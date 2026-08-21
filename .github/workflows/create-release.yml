@@ -49,8 +49,8 @@ jobs:
       shell: pwsh
       run: |
         $tag = "${{ steps.tag.outputs.tag }}"
-        git rev-parse "$tag" 2>$null
-        if ($LASTEXITCODE -eq 0) {
+        # 用 git tag -l 的输出判断（总是以 0 退出），避免依赖 git rev-parse 的非零退出码导致步骤误报失败
+        if (git tag -l "$tag" | Select-String -Quiet -SimpleMatch "$tag") {
           throw "tag $tag 已存在，请使用新的版本号"
         }
         Write-Host "tag $tag 不存在，可以创建"
