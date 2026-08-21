@@ -617,26 +617,38 @@
                             <Border Background="#264F78"
                                     CornerRadius="3"
                                     Padding="6,2" Margin="0,0,4,2">
-                                <Grid>
-                                    <Grid.ColumnDefinitions>
-                                        <ColumnDefinition Width="Auto" />
-                                        <ColumnDefinition Width="Auto" />
-                                    </Grid.ColumnDefinitions>
-                                    <TextBlock Grid.Column="0"
-                                               Text="{Binding}"
+                                <StackPanel Orientation="Horizontal">
+                                    <Button Style="{StaticResource TransparentButton}"
+                                            Padding="0"
+                                            Margin="0,0,5,0"
+                                            Click="OpenAttachedFile_Click"
+                                            Tag="{Binding FilePath}"
+                                            ToolTip="{Binding FileName}">
+                                        <Grid Width="38" Height="38">
+                                            <TextBlock Text="📄"
+                                                       FontSize="20"
+                                                       Foreground="#C8C8C8"
+                                                       HorizontalAlignment="Center"
+                                                       VerticalAlignment="Center" />
+                                            <Image Source="{Binding ThumbnailSource}"
+                                                   Stretch="Uniform"
+                                                   Width="38"
+                                                   Height="38" />
+                                        </Grid>
+                                    </Button>
+                                    <TextBlock Text="{Binding FileName}"
                                                Foreground="#D4D4D4"
                                                FontSize="11"
                                                VerticalAlignment="Center" />
-                                    <Button Grid.Column="1"
-                                            Content="✕"
+                                    <Button Content="✕"
                                             Foreground="#888888"
                                             FontSize="10"
                                             Style="{StaticResource TransparentButton}"
                                             Padding="2,0"
                                             Margin="4,0,0,0"
                                             Click="RemoveAttachedFile_Click"
-                                            Tag="{Binding}" />
-                                </Grid>
+                                            Tag="{Binding FileName}" />
+                                </StackPanel>
                             </Border>
                         </DataTemplate>
                     </ItemsControl.ItemTemplate>

@@ -14,6 +14,7 @@ using System.Text.Json;
 using System.Threading;
 using System.Threading.Tasks;
 using System.Windows;
+using System.Windows.Media.Imaging;
 
 namespace DeepSeek_v4_for_VisualStudio.View
 {
@@ -162,21 +163,67 @@ namespace DeepSeek_v4_for_VisualStudio.View
             string fileContext = string.Empty;
             List<string> attachedFileNames = new();
             List<FileParseResult> parseResults = new();
+            List<ChatContentPart>? visionContent = null;
+            bool visionModelSelected = DeepSeekModelCatalog.IsVisionModel(_options?.SelectedModel);
+            bool ocrExplicitlyRequested = IsOcrExplicitlyRequested(userText, effectiveUserText);
 
             if (_attachedFilePaths.Count > 0)
             {
                 StatusLabel.Text = LocalizationService.Instance["status.parsingFile"];
-                parseResults = await FileParserService.ParseFilesAsync(_attachedFilePaths);
-                attachedFileNames = parseResults.Where(r => r.Success).Select(r => r.FileName).ToList();
+                attachedFileNames = _attachedFilePaths
+                    .Select(path => Path.GetFileName(path))
+                    .Where(name => !string.IsNullOrWhiteSpace(name))
+                    .Cast<string>()
+                    .ToList();
+
+                if (visionModelSelected && !ocrExplicitlyRequested)
+                {
+                    var directImagePaths = _attachedFilePaths
+                        .Where(IsVisionImageFile)
+                        .ToList();
+                    var parsedPaths = _attachedFilePaths
+                        .Where(path => !directImagePaths.Contains(path, StringComparer.OrdinalIgnoreCase))
+                        .ToList();
+
+                    visionContent = await Task.Run(() => BuildVisionContent(directImagePaths));
+                    parseResults = parsedPaths.Count > 0
+                        ? await FileParserService.ParseFilesAsync(parsedPaths)
+                        : new List<FileParseResult>();
+                    Logger.Info($"[Vision] 直接发送图片 {directImagePaths.Count} 张，解析其他文件 {parsedPaths.Count} 个");
+                }
+                else
+                {
+                    parseResults = await FileParserService.ParseFilesAsync(_attachedFilePaths);
+                }
+
                 fileContext = FileParserService.FormatParseResultsForContext(parseResults);
                 if (!string.IsNullOrEmpty(fileContext))
                     Logger.Info($"文件解析完成: {attachedFileNames.Count} 个文件");
             }
 
+            List<string> attachedImageDataUris = new();
+            List<string> attachedImageFileNames = new();
+            List<string> attachedImagePaths = new();
+            foreach (string imagePath in _attachedFilePaths.Where(OcrService.IsImageFile))
+            {
+                string? dataUri = CreateImageThumbnailDataUri(imagePath);
+                if (string.IsNullOrWhiteSpace(dataUri))
+                {
+                    Logger.Warn($"[Preview] 图片缩略图生成失败，跳过: {Path.GetFileName(imagePath)}");
+                    continue;
+                }
+
+                attachedImageDataUris.Add(dataUri);
+                attachedImageFileNames.Add(Path.GetFileName(imagePath));
+                attachedImagePaths.Add(imagePath);
+            }
+
             // 构建用户消息内容
             string analyzeFilesPrompt = "请分析以上文件内容。";
             string userDisplayContent = userText ?? string.Empty;
-            if (string.IsNullOrEmpty(userDisplayContent) && attachedFileNames.Count > 0)
+            if (string.IsNullOrEmpty(userDisplayContent)
+                && attachedFileNames.Count > 0
+                && attachedImageDataUris.Count == 0)
                 userDisplayContent = $"[已上传 {attachedFileNames.Count} 个文件]";
 
             string fullUserContent;
@@ -194,6 +241,9 @@ namespace DeepSeek_v4_for_VisualStudio.View
                 Content = userDisplayContent,
                 AttachedFileNames = attachedFileNames,
                 AttachedFiles = parseResults,
+                AttachedImageDataUris = attachedImageDataUris,
+                AttachedImageFileNames = attachedImageFileNames,
+                AttachedImagePaths = attachedImagePaths,
                 Timestamp = DateTime.Now,
             };
             int earlyUserMsgIndex;
@@ -202,10 +252,18 @@ namespace DeepSeek_v4_for_VisualStudio.View
                 var tree = EnsureTree();
                 tree.AddChildMessage(earlyUserMsg);
                 SyncMessagesFromTree();
-                _contextManager.AddUserMessage(fullUserContent);
+                _contextManager.AddUserMessage(fullUserContent, visionContent);
                 earlyUserMsgIndex = _messages.Count - 1;
             }
-            AddMessagesHtml("user", userDisplayContent, null, parseResults, earlyUserMsgIndex);
+            AddMessagesHtml(
+                "user",
+                userDisplayContent,
+                null,
+                parseResults,
+                attachedImageDataUris,
+                attachedImageFileNames,
+                attachedImagePaths,
+                earlyUserMsgIndex);
             UpdateBrowser();
             ClearAttachedFiles();
             AutoTitleSession();
@@ -262,8 +320,7 @@ namespace DeepSeek_v4_for_VisualStudio.View
                 bool hasAgentInput = !string.IsNullOrEmpty(effectiveUserText) || hasAttachments;
                 if (_activeAgent != null && _agentFactory != null && hasAgentInput && !effectiveUserText.StartsWith("/"))
                 {
-                    // ── 确保系统提示词已初始化（新会话时 _fixedSystemPrompt 为 null，
-                    //     BuildRequestMessagesAsync 在上方未被调用，需在此处补做初始化）──
+                    // ── 确保系统提示词已初始化（新会话时 _fixedSystemPrompt 为 null）──
                     await EnsureSystemPromptInitializedAsync();
 
                     // ── 预分类任务规模，Large 任务提前路由到 Plan Agent ──
@@ -301,8 +358,11 @@ namespace DeepSeek_v4_for_VisualStudio.View
 
                         var capturedUserText = !string.IsNullOrEmpty(agentRoutedUserText)
                             ? agentRoutedUserText
-                            : analyzeFilesPrompt;
+                            : (visionContent is { Count: > 0 } && !string.IsNullOrEmpty(effectiveUserText)
+                                ? effectiveUserText
+                                : analyzeFilesPrompt);
                         var capturedFileContext = fileContext;
+                        var capturedVisionContent = visionContent;
                         var capturedRoute = routing;
                         var capturedMsgIdx = capturedUserMsgIndex;
 
@@ -313,7 +373,11 @@ namespace DeepSeek_v4_for_VisualStudio.View
                         {
                             try
                             {
-                                await RunAgentWorkflowAsync(capturedUserText, capturedFileContext, capturedRoute);
+                                await RunAgentWorkflowAsync(
+                                    capturedUserText,
+                                    capturedFileContext,
+                                    capturedRoute,
+                                    capturedVisionContent);
                                 RecordAgentFileChanges(capturedMsgIdx);
                             }
                             catch (Exception ex)
@@ -400,46 +464,153 @@ namespace DeepSeek_v4_for_VisualStudio.View
             return result.Length > 0 ? result : null;
         }
 
-        /// <summary>
-        /// 构建发送给 API 的消息列表。
-        /// 委托 InitializeSystemContextAsync 完成 prompt/skill/memory 初始化，
-        /// 此处只处理每轮可变的 RAG + 搜索上下文 + 统计。
-        /// </summary>
-        private async Task<List<ChatApiMessage>> BuildRequestMessagesAsync(string searchContext = "")
-        {
-            await InitializeSystemContextAsync();
+        #region Vision Model Helpers
 
-            if (_ragService != null && _ragService.IsEnabled && _options?.EnableRag == true)
+        private static readonly string[] VisionImageExtensions =
+        {
+            ".png", ".jpg", ".jpeg", ".gif", ".webp",
+        };
+
+        private static bool IsVisionImageFile(string filePath)
+        {
+            if (string.IsNullOrWhiteSpace(filePath))
+                return false;
+
+            string ext = Path.GetExtension(filePath);
+            return VisionImageExtensions.Any(
+                supported => string.Equals(ext, supported, StringComparison.OrdinalIgnoreCase));
+        }
+
+        private static bool IsOcrExplicitlyRequested(string? userText, string? effectiveUserText)
+        {
+            string text = ((effectiveUserText ?? string.Empty) + "\n" + (userText ?? string.Empty))
+                .ToLowerInvariant();
+
+            return text.Contains("ocr")
+                || text.Contains("文字识别")
+                || text.Contains("识别文字")
+                || text.Contains("提取文字")
+                || text.Contains("提取图片文字")
+                || text.Contains("读取图片文字")
+                || text.Contains("图片文字");
+        }
+
+        private static List<ChatContentPart>? BuildVisionContent(List<string> imagePaths)
+        {
+            var parts = new List<ChatContentPart>();
+            const long maxImageBytes = 32L * 1024 * 1024;
+
+            foreach (string path in imagePaths)
             {
                 try
                 {
-                    var userMessages = _contextManager.GetConversationHistory().Where(m => m.Role == "user").ToList();
-                    string query = userMessages.Count > 0 ? (userMessages.Last().Content ?? string.Empty) : string.Empty;
-                    if (!string.IsNullOrWhiteSpace(query))
+                    if (!File.Exists(path))
                     {
-                        int topK = _options?.RagTopK ?? 5;
-                        string ragContext = await _ragService.RetrieveContextAsync(query, topK);
-                        _contextManager.SetRagContext(string.IsNullOrWhiteSpace(ragContext) ? null : ragContext);
-                        if (!string.IsNullOrWhiteSpace(ragContext))
-                            Logger.Info($"[RAG] 检索上下文已注入 (topK={topK}, 长度={ragContext.Length})");
+                        Logger.Warn($"[Vision] 图片不存在，跳过: {path}");
+                        continue;
                     }
+
+                    var fileInfo = new FileInfo(path);
+                    if (fileInfo.Length > maxImageBytes)
+                    {
+                        Logger.Warn($"[Vision] 图片超过 32MiB 限制，跳过: {Path.GetFileName(path)}");
+                        continue;
+                    }
+
+                    string? mediaType = path.ToLowerInvariant() switch
+                    {
+                        var p when p.EndsWith(".png") => "image/png",
+                        var p when p.EndsWith(".jpg") || p.EndsWith(".jpeg") => "image/jpeg",
+                        var p when p.EndsWith(".gif") => "image/gif",
+                        var p when p.EndsWith(".webp") => "image/webp",
+                        _ => null,
+                    };
+
+                    if (mediaType == null)
+                        continue;
+
+                    byte[] bytes = File.ReadAllBytes(path);
+                    string base64 = Convert.ToBase64String(bytes);
+                    parts.Add(new ChatContentPart
+                    {
+                        Type = "image_url",
+                        ImageUrl = new ChatImageUrl
+                        {
+                            Url = $"data:{mediaType};base64,{base64}",
+                        },
+                    });
                 }
-                catch (Exception ex) { Logger.Warn($"[RAG] 检索失败: {ex.Message}"); _contextManager.SetRagContext(null); }
+                catch (Exception ex)
+                {
+                    Logger.Warn($"[Vision] 构建图片内容失败 {Path.GetFileName(path)}: {ex.Message}");
+                }
             }
 
-            _contextManager.SetSearchContext(string.IsNullOrWhiteSpace(searchContext) ? null : searchContext);
-
-            if (_options?.ShowContextStats == true || _contextManager.UsageRatio > 0.7)
-            {
-                var stats = _contextManager.GetStats();
-                string level = stats.UsageRatio > 0.9 ? "⚠️" : stats.UsageRatio > 0.7 ? "ℹ️" : "";
-                Logger.Info($"[ContextStats] {level} Token: {stats.EstimatedTokens:N0}/{stats.TokenBudget:N0} ({stats.UsagePercent:F1}%) | 轮次: {stats.TurnCount} | 消息: {stats.MessageCount}");
-                if (stats.UsageRatio > 0.9)
-                    StatusLabel.Text = string.Format(LocalizationService.Instance["status.compressionTriggered"], stats.UsagePercent);
-            }
-
-            return _contextManager.BuildApiMessages();
+            return parts.Count > 0 ? parts : null;
         }
+
+        /// <summary>
+        /// 从树节点恢复视觉消息的 content 数组。优先使用原始图片路径重建完整图，
+        /// 没有路径时使用保存的缩略图 Data URI 作为回退。
+        /// </summary>
+        private static List<ChatContentPart>? BuildStoredVisionContent(ChatMessage message)
+        {
+            var parts = new List<ChatContentPart>();
+
+            if (message.AttachedImagePaths is { Count: > 0 })
+            {
+                var fullSizeParts = BuildVisionContent(message.AttachedImagePaths);
+                if (fullSizeParts != null)
+                    parts.AddRange(fullSizeParts);
+            }
+
+            // 只处理没有完整路径的存量消息，避免同一张图既作为缩略图又作为原图重复注入。
+            if (message.AttachedImagePaths is not { Count: > 0 }
+                && message.AttachedImageDataUris is { Count: > 0 })
+            {
+                foreach (string dataUri in message.AttachedImageDataUris)
+                {
+                    if (string.IsNullOrWhiteSpace(dataUri)
+                        || !dataUri.StartsWith("data:image/", StringComparison.OrdinalIgnoreCase))
+                        continue;
+
+                    parts.Add(new ChatContentPart
+                    {
+                        Type = "image_url",
+                        ImageUrl = new ChatImageUrl { Url = dataUri },
+                    });
+                }
+            }
+
+            return parts.Count > 0 ? parts : null;
+        }
+
+        private static string? CreateImageThumbnailDataUri(string imagePath)
+        {
+            try
+            {
+                var bitmap = new BitmapImage();
+                bitmap.BeginInit();
+                bitmap.CacheOption = BitmapCacheOption.OnLoad;
+                bitmap.CreateOptions = BitmapCreateOptions.IgnoreImageCache;
+                bitmap.DecodePixelWidth = 96;
+                bitmap.UriSource = new Uri(imagePath, UriKind.Absolute);
+                bitmap.EndInit();
+
+                var encoder = new PngBitmapEncoder();
+                encoder.Frames.Add(BitmapFrame.Create(bitmap));
+                using var stream = new MemoryStream();
+                encoder.Save(stream);
+                return "data:image/png;base64," + Convert.ToBase64String(stream.ToArray());
+            }
+            catch (Exception ex)
+            {
+                Logger.Warn($"[Preview] 图片预览 DATA URI 生成失败 {Path.GetFileName(imagePath)}: {ex.Message}");
+                return null;
+            }
+        }
+
+        #endregion
 
         private void StopGeneration()
         {

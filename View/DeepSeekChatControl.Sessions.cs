@@ -297,6 +297,9 @@ namespace DeepSeek_v4_for_VisualStudio.View
                     {
                         _contextManager.RestoreFullContext(_activeSession.ApiHistory);
                         Logger.Info($"[Context] SwitchToSession 从 ApiHistory 恢复上下文成功 ({_activeSession.ApiHistory.Count} 条消息)");
+
+                        if (_contextManager.TurnCount == 0 && _tree != null)
+                            RebuildContextFromTree();
                     }
                     catch (Exception ex)
                     {
@@ -544,6 +547,9 @@ namespace DeepSeek_v4_for_VisualStudio.View
                         {
                             _contextManager.RestoreFullContext(_activeSession.ApiHistory);
                             Logger.Info($"[Context] DeleteCurrentSession 从 ApiHistory 恢复上下文成功 ({_activeSession.ApiHistory.Count} 条消息)");
+
+                            if (_contextManager.TurnCount == 0 && _tree != null)
+                                RebuildContextFromTree();
                         }
                         catch (Exception ex)
                         {

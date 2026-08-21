@@ -140,8 +140,8 @@ namespace DeepSeek_v4_for_VisualStudio.View
 
         /// <summary>
         /// 共享系统上下文初始化：组装 system prompt、发现 skill、冻结前缀、注入记忆。
-        /// BuildRequestMessagesAsync（主流程）和 RestoreSystemContextAsync（Agent 恢复/重试）共用此逻辑。
-        /// RAG 和搜索上下文不在其中 —— 它们每轮都可能变化，由 BuildRequestMessagesAsync 单独处理。
+        /// 新会话首次进入 Agent 工作流和会话恢复/重试共用此逻辑。
+        /// RAG 和搜索上下文属于易变上下文，需要在具体发送路径中单独更新。
         /// </summary>
         private async Task InitializeSystemContextAsync()
         {
@@ -296,8 +296,11 @@ namespace DeepSeek_v4_for_VisualStudio.View
         /// Agent 工作流主入口：分解任务 → 显示步骤计划 → 逐步执行 → 显示变更摘要。
         /// 注意：此方法在后台线程中调用，访问 UI 前必须切换到主线程。
         /// </summary>
-        private async Task RunAgentWorkflowAsync(string userText, string fileContext = "",
-            AgentRoutingResult? routing = null)
+        private async Task RunAgentWorkflowAsync(
+            string userText,
+            string fileContext = "",
+            AgentRoutingResult? routing = null,
+            List<ChatContentPart>? visionContent = null)
         {
             if (_activeAgent == null || _agentFactory == null) return;
 
@@ -333,6 +336,7 @@ namespace DeepSeek_v4_for_VisualStudio.View
                 {
                     SolutionPath = _solutionPath,
                     FileContext = fileContext,
+                    VisionContent = visionContent,
                     ConversationHistory = _contextManager.GetConversationHistory(),
                     ContextManager = _contextManager,
                     IsPlanningMode = routing?.NeedsPlanning == true || routing?.TargetAgent == AgentType.Plan,
@@ -588,6 +592,11 @@ namespace DeepSeek_v4_for_VisualStudio.View
                 while (agentResult.Handoff != null && !handoffChainCompleted)
                 {
                     handoffChainDepth++;
+                    if (agentResult.Handoff.ForwardedMessages == null)
+                    {
+                        agentResult.Handoff.ForwardedMessages = _activeAgent?.SnapshotHandoffCacheMessages();
+                    }
+
                     if (handoffChainDepth > maxHandoffChainDepth)
                     {
                         Logger.Warn($"[Agent] Handoff 链达到最大深度 {maxHandoffChainDepth}，强制终止");

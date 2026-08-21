@@ -173,13 +173,16 @@ namespace DeepSeek_v4_for_VisualStudio.Services
             for (int i = startIndex; i < end; i++)
             {
                 var entry = _entries[i];
-                if (string.IsNullOrEmpty(entry.Content) && (entry.ToolCalls == null || entry.ToolCalls.Count == 0))
+                if (string.IsNullOrEmpty(entry.Content)
+                    && (entry.ToolCalls == null || entry.ToolCalls.Count == 0)
+                    && (entry.MultimodalContent == null || entry.MultimodalContent.Count == 0))
                     continue;
 
                 var apiMsg = new ChatApiMessage
                 {
                     Role = entry.Role,
                     Content = entry.Content,
+                    MultimodalContent = CloneContentParts(entry.MultimodalContent),
                 };
 
                 // 🔑 序列化保真度：原样复制 ReasoningContent（null 保持 null），
@@ -358,11 +361,21 @@ namespace DeepSeek_v4_for_VisualStudio.Services
         /// 当 Token 超出预算时触发压缩而非直接删除。
         /// </summary>
         public void AddUserMessage(string content)
+            => AddUserMessage(content, null);
+
+        /// <summary>
+        /// 添加用户消息。视觉模型轮次中可以携带 <paramref name="multimodalContent"/>，
+        /// 即使文本为空也仍应作为有效 user 轮次保存，避免重启后 ContextManager 被判定为空。
+        /// </summary>
+        public void AddUserMessage(string content, List<ChatContentPart>? multimodalContent)
         {
-            if (string.IsNullOrEmpty(content)) return;
+            bool hasText = !string.IsNullOrEmpty(content);
+            bool hasMultimodal = multimodalContent is { Count: > 0 };
+            if (!hasText && !hasMultimodal) return;
 
             // ── 安全净化：防止工具注入标记进入上下文 ──
-            content = StringExtensions.SanitizeUserInput(content);
+            if (hasText)
+                content = StringExtensions.SanitizeUserInput(content);
 
             // ── 🔑 缓存边界快照：新用户消息意味着新对话轮次，清除旧快照 ──
             if (_cacheSnapshotEntryIndex.HasValue)
@@ -375,9 +388,11 @@ namespace DeepSeek_v4_for_VisualStudio.Services
             {
                 Role = "user",
                 Content = content,
+                MultimodalContent = CloneContentParts(multimodalContent),
                 TurnIndex = TurnCount + 1, // 新轮次
             });
             _estimatedTokens += EstimateTokens(content);
+            _estimatedTokens += EstimateMultimodalTokens(multimodalContent);
 
             // 使用压缩替代直接删除
             if (_compressor != null && _compressor.Config.AutoCompressEnabled)
@@ -567,13 +582,16 @@ namespace DeepSeek_v4_for_VisualStudio.Services
             for (int i = startEntryIdx; i < _entries.Count && i < entryLimit; i++)
             {
                 var entry = _entries[i];
-                if (string.IsNullOrEmpty(entry.Content) && (entry.ToolCalls == null || entry.ToolCalls.Count == 0))
+                if (string.IsNullOrEmpty(entry.Content)
+                    && (entry.ToolCalls == null || entry.ToolCalls.Count == 0)
+                    && (entry.MultimodalContent == null || entry.MultimodalContent.Count == 0))
                     continue;
 
                 var apiMsg = new ChatApiMessage
                 {
                     Role = entry.Role,
                     Content = entry.Content,
+                    MultimodalContent = CloneContentParts(entry.MultimodalContent),
                 };
 
                 if (entry.Role == "assistant")
@@ -600,8 +618,8 @@ namespace DeepSeek_v4_for_VisualStudio.Services
         }
 
         /// <summary>
-        /// 构建动态上下文块：合并压缩摘要、搜索上下文、RAG 上下文、记忆上下文。
-        /// 所有动态内容合并为一段文本，作为单条 system 消息注入。
+        /// 构建动态上下文块：合并压缩摘要、记忆上下文和语言守卫。
+        /// 所有同轮次内相对稳定的内容合并为一段文本，作为单条 system 消息注入。
         /// 这样将可变内容隔离在一个位置，保护 messages[0] 和对话历史前缀的缓存稳定性。
         /// </summary>
         private string? BuildDynamicContextBlock()
@@ -615,10 +633,6 @@ namespace DeepSeek_v4_for_VisualStudio.Services
                 if (!string.IsNullOrWhiteSpace(compressedText))
                     parts.Add(compressedText);
             }
-
-            // 搜索上下文
-            if (!string.IsNullOrWhiteSpace(_searchContext))
-                parts.Add(_searchContext!);
 
             // 记忆上下文
             if (!string.IsNullOrWhiteSpace(_memoryContext))
@@ -730,7 +744,7 @@ namespace DeepSeek_v4_for_VisualStudio.Services
         }
 
         /// <summary>
-        /// 构建易变上下文块：Active Working Set + RAG 检索上下文。
+        /// 构建易变上下文块：Active Working Set + 联网搜索结果 + RAG 检索上下文。
         /// 这些内容在同一会话内可能每轮都变，应从消息数组末尾注入以保护前缀缓存。
         /// </summary>
         public string? BuildVolatileContextBlock()
@@ -747,6 +761,10 @@ namespace DeepSeek_v4_for_VisualStudio.Services
                 if (!string.IsNullOrWhiteSpace(activeFileSummary))
                     parts.Add(activeFileSummary);
             }
+
+            // ── 联网搜索结果（与 RAG 一起放在 user 前，避免干扰 [0..2] 稳定前缀）──
+            if (!string.IsNullOrWhiteSpace(_searchContext))
+                parts.Add(_searchContext!);
 
             // ── RAG 检索上下文 ──
             if (!string.IsNullOrWhiteSpace(_ragContext))
@@ -1021,6 +1039,45 @@ namespace DeepSeek_v4_for_VisualStudio.Services
             return (int)(chineseChars * 0.6 + otherChars * 0.3) + 1;
         }
 
+        private static int EstimateMultimodalTokens(List<ChatContentPart>? parts)
+        {
+            if (parts == null || parts.Count == 0)
+                return 0;
+
+            int tokens = 0;
+            foreach (var part in parts)
+            {
+                tokens += EstimateTokens(part.Text);
+                tokens += EstimateTokens(part.ImageUrl?.Url);
+                tokens += EstimateTokens(part.File?.FileData);
+                tokens += EstimateTokens(part.File?.Filename);
+            }
+            return tokens;
+        }
+
+        private static List<ChatContentPart>? CloneContentParts(List<ChatContentPart>? parts)
+        {
+            if (parts == null || parts.Count == 0)
+                return null;
+
+            return parts.Select(p => new ChatContentPart
+            {
+                Type = p.Type,
+                Text = p.Text,
+                ImageUrl = p.ImageUrl == null
+                    ? null
+                    : new ChatImageUrl { Url = p.ImageUrl.Url, Detail = p.ImageUrl.Detail },
+                File = p.File == null
+                    ? null
+                    : new ChatFilePart
+                    {
+                        FileId = p.File.FileId,
+                        FileData = p.File.FileData,
+                        Filename = p.File.Filename,
+                    },
+            }).ToList();
+        }
+
         /// <summary>
         /// 当估算 Token 超过预算时，自动修剪最旧的轮次（旧行为，无压缩服务时使用）。
         /// 使用校准后估算值作为阈值比较，确保在 API 真实 token 消耗接近预算时触发。
@@ -1218,6 +1275,7 @@ namespace DeepSeek_v4_for_VisualStudio.Services
                 {
                     Role = e.Role,
                     Content = e.Content,
+                    MultimodalContent = CloneContentParts(e.MultimodalContent),
                     ReasoningContent = e.ReasoningContent,
                 })
                 .ToList();
@@ -1234,6 +1292,7 @@ namespace DeepSeek_v4_for_VisualStudio.Services
                 {
                     Role = e.Role,
                     Content = e.Content,
+                    MultimodalContent = CloneContentParts(e.MultimodalContent),
                     ReasoningContent = e.ReasoningContent,
                     ToolCalls = e.ToolCalls?.Select(tc => new ToolCall
                     {
@@ -1262,7 +1321,7 @@ namespace DeepSeek_v4_for_VisualStudio.Services
                 switch (msg.Role)
                 {
                     case "user":
-                        AddUserMessage(msg.Content ?? string.Empty);
+                        AddUserMessage(msg.Content ?? string.Empty, msg.MultimodalContent);
                         break;
                     case "assistant":
                         AddAssistantMessage(msg.Content, msg.ReasoningContent, msg.ToolCalls);
@@ -1291,7 +1350,7 @@ namespace DeepSeek_v4_for_VisualStudio.Services
                 if (msg.Role == "user")
                 {
                     turnIdx++;
-                    AddUserMessage(msg.Content ?? string.Empty);
+                    AddUserMessage(msg.Content ?? string.Empty, msg.MultimodalContent);
                 }
                 else if (msg.Role == "assistant")
                 {
@@ -1384,6 +1443,7 @@ namespace DeepSeek_v4_for_VisualStudio.Services
         {
             public string Role { get; set; } = "user";
             public string? Content { get; set; }
+            public List<ChatContentPart>? MultimodalContent { get; set; }
             public string? ReasoningContent { get; set; }
             public List<ToolCall>? ToolCalls { get; set; }
             public bool HasToolCalls { get; set; }

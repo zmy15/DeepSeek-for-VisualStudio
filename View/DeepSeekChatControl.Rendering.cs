@@ -86,7 +86,16 @@ namespace DeepSeek_v4_for_VisualStudio.View
         /// <summary>
         /// 构建消息 HTML 片段并追加到 _messagesHtml，然后更新浏览器。
         /// </summary>
-        private void AddMessagesHtml(string role, string content, string? reasoningContent = null, List<FileParseResult>? attachedFiles = null, int messageIndex = -1, bool isHtml = false)
+        private void AddMessagesHtml(
+            string role,
+            string content,
+            string? reasoningContent = null,
+            List<FileParseResult>? attachedFiles = null,
+            List<string>? attachedImageDataUris = null,
+            List<string>? attachedImageFileNames = null,
+            List<string>? attachedImagePaths = null,
+            int messageIndex = -1,
+            bool isHtml = false)
         {
             // 自动推断消息索引
             if (messageIndex < 0)
@@ -94,7 +103,13 @@ namespace DeepSeek_v4_for_VisualStudio.View
 
             if (role == "user")
             {
-                _messagesHtml.Append(ChatHtmlService.BuildUserMessageHtml(content, attachedFiles, messageIndex));
+                _messagesHtml.Append(ChatHtmlService.BuildUserMessageHtml(
+                    content,
+                    attachedFiles,
+                    messageIndex,
+                    attachedImageDataUris,
+                    attachedImageFileNames,
+                    attachedImagePaths));
             }
             else
             {
@@ -201,7 +216,10 @@ namespace DeepSeek_v4_for_VisualStudio.View
                     _messagesHtml.Append(ChatHtmlService.BuildUserMessageHtml(
                         msg.Content ?? string.Empty,
                         msg.AttachedFiles.Count > 0 ? msg.AttachedFiles : null,
-                        i));
+                        i,
+                        msg.AttachedImageDataUris.Count > 0 ? msg.AttachedImageDataUris : null,
+                        msg.AttachedImageFileNames.Count > 0 ? msg.AttachedImageFileNames : null,
+                        msg.AttachedImagePaths.Count > 0 ? msg.AttachedImagePaths : null));
                     // ── 分支导航（始终在用户气泡正下方）──
                     // 场景1：编辑用户消息产生分支 → 用户消息的 SiblingCount > 1
                     // 场景2：重试助手回复产生分支 → 下一个助手消息的 SiblingCount > 1

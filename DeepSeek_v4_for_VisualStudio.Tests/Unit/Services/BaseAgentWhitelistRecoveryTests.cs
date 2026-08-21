@@ -42,6 +42,7 @@ public class BaseAgentWhitelistRecoveryTests
                 ("request_handoff", "{\"targetAgent\":\"Edit\",\"reason\":\"需要终端\",\"taskDescription\":\"运行 Python 并返回输出\"}")),
         });
         var agent = CreateAgent(handler);
+        agent.Context = new AgentContext();
 
         var result = await agent.RunLoopAsync(
             new List<ChatApiMessage> { new() { Role = "user", Content = "运行 Python" } },
@@ -53,6 +54,10 @@ public class BaseAgentWhitelistRecoveryTests
         handler.RequestBodies.Should().HaveCount(1);
         agent.PendingHandoffRequest.Should().NotBeNull();
         agent.PendingHandoffRequest!.TargetAgent.Should().Be(AgentType.Edit);
+        agent.Context.ForwardedMessages.Should().NotBeNull();
+        agent.Context.ForwardedMessages.Should().HaveCount(1);
+        agent.Context.ForwardedMessages![0].Role.Should().Be("user");
+        agent.Context.ForwardedMessages![0].ToolCalls.Should().BeNull();
     }
 
     [Fact]

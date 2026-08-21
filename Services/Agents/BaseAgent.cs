@@ -512,6 +512,59 @@ namespace DeepSeek_v4_for_VisualStudio.Services.Agents
         }
 
         /// <summary>
+        /// 获取最近一次成功发送的清洗后消息列表快照。
+        /// 用于 Handoff / runSubagent 转发缓存前缀；返回独立副本，避免调用方复用后再次修改。
+        /// </summary>
+        protected List<ChatApiMessage>? CaptureLastSentMessagesForCache()
+        {
+            IReadOnlyList<ChatApiMessage>? sent = _apiService.LastSentMessages;
+            if (sent == null || sent.Count == 0)
+                return null;
+
+            return CloneApiMessages(sent);
+        }
+
+        /// <summary>
+        /// 获取当前 Agent 可复用给 Handoff 的缓存前缀。
+        /// 优先使用工具循环保存的 ForwardedMessages，其次回退到最近一次实际发送的清洗后消息。
+        /// </summary>
+        public List<ChatApiMessage>? SnapshotHandoffCacheMessages()
+        {
+            var forwarded = Context?.ForwardedMessages;
+            if (forwarded != null && forwarded.Count > 0)
+                return CloneApiMessages(forwarded);
+
+            return CaptureLastSentMessagesForCache();
+        }
+
+        /// <summary>
+        /// 深拷贝 ChatApiMessage 列表，避免 Handoff 后目标 Agent 修改复制列表时影响源快照。
+        /// </summary>
+        protected static List<ChatApiMessage> CloneApiMessages(IEnumerable<ChatApiMessage> messages)
+        {
+            return messages.Select(m => new ChatApiMessage
+            {
+                Role = m.Role,
+                Content = m.Content,
+                MultimodalContent = m.MultimodalContent,
+                ReasoningContent = m.ReasoningContent,
+                ToolCalls = m.ToolCalls?
+                    .Select(tc => new ToolCall
+                    {
+                        Id = tc.Id,
+                        Type = tc.Type,
+                        Function = new ToolCallFunction
+                        {
+                            Name = tc.Function?.Name,
+                            Arguments = tc.Function?.Arguments,
+                        }
+                    }).ToList(),
+                ToolCallId = m.ToolCallId,
+                Name = m.Name,
+            }).ToList();
+        }
+
+        /// <summary>
         /// 使用 ConversationContextManager 构建的消息列表调用 AI。
         /// 正确处理 reasoning_content 回传规则。
         /// </summary>
@@ -573,7 +626,7 @@ namespace DeepSeek_v4_for_VisualStudio.Services.Agents
                     // 兼容旧结构：尾部 [agent] + [user] 一并移除
                     result.RemoveRange(count - 2, 2);
                 }
-                result.Add(new ChatApiMessage { Role = "user", Content = userPrompt });
+                result.Add(CreateCurrentUserMessage(userPrompt));
                 if (!string.IsNullOrWhiteSpace(systemPrompt))
                     result.Add(new ChatApiMessage { Role = "system", Content = systemPrompt });
                 return result;
@@ -612,13 +665,38 @@ namespace DeepSeek_v4_for_VisualStudio.Services.Agents
             }
 
             // ── 第5层：当前用户消息 ──
-            messages.Add(new ChatApiMessage { Role = "user", Content = userPrompt });
+            messages.Add(CreateCurrentUserMessage(userPrompt));
 
             // ── 第6层：Agent 专属行为指令（固定在最后）──
             if (!string.IsNullOrWhiteSpace(systemPrompt))
                 messages.Add(new ChatApiMessage { Role = "system", Content = systemPrompt });
 
             return messages;
+        }
+
+        /// <summary>
+        /// 创建当前用户消息。视觉模型场景下，把 VisionContent 图片块和用户文本
+        /// 合成为 OpenAI 兼容的 content 数组。
+        /// </summary>
+        private ChatApiMessage CreateCurrentUserMessage(string userPrompt)
+        {
+            var message = new ChatApiMessage
+            {
+                Role = "user",
+                Content = userPrompt,
+            };
+
+            if (Context?.VisionContent is { Count: > 0 } visionParts)
+            {
+                var parts = new List<ChatContentPart>
+                {
+                    new ChatContentPart { Type = "text", Text = userPrompt },
+                };
+                parts.AddRange(visionParts);
+                message.MultimodalContent = parts;
+            }
+
+            return message;
         }
 
         /// <summary>
@@ -1065,17 +1143,21 @@ namespace DeepSeek_v4_for_VisualStudio.Services.Agents
                     while (toolCallHistory.Count > 20)
                         toolCallHistory.RemoveAt(0);
 
-                    // ── 🔑 子Agent缓存优化：在插入 assistant(tool_calls) 前捕获消息列表，
-                    //     供 runSubagent(ExploreAgent) 复用父 Agent 的缓存前缀。
+                    // ── 🔑 子Agent/Handoff缓存优化：在插入 assistant(tool_calls) 前捕获消息列表，
+                    //     供 runSubagent(ExploreAgent) 或 request_handoff 目标 Agent 复用
+                    //     本轮 API 调用实际使用过的缓存前缀。
                     //     必须在 Insert 之前捕获：Insert 后 messages[4] 从 system 变为
                     //     assistant(tool_calls)，Rule 5 剥离 tool_calls 后残留纯文本
                     //     assistant，与已缓存的 system(Agent提示词) 结构不同，导致
                     //     DeepSeek 前缀缓存在 messages[4] 断裂，命中率从 98% 暴跌至 10.9%。
                     //     提前捕获不含 assistant 的"干净前缀"确保 messages[0..3] 与已缓存
                     //     版本完全一致，前缀缓存可持续命中。──
-                    if (Context != null && toolCalls.Any(tc => tc.Function.Name == "runSubagent"))
+                    if (Context != null && toolCalls.Any(tc =>
+                        tc.Function.Name == "runSubagent" || tc.Function.Name == "request_handoff"))
                     {
-                        Context.ForwardedMessages = new List<ChatApiMessage>(messages);
+                        Context.ForwardedMessages =
+                            CaptureLastSentMessagesForCache()
+                            ?? new List<ChatApiMessage>(messages);
                     }
 
                     // ── 添加 assistant 消息（含工具调用）──
@@ -1256,9 +1338,13 @@ namespace DeepSeek_v4_for_VisualStudio.Services.Agents
                         //     - CleanIncompleteToolChains 会修改消息内容（剥离 tool_calls），
                         //       导致 ForwardedMessages 与 DeepSeek 服务端缓存不一致 → 前缀断裂
                         //     - Rule 5 是确定性的：相同输入前缀 → 相同输出，不会产生缓存断裂
-                        if (Context != null)
+                        if (Context != null && Context.ForwardedMessages == null)
                         {
-                            Context.ForwardedMessages = new List<ChatApiMessage>(messages);
+                            // 正常路径已在插入本轮 assistant/tool 消息前保存干净前缀；
+                            // 此处仅作为异常路径兜底，避免把 request_handoff 自身消息带入前缀。
+                            Context.ForwardedMessages =
+                                CaptureLastSentMessagesForCache()
+                                ?? new List<ChatApiMessage>(messages);
                         }
                         contentBuilder.Append("\n\n> 🔄 任务已移交给 " + PendingHandoffRequest.TargetAgent + " Agent...");
                         break;
@@ -2156,6 +2242,10 @@ namespace DeepSeek_v4_for_VisualStudio.Services.Agents
 
             targetAgent.Context = context;
 
+            // 如果热链路上尚未消费 ForwardedMessages，优先使用 Handoff 中携带的快照。
+            if (context.ForwardedMessages == null && handoff.ForwardedMessages != null)
+                context.ForwardedMessages = CloneApiMessages(handoff.ForwardedMessages);
+
             // ── 🔑 缓存边界快照（v1.1.10）：在 Handoff 前保存 ContextManager 状态 ──
             //     目标 Agent 通过 BuildApiMessages 读取历史时，仅包含边界前的条目，
             //     排除 Handoff 过渡消息（步骤完成通知、最终构建结果等），
@@ -2301,6 +2391,7 @@ namespace DeepSeek_v4_for_VisualStudio.Services.Agents
             {
                 Role = m.Role,
                 Content = m.Content,
+                MultimodalContent = m.MultimodalContent,
                 ReasoningContent = m.ReasoningContent,
                 ToolCalls = m.ToolCalls,
                 ToolCallId = m.ToolCallId,

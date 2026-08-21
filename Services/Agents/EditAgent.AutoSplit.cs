@@ -209,12 +209,21 @@ namespace DeepSeek_v4_for_VisualStudio.Services.Agents
 
             try
             {
-                string aiResult = await CallAiLongAsync(
-                    Definition.SystemPrompt,
-                    splitPrompt,
+                // ── 🔑 缓存保护：任务拆分是一次轻量预分析，不应消费 Handoff 传入的
+                //     ForwardedMessages。改用最小上下文直接调用，保留 ForwardedMessages
+                //     给真正的首个执行步骤复用上一次 API 缓存前缀。
+                var messages = new List<ChatApiMessage>
+                {
+                    new ChatApiMessage { Role = "system", Content = AiPrompts.SharedImmutablePrefix },
+                    new ChatApiMessage { Role = "system", Content = Definition.SystemPrompt },
+                    new ChatApiMessage { Role = "user", Content = splitPrompt },
+                };
+                string aiResult = await CallAiWithMessagesAsync(
+                    messages,
                     ct,
                     maxTokens: 2048,
-                    responseFormat: "json_object");
+                    responseFormat: "json_object",
+                    toolChoice: "none");
 
                 // ── 解析 AI 返回的步骤 ──
                 var steps = ParseStepsFromAiResponse(aiResult, userMessage);

@@ -94,6 +94,13 @@ namespace DeepSeek_v4_for_VisualStudio.Models
 
         /// <summary>推荐模型（可选）</summary>
         public string? Model { get; set; }
+
+        /// <summary>
+        /// 源 Agent 在当前 Handoff 前实际缓存的消息前缀。
+        /// 仅在同一进程内的 Handoff 链/按钮执行时使用，不随 HandoffJson 持久化。
+        /// </summary>
+        [System.Text.Json.Serialization.JsonIgnore]
+        public List<ChatApiMessage>? ForwardedMessages { get; set; }
     }
 
     /// <summary>
@@ -141,6 +148,13 @@ namespace DeepSeek_v4_for_VisualStudio.Models
         /// <summary>会话上下文管理器引用（用于 Agent 内部构建带历史的 API 消息，优化缓存命中率）</summary>
         [JsonIgnore]
         public Services.ConversationContextManager? ContextManager { get; set; }
+
+        /// <summary>
+        /// 当前用户消息附带的视觉内容块（仅 deepseek-v4-flash-vision-exp 使用）。
+        /// BaseAgent 会把它们和当前用户文本合成为 content 数组。
+        /// </summary>
+        [JsonIgnore]
+        public List<ChatContentPart>? VisionContent { get; set; }
 
         /// <summary>文件读取回调</summary>
         [JsonIgnore]

@@ -50,6 +50,7 @@ namespace DeepSeek_v4_for_VisualStudio.Services
 
         // ── 消息管理 ──
         void AddUserMessage(string content);
+        void AddUserMessage(string content, List<ChatContentPart>? multimodalContent);
         void AddAssistantMessage(string? content, string? reasoningContent = null, List<ToolCall>? toolCalls = null);
         void AddToolResult(string toolCallId, string toolName, string result);
         void AddCustomMessage(string role, string content);

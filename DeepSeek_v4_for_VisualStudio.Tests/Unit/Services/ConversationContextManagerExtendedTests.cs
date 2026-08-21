@@ -1,5 +1,6 @@
 using DeepSeek_v4_for_VisualStudio.Models;
 using DeepSeek_v4_for_VisualStudio.Services;
+using System.Text.Json;
 
 namespace DeepSeek_v4_for_VisualStudio.Tests.Unit.Services;
 
@@ -61,6 +62,29 @@ public class ConversationContextManagerExtendedTests
 
         // 空白内容仍然被添加
         _manager.IsEmpty.Should().BeFalse();
+    }
+
+    [Fact]
+    public void AddUserMessage_EmptyTextAndVisualContent_StillCountsAsUserTurn()
+    {
+        var visual = new List<ChatContentPart>
+        {
+            new()
+            {
+                Type = "image_url",
+                ImageUrl = new ChatImageUrl { Url = "data:image/png;base64,AAAA" },
+            },
+        };
+
+        _manager.AddUserMessage(string.Empty, visual);
+
+        _manager.IsEmpty.Should().BeFalse();
+        _manager.TurnCount.Should().Be(1);
+
+        var userMessage = _manager.BuildApiMessages().FirstOrDefault(m => m.Role == "user");
+        userMessage.Should().NotBeNull();
+        userMessage!.MultimodalContent.Should().NotBeNull();
+        userMessage.MultimodalContent.Should().HaveCount(1);
     }
 
     #endregion
@@ -317,7 +341,6 @@ public class ConversationContextManagerExtendedTests
     public void BuildApiMessagesRecentTurns_PreservesSystemMessages()
     {
         _manager.SetSystemPrompt("You are helpful.");
-        _manager.SetSearchContext("Search results here.");
         _manager.AddUserMessage("Q1");
         _manager.AddAssistantMessage("A1");
         _manager.AddUserMessage("Q2");
@@ -327,8 +350,6 @@ public class ConversationContextManagerExtendedTests
 
         // 系统提示词必须保留
         messages.Should().Contain(m => m.Role == "system" && m.Content!.Contains("You are helpful"));
-        // 搜索上下文必须保留
-        messages.Should().Contain(m => m.Role == "system" && m.Content!.Contains("Search results"));
     }
 
     [Fact]
@@ -556,6 +577,36 @@ public class ConversationContextManagerExtendedTests
     }
 
     [Fact]
+    public void GetFullContext_JsonRoundTrip_PreservesVisualContent()
+    {
+        _manager.AddUserMessage(
+            string.Empty,
+            new List<ChatContentPart>
+            {
+                new()
+                {
+                    Type = "image_url",
+                    ImageUrl = new ChatImageUrl { Url = "data:image/png;base64,AAAA" },
+                },
+            });
+
+        var savedContext = _manager.GetFullContext();
+        var json = JsonSerializer.Serialize(savedContext);
+        var deserialized = JsonSerializer.Deserialize<List<ChatApiMessage>>(json);
+
+        deserialized.Should().NotBeNull();
+        deserialized.Should().NotBeEmpty();
+        deserialized![0].MultimodalContent.Should().NotBeNull();
+        deserialized[0].MultimodalContent.Should().HaveCount(1);
+
+        _manager.Clear();
+        _manager.RestoreFullContext(deserialized);
+
+        _manager.IsEmpty.Should().BeFalse();
+        _manager.TurnCount.Should().Be(1);
+    }
+
+    [Fact]
     public void RestoreFromHistory_RestoresMessages()
     {
         _manager.AddUserMessage("Q1");
@@ -623,16 +674,18 @@ public class ConversationContextManagerExtendedTests
     #region Multiple context sources
 
     [Fact]
-    public void BuildApiMessages_WithAllContextSources_IncludesAll()
+    public void ContextBlocks_IncludeSystemAndVolatileSources()
     {
         _manager.SetSystemPrompt("You are helpful.");
         _manager.SetSearchContext("Web search results");
         _manager.AddUserMessage("Query");
 
         var messages = _manager.BuildApiMessages();
+        var volatileBlock = _manager.BuildVolatileContextBlock();
 
         messages.Should().Contain(m => m.Role == "system" && m.Content!.Contains("You are helpful"));
-        messages.Should().Contain(m => m.Role == "system" && m.Content!.Contains("Web search results"));
+        volatileBlock.Should().NotBeNull();
+        volatileBlock!.Should().Contain("Web search results");
     }
 
     [Fact]
@@ -644,6 +697,17 @@ public class ConversationContextManagerExtendedTests
 
         volatileBlock.Should().NotBeNull();
         volatileBlock!.Should().Contain("RAG context from database");
+    }
+
+    [Fact]
+    public void BuildVolatileContextBlock_IncludesSearchContext()
+    {
+        _manager.SetSearchContext("Web search results");
+
+        var volatileBlock = _manager.BuildVolatileContextBlock();
+
+        volatileBlock.Should().NotBeNull();
+        volatileBlock!.Should().Contain("Web search results");
     }
 
     #endregion

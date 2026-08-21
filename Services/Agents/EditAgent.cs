@@ -165,7 +165,7 @@ namespace DeepSeek_v4_for_VisualStudio.Services.Agents
         };
 
         /// <summary>
-        /// 只读执行阶段工具：允许读取、搜索和运行终端命令，但不允许任何文件写入。
+        /// 只读执行阶段工具：允许读取、搜索、运行终端命令和 git 操作，但不允许代码文件写入。
         /// </summary>
         private static readonly string[] ReadOnlyExecutionTools = new[]
         {
@@ -177,6 +177,7 @@ namespace DeepSeek_v4_for_VisualStudio.Services.Agents
             "run_in_terminal",
             "get_terminal_output",
             "VisualStudio_askQuestions",
+            "git",
         };
         protected override AgentDefinition CreateDefinition(AgentType agentType)
         {
@@ -2405,18 +2406,9 @@ namespace DeepSeek_v4_for_VisualStudio.Services.Agents
 
             if (isCodeStep)
             {
-                var stageTools = new List<string>(CodeStepTools);
-                if (McpManager != null)
-                {
-                    stageTools.AddRange(GetAutoMcpToolNames(McpManager, Definition.Type));
-                }
-                stageTools = stageTools
-                    .Distinct(StringComparer.OrdinalIgnoreCase)
-                    .ToList();
-
-                sb.AppendLine(string.Format(
-                    AiPrompts.EditCodeStepToolGuidance,
-                    string.Join(", ", stageTools)));
+                sb.AppendLine("## 代码修改步骤");
+                sb.AppendLine("- 按系统提示中的编辑格式和项目文件规则执行修改。");
+                sb.AppendLine("- 完成修改后直接结束本步骤，系统会自动执行编译验证与移交。");
                 sb.AppendLine();
             }
 
@@ -2555,70 +2547,14 @@ namespace DeepSeek_v4_for_VisualStudio.Services.Agents
                 sb.AppendLine();
             }
 
-            if (isCodeStep)
-            {
-                sb.AppendLine("## 编辑方法（按优先级选择）");
-                sb.AppendLine();
-                sb.AppendLine("### 首选：apply_patch（局部修改，最快）");
-                sb.AppendLine("对每个需要修改的文件，使用以下格式输出补丁：");
-                sb.AppendLine();
-                sb.AppendLine("*** Begin Patch");
-                sb.AppendLine("*** Update File: 完整/绝对/路径");
-                sb.AppendLine("@@ 类名或函数名（用于定位）");
-                sb.AppendLine("     上下文行（原样保留）");
-                sb.AppendLine("-    要删除的行");
-                sb.AppendLine("+    要新增的行");
-                sb.AppendLine("     上下文行（原样保留）");
-                sb.AppendLine("*** End Patch");
-                sb.AppendLine();
-                sb.AppendLine("- 多个修改点用多个 @@ 标记");
-                sb.AppendLine("- 新建文件用 *** Add File:");
-                sb.AppendLine("- 删除文件用 *** Delete File:");
-                sb.AppendLine("- 重命名用 *** Move to: <新路径>");
-                sb.AppendLine();
-                sb.AppendLine("### 备选：insert_edit_into_file（多处修改/重构）");
-                sb.AppendLine("```insert_edit_into_file:完整/绝对/路径");
-                sb.AppendLine("// ...existing code...");
-                sb.AppendLine("（修改后的代码段，保留足够上下文以精确定位）");
-                sb.AppendLine("// ...existing code...");
-                sb.AppendLine("```");
-                sb.AppendLine();
-                sb.AppendLine("### 新建文件：create_file");
-                sb.AppendLine("```file:完整/绝对/路径");
-                sb.AppendLine("完整文件内容");
-                sb.AppendLine("```");
-                sb.AppendLine();
-                sb.AppendLine("### 删除文件：");
-                sb.AppendLine("delete:完整/绝对/路径");
-                sb.AppendLine();
-                sb.AppendLine("重要规则：");
-                sb.AppendLine("1. 优先使用 apply_patch 格式（最精确、最快）");
-                sb.AppendLine("2. 每种格式都必须包含文件的完整绝对路径");
-                sb.AppendLine("3. 不要输出额外解释，只输出编辑操作");
-                sb.AppendLine("4. 多个文件用多个独立的编辑块");
-                sb.AppendLine();
-                sb.AppendLine("## ⚠️ 项目配置文件规则（必须遵守）");
-                sb.AppendLine("- ✅ **可以编辑 .vcxproj / .csproj**：NuGet 包引用、外部依赖路径、编译选项、项目间引用");
-                sb.AppendLine("- ❌ **禁止手动添加/移除源文件引用**（<ClInclude> / <ClCompile> / <Compile> 等 ItemGroup 项）");
-                sb.AppendLine("- 添加新源文件的方法：用 create_file (```file: 格式) 创建文件 → 系统自动通过 VS SDK 加入项目");
-                sb.AppendLine("- **CMakeLists.txt** 不在此限制范围，可直接编辑（系统会请求确认）");
-                sb.AppendLine("- 对于 CMake 项目：**必须先 create_file 创建源文件，再编辑 CMakeLists.txt** 添加引用");
-                sb.AppendLine("- 如果 read_file 返回「文件不存在」，先创建该文件，不要尝试修改项目配置来绕过");
-            }
-            else
+            if (!isCodeStep)
             {
                 sb.AppendLine("这是一个分析/验证步骤，不需要修改代码。");
                 sb.AppendLine("请直接输出你的分析结论、发现或建议。");
             }
 
-            // ── v1.1.10: 步骤完成声明指令 ──
-            // 如果本步骤的操作也顺带完成了后续步骤中描述的任务，请在响应末尾明确声明：
-            // "也完成了步骤X、Y" 或 "also completed step X, Y"
             sb.AppendLine();
-            sb.AppendLine("## 📋 步骤完成声明");
-            sb.AppendLine("如果当前步骤的代码修改顺带完成了后续某个步骤的任务（如修改同一文件的不同部分），");
-            sb.AppendLine("请在响应末尾声明，格式如：\"也完成了步骤3、5\" 或 \"also completed step 3, 5\"。");
-            sb.AppendLine("系统将自动标记这些步骤为已完成，避免重复执行。");
+            sb.AppendLine("- 如果本步骤顺带完成了后续步骤，请在响应末尾声明：\"也完成了步骤X、Y\" 或 \"also completed step X, Y\"。");
 
             return sb.ToString();
         }
@@ -3045,8 +2981,9 @@ namespace DeepSeek_v4_for_VisualStudio.Services.Agents
             var promptBuilder = new StringBuilder(stepPrompt);
             promptBuilder.AppendLine();
             promptBuilder.AppendLine("## 只读执行约束（最高优先级）");
-            promptBuilder.AppendLine("- 本任务是读取或输出内容，只能使用读取、搜索和终端执行工具。");
-            promptBuilder.AppendLine("- 严禁创建、修改、删除、保存任何文件；不要调用 create_file、replace_string_in_file、apply_patch、delete_file。");
+            promptBuilder.AppendLine("- 本任务是读取或输出内容，只能使用读取、搜索、终端执行和 git 工具。");
+            promptBuilder.AppendLine("- 严禁创建、修改、删除、保存代码文件；不要调用 create_file、replace_string_in_file、apply_patch、delete_file。");
+            promptBuilder.AppendLine("- 可以使用 git 工具查看版本状态或执行其他 git 操作；需要审批的 git 写操作必须等用户确认。");
             promptBuilder.AppendLine("- 你可以对执行过程或元信息做简要说明，但用户明确要求输出的内容必须完整保留。");
             promptBuilder.AppendLine("- 如果用户要求输出代码或文件内容，必须包含完整原文；不得只给摘要、说明或“已输出”的状态描述。");
 

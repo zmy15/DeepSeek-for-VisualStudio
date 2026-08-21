@@ -20,6 +20,7 @@ using System.Windows;
 using System.Windows.Controls;
 using System.Windows.Input;
 using System.Windows.Media;
+using System.Windows.Media.Imaging;
 
 namespace DeepSeek_v4_for_VisualStudio.View
 {
@@ -246,14 +247,73 @@ namespace DeepSeek_v4_for_VisualStudio.View
         }
 
         /// <summary>
+        /// 点击附件缩略图或文件名时，用系统默认打开方式打开原图/原文件。
+        /// </summary>
+        private void OpenAttachedFile_Click(object sender, RoutedEventArgs e)
+        {
+            if (sender is FrameworkElement element && element.Tag is string filePath)
+            {
+                TryOpenAttachment(filePath);
+            }
+        }
+
+        /// <summary>
         /// 刷新附件文件标签 UI。
         /// </summary>
         private void RefreshAttachedFilesUI()
         {
             AttachedFilesControl.ItemsSource = null;
             AttachedFilesControl.ItemsSource = _attachedFilePaths
-                .Select(p => System.IO.Path.GetFileName(p))
+                .Select(path => new AttachedFileItem
+                {
+                    FilePath = path,
+                    FileName = System.IO.Path.GetFileName(path),
+                    ThumbnailSource = OcrService.IsImageFile(path) ? CreateThumbnail(path) : null,
+                })
                 .ToList();
+        }
+
+        private static BitmapImage? CreateThumbnail(string imagePath)
+        {
+            try
+            {
+                var bitmap = new BitmapImage();
+                bitmap.BeginInit();
+                bitmap.CacheOption = BitmapCacheOption.OnLoad;
+                bitmap.CreateOptions = BitmapCreateOptions.IgnoreImageCache;
+                bitmap.DecodePixelWidth = 48;
+                bitmap.UriSource = new Uri(imagePath, UriKind.Absolute);
+                bitmap.EndInit();
+                bitmap.Freeze();
+                return bitmap;
+            }
+            catch (Exception ex)
+            {
+                Logger.Warn($"[Attachment] 生成缩略图失败 {System.IO.Path.GetFileName(imagePath)}: {ex.Message}");
+                return null;
+            }
+        }
+
+        private static void TryOpenAttachment(string filePath)
+        {
+            try
+            {
+                if (!File.Exists(filePath))
+                {
+                    Logger.Warn($"[Attachment] 无法打开附件，文件不存在: {filePath}");
+                    return;
+                }
+
+                System.Diagnostics.Process.Start(new ProcessStartInfo
+                {
+                    FileName = filePath,
+                    UseShellExecute = true,
+                });
+            }
+            catch (Exception ex)
+            {
+                Logger.Error($"[Attachment] 打开附件失败 {System.IO.Path.GetFileName(filePath)}: {ex.Message}", ex);
+            }
         }
 
         /// <summary>
@@ -2080,6 +2140,13 @@ namespace DeepSeek_v4_for_VisualStudio.View
                         string code = obj.TryGetProperty("code", out var codeProp)
                             ? codeProp.GetString() ?? string.Empty : string.Empty;
                         ApplyCodeToActiveDocument(code);
+                    }
+                    else if (type == "openAttachment")
+                    {
+                        string filePath = obj.TryGetProperty("path", out var pathProp)
+                            ? pathProp.GetString() ?? string.Empty : string.Empty;
+                        if (!string.IsNullOrWhiteSpace(filePath))
+                            TryOpenAttachment(filePath);
                     }
                     else if (type == "retryMessage")
                     {

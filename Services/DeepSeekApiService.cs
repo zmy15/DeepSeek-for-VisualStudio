@@ -1,4 +1,4 @@
-using DeepSeek_v4_for_VisualStudio.Models;
+﻿using DeepSeek_v4_for_VisualStudio.Models;
 using DeepSeek_v4_for_VisualStudio.Utils;
 using System;
 using System.Collections.Generic;
@@ -48,6 +48,12 @@ namespace DeepSeek_v4_for_VisualStudio.Services
         /// 流式调用结束后更新，非流式调用后立即可用。
         /// </summary>
         public DeepSeekUsage? LastUsage { get; private set; }
+
+        /// <summary>
+        /// 最近一次 Chat API 实际发送的消息列表（清洗/规则处理后的最终版本）。
+        /// Handoff 时优先转发此快照，确保目标 Agent 使用与服务器缓存完全一致的 messages 长度和字段。
+        /// </summary>
+        public IReadOnlyList<ChatApiMessage>? LastSentMessages { get; private set; }
 
         // ── 线程安全的累计统计字段（使用 Interlocked 保证多 Agent 并行调用时正确累加）──
         private long _totalCacheHitTokens;
@@ -562,6 +568,7 @@ namespace DeepSeek_v4_for_VisualStudio.Services
                 {
                     Role = msg.Role,
                     Content = msg.Content,
+                    MultimodalContent = msg.MultimodalContent,
                     ReasoningContent = msg.ReasoningContent,
                     ToolCalls = msg.ToolCalls,
                     ToolCallId = msg.ToolCallId,
@@ -591,7 +598,15 @@ namespace DeepSeek_v4_for_VisualStudio.Services
                         bool currHasTc = clone.ToolCalls != null && clone.ToolCalls.Count > 0;
                         mergedPositions.Add($"[{msgIndex}]{clone.Role}(lastTc={lastHasTc},curTc={currHasTc},exist={existingContent.Length},new={newContent.Length})");
 
-                        if (!string.IsNullOrWhiteSpace(newContent))
+                        if (clone.Role == "user"
+                            && (clone.MultimodalContent is { Count: > 0 }
+                                || lastMsg.MultimodalContent is { Count: > 0 }))
+                        {
+                            // 视觉消息不能简单按字符串拼接，否则会把图片块丢成纯文本。
+                            lastMsg.MultimodalContent = MergeUserContentParts(lastMsg, clone);
+                            lastMsg.Content = null;
+                        }
+                        else if (!string.IsNullOrWhiteSpace(newContent))
                         {
                             // ── 合并内容：用分隔线连接 ──
                             lastMsg.Content = string.IsNullOrWhiteSpace(existingContent)
@@ -732,6 +747,30 @@ namespace DeepSeek_v4_for_VisualStudio.Services
             {
                 Logger.Warn($"[API] 移除 {orphanToolCount} 条孤立 tool 消息（tool_call_id 无匹配 assistant），避免 HTTP 400；剩余 {request.Messages.Count} 条");
             }
+
+            // ── 保存本次实际发送的消息快照，供 Handoff 复用 ──
+            LastSentMessages = request.Messages
+                .Select(m => new ChatApiMessage
+                {
+                    Role = m.Role,
+                    Content = m.Content,
+                    MultimodalContent = m.MultimodalContent,
+                    ReasoningContent = m.ReasoningContent,
+                    ToolCalls = m.ToolCalls?
+                        .Select(tc => new ToolCall
+                        {
+                            Id = tc.Id,
+                            Type = tc.Type,
+                            Function = new ToolCallFunction
+                            {
+                                Name = tc.Function?.Name,
+                                Arguments = tc.Function?.Arguments,
+                            }
+                        }).ToList(),
+                    ToolCallId = m.ToolCallId,
+                    Name = m.Name,
+                })
+                .ToList();
 
             // ── 预序列化请求体，供重试时复用 ──
             var requestJson = JsonSerializer.Serialize(request, new JsonSerializerOptions
@@ -1094,6 +1133,106 @@ namespace DeepSeek_v4_for_VisualStudio.Services
             // ── 流正常结束（无 [DONE] 时）输出缓存诊断 ──
             FlushCacheDiagnostics();
             } // using(response) — 重试块闭合
+        }
+
+        /// <summary>
+        /// 合并连续的用户消息，同时保留视觉内容块。视觉模型的 content 是数组，
+        /// 不能像纯文本一样直接字符串拼接，否则 image_url 块会丢失。
+        /// </summary>
+        private static List<ChatContentPart> MergeUserContentParts(
+            ChatApiMessage first,
+            ChatApiMessage second)
+        {
+            var result = new List<ChatContentPart>();
+            var seenImageUrls = new HashSet<string>(StringComparer.Ordinal);
+            var seenText = new HashSet<string>(StringComparer.Ordinal);
+
+            if (first.MultimodalContent is { Count: > 0 } firstParts)
+                AddContentPartsDeduplicated(result, firstParts, seenImageUrls, seenText);
+            else if (!string.IsNullOrWhiteSpace(first.Content))
+                AddTextDeduplicated(result, first.Content, seenText);
+
+            if (second.MultimodalContent is { Count: > 0 } secondParts)
+                AddContentPartsDeduplicated(result, secondParts, seenImageUrls, seenText);
+            else if (!string.IsNullOrWhiteSpace(second.Content))
+                AddTextDeduplicated(result, second.Content, seenText);
+
+            return result;
+        }
+
+        private static void AddContentPartsDeduplicated(
+            List<ChatContentPart> target,
+            IEnumerable<ChatContentPart> parts,
+            HashSet<string> seenImageUrls,
+            HashSet<string> seenText)
+        {
+            foreach (var part in parts)
+            {
+                if (part.Type == "image_url" && part.ImageUrl?.Url != null)
+                {
+                    if (seenImageUrls.Add(part.ImageUrl.Url))
+                    {
+                        target.Add(new ChatContentPart
+                        {
+                            Type = part.Type,
+                            ImageUrl = new ChatImageUrl
+                            {
+                                Url = part.ImageUrl.Url,
+                                Detail = part.ImageUrl.Detail,
+                            },
+                        });
+                    }
+                    continue;
+                }
+
+                if (part.Type == "text")
+                {
+                    AddTextDeduplicated(target, part.Text ?? string.Empty, seenText);
+                    continue;
+                }
+
+                target.Add(CloneContentParts(new List<ChatContentPart> { part })[0]);
+            }
+        }
+
+        private static void AddTextDeduplicated(
+            List<ChatContentPart> target,
+            string text,
+            HashSet<string> seenText)
+        {
+            if (string.IsNullOrWhiteSpace(text))
+                return;
+            if (seenText.Add(text))
+                target.Add(TextContentPart(text));
+        }
+
+        private static List<ChatContentPart> CloneContentParts(List<ChatContentPart> parts)
+        {
+            return parts.Select(p => new ChatContentPart
+            {
+                Type = p.Type,
+                Text = p.Text,
+                ImageUrl = p.ImageUrl == null
+                    ? null
+                    : new ChatImageUrl { Url = p.ImageUrl.Url, Detail = p.ImageUrl.Detail },
+                File = p.File == null
+                    ? null
+                    : new ChatFilePart
+                    {
+                        FileId = p.File.FileId,
+                        FileData = p.File.FileData,
+                        Filename = p.File.Filename,
+                    },
+            }).ToList();
+        }
+
+        private static ChatContentPart TextContentPart(string text)
+        {
+            return new ChatContentPart
+            {
+                Type = "text",
+                Text = text,
+            };
         }
 
         /// <summary>

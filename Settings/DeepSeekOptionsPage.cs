@@ -1,4 +1,4 @@
-﻿using DeepSeek_v4_for_VisualStudio.Models;
+using DeepSeek_v4_for_VisualStudio.Models;
 using DeepSeek_v4_for_VisualStudio.Services;
 using DeepSeek_v4_for_VisualStudio.Utils;
 using Microsoft.VisualStudio.Shell;
@@ -58,7 +58,46 @@ namespace DeepSeek_v4_for_VisualStudio.Settings
             base.OnApply(e);
             if (e.ApplyBehavior == ApplyKind.Apply)
             {
+                // ── 同步静态 Instance 到被 VS 实际应用的规范 DialogPage 实例 ──
+                // 避免后续通过 Options/Instance 读取到包初始化阶段的过期内存实例。
+                if (!ReferenceEquals(Instance, this))
+                {
+                    Instance = this;
+                }
+
+                // ── 语言设置：直接读取本页被 VS 应用后的最新 Language 值，立即生效 ──
+                // 不能依赖静态 DeepSeekOptionsPage.Instance（它可能是尚未同步到
+                // 规范 DialogPage 的过期实例），否则用户手动选择的语言会被静默丢弃、
+                // 回退到自动检测（中文），表现为"切换失效"。
+                ApplyLanguageSetting();
                 SettingsChanged?.Invoke();
+            }
+        }
+
+        /// <summary>
+        /// 将本页当前的 Language 设置应用到 LocalizationService。
+        /// 在 OnApply 中调用，读取的一定是 VS 刚刚写入本页的最新值。
+        /// </summary>
+        private void ApplyLanguageSetting()
+        {
+            try
+            {
+                string language = Language;
+                if (string.IsNullOrEmpty(language) ||
+                    string.Equals(language, "auto", StringComparison.OrdinalIgnoreCase))
+                {
+                    LocalizationService.Instance.Initialize(null);
+                    Logger.Info($"[I18n] 语言设置已应用: auto → {LocalizationService.Instance.CurrentLanguage}");
+                }
+                else
+                {
+                    LocalizationService.Instance.SetLanguage(language);
+                    Logger.Info($"[I18n] 语言设置已应用: {language}");
+                }
+            }
+            catch (Exception ex)
+            {
+                Logger.Warn($"[I18n] 应用语言设置失败: {ex.Message}");
             }
         }
 
@@ -431,7 +470,7 @@ namespace DeepSeek_v4_for_VisualStudio.Settings
     {
         public override bool GetStandardValuesSupported(ITypeDescriptorContext? context) => true;
         public override StandardValuesCollection GetStandardValues(ITypeDescriptorContext? context)
-            => new(new[] { "deepseek-v4-pro", "deepseek-v4-flash" });
+            => new(DeepSeekModelCatalog.All);
     }
 
     /// <summary>

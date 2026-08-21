@@ -862,6 +862,10 @@ namespace DeepSeek_v4_for_VisualStudio.View
                         _contextManager.RestoreFullContext(_activeSession.ApiHistory);
                         Logger.Info($"[Context] 从 ApiHistory 恢复上下文成功 ({_activeSession.ApiHistory.Count} 条消息, "
                             + $"turnCount={_contextManager.TurnCount}, estimatedTokens={_contextManager.EstimatedTokens})");
+
+                        // 修复旧版会话：ApiHistory 可能不含视觉 user 轮次，导致恢复后没有 user 上下文。
+                        if (_contextManager.TurnCount == 0 && _tree != null)
+                            RebuildContextFromTree();
                     }
                     catch (Exception ex)
                     {

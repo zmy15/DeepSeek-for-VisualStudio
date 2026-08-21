@@ -85,7 +85,14 @@ namespace DeepSeek_v4_for_VisualStudio.Services
                 var msg = messages[i];
                 if (msg.Role == "user")
                 {
-                    AppendUserMessageHtml(sb, msg.Content ?? string.Empty, msg.AttachedFiles, i);
+                    AppendUserMessageHtml(
+                        sb,
+                        msg.Content ?? string.Empty,
+                        msg.AttachedFiles,
+                        i,
+                        msg.AttachedImageDataUris,
+                        msg.AttachedImageFileNames,
+                        msg.AttachedImagePaths);
                     // ── 分支导航（始终在用户气泡正下方）──
                     // 场景1：编辑用户消息产生分支 → 用户消息的 SiblingCount > 1
                     // 场景2：重试助手回复产生分支 → 下一个助手消息的 SiblingCount > 1
@@ -103,10 +110,23 @@ namespace DeepSeek_v4_for_VisualStudio.Services
         /// <summary>
         /// 构建单条用户消息的 HTML 片段（用于增量追加）。
         /// </summary>
-        public static string BuildUserMessageHtml(string content, List<FileParseResult>? attachedFiles = null, int messageIndex = -1)
+        public static string BuildUserMessageHtml(
+            string content,
+            List<FileParseResult>? attachedFiles = null,
+            int messageIndex = -1,
+            List<string>? attachedImageDataUris = null,
+            List<string>? attachedImageFileNames = null,
+            List<string>? attachedImagePaths = null)
         {
             var sb = new StringBuilder();
-            AppendUserMessageHtml(sb, content, attachedFiles, messageIndex);
+            AppendUserMessageHtml(
+                sb,
+                content,
+                attachedFiles,
+                messageIndex,
+                attachedImageDataUris,
+                attachedImageFileNames,
+                attachedImagePaths);
             return sb.ToString();
         }
 
@@ -480,7 +500,14 @@ namespace DeepSeek_v4_for_VisualStudio.Services
 
         #region Private Methods - Message HTML Builders
 
-        private static void AppendUserMessageHtml(StringBuilder sb, string content, List<FileParseResult>? attachedFiles = null, int messageIndex = -1)
+        private static void AppendUserMessageHtml(
+            StringBuilder sb,
+            string content,
+            List<FileParseResult>? attachedFiles = null,
+            int messageIndex = -1,
+            List<string>? attachedImageDataUris = null,
+            List<string>? attachedImageFileNames = null,
+            List<string>? attachedImagePaths = null)
         {
             // ── 编辑按钮（仅在有索引时渲染） ──
             string editBtnHtml = messageIndex >= 0
@@ -489,6 +516,10 @@ namespace DeepSeek_v4_for_VisualStudio.Services
 
             // ── 文件附件 𠅂
             string fileBlocksHtml = BuildFileAttachmentHtml(attachedFiles);
+            string imagePreviewHtml = BuildImageThumbnailHtml(
+                attachedImageDataUris,
+                attachedImageFileNames,
+                attachedImagePaths);
 
             // ── 提取 @agent 路由前缀，渲染为彩色徽章 ──
             string cleanContent = content ?? string.Empty;
@@ -512,12 +543,43 @@ namespace DeepSeek_v4_for_VisualStudio.Services
             sb.Append("<div class='msg-wrapper user'>");
             sb.Append("<div class='msg-bubble user'>");
             sb.Append(fileBlocksHtml);
+            sb.Append(imagePreviewHtml);
             sb.Append(agentBadgeHtml);
             sb.Append($"<div class='msg-content' id='msg-body-{messageIndex}'>{body}</div>");
             sb.Append(editBtnHtml);
             sb.Append("</div>");
             sb.Append("<div class='msg-avatar user'>👤</div>");
             sb.Append("</div>");
+        }
+
+        /// <summary>
+        /// 构建图片附件缩略图 HTML，直接在用户气泡中显示。
+        /// </summary>
+        private static string BuildImageThumbnailHtml(
+            IReadOnlyList<string>? dataUris,
+            IReadOnlyList<string>? fileNames,
+            IReadOnlyList<string>? filePaths)
+        {
+            if (dataUris == null || dataUris.Count == 0)
+                return string.Empty;
+
+            var sb = new StringBuilder();
+            sb.Append("<div class='attached-images' style='display:flex;flex-wrap:wrap;gap:6px;margin-bottom:6px'>");
+            for (int i = 0; i < dataUris.Count; i++)
+            {
+                string name = i < (fileNames?.Count ?? 0)
+                    ? fileNames![i]
+                    : string.Empty;
+                string escapedName = System.Net.WebUtility.HtmlEncode(name);
+                string escapedSrc = System.Net.WebUtility.HtmlEncode(dataUris[i]);
+                string path = i < (filePaths?.Count ?? 0)
+                    ? filePaths![i]
+                    : string.Empty;
+                string escapedPath = System.Net.WebUtility.HtmlEncode(path);
+                sb.Append($"<img class='attached-image-thumb' src=\"{escapedSrc}\" alt=\"{escapedName}\" title=\"{escapedName}\" data-path=\"{escapedPath}\" style=\"width:52px;height:52px;object-fit:cover;border-radius:4px;border:1px solid #4EC9B0;cursor:pointer\" onclick=\"window.__openAttachment(this.getAttribute('data-path'))\" />");
+            }
+            sb.Append("</div>");
+            return sb.ToString();
         }
 
         /// <summary>

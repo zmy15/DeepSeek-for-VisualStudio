@@ -1,4 +1,4 @@
-﻿using DeepSeek_v4_for_VisualStudio.Commands;
+using DeepSeek_v4_for_VisualStudio.Commands;
 using DeepSeek_v4_for_VisualStudio.Models;
 using DeepSeek_v4_for_VisualStudio.Services;
 using DeepSeek_v4_for_VisualStudio.Settings;
@@ -321,10 +321,12 @@ namespace DeepSeek_v4_for_VisualStudio
             }
 
             // ═══ 步骤 6/8：设置变更订阅 ═══
+            // 注意：语言切换不再通过此事件处理（OnSettingsChanged 已移除），
+            // 改为在 DeepSeekOptionsPage.OnApply 中直接读取本页最新 Language 值应用，
+            // 避免从可能过期的静态 Instance 读取导致语言切换失效。
             try
             {
-                DeepSeekOptionsPage.SettingsChanged += OnSettingsChanged;
-                DiagnosticLog.Write("[DeepSeek Init] Step 6/8: SettingsChanged OK");
+                DiagnosticLog.Write("[DeepSeek Init] Step 6/8: SettingsChanged OK (language applied in DeepSeekOptionsPage.OnApply)");
             }
             catch (Exception ex)
             {
@@ -336,11 +338,27 @@ namespace DeepSeek_v4_for_VisualStudio
             try
             {
                 await JoinableTaskFactory.SwitchToMainThreadAsync(cancellationToken);
+
+                // ── 在 VS UI 线程上捕获 VS 自身的 UI 语言，并据此刷新语言 ──
+                // 之前步骤 2/5 在后台线程初始化，CultureInfo.CurrentUICulture
+                // 拿到的是系统安装语言而非 VS 语言；这里切回主线程后重新检测，
+                // 让 "auto" 跟随 VS 当前显示语言（VS 英文 → 扩展英文）。
+                // 独立 try/catch：语言初始化失败不影响后续主题服务初始化。
+                try
+                {
+                    LocalizationService.CaptureVsUiLanguage();
+                    InitializeLocalization();
+                }
+                catch (Exception ex)
+                {
+                    DiagnosticLog.Write($"[DeepSeek Init] Step 7/9 VS language (non-fatal): {ex.GetType().Name}: {ex.Message}");
+                }
+
                 ThemeService.Initialize();
                 // 从设置恢复用户主题偏好
                 var savedTheme = Options?.ThemeMode ?? Models.ThemeMode.Auto;
                 ThemeService.Instance.UserThemeMode = savedTheme;
-                DiagnosticLog.Write("[DeepSeek Init] Step 7/9: ThemeService OK");
+                DiagnosticLog.Write("[DeepSeek Init] Step 7/9: ThemeService + VS language OK");
             }
             catch (Exception ex)
             {
@@ -470,31 +488,6 @@ namespace DeepSeek_v4_for_VisualStudio
             LocalizationService.Instance.Initialize(languageOverride);
         }
 
-        /// <summary>
-        /// 设置变更回调：当用户在选项页修改语言设置时热更新。
-        /// </summary>
-        private void OnSettingsChanged()
-        {
-            try
-            {
-                string? language = Options?.Language;
-                if (!string.IsNullOrEmpty(language) &&
-                    !string.Equals(language, "auto", StringComparison.OrdinalIgnoreCase))
-                {
-                    LocalizationService.Instance.SetLanguage(language);
-                }
-                else
-                {
-                    // 重新自动检测
-                    LocalizationService.Instance.Initialize(null);
-                }
-            }
-            catch (Exception ex)
-            {
-                DiagnosticLog.Write($"[I18n] Failed to reload language: {ex.Message}");
-            }
-        }
-
         #endregion
 
         #region Native Methods (Toast 通知点击 → 激活 VS 窗口)
@@ -519,6 +512,6 @@ namespace DeepSeek_v4_for_VisualStudio
     {
         public const string Name = "DeepSeek Chat for Visual Studio";
         public const string Description = "DeepSeek AI chat integration for Visual Studio 2022.";
-        public const string Version = "1.1.13";
+        public const string Version = "1.1.14";
     }
 }

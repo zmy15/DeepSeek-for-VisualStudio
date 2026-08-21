@@ -151,8 +151,9 @@ public class ConversationContextManagerTests
         _manager.SetSearchContext("Search results: ...");
         _manager.AddUserMessage("query");
 
-        var messages = _manager.BuildApiMessages();
+        var volatileBlock = _manager.BuildVolatileContextBlock();
 
-        messages.Should().Contain(m => m.Role == "system" && m.Content!.Contains("Search results"));
+        volatileBlock.Should().NotBeNull();
+        volatileBlock!.Should().Contain("Search results");
     }
 }

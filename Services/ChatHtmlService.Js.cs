@@ -260,6 +260,10 @@ window.__sendToHost=function(msg){
     try{window.chrome.webview.postMessage(JSON.stringify(msg));}
     catch(e1){try{window.external.notify(JSON.stringify(msg));}catch(e2){}}
 };
+window.__openAttachment=function(path){
+    if(!path)return;
+    window.__sendToHost({type:'openAttachment',path:path});
+};
 window.__retryMessage=function(msgIndex){
     window.__sendToHost({type:'retryMessage',messageIndex:msgIndex});
 };

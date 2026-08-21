@@ -1027,7 +1027,10 @@ namespace DeepSeek_v4_for_VisualStudio.View
                             if (!string.IsNullOrEmpty(fileContext))
                                 content = fileContext + "\n" + content;
                         }
-                        _contextManager.AddUserMessage(content);
+                        // 视觉轮次在树中的 Content 可能为空，图片只存在于附件字段中。
+                        // 必须重建 MultimodalContent，否则重启后 ContextManager 会一直被判定为空。
+                        List<ChatContentPart>? visualParts = BuildStoredVisionContent(msg);
+                        _contextManager.AddUserMessage(content, visualParts);
                     }
                     else if (msg.Role == "assistant")
                     {

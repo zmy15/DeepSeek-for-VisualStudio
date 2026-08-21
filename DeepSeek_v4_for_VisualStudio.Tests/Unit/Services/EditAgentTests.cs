@@ -206,6 +206,7 @@ public class EditAgentTests
         tools.Should().NotContain("delete_file");
         tools.Should().NotContain("create_directory");
         tools.Should().NotContain("build_solution");
+        tools.Should().Contain("git");
     }
 
     [Fact]
@@ -236,7 +237,7 @@ public class EditAgentTests
     }
 
     [Fact]
-    public void BuildStepPrompt_ForCodeStep_ExplainsStageToolsAndAutomaticVerification()
+    public void BuildStepPrompt_ForCodeStep_UsesShortInstructionWithoutDuplicatedTemplates()
     {
         var agent = new EditAgent(_apiService);
         var plan = new AgentTaskPlan
@@ -261,21 +262,12 @@ public class EditAgentTests
             plan.Steps[0], plan, new AgentContext(), true
         })!;
 
-        var codeStepTools = typeof(EditAgent).GetField(
-            "CodeStepTools",
-            System.Reflection.BindingFlags.NonPublic | System.Reflection.BindingFlags.Static)!
-            .GetValue(null) as string[];
-        var expectedToolList = string.Join(", ", codeStepTools!);
-
-        prompt.Should().Contain(expectedToolList);
-        prompt.Should().Contain("build_solution");
-        prompt.Should().Contain("run_in_terminal");
-        prompt.Should().Contain("request_handoff");
-        prompt.Should().Contain(
-            LocalizationService.Instance.CurrentLanguage.StartsWith("zh", StringComparison.OrdinalIgnoreCase)
-                ? "自动"
-                : "automatic",
-            AtLeast.Once());
+        prompt.Should().Contain("## 代码修改步骤");
+        prompt.Should().Contain("系统会自动执行编译验证与移交");
+        prompt.Should().Contain("按系统提示中的编辑格式和项目文件规则执行修改");
+        prompt.Should().NotContain("本阶段可用工具");
+        prompt.Should().NotContain("*** Begin Patch");
+        prompt.Should().NotContain("项目配置文件规则");
     }
 
     #endregion

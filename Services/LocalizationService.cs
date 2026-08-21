@@ -257,7 +257,37 @@ namespace DeepSeek_v4_for_VisualStudio.Services
         #region Language Detection
 
         /// <summary>
+        /// VS UI 语言缓存（在 VS UI 线程上捕获的 CultureInfo.CurrentUICulture）。
+        /// VS 会把自己的 UI 语言设置到主线程的 CurrentUICulture，
+        /// 因此在 UI 线程上读取即可得到 VS 当前显示语言，线程无关地保存下来。
+        /// </summary>
+        private static volatile string? _vsUiLanguageName;
+
+        /// <summary>
+        /// 在 VS UI（主）线程上调用，捕获 VS 当前的 UI 语言。
+        /// 必须在 JoinableTaskFactory.SwitchToMainThreadAsync 之后调用，
+        /// 否则读到的仍是后台线程的系统安装语言而非 VS 语言。
+        /// </summary>
+        public static void CaptureVsUiLanguage()
+        {
+            try
+            {
+                string name = CultureInfo.CurrentUICulture.Name;
+                if (!string.IsNullOrWhiteSpace(name))
+                {
+                    _vsUiLanguageName = name.Trim();
+                }
+                System.Diagnostics.Debug.WriteLine($"[I18n] Captured VS UI language: {_vsUiLanguageName}");
+            }
+            catch (Exception ex)
+            {
+                System.Diagnostics.Debug.WriteLine($"[I18n] Failed to capture VS UI language: {ex.Message}");
+            }
+        }
+
+        /// <summary>
         /// 检测用户系统 UI 语言，映射到支持的语言代码。
+        /// 优先级：VS UI 语言（当前显示）→ Windows 显示语言（兜底）。
         /// 检测失败时回退到 "en"（而非 DefaultLanguage），
         /// 避免静默回退到中文导致非中文系统用户始终收到中文回复。
         /// </summary>
@@ -265,8 +295,31 @@ namespace DeepSeek_v4_for_VisualStudio.Services
         {
             try
             {
-                var culture = CultureInfo.CurrentUICulture;
-                string name = culture.Name.ToLowerInvariant();
+                string name;
+
+                // ── 关键：优先跟随 VS 自身的 UI 语言 ──
+                // 用户在 VS 里看到的语言才是期望的语言（VS 英文 → 英文扩展）。
+                // 直接读线程局部的 CultureInfo.CurrentUICulture 不可靠：
+                // 本扩展 AllowsBackgroundLoading=true，早期初始化跑在后台线程上，
+                // 后台线程的 CurrentUICulture 返回“系统安装语言”(zh-CN)，
+                // 而非 VS 语言(en-US)或 Windows 显示语言(en-US)。
+                if (!string.IsNullOrWhiteSpace(_vsUiLanguageName))
+                {
+                    name = _vsUiLanguageName.ToLowerInvariant();
+                }
+                else
+                {
+                    // 兜底：Windows 显示语言（线程无关）
+                    int langId = GetUserDefaultUILanguage();
+                    try
+                    {
+                        name = CultureInfo.GetCultureInfo(langId).Name.ToLowerInvariant();
+                    }
+                    catch
+                    {
+                        name = CultureInfo.CurrentUICulture.Name.ToLowerInvariant();
+                    }
+                }
 
                 // 中文系列 → zh-CN
                 if (name.StartsWith("zh"))
@@ -278,12 +331,17 @@ namespace DeepSeek_v4_for_VisualStudio.Services
             catch (Exception ex)
             {
                 // 检测失败时回退到英文，避免静默回退到中文
-                // 典型场景：VS 2026 中 CultureInfo.CurrentUICulture 可能因宿主环境变化而抛出异常
                 System.Diagnostics.Debug.WriteLine(
                     $"[I18n] System language detection failed: {ex.Message}. Falling back to 'en'.");
                 return "en";
             }
         }
+
+        /// <summary>
+        /// 获取用户当前的 Windows 显示 UI 语言 LANGID（线程无关）。
+        /// </summary>
+        [System.Runtime.InteropServices.DllImport("kernel32.dll")]
+        private static extern ushort GetUserDefaultUILanguage();
 
         /// <summary>
         /// 标准化语言代码：确保映射到支持的语言。
