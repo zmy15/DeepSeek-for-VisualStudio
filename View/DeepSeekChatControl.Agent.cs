@@ -407,7 +407,7 @@ namespace DeepSeek_v4_for_VisualStudio.View
                     Logger.Warn($"[IdeContext] 注入失败: {ideEx.Message}");
                 }
 
-                // ── P2 Context Debugger：状态栏级一行摘要（设置开关复用 ShowContextStats）──
+                // ── P2 Context Debugger：一行日志 + 聊天面板推送（设置开关复用 ShowContextStats）──
                 if (_options?.ShowContextStats == true)
                 {
                     try
@@ -418,6 +418,12 @@ namespace DeepSeek_v4_for_VisualStudio.View
                             $"(sel={ideCur?.HasSelection == true}, diag={ideCur?.ErrorCount ?? 0}e/{ideCur?.WarningCount ?? 0}w) " +
                             $"Search={_contextManager.HasSearchContext} RAG={_contextManager.HasRagContext} " +
                             $"Tokens={dbgStats.EstimatedTokens:N0}/{dbgStats.TokenBudget:N0}");
+
+                        // 推送到聊天窗口右上角抽屉（JS 懒创建，折叠展示）
+                        string? ctxJson = BuildContextDebugJson();
+                        if (!string.IsNullOrEmpty(ctxJson))
+                            ChatWebView.CoreWebView2?.PostWebMessageAsString(
+                                "{\"type\":\"contextDebug\",\"d\":" + ctxJson + "}");
                     }
                     catch { }
                 }

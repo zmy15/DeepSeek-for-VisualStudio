@@ -380,11 +380,67 @@ window._showCopyFeedback=function(msgIndex){
     var _rafPending=false;      // 是否已有待处理的 rAF
     var _rafTimer=null;         // 兜底定时器（防止 rAF 不触发）
 
+    // ═══ Context Debugger 面板（P2，序号 20 渲染层）═══
+    // 懒创建：首条 contextDebug 消息到达时注入固定抽屉（右上角，默认折叠）
+    function _ensureCtxPanel(){
+        var p=document.getElementById('ctx-debug');
+        if(p)return p;
+        p=document.createElement('div');
+        p.id='ctx-debug';
+        p.style.cssText='position:fixed;top:8px;right:12px;z-index:9999;background:#252526ee;'
+            +'border:1px solid #007ACC;border-radius:8px;font:11px/1.55 Consolas,monospace;'
+            +'color:#d4d4d4;max-width:340px;display:none;box-shadow:0 4px 14px rgba(0,0,0,.4);';
+        var head=document.createElement('div');
+        head.id='ctx-debug-head';
+        head.textContent='▸ Context';
+        head.style.cssText='padding:4px 10px;cursor:pointer;user-select:none;color:#9CDCFE;';
+        var body=document.createElement('div');
+        body.id='ctx-debug-body';
+        body.style.cssText='display:none;padding:6px 10px 8px;border-top:1px solid #3f3f46;white-space:pre-wrap;';
+        head.addEventListener('click',function(){
+            var open=body.style.display!=='none';
+            body.style.display=open?'none':'block';
+            head.textContent=(open?'▸':'▾')+' Context';
+        });
+        p.appendChild(head);p.appendChild(body);
+        document.body.appendChild(p);
+        return p;
+    }
+    function _renderCtxDebug(d){
+        try{
+            var panel=_ensureCtxPanel();
+            panel.style.display='block';
+            var rows=[];
+            var tk=d.tokens||{};
+            rows.push('Tokens   : '+(tk.estimated||0).toLocaleString()+' / '+(tk.budget||0).toLocaleString()
+                +'  ('+(tk.percent!=null?tk.percent:0)+'%)');
+            var inj=d.injected||{};
+            rows.push('Injected : IDE='+!!inj.ide+' ('+(inj.ideChars||0)+' ch)'
+                +'  Search='+!!inj.search+'  RAG='+!!inj.rag);
+            var ide=d.ideSnapshot;
+            if(ide){
+                rows.push('File     : '+(ide.file||'-'));
+                if(ide.hasSelection)rows.push('Selection: L'+ide.selectionStartLine+'-L'+ide.selectionEndLine);
+                rows.push('Cursor   : L'+(ide.cursorLine||0)+(ide.symbol?('   Symbol: '+ide.symbol):''));
+                rows.push('Diags    : '+(ide.errors||0)+' err / '+(ide.warnings||0)+' warn');
+            }else{
+                rows.push('IDE      : (off)');
+            }
+            rows.push('Turns    : '+(d.turns||0)+'    Messages: '+(d.messages||0));
+            var body=document.getElementById('ctx-debug-body');
+            if(body)body.textContent=rows.join('\n');
+        }catch(err){ console.error('[DeepSeek] ctxDebug render:',err); }
+    }
+
     // 监听来自 C# 的流式更新消息
     if(window.chrome&&window.chrome.webview){
         window.chrome.webview.addEventListener('message',function(e){
             try{
                 var msg=typeof e.data==='string'?JSON.parse(e.data):e.data;
+                if(msg.type==='contextDebug'){
+                    _renderCtxDebug(msg.d||{});
+                    return;
+                }
                 if(msg.type==='stream'){
                     _streamBuf[msg.i]=msg;
                     if(!_rafPending){
