@@ -181,15 +181,46 @@ namespace DeepSeek_v4_for_VisualStudio.View
                     var directImagePaths = _attachedFilePaths
                         .Where(IsVisionImageFile)
                         .ToList();
+                    var directPdfPaths = _attachedFilePaths
+                        .Where(IsPdfFile)
+                        .ToList();
                     var parsedPaths = _attachedFilePaths
-                        .Where(path => !directImagePaths.Contains(path, StringComparer.OrdinalIgnoreCase))
+                        .Where(path => !directImagePaths.Contains(path, StringComparer.OrdinalIgnoreCase)
+                                    && !directPdfPaths.Contains(path, StringComparer.OrdinalIgnoreCase))
                         .ToList();
 
-                    visionContent = await Task.Run(() => BuildVisionContent(directImagePaths));
+                    var visionParts = new List<ChatContentPart>();
+                    var failedPdfPaths = new List<string>();
+
+                    await Task.Run(async () =>
+                    {
+                        // 图片直传视觉模型
+                        var imageParts = BuildVisionContent(directImagePaths);
+                        if (imageParts != null)
+                            visionParts.AddRange(imageParts);
+
+                        // PDF 逐页渲染为图片后直传视觉模型
+                        foreach (string pdf in directPdfPaths)
+                        {
+                            var pdfParts = await PdfRenderService.BuildPdfVisionPartsAsync(pdf);
+                            if (pdfParts is { Count: > 0 })
+                                visionParts.AddRange(pdfParts);
+                            else
+                                failedPdfPaths.Add(pdf);
+                        }
+                    });
+
+                    // PDF 渲染失败时回退到 PdfPig 文本解析，避免内容完全丢失
+                    if (failedPdfPaths.Count > 0)
+                        parsedPaths.AddRange(failedPdfPaths);
+
+                    visionContent = visionParts.Count > 0 ? visionParts : null;
                     parseResults = parsedPaths.Count > 0
                         ? await FileParserService.ParseFilesAsync(parsedPaths)
                         : new List<FileParseResult>();
-                    Logger.Info($"[Vision] 直接发送图片 {directImagePaths.Count} 张，解析其他文件 {parsedPaths.Count} 个");
+
+                    int directPdfCount = directPdfPaths.Count - failedPdfPaths.Count;
+                    Logger.Info($"[Vision] 直传图片 {directImagePaths.Count} 张，直传 PDF {directPdfCount}/{directPdfPaths.Count} 个，解析其他文件 {parsedPaths.Count} 个");
                 }
                 else
                 {
@@ -218,6 +249,9 @@ namespace DeepSeek_v4_for_VisualStudio.View
                 attachedImagePaths.Add(imagePath);
             }
 
+            // 记录视觉模型直传的 PDF 附件路径，供重试/回退恢复时重新渲染页面
+            List<string> attachedPdfPaths = _attachedFilePaths.Where(IsPdfFile).ToList();
+
             // 构建用户消息内容
             string analyzeFilesPrompt = "请分析以上文件内容。";
             string userDisplayContent = userText ?? string.Empty;
@@ -244,6 +278,7 @@ namespace DeepSeek_v4_for_VisualStudio.View
                 AttachedImageDataUris = attachedImageDataUris,
                 AttachedImageFileNames = attachedImageFileNames,
                 AttachedImagePaths = attachedImagePaths,
+                AttachedPdfPaths = attachedPdfPaths,
                 Timestamp = DateTime.Now,
             };
             int earlyUserMsgIndex;
@@ -481,6 +516,14 @@ namespace DeepSeek_v4_for_VisualStudio.View
                 supported => string.Equals(ext, supported, StringComparison.OrdinalIgnoreCase));
         }
 
+        private static bool IsPdfFile(string filePath)
+        {
+            if (string.IsNullOrWhiteSpace(filePath))
+                return false;
+
+            return string.Equals(Path.GetExtension(filePath), ".pdf", StringComparison.OrdinalIgnoreCase);
+        }
+
         private static bool IsOcrExplicitlyRequested(string? userText, string? effectiveUserText)
         {
             string text = ((effectiveUserText ?? string.Empty) + "\n" + (userText ?? string.Empty))
@@ -562,6 +605,17 @@ namespace DeepSeek_v4_for_VisualStudio.View
                 var fullSizeParts = BuildVisionContent(message.AttachedImagePaths);
                 if (fullSizeParts != null)
                     parts.AddRange(fullSizeParts);
+            }
+
+            // 视觉模型直传的 PDF：从原始路径重新渲染页面，恢复到 content 数组。
+            if (message.AttachedPdfPaths is { Count: > 0 })
+            {
+                foreach (string pdf in message.AttachedPdfPaths)
+                {
+                    var pdfParts = PdfRenderService.BuildPdfVisionParts(pdf);
+                    if (pdfParts is { Count: > 0 })
+                        parts.AddRange(pdfParts);
+                }
             }
 
             // 只处理没有完整路径的存量消息，避免同一张图既作为缩略图又作为原图重复注入。
