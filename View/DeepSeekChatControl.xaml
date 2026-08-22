@@ -800,10 +800,6 @@
                             SelectionChanged="WebSearchEngineComboBox_SelectionChanged"
                             ToolTip="选择搜索引擎"
                             Visibility="Collapsed" />
-                    </StackPanel>
-
-                    <!-- 右侧: 操作按钮 -->
-                    <StackPanel Grid.Column="1" Orientation="Horizontal">
                         <Button x:Name="WebSearchToggleButton"
                                 Click="WebSearchToggleButton_Click"
                                 Style="{StaticResource TransparentButton}"
@@ -824,6 +820,10 @@
                                 <TextBlock Text="&#xE713;" FontSize="13" FontFamily="Segoe Fluent Icons" />
                             </Button.Content>
                         </Button>
+                    </StackPanel>
+
+                    <!-- 右侧: 仅保留发送控制（P3 去拥挤：联网/MCP 移至左侧设置组）-->
+                    <StackPanel Grid.Column="1" Orientation="Horizontal">
                         <Button x:Name="ClearButton" Content="清空" Click="ClearButton_Click"
                                 Style="{StaticResource TransparentButton}"
                                 Margin="0,0,2,0" FontSize="12" />
