@@ -238,6 +238,13 @@ namespace DeepSeek_v4_for_VisualStudio
                 DiagnosticLog.Write("[DeepSeek Init] Loading persisted options after package initialization...");
                 var persistedOptions = (DeepSeekOptionsPage)GetDialogPage(typeof(DeepSeekOptionsPage));
                 DeepSeekOptionsPage.Instance = persistedOptions;
+
+                // ── 跨实例设置迁移（问题 2）：新 hive 无配置时从其他 VS 实例导入 ──
+                if (string.IsNullOrWhiteSpace(persistedOptions.ApiKey))
+                {
+                    Settings.SettingsMigration.TryMigrateInto(persistedOptions);
+                }
+
                 InitializeLocalization();
                 ThemeService.Instance.UserThemeMode = persistedOptions.ThemeMode;
                 DiagnosticLog.Write("[DeepSeek Init] Persisted options loaded OK");
