@@ -289,6 +289,23 @@ namespace DeepSeek_v4_for_VisualStudio.Services
         [JsonIgnore]
         public int IdeContextChars => _ideContext?.Length ?? 0;
 
+        /// <summary>Working Set 最近活跃文件 Top-N（P2 Context Debugger 数据面）。</summary>
+        public System.Collections.Generic.IReadOnlyList<string> GetWorkingSetTopPaths(int limit = 8)
+        {
+            try
+            {
+                var root = !string.IsNullOrWhiteSpace(_workspaceRoot)
+                    ? _workspaceRoot!
+                    : Environment.CurrentDirectory;
+                return _activeFileTracker?.GetTopPaths(root, limit)
+                       ?? (System.Collections.Generic.IReadOnlyList<string>)Array.Empty<string>();
+            }
+            catch
+            {
+                return Array.Empty<string>();
+            }
+        }
+
         /// <summary>
         /// 设置 Skill 发现上下文。
         /// </summary>

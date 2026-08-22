@@ -328,6 +328,7 @@ namespace DeepSeek_v4_for_VisualStudio.View
                         search = _contextManager.HasSearchContext,
                         rag = _contextManager.HasRagContext,
                     },
+                    workingSet = _contextManager.GetWorkingSetTopPaths(6),
                     ideSnapshot = ide == null ? null : new
                     {
                         file = ide.FilePath,
@@ -417,6 +418,7 @@ namespace DeepSeek_v4_for_VisualStudio.View
                         Logger.Info($"[ContextDebug] IDE={(ideCur != null ? ideCur.FilePath : "off")}" +
                             $"(sel={ideCur?.HasSelection == true}, diag={ideCur?.ErrorCount ?? 0}e/{ideCur?.WarningCount ?? 0}w) " +
                             $"Search={_contextManager.HasSearchContext} RAG={_contextManager.HasRagContext} " +
+                            $"WS={_contextManager.GetWorkingSetTopPaths(6).Count} " +
                             $"Tokens={dbgStats.EstimatedTokens:N0}/{dbgStats.TokenBudget:N0}");
 
                         // 推送到聊天窗口右上角抽屉（JS 懒创建，折叠展示）
