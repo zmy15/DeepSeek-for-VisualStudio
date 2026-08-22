@@ -21,19 +21,10 @@ namespace DeepSeek_v4_for_VisualStudio.View
         #region Theme
 
         /// <summary>
-        /// 主题切换按钮点击：在 Auto → Dark → Light 之间循环。
+        /// 更新主题切换按钮图标（P2：独立切换已移除，保留空实现兼容调用点）。
         /// </summary>
-        private void ThemeToggleButton_Click(object sender, RoutedEventArgs e)
+        private void UpdateThemeToggleIcon()
         {
-            var nextMode = _themeService.UserThemeMode switch
-            {
-                ThemeMode.Auto => ThemeMode.Dark,
-                ThemeMode.Dark => ThemeMode.Light,
-                ThemeMode.Light => ThemeMode.Auto,
-                _ => ThemeMode.Auto
-            };
-            _themeService.UserThemeMode = nextMode;
-            UpdateThemeToggleIcon();
         }
 
         /// <summary>
@@ -58,36 +49,6 @@ namespace DeepSeek_v4_for_VisualStudio.View
             {
                 _isApplyingTheme = false;
             }
-        }
-
-        /// <summary>
-        /// 更新主题切换按钮图标。
-        /// </summary>
-        private void UpdateThemeToggleIcon()
-        {
-            try
-            {
-                if (ThemeToggleIcon == null) return;
-                ThemeToggleIcon.Text = _themeService.UserThemeMode switch
-                {
-                    ThemeMode.Auto => "🌓",
-                    ThemeMode.Dark => "🌙",
-                    ThemeMode.Light => "☀️",
-                    _ => "🌓"
-                };
-
-                var L = LocalizationService.Instance;
-                string themeLabel = _themeService.IsLight ? L["theme.light"] : L["theme.dark"];
-                var tooltip = _themeService.UserThemeMode switch
-                {
-                    ThemeMode.Auto => string.Format(L["theme.toggle.auto"], themeLabel),
-                    ThemeMode.Dark => L["theme.toggle.dark"],
-                    ThemeMode.Light => L["theme.toggle.light"],
-                    _ => L["theme.toggle.switch"]
-                };
-                ThemeToggleButton.ToolTip = tooltip;
-            }
-            catch { }
         }
 
         /// <summary>

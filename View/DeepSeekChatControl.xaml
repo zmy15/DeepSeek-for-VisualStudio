@@ -189,7 +189,7 @@
                           SelectionChanged="SessionComboBox_SelectionChanged"
                           DisplayMemberPath="Title" />
                 <Button x:Name="DeleteSessionButton"
-                        Content="✕"
+                        Content="&#xE711;" FontFamily="Segoe Fluent Icons"
                         ToolTip="删除当前对话"
                         Click="DeleteSessionButton_Click"
                         Background="Transparent"
@@ -326,16 +326,6 @@
                     <RowDefinition Height="Auto" />
                 </Grid.RowDefinitions>
 
-                <!-- ➕ 输入框左上角：添加上下文按钮 + Popup -->
-                <Button x:Name="AddContextButton" Content="＋"
-                        Click="AddContextButton_Click"
-                        Style="{StaticResource TransparentButton}"
-                        ToolTip="添加上下文：活动文档 / 项目文件 / 项目全部文件 / 选中代码块 / 调试输出"
-                        FontSize="18" Padding="6,2"
-                        Foreground="#6CAFD9"
-                        HorizontalAlignment="Left" VerticalAlignment="Top"
-                        Margin="4,4,0,0"
-                        Panel.ZIndex="10" />
 
                 <Popup x:Name="AddContextPopup"
                        PlacementTarget="{Binding ElementName=AddContextButton}"
@@ -395,7 +385,7 @@
                          CaretBrush="#D4D4D4"
                          VerticalScrollBarVisibility="Auto"
                          VerticalContentAlignment="Top"
-                         Padding="36,4,4,4"
+                         Padding="10,8,8,4"
                          PreviewKeyDown="InputTextBox_PreviewKeyDown"
                          TextChanged="InputTextBox_TextChanged"
                          GotFocus="InputTextBox_GotFocus"
@@ -407,7 +397,7 @@
                            Text="输入问题..."
                            Foreground="#555555"
                            FontSize="12"
-                           Padding="40,8,8,4"
+                           Padding="12,8,8,4"
                            VerticalAlignment="Top"
                            IsHitTestVisible="False"
                            Panel.ZIndex="0" />
@@ -625,7 +615,7 @@
                                             Tag="{Binding FilePath}"
                                             ToolTip="{Binding FileName}">
                                         <Grid Width="38" Height="38">
-                                            <TextBlock Text="📄"
+                                            <TextBlock Text="&#xE7C3;" FontFamily="Segoe Fluent Icons"
                                                        FontSize="20"
                                                        Foreground="#C8C8C8"
                                                        HorizontalAlignment="Center"
@@ -640,7 +630,7 @@
                                                Foreground="#D4D4D4"
                                                FontSize="11"
                                                VerticalAlignment="Center" />
-                                    <Button Content="✕"
+                                    <Button Content="&#xE711;" FontFamily="Segoe Fluent Icons"
                                             Foreground="#888888"
                                             FontSize="10"
                                             Style="{StaticResource TransparentButton}"
@@ -661,22 +651,22 @@
                     </Grid.ColumnDefinitions>
 
                     <!-- 左侧: 模型、思考和搜索设置 -->
+                    <!-- P2：独立主题切换已移除，主题始终跟随 IDE -->
                     <StackPanel Grid.Column="0" Orientation="Horizontal">
-                        <Button x:Name="ThemeToggleButton"
-                                Click="ThemeToggleButton_Click"
+                        <Button x:Name="AddContextButton" Content="&#xE710;"
+                                Click="AddContextButton_Click"
                                 Style="{StaticResource TransparentButton}"
-                                ToolTip="切换主题 (自动/深色/浅色)"
-                                FontSize="14" Padding="4,0" Margin="0,0,2,0"
-                                Foreground="#CEA85C">
-                            <Button.Content>
-                                <TextBlock x:Name="ThemeToggleIcon" Text="🌓" FontSize="14" />
-                            </Button.Content>
-                        </Button>
-                        <Button x:Name="UploadButton" Content="📎"
+                                FontFamily="Segoe Fluent Icons"
+                                ToolTip="添加上下文（活动文档 / 项目文件 / 全部文件 / 选中代码 / 调试输出）"
+                                FontSize="12" Padding="6,0" Margin="0,0,4,0"
+                                Foreground="#6CAFD9" />
+
+                        <Button x:Name="UploadButton" Content="&#xE723;"
                             Click="UploadButton_Click"
                             Style="{StaticResource TransparentButton}"
                             ToolTip="上传文件 (支持 .txt .doc .xls .py .c 等)"
-                            FontSize="15" Padding="6,0" Margin="0,0,2,0"
+                            FontFamily="Segoe Fluent Icons"
+                            FontSize="13" Padding="6,0" Margin="0,0,2,0"
                             Foreground="#CE9178" />
                         <ComboBox x:Name="ModelComboBox"
                                   MinWidth="130" Margin="4,0,4,0"
@@ -710,7 +700,7 @@
                                 FontSize="14" Padding="4,0" Margin="0,0,2,0"
                                 Foreground="#888888">
                             <Button.Content>
-                                <TextBlock Text="🌐" FontSize="14" />
+                                <TextBlock Text="&#xE774;" FontSize="13" FontFamily="Segoe Fluent Icons" />
                             </Button.Content>
                         </Button>
                         <Button x:Name="McpConfigButton"
@@ -720,7 +710,7 @@
                                 FontSize="14" Padding="4,0" Margin="0,0,2,0"
                                 Foreground="#888888">
                             <Button.Content>
-                                <TextBlock Text="🔌" FontSize="14" />
+                                <TextBlock Text="&#xE713;" FontSize="13" FontFamily="Segoe Fluent Icons" />
                             </Button.Content>
                         </Button>
                         <Button x:Name="ClearButton" Content="清空" Click="ClearButton_Click"
@@ -730,12 +720,12 @@
                                 Style="{StaticResource TransparentButton}"
                                 Margin="0,0,4,0" FontSize="12"
                                 Foreground="#4EC9B0" />
-                        <Button x:Name="StopButton" Content="⏹"
+                        <Button x:Name="StopButton" Content="&#xE71A;" FontFamily="Segoe Fluent Icons"
                                 Click="StopButton_Click"
                                 Style="{StaticResource TransparentButton}"
                                 FontSize="14" Padding="4,0"
                                 Visibility="Collapsed" />
-                        <Button x:Name="SendButton" Content="➤"
+                        <Button x:Name="SendButton" Content="&#xE724;" FontFamily="Segoe Fluent Icons"
                                 Click="SendButton_Click"
                                 Style="{StaticResource TransparentButton}"
                                 Foreground="#6CAFD9" FontSize="14" Padding="4,0" />

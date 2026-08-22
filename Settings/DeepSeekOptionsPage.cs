@@ -386,24 +386,7 @@ namespace DeepSeek_v4_for_VisualStudio.Settings
         //  界面主题设置
         // ═══════════════════════════════════════════════
 
-        [LocalizedCategory("settings.category.appearance")]
-        [LocalizedDisplayName("settings.themeMode.displayName")]
-        [LocalizedDescription("settings.themeMode.description")]
-        [TypeConverter(typeof(ThemeModeConverter))]
-        [DesignerSerializationVisibility(DesignerSerializationVisibility.Visible)]
-        public string ThemeModeString
-        {
-            get => _themeMode == ThemeMode.Auto ? "Auto" : _themeMode == ThemeMode.Dark ? "Dark" : "Light";
-            set
-            {
-                _themeMode = value switch
-                {
-                    "Dark" => ThemeMode.Dark,
-                    "Light" => ThemeMode.Light,
-                    _ => ThemeMode.Auto
-                };
-            }
-        }
+        // ═══ P2：主题始终跟随 IDE，不再提供独立切换（ThemeModeString 已移除）═══
 
         private int _inputBoxHeight = DefaultInputBoxHeight;
 
@@ -470,18 +453,13 @@ namespace DeepSeek_v4_for_VisualStudio.Settings
         private ThemeMode _themeMode = ThemeMode.Auto;
 
         /// <summary>
-        /// 获取/设置主题模式（强类型版本，供代码使用）。
+        /// 主题模式（P2）：始终跟随 IDE，固定为 Auto；保留属性以兼容既有调用点。
         /// </summary>
         [System.ComponentModel.Browsable(false)]
         public ThemeMode ThemeMode
         {
-            get => _themeMode;
-            set
-            {
-                _themeMode = value;
-                // 同步通知 ThemeService（可能尚未初始化，安全忽略）
-                try { ThemeService.Instance.UserThemeMode = value; } catch { }
-            }
+            get => ThemeMode.Auto;
+            set { /* 强制跟随 IDE，忽略外部设置 */ }
         }
     }
 
