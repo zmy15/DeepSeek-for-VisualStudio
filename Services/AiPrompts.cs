@@ -313,6 +313,9 @@ namespace DeepSeek_v4_for_VisualStudio.Services
         /// <summary>Ask Agent — Git 只读操作规则</summary>
         public static string AskGitInstructions => L["system.agent.askGitInstructions"];
 
+        /// <summary>Ask Agent — 终端只读规则（不修改文件的命令）</summary>
+        public static string AskTerminalInstructions => L["system.agent.askTerminalInstructions"];
+
         /// <summary>Explore Agent — 深度检索模式完整系统提示</summary>
         public static string ExploreAgentSystemPrompt =>
             L["system.agent.explorePrompt"] + "\n\n" + ExploreMemoryInstructions;

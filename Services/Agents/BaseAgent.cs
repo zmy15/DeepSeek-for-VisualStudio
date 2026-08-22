@@ -1,4 +1,4 @@
-﻿using DeepSeek_v4_for_VisualStudio.Models;
+using DeepSeek_v4_for_VisualStudio.Models;
 using DeepSeek_v4_for_VisualStudio.Services;
 using DeepSeek_v4_for_VisualStudio.Services.BuiltInTools;
 using DeepSeek_v4_for_VisualStudio.Utils;
@@ -814,11 +814,13 @@ namespace DeepSeek_v4_for_VisualStudio.Services.Agents
 
                     if (Definition.Type != AgentType.Edit && Definition.Type != AgentType.Build && effectiveWhitelist != null)
                     {
+                        // run_in_terminal 不在本列表中：AskAgent 通过白名单显式启用，
+                        // 但由 RunInTerminalTool / BaseAgent 在运行时拦截任何修改文件的命令（只读终端）。
                         var modifyingTools = new HashSet<string>(StringComparer.OrdinalIgnoreCase)
                         {
                             "replace_string_in_file", "create_file", "create_directory",
                             "delete_file", "apply_patch",
-                            "run_in_terminal", "write_file", "edit_file"
+                            "write_file", "edit_file"
                         };
                         effectiveWhitelist = effectiveWhitelist.Where(t => !modifyingTools.Contains(t)).ToList();
                     }
@@ -1241,7 +1243,8 @@ namespace DeepSeek_v4_for_VisualStudio.Services.Agents
                         var tc = toolCalls[i];
                         string toolResult = toolResults[i];
 
-                        // ── fetch_webpage：剥离图片块，视觉模型时提取图片 URL 直传给视觉模型 ──
+                        // ── 视觉工具：剥离图片块，视觉模型时提取图片直传给视觉模型 ──
+                        // fetch_webpage 提取网页图片 URL；capture_window 提取窗口截图 data URI。
                         List<string>? webImageUrls = null;
                         string resultText = toolResult;
                         if (tc.Function.Name == "fetch_webpage")
@@ -1252,6 +1255,16 @@ namespace DeepSeek_v4_for_VisualStudio.Services.Agents
                                 && DeepSeekModelCatalog.IsVisionModel(_apiService.CurrentModel))
                             {
                                 webImageUrls = imageUrls;
+                            }
+                        }
+                        else if (tc.Function.Name == "capture_window")
+                        {
+                            var (cleanText, imageUris) = CaptureWindowTool.ParseImageBlock(toolResult);
+                            resultText = cleanText;
+                            if (imageUris.Count > 0
+                                && DeepSeekModelCatalog.IsVisionModel(_apiService.CurrentModel))
+                            {
+                                webImageUrls = imageUris;
                             }
                         }
 
@@ -1924,6 +1937,9 @@ namespace DeepSeek_v4_for_VisualStudio.Services.Agents
             // ── 终端命令需要用户审批 ──
             if (toolName == "run_in_terminal" && BuiltInTools != null)
             {
+                // 设置 Agent 类型供 RunInTerminalTool 运行时校验（Ask/Explore 禁止修改文件的终端命令）
+                RunInTerminalTool.CurrentAgentType = Definition.Type;
+
                 string command = string.Empty;
                 string explanation = string.Empty;
                 string purpose = string.Empty;
@@ -1941,6 +1957,15 @@ namespace DeepSeek_v4_for_VisualStudio.Services.Agents
                         purpose = goalProp.GetString() ?? string.Empty;
                 }
                 catch { }
+
+                if (!string.IsNullOrWhiteSpace(command)
+                    && RunInTerminalTool.CurrentAgentType is AgentType.Ask or AgentType.Explore
+                    && RunInTerminalTool.DetectFileEditingCommand(command))
+                {
+                    // 只读 Agent：直接拒绝会修改文件的终端命令，不进入审批流程
+                    AddLog("WARN", $"⛔ 只读 Agent 的文件修改命令被拦截: {command.Truncate(100)}");
+                    return RunInTerminalTool.FormatFileEditBlocked(command);
+                }
 
                 if (!string.IsNullOrWhiteSpace(command))
                 {
