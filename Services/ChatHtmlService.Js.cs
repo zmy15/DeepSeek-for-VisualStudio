@@ -1,4 +1,4 @@
-﻿using System;
+using System;
 
 namespace DeepSeek_v4_for_VisualStudio.Services
 {
@@ -39,7 +39,7 @@ window.decorateCodeBlocks=function(container){
         // Copy button
         var copyBtn=document.createElement('button');
         copyBtn.className='copy-btn';
-        copyBtn.textContent='📋 Copy';
+        copyBtn.textContent='\uE8C8 Copy';copyBtn.style.fontFamily=""'Segoe Fluent Icons','Segoe MDL2 Assets'"";
         copyBtn.onclick=function(){
             var target=pre.querySelector('code')||pre;
             var text=target.innerText,ok=false;
@@ -53,7 +53,7 @@ window.decorateCodeBlocks=function(container){
                 document.body.removeChild(ta);
             }
             if(ok){copyBtn.textContent='✓ Copied';copyBtn.style.background='#1a3a1a';copyBtn.style.color='#6cd96c';}
-            setTimeout(function(){copyBtn.textContent='📋 Copy';copyBtn.style.background='';copyBtn.style.color='';},2000);
+            setTimeout(function(){copyBtn.textContent='\uE8C8 Copy';copyBtn.style.fontFamily=""'Segoe Fluent Icons','Segoe MDL2 Assets'"";copyBtn.style.background='';copyBtn.style.color='';},2000);
         };
         pre.appendChild(copyBtn);
     });
@@ -364,7 +364,7 @@ window._showCopyFeedback=function(msgIndex){
     btn.style.position='';
     setTimeout(function(){
         btn.classList.remove('copied');
-        btn.textContent='📋';
+        btn.textContent='\uE8C8';btn.style.fontFamily=""'Segoe Fluent Icons','Segoe MDL2 Assets'"";
         btn.style.position='';
     },2000);
 };
@@ -530,7 +530,7 @@ window._showCopyFeedback=function(msgIndex){
                             var copyBtn=document.createElement('button');
                             copyBtn.id='copy-btn-'+msg.i;
                             copyBtn.className='msg-action-btn copy-msg-btn';
-                            copyBtn.textContent='📋';
+                            copyBtn.textContent='\uE8C8';copyBtn.style.fontFamily=""'Segoe Fluent Icons','Segoe MDL2 Assets'"";
                             copyBtn.title=msg.copyLabel||'Copy this response';
                             copyBtn.onclick=function(){window.__copyMessage(msg.i);};
                             var msgBody2=document.getElementById('msg-body-'+msg.i);

@@ -293,7 +293,8 @@ namespace DeepSeek_v4_for_VisualStudio.Services
 
             double rate = (double)hitTokens / cacheable;
             string level = rate >= 0.90 ? "high" : rate >= 0.50 ? "medium" : "low";
-            string icon = rate >= 0.90 ? "🟢" : rate >= 0.50 ? "🟡" : "🔴";
+            // 用 CSS 圆点替代 emoji（UI 质感统一，颜色随 level 类控制）
+            string icon = string.Empty;
 
             // 命中率百分比
             string rateText = $"{rate * 100:F1}%";

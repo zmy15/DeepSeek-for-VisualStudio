@@ -47,8 +47,13 @@ namespace DeepSeek_v4_for_VisualStudio.Settings
 
                 foreach (var bin in candidates)
                 {
+                    Logger.Info($"[Settings] 迁移探测: {bin}");
                     var values = TryReadValues(bin);
-                    if (values == null || values.Count == 0) continue;
+                    if (values == null || values.Count == 0)
+                    {
+                        Logger.Info("[Settings] 迁移探测: 未找到有效 DeepSeekOptionsPage 集合");
+                        continue;
+                    }
 
                     int applied = Apply(target, values);
                     if (applied > 0)
@@ -58,6 +63,7 @@ namespace DeepSeek_v4_for_VisualStudio.Settings
                         return true;
                     }
                 }
+                Logger.Info("[Settings] 迁移结束：无可迁移来源");
             }
             catch (Exception ex)
             {
@@ -72,7 +78,11 @@ namespace DeepSeek_v4_for_VisualStudio.Settings
             try
             {
                 int err = RegLoadAppKey(binPath, out hKey, KEY_READ, 0, 0);
-                if (err != 0 || hKey == IntPtr.Zero) return null;
+                if (err != 0 || hKey == IntPtr.Zero)
+                {
+                    Logger.Info($"[Settings] RegLoadAppKey 失败: win32err={err}");
+                    return null;
+                }
 
                 // SafeRegistryHandle 拥有句柄，负责最终释放（不再单独 RegCloseKey）
                 using var root = RegistryKey.FromHandle(new Microsoft.Win32.SafeHandles.SafeRegistryHandle(hKey, true));
