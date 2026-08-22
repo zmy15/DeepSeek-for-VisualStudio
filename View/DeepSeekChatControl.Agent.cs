@@ -307,6 +307,14 @@ namespace DeepSeek_v4_for_VisualStudio.View
             // ── 单轮 Cache 统计快照：本次问答开始时的累计值 ──
             _apiService?.TakeCacheSnapshot();
 
+            // ── P0 Telemetry：会话指标采集器（设置开关控制，创建失败静默降级）──
+            Services.Telemetry.AgentMetricsCollector? telemetry = null;
+            if (_options?.EnableTelemetryExport != false)
+            {
+                try { telemetry = new Services.Telemetry.AgentMetricsCollector(); }
+                catch (Exception tex) { Logger.Warn($"[Telemetry] 采集器创建失败: {tex.Message}"); }
+            }
+
             try
             {
                 await ThreadHelper.JoinableTaskFactory.SwitchToMainThreadAsync();
@@ -573,6 +581,14 @@ namespace DeepSeek_v4_for_VisualStudio.View
                 AgentResult agentResult;
                 try
                 {
+                    // ── P0 Telemetry：路由确定后挂载采集器并标记会话开始 ──
+                    if (telemetry != null)
+                    {
+                        context.Metrics = telemetry;
+                        telemetry.BeginSession(_options?.SelectedModel,
+                            _activeAgent.Definition.Type.ToString(), userText);
+                    }
+
                     agentResult = await _activeAgent.ExecuteAsync(userText, context);
                 }
                 finally
@@ -627,6 +643,7 @@ namespace DeepSeek_v4_for_VisualStudio.View
 
                     var nextAgent = _agentFactory.GetAgent(agentResult.Handoff.TargetAgent);
                     SwitchActiveAgent(nextAgent, context);
+                    context.Metrics?.SwitchAgent(agentResult.Handoff.TargetAgent.ToString());
                     if (_agentFactory.EditAgent is EditAgent ea2)
                         ea2.PlanUpdated += OnAgentPlanUpdated;
                     try
@@ -781,6 +798,12 @@ namespace DeepSeek_v4_for_VisualStudio.View
                             ? string.Format(LocalizationService.Instance["agent.taskCompletedFiles"], plan.ChangedFiles.Count)
                             : string.Format(LocalizationService.Instance["agent.planCompletedSteps"], plan.Steps.Count);
 
+                    // ── P0 Telemetry：计划执行完成（取消视为 Cancelled）──
+                    if (plan.IsCancelled || context.CancellationToken.IsCancellationRequested)
+                        telemetry?.CompleteCancelled();
+                    else
+                        telemetry?.CompleteSuccess();
+
                     // ── 如果有待处理的 Handoff（如 Plan→Edit），注入"开始实现"按钮 ──
                     if (_pendingHandoff != null && _agentStreamingMsgIndex >= 0)
                     {
@@ -841,6 +864,12 @@ namespace DeepSeek_v4_for_VisualStudio.View
                     PostStreamEnd(_agentStreamingMsgIndex, agentResult.Content, reasoningForRender, cacheFooter);
                     StatusLabel.Text = LocalizationService.Instance["status.ready"];
 
+                    // ── P0 Telemetry：问答完成（流中取消视为 Cancelled）──
+                    if (context.CancellationToken.IsCancellationRequested)
+                        telemetry?.CompleteCancelled();
+                    else
+                        telemetry?.CompleteSuccess();
+
                     // ── 如果有待处理的 Handoff，注入按钮 ──
                     if (_pendingHandoff != null && _agentStreamingMsgIndex >= 0)
                     {
@@ -887,6 +916,12 @@ namespace DeepSeek_v4_for_VisualStudio.View
                     // ── 使用非阻塞 PostWebMessageAsString 发送最终渲染 ──
                     PostStreamEnd(_agentStreamingMsgIndex, errorContent, string.Empty, cacheFooter);
                     StatusLabel.Text = string.Format(LocalizationService.Instance["status.agentError"], agentResult.ErrorMessage);
+
+                    // ── P0 Telemetry：会话失败（取消 → Cancelled；其余 category 留待人工标注 Model/Context/Host）──
+                    if (context.CancellationToken.IsCancellationRequested)
+                        telemetry?.CompleteCancelled();
+                    else
+                        telemetry?.CompleteFailure(AgentFailureCategory.None, agentResult.ErrorMessage);
                 }
             }
             catch (Exception ex)
@@ -894,6 +929,9 @@ namespace DeepSeek_v4_for_VisualStudio.View
                 Logger.Error($"[AgentFlow] 工作流异常: {ex.Message}", ex);
                 await ThreadHelper.JoinableTaskFactory.SwitchToMainThreadAsync();
                 StatusLabel.Text = string.Format(LocalizationService.Instance["status.agentError"], ex.Message);
+
+                // ── P0 Telemetry：未捕获异常归类为 System 故障 ──
+                try { telemetry?.CompleteFailure(AgentFailureCategory.System, ex.ToString()); } catch { }
             }
             finally
             {

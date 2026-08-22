@@ -135,6 +135,8 @@
     "settings.ragTopK.description":  "Maximum number of documents to retrieve from the knowledge base per query. Default 5.",
     "settings.showContextStats.displayName":  "Context Stats Indicator",
     "settings.showContextStats.description":  "Show current token usage in the status bar (used/budget).",
+    "settings.enableTelemetryExport.displayName":  "Export Session Metrics",
+    "settings.enableTelemetryExport.description":  "After each agent session, export metrics (TTFT, turns, tokens, tool calls) as a JSON file to %LocalAppData%\\DeepSeekVS\\telemetry\\ for performance analysis and benchmarking.",
     "settings.language.displayName":  "Display Language / 显示语言",
     "settings.language.description":  "Choose display language. Select 'Auto' to follow system language.\n选择显示语言。「自动」则跟随系统语言。",
     "settings.approvalMode.displayName":  "Approval Mode",

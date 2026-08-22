@@ -312,6 +312,16 @@ namespace DeepSeek_v4_for_VisualStudio.Settings
         public bool ShowContextStats { get; set; } = true;
 
         // ═══════════════════════════════════════════════
+        //  可观测性 (Telemetry) 设置 — P0
+        // ═══════════════════════════════════════════════
+
+        [LocalizedCategory("settings.category.context")]
+        [LocalizedDisplayName("settings.enableTelemetryExport.displayName")]
+        [LocalizedDescription("settings.enableTelemetryExport.description")]
+        [DesignerSerializationVisibility(DesignerSerializationVisibility.Visible)]
+        public bool EnableTelemetryExport { get; set; } = true;
+
+        // ═══════════════════════════════════════════════
         //  国际化 (i18n) 设置
         // ═══════════════════════════════════════════════
 

@@ -753,6 +753,17 @@ namespace DeepSeek_v4_for_VisualStudio.Services.Agents
             var contentBuilder = new StringBuilder();
             var toolCallAccumulator = new Dictionary<int, Models.ToolCallAccumulator>();
 
+            // ── P0 Telemetry：会话指标采集（非侵入：Metrics 为 null 时零开销）──
+            // 包装流式回调以捕获首个 token 到达时间（TTFT），原回调语义保持不变。
+            var metrics = Context?.Metrics;
+            if (metrics != null)
+            {
+                var origThinking = onThinking;
+                var origContent = onContent;
+                onThinking = s => { metrics.RecordFirstToken(); origThinking?.Invoke(s); };
+                onContent = s => { metrics.RecordFirstToken(); origContent?.Invoke(s); };
+            }
+
             // ── 循环检测状态 ──
             var callSignatureHistory = new List<string>();
             var toolCallHistory = new List<(int Round, string Summary)>();
@@ -784,8 +795,12 @@ namespace DeepSeek_v4_for_VisualStudio.Services.Agents
                     var L = LocalizationService.Instance;
                     Logger.Warn($"[Agent:{Definition.Name}] {string.Format(L["agent.log.safetyLimit"], safetyLimit)}");
                     contentBuilder.Append($"\n\n> ⚠️ {string.Format(L["agent.log.safetyLimit"], safetyLimit)}");
+                    metrics?.MarkTerminated("safety_limit");
                     break;
                 }
+
+                // ── P0 Telemetry：本轮 LLM 请求计时开始（TTFT/耗时基准）──
+                metrics?.BeginTurn(round);
 
                 // ── 同步当前轮次到文件读取缓存，用于轮数过期策略 ──
                 if (BuiltInTools != null)
@@ -915,6 +930,7 @@ namespace DeepSeek_v4_for_VisualStudio.Services.Agents
                         savedPartialReasoning = reasoningBuilder.ToString();
                         double backoffSec = Math.Pow(2, streamAttempt);
                         Logger.Warn($"[Agent:{Definition.Name}] 流中断 (尝试 {streamAttempt}/{maxStreamAttempts})，已收到 {savedPartialContent.Length} 字符，{backoffSec}s 后恢复…");
+                        metrics?.RecordStreamRetry();
                         contentBuilder.Clear();
                         reasoningBuilder.Clear();
                         toolCallAccumulator.Clear();
@@ -928,6 +944,7 @@ namespace DeepSeek_v4_for_VisualStudio.Services.Agents
                         savedPartialReasoning = reasoningBuilder.ToString();
                         double backoffSec = Math.Pow(2, streamAttempt);
                         Logger.Warn($"[Agent:{Definition.Name}] 流超时 (尝试 {streamAttempt}/{maxStreamAttempts})，{backoffSec}s 后恢复…");
+                        metrics?.RecordStreamRetry();
                         contentBuilder.Clear();
                         reasoningBuilder.Clear();
                         toolCallAccumulator.Clear();
@@ -949,6 +966,7 @@ namespace DeepSeek_v4_for_VisualStudio.Services.Agents
                         savedPartialReasoning = reasoningBuilder.ToString();
                         double backoffSec = Math.Pow(2, streamAttempt);
                         Logger.Warn($"[Agent:{Definition.Name}] SSE 流读取超时 (尝试 {streamAttempt}/{maxStreamAttempts})，已收到 {savedPartialContent.Length} 字符，{backoffSec}s 后恢复…");
+                        metrics?.RecordStreamRetry();
                         contentBuilder.Clear();
                         reasoningBuilder.Clear();
                         toolCallAccumulator.Clear();
@@ -1005,6 +1023,17 @@ namespace DeepSeek_v4_for_VisualStudio.Services.Agents
 
                 // ── 记录本轮 Cache 命中率 ──
                 LogCacheHitRate(round);
+
+                // ── P0 Telemetry：记录本轮 usage 与总耗时（usage 取自最后一帧 SSE）──
+                if (metrics != null)
+                {
+                    var turnUsage = _apiService?.LastUsage;
+                    metrics.EndTurn(round,
+                        turnUsage?.PromptTokens ?? 0,
+                        turnUsage?.CompletionTokens ?? 0,
+                        turnUsage?.PromptCacheHitTokens ?? 0,
+                        turnUsage?.PromptCacheMissTokens ?? 0);
+                }
 
                 // ── 处理工具调用 ──
                 var toolCalls = new List<ToolCall>();
@@ -1208,7 +1237,7 @@ namespace DeepSeek_v4_for_VisualStudio.Services.Agents
                                 "\n再次发生白名单外工具调用将终止本轮工具循环。");
                         }
                         var timeout = GetToolTimeout(tc.Function.Name);
-                        return ExecuteToolWithTimeoutAsync(tc, workspaceRoot, ct, timeout);
+                        return ExecuteToolWithTelemetryAsync(metrics, round, tc, workspaceRoot, ct, timeout);
                     }).ToList();
                     var dedupedResults = await Task.WhenAll(toolTasks).ConfigureAwait(false);
 
@@ -1291,6 +1320,7 @@ namespace DeepSeek_v4_for_VisualStudio.Services.Agents
                         PendingHandoffRequest = null;
                         var distinctRejectedTools = string.Join(", ", rejectedToolNames.Distinct(StringComparer.OrdinalIgnoreCase));
                         Logger.Warn($"[Agent:{Definition.Name}] 🚫 连续 {rejectedToolRounds} 轮白名单拒绝，终止工具循环: {distinctRejectedTools}");
+                        metrics?.MarkTerminated("whitelist_rejection");
 
                         var terminatedBuilder = new StringBuilder().Append(contentBuilder);
                         terminatedBuilder.Append($"\n\n> ⚠️ 连续 {rejectedToolRounds} 轮调用白名单外工具: {distinctRejectedTools}。");
@@ -1393,6 +1423,7 @@ namespace DeepSeek_v4_for_VisualStudio.Services.Agents
                                 loopDetected = true;
                                 PendingHandoffRequest = null;
                                 Logger.Warn($"[Agent:{Definition.Name}] 🔄 检测到循环调用: {toolName} 已重复 {repeatCount} 次且每次返回相同结果");
+                                metrics?.MarkTerminated("loop_detected");
 
                                 var terminatedBuilder = new StringBuilder();
                                 terminatedBuilder.Append(contentBuilder);
@@ -1471,6 +1502,7 @@ namespace DeepSeek_v4_for_VisualStudio.Services.Agents
                             loopDetected = true;
                             PendingHandoffRequest = null;
                             Logger.Warn($"[Agent:{Definition.Name}] 🔄 连续 {consecutiveErrorRounds} 轮工具调用全部返回错误，强制结束");
+                            metrics?.MarkTerminated("consecutive_errors");
 
                             // ── 附加上次 AI 的上下文总结和最后一次工具调用结果摘要 ──
                             var terminatedBuilder = new StringBuilder();
@@ -2834,6 +2866,42 @@ namespace DeepSeek_v4_for_VisualStudio.Services.Agents
             {
                 _ => TimeSpan.FromSeconds(60),  // 默认 60 秒
             };
+        }
+
+        /// <summary>
+        /// 带遥测的工具执行包装（P0 可观测性）：
+        /// 记录每次调用的名称、总耗时（含超时等待）与成败。
+        /// 成败判定沿用结果字符串约定：❌（错误）/ ⏱️（超时）前缀视为失败。
+        /// </summary>
+        private async Task<string> ExecuteToolWithTelemetryAsync(
+            Services.Telemetry.AgentMetricsCollector? metrics,
+            int round,
+            ToolCall tc,
+            string? workspaceRoot,
+            CancellationToken ct,
+            TimeSpan timeout)
+        {
+            if (metrics == null)
+                return await ExecuteToolWithTimeoutAsync(tc, workspaceRoot, ct, timeout).ConfigureAwait(false);
+
+            var sw = System.Diagnostics.Stopwatch.StartNew();
+            string result;
+            try
+            {
+                result = await ExecuteToolWithTimeoutAsync(tc, workspaceRoot, ct, timeout).ConfigureAwait(false);
+            }
+            catch (Exception ex)
+            {
+                sw.Stop();
+                metrics.RecordToolCall(round, tc.Function.Name, sw.ElapsedMilliseconds, success: false, ex.Message);
+                throw;
+            }
+            sw.Stop();
+
+            bool success = !result.StartsWith("❌") && !result.StartsWith("⏱️");
+            metrics.RecordToolCall(round, tc.Function.Name, sw.ElapsedMilliseconds, success,
+                success ? null : result.Truncate(200));
+            return result;
         }
 
         /// <summary>

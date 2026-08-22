@@ -234,6 +234,14 @@ namespace DeepSeek_v4_for_VisualStudio.Models
         /// </summary>
         [JsonIgnore]
         public Action<string>? OnContentChunk { get; set; }
+
+        /// <summary>
+        /// 会话级指标采集器（P0 可观测性）。
+        /// View 层在创建 AgentContext 时注入，BaseAgent 工具循环通过 Context?.Metrics 写入
+        /// 逐轮 TTFT/耗时/token/工具调用数据；完成后由 View 导出 JSON。
+        /// </summary>
+        [JsonIgnore]
+        public Services.Telemetry.AgentMetricsCollector? Metrics { get; set; }
     }
 
     /// <summary>

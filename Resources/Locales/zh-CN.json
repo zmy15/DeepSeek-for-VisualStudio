@@ -135,6 +135,8 @@
     "settings.ragTopK.description":  "每次查询从知识库检索的最大文档数。默认 5。",
     "settings.showContextStats.displayName":  "上下文统计指示器",
     "settings.showContextStats.description":  "在状态栏显示当前 Token 使用量（已用/预算）。",
+    "settings.enableTelemetryExport.displayName":  "导出会话指标",
+    "settings.enableTelemetryExport.description":  "每次 Agent 会话结束后，将 TTFT、轮次、Token、工具调用等指标导出为 JSON 文件到 %LocalAppData%\\DeepSeekVS\\telemetry\\，用于性能分析与 Benchmark。",
     "settings.language.displayName":  "界面语言 / Language",
     "settings.language.description":  "选择显示语言。选择「自动」则跟随系统语言。\nSelect display language. 'Auto' follows system language.",
     "settings.approvalMode.displayName":  "审批模式",
