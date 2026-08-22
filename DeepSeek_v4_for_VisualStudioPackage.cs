@@ -440,7 +440,18 @@ namespace DeepSeek_v4_for_VisualStudio
                 throw;
             }
 
-            DiagnosticLog.Write("[DeepSeek Init] All 9 steps completed successfully");
+            // ═══ 步骤 10：注册编辑器 Inline Edit 命令（P1-B，非致命）═══
+            try
+            {
+                await Commands.InlineAiEditCommand.InitializeAsync(this);
+                DiagnosticLog.Write("[DeepSeek Init] Step 10: InlineAiEditCommand registered OK");
+            }
+            catch (Exception ex)
+            {
+                DiagnosticLog.Write($"[DeepSeek Init] WARN Step 10 InlineAiEditCommand failed: {ex.GetType().Name}: {ex.Message}");
+            }
+
+            DiagnosticLog.Write("[DeepSeek Init] All steps completed successfully");
 
             // 延迟显示工具窗口，避免在包初始化期间调用 ShowToolWindowAsync
             // 导致 COMException (0x80049283): LoadPackageWithContext 冲突

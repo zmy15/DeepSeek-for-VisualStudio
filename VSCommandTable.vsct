@@ -45,12 +45,29 @@
 					<LocCanonicalName>.DeepSeek_v4_for_VisualStudio.ShowChatWindowToolbar</LocCanonicalName>
 				</Strings>
 			</Button>
+
+			<!-- ═══ P1-B Inline Edit：编辑器右键菜单 + Ctrl+I（仅文本编辑器作用域）═══ -->
+			<Button guid="guidDeepSeekCmdSet" id="cmdidInlineAiEdit" priority="0x0100" type="Button">
+				<Parent guid="guidSHLMainMenu" id="IDG_VS_CTXT_CODEWIN"/>
+				<Icon guid="guidImages" id="bmpPic1"/>
+				<Strings>
+					<ButtonText>DeepSeek AI Edit</ButtonText>
+					<LocCanonicalName>.DeepSeek_v4_for_VisualStudio.InlineAiEdit</LocCanonicalName>
+				</Strings>
+			</Button>
 		</Buttons>
 
 		<Bitmaps>
 			<Bitmap guid="guidImages" href="Resources\DeepSeekIcon.png" usedList="bmpPic1"/>
 		</Bitmaps>
 	</Commands>
+
+	<!-- Ctrl+I：限定在文本编辑器内，不影响其他位置的系统增量搜索 -->
+	<KeyBindings>
+		<KeyBinding guid="guidDeepSeekCmdSet" id="cmdidInlineAiEdit"
+		            editor="{8B382828-6202-11D1-8870-0000F87579D2}"
+		            mod1="Control" key1="I"/>
+	</KeyBindings>
 
 	<!-- ═══ 符号定义 ═══ -->
 	<Symbols>
@@ -61,6 +78,7 @@
 		<GuidSymbol name="guidDeepSeekCmdSet" value="{A1B2C3D4-E5F6-7890-ABCD-EF1234567890}">
 			<IDSymbol name="cmdidShowChatWindow" value="0x0100"/>
 			<IDSymbol name="cmdidShowChatWindowToolbar" value="0x0101"/>
+			<IDSymbol name="cmdidInlineAiEdit" value="0x0102"/>
 			<IDSymbol name="idToolbar" value="0x2000"/>
 			<IDSymbol name="grpToolbarCommands" value="0x3000"/>
 		</GuidSymbol>
