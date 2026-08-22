@@ -184,6 +184,19 @@ namespace DeepSeek_v4_for_VisualStudio.Models
         public string? FailureDetail { get; set; }
 
         /// <summary>
+        /// Benchmark 任务类别（compile_fix / inline_edit / cross_file）。
+        /// 日常使用为 null；仅在跑基准任务集时由运行方标注。
+        /// </summary>
+        [JsonPropertyName("task_category")]
+        [JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)]
+        public string? TaskCategory { get; set; }
+
+        /// <summary>Benchmark 任务 ID（对应 benchmark/tasks.json 的 id）</summary>
+        [JsonPropertyName("task_id")]
+        [JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)]
+        public string? TaskId { get; set; }
+
+        /// <summary>
         /// 会话开始时的上下文构成快照（P2 Context Debugger 数据面，camelCase JSON 字符串）。
         /// 回答报告 §16 的问题："这些 Context 为什么被加入" —— 失败复盘时对照
         /// failure_category 即可判定缺了哪类上下文。

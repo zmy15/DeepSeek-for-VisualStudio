@@ -80,6 +80,22 @@ namespace DeepSeek_v4_for_VisualStudio.Services.Telemetry
             catch (Exception ex) { Logger.Warn($"[Telemetry] SwitchAgent 异常: {ex.Message}"); }
         }
 
+        /// <summary>
+        /// 标注 Benchmark 任务信息（仅基准运行时调用；日常会话不标注）。
+        /// </summary>
+        public void SetTaskInfo(string taskCategory, string? taskId = null)
+        {
+            try
+            {
+                lock (_lock)
+                {
+                    _session.TaskCategory = taskCategory;
+                    _session.TaskId = taskId;
+                }
+            }
+            catch (Exception ex) { Logger.Warn($"[Telemetry] SetTaskInfo 异常: {ex.Message}"); }
+        }
+
         /// <summary>开始一轮 LLM 请求（工具循环每轮迭代调用一次）。</summary>
         public void BeginTurn(int round)
         {
