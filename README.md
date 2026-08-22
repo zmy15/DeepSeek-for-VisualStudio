@@ -11,7 +11,7 @@
 [![.NET](https://img.shields.io/badge/.NET%20Framework-4.7.2-blueviolet)]()
 [![DeepSeek](https://img.shields.io/badge/DeepSeek-V4-green)]()
 [![Platform](https://img.shields.io/badge/platform-Windows%20x64-lightgrey)]()
-[![Version](https://img.shields.io/badge/version-1.1.14-blue)]()
+[![Version](https://img.shields.io/badge/version-1.2.0-blue)]()
 
 [English](README_EN.md)
 
@@ -264,9 +264,14 @@ AI 通过 `memory` 工具管理三层持久化记忆：
 
 ## 🗺️ 路线图
 
+> ✅ **v1.2.0 已交付（Phase 1.5）**：会话遥测与 JSON 指标导出、IDE 实时上下文注入
+> （活动文件/选区/光标/诊断）、`Ctrl+I` 编辑器 Inline Edit、Context Debugger 抽屉、
+> 工具超时分档与 LLM 超时配置。详见 `docs/Phase1.5-Delivery-Report.md`。
+
 | 计划项 | 说明 | 优先级 |
 |--------|------|--------|
-| **RAG 代码检索增强** | 本地向量库（SQLite + 嵌入模型）、文件自动索引、BM25+向量混合检索、解决方案级符号索引 | 🔴 高 |
+| **Benchmark v1** | 24 任务基准跑分（规程见 `benchmark/README.md`），按失败分类分布驱动后续优化方向 | 🔴 高 |
+| **RAG 代码检索增强** | BM25 轻检索先行；仅在 Benchmark 显示 cross_file 类 Context 失败集中时立项，暂不做向量库 | 🟡 条件触发 |
 | **项目代码知识图谱** | 基于代码 AST 的符号关系图，类/方法/接口依赖可视化，语义级代码导航与理解 | 🟡 中 |
 | **测试生成 Skill** | 基于 `tdd` 技能自动生成 xUnit 测试 | 🔴 高 |
 | **GitHub PR/Issue 深度集成** | PR 描述生成、Review 辅助、Issue 自动分派 | 🟡 中 |

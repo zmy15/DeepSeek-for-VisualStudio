@@ -11,7 +11,7 @@
 [![.NET](https://img.shields.io/badge/.NET%20Framework-4.7.2-blueviolet)]()
 [![DeepSeek](https://img.shields.io/badge/DeepSeek-V4-green)]()
 [![Platform](https://img.shields.io/badge/platform-Windows%20x64-lightgrey)]()
-[![Version](https://img.shields.io/badge/version-1.1.14-blue)]()
+[![Version](https://img.shields.io/badge/version-1.2.0-blue)]()
 
 [中文](README.md)
 
@@ -264,9 +264,15 @@ Three approval modes: **BlockAll** / **AllowAll** / **SmartBlock** (recommended)
 
 ## 🗺️ Roadmap
 
+> ✅ **Shipped in v1.2.0 (Phase 1.5)**: session telemetry with JSON metric export,
+> IDE live-context injection (active file/selection/cursor/diagnostics),
+> `Ctrl+I` editor Inline Edit, Context Debugger drawer, per-tool timeout tiers
+> and configurable LLM timeout. See `docs/Phase1.5-Delivery-Report.md`.
+
 | Plan | Description | Priority |
 |------|-------------|----------|
-| **RAG Code Retrieval** | Local vector DB (SQLite + embedding model), auto file indexing, BM25 + vector hybrid search, solution-level symbol indexing | 🔴 High |
+| **Benchmark v1** | 24-task scoring run (protocol in `benchmark/README.md`); next-step priorities driven by failure-category distribution | 🔴 High |
+| **RAG Code Retrieval** | BM25 lightweight retrieval first; green-lit only if Benchmark shows concentrated cross-file Context failures — no vector DB for now | 🟡 Conditional |
 | **Project Code Knowledge Graph** | AST-based symbol relationship graph, class/method/interface dependency visualization, semantic code navigation & understanding | 🟡 Medium |
 | **Test Generation Skill** | Auto-generate xUnit tests based on `tdd` skill | 🔴 High |
 | **GitHub PR/Issue Deep Integration** | PR description generation, review assistance, auto issue assignment | 🟡 Medium |
