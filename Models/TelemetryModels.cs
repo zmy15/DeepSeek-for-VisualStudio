@@ -183,6 +183,15 @@ namespace DeepSeek_v4_for_VisualStudio.Models
         [JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)]
         public string? FailureDetail { get; set; }
 
+        /// <summary>
+        /// 会话开始时的上下文构成快照（P2 Context Debugger 数据面，camelCase JSON 字符串）。
+        /// 回答报告 §16 的问题："这些 Context 为什么被加入" —— 失败复盘时对照
+        /// failure_category 即可判定缺了哪类上下文。
+        /// </summary>
+        [JsonPropertyName("context_debug")]
+        [JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)]
+        public string? ContextDebug { get; set; }
+
         // ═══════════════ 聚合统计 ═══════════════
 
         [JsonPropertyName("turn_count")]

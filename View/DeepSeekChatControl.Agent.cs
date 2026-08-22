@@ -299,6 +299,58 @@ namespace DeepSeek_v4_for_VisualStudio.View
         /// <summary>IDE 实时态追踪器（P1-A，惰性创建；仅 UI 线程使用）</summary>
         private Services.IdeContext.IdeContextTracker? _ideContextTracker;
 
+        /// <summary>
+        /// 构建会话开始时的上下文构成快照（P2 Context Debugger 数据面）。
+        /// 随遥测 JSON 导出，用于失败复盘时回答"模型当时看到了什么、为什么"。
+        /// </summary>
+        private string? BuildContextDebugJson()
+        {
+            try
+            {
+                var stats = _contextManager.GetStats();
+                var ide = _ideContextTracker?.Current;
+
+                var payload = new
+                {
+                    tokens = new
+                    {
+                        estimated = stats.EstimatedTokens,
+                        budget = stats.TokenBudget,
+                        percent = Math.Round(stats.UsagePercent, 1),
+                    },
+                    turns = stats.TurnCount,
+                    messages = stats.MessageCount,
+                    compressedTurns = stats.CompressedTurns,
+                    injected = new
+                    {
+                        ide = ide != null,
+                        ideChars = _contextManager.IdeContextChars,
+                        search = _contextManager.HasSearchContext,
+                        rag = _contextManager.HasRagContext,
+                    },
+                    ideSnapshot = ide == null ? null : new
+                    {
+                        file = ide.FilePath,
+                        hasSelection = ide.HasSelection,
+                        selectionStartLine = ide.SelectionStartLine,
+                        selectionEndLine = ide.SelectionEndLine,
+                        cursorLine = ide.CursorLine,
+                        symbol = ide.SymbolAtCursor,
+                        errors = ide.ErrorCount,
+                        warnings = ide.WarningCount,
+                    },
+                    capturedAt = DateTime.Now.ToString("yyyy-MM-dd HH:mm:ss"),
+                };
+                return JsonSerializer.Serialize(payload,
+                    new JsonSerializerOptions { PropertyNamingPolicy = JsonNamingPolicy.CamelCase });
+            }
+            catch (Exception ex)
+            {
+                Logger.Warn($"[ContextDebug] 构建快照失败: {ex.Message}");
+                return null;
+            }
+        }
+
         private async Task RunAgentWorkflowAsync(
             string userText,
             string fileContext = "",
@@ -353,6 +405,21 @@ namespace DeepSeek_v4_for_VisualStudio.View
                 catch (Exception ideEx)
                 {
                     Logger.Warn($"[IdeContext] 注入失败: {ideEx.Message}");
+                }
+
+                // ── P2 Context Debugger：状态栏级一行摘要（设置开关复用 ShowContextStats）──
+                if (_options?.ShowContextStats == true)
+                {
+                    try
+                    {
+                        var dbgStats = _contextManager.GetStats();
+                        var ideCur = _ideContextTracker?.Current;
+                        Logger.Info($"[ContextDebug] IDE={(ideCur != null ? ideCur.FilePath : "off")}" +
+                            $"(sel={ideCur?.HasSelection == true}, diag={ideCur?.ErrorCount ?? 0}e/{ideCur?.WarningCount ?? 0}w) " +
+                            $"Search={_contextManager.HasSearchContext} RAG={_contextManager.HasRagContext} " +
+                            $"Tokens={dbgStats.EstimatedTokens:N0}/{dbgStats.TokenBudget:N0}");
+                    }
+                    catch { }
                 }
 
                 // ── 清理上一轮 Agent 执行的追踪状态 ──
@@ -609,12 +676,13 @@ namespace DeepSeek_v4_for_VisualStudio.View
                 AgentResult agentResult;
                 try
                 {
-                    // ── P0 Telemetry：路由确定后挂载采集器并标记会话开始 ──
+                    // ── P0 Telemetry：路由确定后挂载采集器并标记会话开始（附上下文构成快照）──
                     if (telemetry != null)
                     {
                         context.Metrics = telemetry;
                         telemetry.BeginSession(_options?.SelectedModel,
-                            _activeAgent.Definition.Type.ToString(), userText);
+                            _activeAgent.Definition.Type.ToString(), userText,
+                            BuildContextDebugJson());
                     }
 
                     agentResult = await _activeAgent.ExecuteAsync(userText, context);

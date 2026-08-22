@@ -274,6 +274,20 @@ namespace DeepSeek_v4_for_VisualStudio.Services
                 _estimatedTokens += EstimateTokens(_ideContext);
         }
 
+        // ── Context Debugger 只读探针（P2，序号 20 数据面）──
+
+        /// <summary>本轮是否注入了联网搜索上下文</summary>
+        [JsonIgnore]
+        public bool HasSearchContext => !string.IsNullOrEmpty(_searchContext);
+
+        /// <summary>本轮是否注入了 RAG 检索上下文</summary>
+        [JsonIgnore]
+        public bool HasRagContext => !string.IsNullOrEmpty(_ragContext);
+
+        /// <summary>IDE 实时态上下文字符数（0 = 未注入/已禁用）</summary>
+        [JsonIgnore]
+        public int IdeContextChars => _ideContext?.Length ?? 0;
+
         /// <summary>
         /// 设置 Skill 发现上下文。
         /// </summary>

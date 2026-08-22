@@ -48,7 +48,8 @@ namespace DeepSeek_v4_for_VisualStudio.Services.Telemetry
         }
 
         /// <summary>标记会话开始。</summary>
-        public void BeginSession(string? model, string agentType, string? userPrompt)
+        public void BeginSession(string? model, string agentType, string? userPrompt,
+            string? contextDebugJson = null)
         {
             try
             {
@@ -56,6 +57,7 @@ namespace DeepSeek_v4_for_VisualStudio.Services.Telemetry
                 {
                     _session.Model = model;
                     _session.UserPromptSnippet = Truncate(userPrompt, 200);
+                    _session.ContextDebug = contextDebugJson;
                     if (!string.IsNullOrEmpty(agentType))
                         _session.Agents.Add(agentType);
                 }
