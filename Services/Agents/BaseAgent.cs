@@ -1254,7 +1254,8 @@ namespace DeepSeek_v4_for_VisualStudio.Services.Agents
                             if (imageUrls.Count > 0
                                 && DeepSeekModelCatalog.IsVisionModel(_apiService.CurrentModel))
                             {
-                                webImageUrls = imageUrls;
+                                // ── 过滤视觉模型不支持的图片格式（如 SVG），避免直传导致 HTTP 400 ──
+                                webImageUrls = WebSearchService.FilterVisionImageUrls(imageUrls);
                             }
                         }
                         else if (tc.Function.Name == "capture_window")

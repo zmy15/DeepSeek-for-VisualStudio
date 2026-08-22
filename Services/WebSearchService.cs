@@ -63,6 +63,18 @@ namespace DeepSeek_v4_for_VisualStudio.Services
         /// <summary>单页网页最多提取的子链接数（供递归抓取，实际只会追 3 个）。</summary>
         public const int MaxLinksPerPage = 24;
 
+        /// <summary>
+        /// 视觉模型（deepseek-v4-flash-vision-exp）支持的图片扩展名。
+        /// DeepSeek 官方支持 JPEG/PNG/GIF/WebP，且按文件实际内容而非文件名判定；
+        /// 客户端无法廉价读取文件头，只能按路径扩展名做预过滤，
+        /// 避免把 .svg 等不支持格式作为 image_url 直传导致 HTTP 400。
+        /// </summary>
+        private static readonly HashSet<string> VisionSupportedImageExtensions =
+            new HashSet<string>(StringComparer.OrdinalIgnoreCase)
+            {
+                ".png", ".jpg", ".jpeg", ".gif", ".webp",
+            };
+
         #endregion
 
         #region Properties
@@ -1268,6 +1280,53 @@ namespace DeepSeek_v4_for_VisualStudio.Services
             }
 
             return (cleanText, urls);
+        }
+
+        /// <summary>
+        /// 过滤出视觉模型支持的图片 URL（按路径扩展名判断，忽略 query/fragment）。
+        /// 非支持格式（如 .svg/.bmp/.tiff/.ico）或无扩展名的 URL 会被丢弃，
+        /// 避免作为 image_url 直传视觉模型导致 HTTP 400。
+        /// 所有 URL 都被过滤掉时返回 null（而非空列表），供调用方直接判断。
+        /// </summary>
+        public static List<string>? FilterVisionImageUrls(IEnumerable<string>? urls)
+        {
+            if (urls == null)
+                return null;
+
+            var result = new List<string>();
+            foreach (string u in urls)
+            {
+                if (string.IsNullOrWhiteSpace(u))
+                    continue;
+
+                string? ext = GetUrlPathExtension(u);
+                if (ext != null && VisionSupportedImageExtensions.Contains(ext))
+                    result.Add(u);
+            }
+
+            return result.Count > 0 ? result : null;
+        }
+
+        /// <summary>
+        /// 提取 URL 路径部分的扩展名（含点，如 ".svg" / ".png"），忽略 query 与 fragment。
+        /// 无法解析为绝对 http(s) URL 或路径无扩展名时返回 null。
+        /// </summary>
+        private static string? GetUrlPathExtension(string url)
+        {
+            try
+            {
+                if (!Uri.TryCreate(url, UriKind.Absolute, out var uri))
+                    return null;
+                if (uri.Scheme != Uri.UriSchemeHttp && uri.Scheme != Uri.UriSchemeHttps)
+                    return null;
+
+                string ext = Path.GetExtension(uri.AbsolutePath);
+                return string.IsNullOrEmpty(ext) ? null : ext;
+            }
+            catch
+            {
+                return null;
+            }
         }
 
         #endregion
