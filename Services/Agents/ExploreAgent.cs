@@ -132,6 +132,7 @@ namespace DeepSeek_v4_for_VisualStudio.Services.Agents
             "grep_search",      // 文本/正则搜索
             "symbol_search",    // 符号搜索（类/方法/接口/属性）
             "read_file",        // 读取文件内容
+            "capture_window",   // 捕获窗口截图（视觉模型直接查看）
             "list_dir",         // 列出目录内容
             "get_errors",       // 获取编译错误
             "fetch_webpage",    // 获取网页内容
