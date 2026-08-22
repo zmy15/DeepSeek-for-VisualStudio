@@ -44,8 +44,15 @@ namespace DeepSeek_v4_for_VisualStudio.Settings
             }
             catch (Exception ex)
             {
-                Logger.Warn($"[Settings] API Key 解密失败，保留已存储值: {ex.GetType().Name}");
-                return value;
+                // ── 修复：解密失败时绝不能把密文（"dpapi1:..."）当作 API Key 返回 ──
+                // DPAPI 以 CurrentUser 为作用域，若密钥在其它用户上下文（如管理员权限、
+                // 不同 Windows 用户、域账户迁移）或凭据变更后被加密，解密会抛
+                // CryptographicException。旧实现直接返回密文，导致 HttpClient 把
+                // "dpapi1:..." 当作 Bearer Token 发送，服务端返回 401。
+                // 这里返回空字符串，让上层走"未配置 API Key"分支并提示用户重新填写，
+                // 而不是静默发送一个必然 401 的垃圾令牌。
+                Logger.Error($"[Settings] API Key 解密失败，按未配置处理（请重新填写）: {ex.GetType().Name}: {ex.Message}", ex);
+                return string.Empty;
             }
         }
     }

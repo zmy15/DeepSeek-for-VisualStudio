@@ -1,4 +1,4 @@
-﻿using DeepSeek_v4_for_VisualStudio.Models;
+using DeepSeek_v4_for_VisualStudio.Models;
 using DeepSeek_v4_for_VisualStudio.Services;
 using DeepSeek_v4_for_VisualStudio.Services.BuiltInTools;
 using DeepSeek_v4_for_VisualStudio.Utils;
@@ -814,11 +814,13 @@ namespace DeepSeek_v4_for_VisualStudio.Services.Agents
 
                     if (Definition.Type != AgentType.Edit && Definition.Type != AgentType.Build && effectiveWhitelist != null)
                     {
+                        // run_in_terminal 不在本列表中：AskAgent 通过白名单显式启用，
+                        // 但由 RunInTerminalTool / BaseAgent 在运行时拦截任何修改文件的命令（只读终端）。
                         var modifyingTools = new HashSet<string>(StringComparer.OrdinalIgnoreCase)
                         {
                             "replace_string_in_file", "create_file", "create_directory",
                             "delete_file", "apply_patch",
-                            "run_in_terminal", "write_file", "edit_file"
+                            "write_file", "edit_file"
                         };
                         effectiveWhitelist = effectiveWhitelist.Where(t => !modifyingTools.Contains(t)).ToList();
                     }
@@ -1241,31 +1243,47 @@ namespace DeepSeek_v4_for_VisualStudio.Services.Agents
                         var tc = toolCalls[i];
                         string toolResult = toolResults[i];
 
+                        // ── 视觉工具：剥离图片块，视觉模型时提取图片直传给视觉模型 ──
+                        // fetch_webpage 提取网页图片 URL；capture_window 提取窗口截图 data URI。
+                        List<string>? webImageUrls = null;
+                        string resultText = toolResult;
+                        if (tc.Function.Name == "fetch_webpage")
+                        {
+                            var (cleanText, imageUrls) = WebSearchService.ParseWebImagesBlock(toolResult);
+                            resultText = cleanText;
+                            if (imageUrls.Count > 0
+                                && DeepSeekModelCatalog.IsVisionModel(_apiService.CurrentModel))
+                            {
+                                // ── 过滤视觉模型不支持的图片格式（如 SVG），避免直传导致 HTTP 400 ──
+                                webImageUrls = WebSearchService.FilterVisionImageUrls(imageUrls);
+                            }
+                        }
+                        else if (tc.Function.Name == "capture_window")
+                        {
+                            var (cleanText, imageUris) = CaptureWindowTool.ParseImageBlock(toolResult);
+                            resultText = cleanText;
+                            if (imageUris.Count > 0
+                                && DeepSeekModelCatalog.IsVisionModel(_apiService.CurrentModel))
+                            {
+                                webImageUrls = imageUris;
+                            }
+                        }
+
                         // ── 裁剪工具结果以保护上下文（与 ContextManager.AddToolResult 保持一致）──
-                        string contextResult = CompactToolResultForAgent(tc.Function.Name, toolResult);
+                        string contextResult = CompactToolResultForAgent(tc.Function.Name, resultText);
 
                         // ── 🔑 runSubagent 结果放到 [user] 之后、[agent] 之前，
                         //     保持前缀不被破坏，确保 DeepSeek Prefix Cache 跨轮次命中。──
                         if (tc.Function.Name == "runSubagent")
                         {
-                            messages.Insert(messages.Count - 1, new ChatApiMessage
-                            {
-                                Role = "tool",
-                                Content = contextResult,
-                                ToolCallId = tc.Id,
-                                Name = tc.Function.Name
-                            });
+                            messages.Insert(messages.Count - 1,
+                                BuildToolResultMessage(tc.Id, tc.Function.Name, contextResult, webImageUrls));
                             // 不递增 toolInsertPos——runSubagent 结果不属于主历史前缀
                         }
                         else
                         {
-                            messages.Insert(toolInsertPos, new ChatApiMessage
-                            {
-                                Role = "tool",
-                                Content = contextResult,
-                                ToolCallId = tc.Id,
-                                Name = tc.Function.Name
-                            });
+                            messages.Insert(toolInsertPos,
+                                BuildToolResultMessage(tc.Id, tc.Function.Name, contextResult, webImageUrls));
                             toolInsertPos++;
                         }
 
@@ -1920,6 +1938,9 @@ namespace DeepSeek_v4_for_VisualStudio.Services.Agents
             // ── 终端命令需要用户审批 ──
             if (toolName == "run_in_terminal" && BuiltInTools != null)
             {
+                // 设置 Agent 类型供 RunInTerminalTool 运行时校验（Ask/Explore 禁止修改文件的终端命令）
+                RunInTerminalTool.CurrentAgentType = Definition.Type;
+
                 string command = string.Empty;
                 string explanation = string.Empty;
                 string purpose = string.Empty;
@@ -1937,6 +1958,15 @@ namespace DeepSeek_v4_for_VisualStudio.Services.Agents
                         purpose = goalProp.GetString() ?? string.Empty;
                 }
                 catch { }
+
+                if (!string.IsNullOrWhiteSpace(command)
+                    && RunInTerminalTool.CurrentAgentType is AgentType.Ask or AgentType.Explore
+                    && RunInTerminalTool.DetectFileEditingCommand(command))
+                {
+                    // 只读 Agent：直接拒绝会修改文件的终端命令，不进入审批流程
+                    AddLog("WARN", $"⛔ 只读 Agent 的文件修改命令被拦截: {command.Truncate(100)}");
+                    return RunInTerminalTool.FormatFileEditBlocked(command);
+                }
 
                 if (!string.IsNullOrWhiteSpace(command))
                 {
@@ -2904,6 +2934,41 @@ namespace DeepSeek_v4_for_VisualStudio.Services.Agents
             {
                 return rawResult ?? string.Empty;
             }
+        }
+
+        /// <summary>
+        /// 构建工具结果消息。视觉模型的 fetch_webpage 结果会把图片 URL 作为
+        /// image_url 内容块附加，让视觉模型直读网页图片；否则只返回纯文本。
+        /// </summary>
+        private static ChatApiMessage BuildToolResultMessage(
+            string toolCallId, string toolName, string contextResult, List<string>? webImageUrls)
+        {
+            var message = new ChatApiMessage
+            {
+                Role = "tool",
+                Content = contextResult,
+                ToolCallId = toolCallId,
+                Name = toolName,
+            };
+
+            if (webImageUrls is { Count: > 0 })
+            {
+                var parts = new List<ChatContentPart>
+                {
+                    new ChatContentPart { Type = "text", Text = contextResult },
+                };
+                foreach (string u in webImageUrls)
+                {
+                    parts.Add(new ChatContentPart
+                    {
+                        Type = "image_url",
+                        ImageUrl = new ChatImageUrl { Url = u },
+                    });
+                }
+                message.MultimodalContent = parts;
+            }
+
+            return message;
         }
 
         /// <summary>

@@ -82,6 +82,40 @@ public class RunInTerminalToolTests
         RunInTerminalTool.DetectDangerousCommand(command).Should().Be(DangerousCommandKind.None);
     }
 
+    [Theory]
+    [InlineData("Set-Content file.txt 'hi'", true)]
+    [InlineData("Add-Content file.txt 'hi'", true)]
+    [InlineData("Out-File file.txt", true)]
+    [InlineData("Remove-Item file.txt", true)]
+    [InlineData("del file.txt", true)]
+    [InlineData("copy a.txt b.txt", true)]
+    [InlineData("move a.txt b.txt", true)]
+    [InlineData("ren a.txt b.txt", true)]
+    [InlineData("new-item file.txt", true)]
+    [InlineData("touch file.txt", true)]
+    [InlineData("echo hi > out.txt", true)]
+    [InlineData("echo hi >> out.txt", true)]
+    [InlineData("Get-ChildItem | Set-Content x.txt", true)]
+    [InlineData("git add .", true)]
+    [InlineData("git commit -m 'x'", true)]
+    [InlineData("notepad file.txt", true)]
+    [InlineData("vim file.txt", true)]
+    [InlineData("code file.txt", true)]
+    [InlineData("git status", false)]
+    [InlineData("git diff", false)]
+    [InlineData("git log --oneline", false)]
+    [InlineData("git show HEAD", false)]
+    [InlineData("Get-ChildItem", false)]
+    [InlineData("dotnet test", false)]
+    [InlineData("python -m pytest", false)]
+    [InlineData("pip list", false)]
+    [InlineData("node --version", false)]
+    [InlineData("Get-ChildItem | Sort-Object Length", false)]
+    public void DetectFileEditingCommand_DetectsFileModification(string command, bool expected)
+    {
+        RunInTerminalTool.DetectFileEditingCommand(command).Should().Be(expected);
+    }
+
     [Fact]
     public async Task ExecuteAsync_BlocksDangerousCommandWithoutSideEffects()
     {

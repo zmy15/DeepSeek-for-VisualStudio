@@ -47,6 +47,12 @@ public class BuiltInToolsTests
     }
 
     [Fact]
+    public void CaptureWindowTool_HasCorrectName()
+    {
+        new CaptureWindowTool().Name.Should().Be("capture_window");
+    }
+
+    [Fact]
     public void BuildSolutionTool_HasCorrectName()
     {
         new BuildSolutionTool().Name.Should().Be("build_solution");
@@ -286,6 +292,32 @@ public class BuiltInToolsTests
 
     #endregion
 
+    #region CaptureWindowTool Image Block Parsing
+
+    [Fact]
+    public void ParseImageBlock_NoBlock_ReturnsOriginalText()
+    {
+        var (cleanText, uris) = CaptureWindowTool.ParseImageBlock("✅ no image here");
+
+        cleanText.Should().Be("✅ no image here");
+        uris.Should().BeEmpty();
+    }
+
+    [Fact]
+    public void ParseImageBlock_WithInlineDataUri_ExtractsUriAndStripsBlock()
+    {
+        const string dataUri = "data:image/png;base64,AAAA";
+        string raw = "✅ captured\n\n[CAPTURE_IMAGE]\n" + dataUri + "\n[/CAPTURE_IMAGE]";
+
+        var (cleanText, uris) = CaptureWindowTool.ParseImageBlock(raw);
+
+        uris.Should().ContainSingle().Which.Should().Be(dataUri);
+        cleanText.Should().NotContain("[CAPTURE_IMAGE]");
+        cleanText.Should().Contain("✅ captured");
+    }
+
+    #endregion
+
     #region Helpers
 
     private static BuiltInToolBase[] GetAllTools()
@@ -298,6 +330,7 @@ public class BuiltInToolsTests
             new GrepSearchTool(),
             new GetErrorsTool(),
             new FetchWebpageTool(),
+            new CaptureWindowTool(),
             new BuildSolutionTool(),
             new ReplaceStringInFileTool(),
             new MultiReplaceStringInFileTool(),
