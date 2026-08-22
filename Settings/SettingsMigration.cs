@@ -5,6 +5,7 @@ using System.IO;
 using System.Linq;
 using System.Runtime.InteropServices;
 using DeepSeek_v4_for_VisualStudio.Utils;
+using System.Text.RegularExpressions;
 
 namespace DeepSeek_v4_for_VisualStudio.Settings
 {
@@ -47,7 +48,7 @@ namespace DeepSeek_v4_for_VisualStudio.Settings
 
                 foreach (var bin in candidates)
                 {
-                    Logger.Info($"[Settings] 迁移探测: {bin}");
+                    DiagnosticLog.Write($"[Settings] 迁移探测: {bin}");
                     var values = TryReadValues(bin);
                     if (values == null || values.Count == 0)
                     {
@@ -59,7 +60,7 @@ namespace DeepSeek_v4_for_VisualStudio.Settings
                     if (applied > 0)
                     {
                         target.SaveSettingsToStorage();
-                        Logger.Info($"[Settings] 已从 {Path.GetFileName(Path.GetDirectoryName(bin))} 迁移 {applied} 项设置");
+                        DiagnosticLog.Write($"[Settings] 已从 {Path.GetFileName(Path.GetDirectoryName(bin))} 迁移 {applied} 项设置");
                         return true;
                     }
                 }
@@ -67,11 +68,19 @@ namespace DeepSeek_v4_for_VisualStudio.Settings
             }
             catch (Exception ex)
             {
-                Logger.Warn($"[Settings] 迁移失败: {ex.Message}");
+                DiagnosticLog.Write($"[Settings] 迁移失败: {ex.Message}");
             }
             return false;
         }
 
+
+        /// <summary>解码 SettingsManager 存储编码：&lt;flag&gt;*&lt;Type&gt;*&lt;value&gt;。</summary>
+        private static string DecodeStoredValue(string raw)
+        {
+            if (string.IsNullOrEmpty(raw)) return raw;
+            var m = Regex.Match(raw, @"^(\d+)\*([^*]+)\*(.*)$", RegexOptions.Singleline);
+            return m.Success ? m.Groups[3].Value : raw;
+        }
         private static Dictionary<string, string>? TryReadValues(string binPath)
         {
             IntPtr hKey = IntPtr.Zero;
@@ -80,13 +89,13 @@ namespace DeepSeek_v4_for_VisualStudio.Settings
                 int err = RegLoadAppKey(binPath, out hKey, KEY_READ, 0, 0);
                 if (err != 0 || hKey == IntPtr.Zero)
                 {
-                    Logger.Info($"[Settings] RegLoadAppKey 失败: win32err={err}");
+                    DiagnosticLog.Write($"[Settings] RegLoadAppKey 失败: win32err={err}");
                     return null;
                 }
 
                 // SafeRegistryHandle 拥有句柄，负责最终释放（不再单独 RegCloseKey）
                 using var root = RegistryKey.FromHandle(new Microsoft.Win32.SafeHandles.SafeRegistryHandle(hKey, true));
-                var page = FindKeyRecursive(root, "DeepSeekOptionsPage", maxDepth: 6);
+                var page = FindKeyRecursive(root, "DeepSeekOptionsPage", maxDepth: 10);
                 if (page == null) return null;
 
                 var dict = new Dictionary<string, string>(StringComparer.OrdinalIgnoreCase);
@@ -95,13 +104,13 @@ namespace DeepSeek_v4_for_VisualStudio.Settings
                 {
                     if (string.IsNullOrEmpty(name)) continue;
                     if (page.GetValue(name) is string s && !string.IsNullOrEmpty(s))
-                        dict[name] = s;   // DPAPI 密文原样复制（同一用户可解）
+                        dict[name] = DecodeStoredValue(s);   // 剥离 0*Type* 前缀；DPAPI 密文同用户可解
                 }
                 return dict.ContainsKey("ApiKey") ? dict : null; // 必须含 Key 才视为有效来源
             }
             catch (Exception ex)
             {
-                Logger.Warn($"[Settings] 读取 {binPath} 失败: {ex.Message}");
+                DiagnosticLog.Write($"[Settings] 读取 {binPath} 失败: {ex.Message}");
                 return null;
             }
         }
