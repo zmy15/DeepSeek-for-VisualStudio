@@ -198,5 +198,85 @@ namespace DeepSeek_v4_for_VisualStudio.Settings
             catch (ReflectionTypeLoadException ex) { return ex.Types.Where(t => t != null)!; }
             catch { return Array.Empty<Type>(); }
         }
+
+        /// <summary>
+        /// 探针 v2：全程序集扫描 (a) 以 ExternalSettingsRegionDefinition 为参数的方法（= 注册入口）
+        /// (b) IRegisteredSettingDefinition 的具体实现类型（= 各设置项定义的构造模板）。
+        /// </summary>
+        public static void RunConsumptionScan()
+        {
+            try
+            {
+                Type? defType = null, ifaceType = null;
+                foreach (var asm in AppDomain.CurrentDomain.GetAssemblies())
+                {
+                    try
+                    {
+                        defType ??= asm.GetType("Microsoft.VisualStudio.Services.UnifiedSettings.DataModel.ExternalSettingsRegionDefinition", false);
+                        ifaceType ??= asm.GetType("Microsoft.VisualStudio.Services.UnifiedSettings.DataModel.IRegisteredSettingDefinition", false);
+                    }
+                    catch { }
+                    if (defType != null && ifaceType != null) { DiagnosticLog.Write($"[USv2] 契约所在程序集: {asm.GetName().Name}"); break; }
+                }
+                if (defType == null) { DiagnosticLog.Write("[USv2] 未找到定义类型"); return; }
+
+                var consumers = new List<string>();
+                var impls = new List<(string Asm, string Name, string Ctor)>();
+
+                foreach (var asm in AppDomain.CurrentDomain.GetAssemblies())
+                {
+                    IEnumerable<Type> types;
+                    try { types = SafeGetTypes(asm); } catch { continue; }
+
+                    foreach (var t in types)
+                    {
+                        try
+                        {
+                            foreach (var m in t.GetMethods(BindingFlags.Public | BindingFlags.Instance | BindingFlags.Static | BindingFlags.NonPublic))
+                            {
+                                foreach (var p in m.GetParameters())
+                                {
+                                    if (p.ParameterType == defType)
+                                    {
+                                        consumers.Add($"{asm.GetName().Name}: {tn(t)}.{m.Name}");
+                                        break;
+                                    }
+                                }
+                            }
+                        }
+                        catch { }
+                    }
+
+                    if (ifaceType != null)
+                    {
+                        foreach (var t in types)
+                        {
+                            try
+                            {
+                                if (t.IsClass && !t.IsAbstract && ifaceType.IsAssignableFrom(t))
+                                {
+                                    var ctors = t.GetConstructors(BindingFlags.Public | BindingFlags.Instance)
+                                                 .Select(c => c.ToString()!)
+                                                 .FirstOrDefault() ?? "";
+                                    impls.Add((asm.GetName().Name, t.FullName ?? t.Name, ctors));
+                                }
+                            }
+                            catch { }
+                        }
+                    }
+                }
+
+                DiagnosticLog.Write($"[USv2] 注册入口候选 ({consumers.Count}):");
+                foreach (var c in consumers.Distinct()) DiagnosticLog.Write($"[USv2]   {c}");
+                DiagnosticLog.Write($"[USv2] 设置项定义实现 ({impls.Count}):");
+                foreach (var i in impls.Take(12)) DiagnosticLog.Write($"[USv2]   [{i.Asm}] {i.Name} :: {i.Ctor}");
+            }
+            catch (Exception ex)
+            {
+                DiagnosticLog.Write($"[USv2] 扫描异常: {ex.Message}");
+            }
+        }
+
+        private static string tn(Type t) => $"{t.Assembly.GetName().Name}::{t.FullName}";
     }
 }

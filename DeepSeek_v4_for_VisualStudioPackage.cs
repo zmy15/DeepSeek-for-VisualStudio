@@ -256,6 +256,7 @@ namespace DeepSeek_v4_for_VisualStudio
 
                 // ── P1 原型：Unified Settings 外部区域注册探针（仅诊断，无副作用）──
                 Settings.UnifiedSettingsRegistrationProbe.Run();
+                Settings.UnifiedSettingsRegistrationProbe.RunConsumptionScan();
 
                 // ── 生效配置快照（脱敏）：用于核对"选项页所见 = 运行时所用" ──
                 {

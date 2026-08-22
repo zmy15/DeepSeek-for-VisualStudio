@@ -84,4 +84,33 @@ ApiKey 保持现状：旧页编辑 + DPAPI 私有存储；新 UI 对应条目可
 | 入口服务 | ISettingsManager doc：「available as a VS service (via SVsUnifiedSettingsManager)」，Guid 2f26e586-… |
 | 兼容承诺 | DevBlog《Modernizing Visual Studio Extension Compatibility》：VS2022 扩展免改运行于 VS2026 |
 
-*后续若立项 Step1，建议同时把 §一 缺口 2 的构造期捕获点改为订阅式刷新，一并收口。*
+## 七、Step1 实测附录（探针 v2 蓝图，2026-08-23）
+
+运行时反射扫描（诊断日志全量捕获）确认：
+
+1. 区域/设置定义类型位于 Dev18 内部程序集 `Microsoft.VisualStudio.Shell.UI.Internal`，
+   命名空间 `Microsoft.VisualStudio.Services.UnifiedSettings.DataModel`；
+   `RegisteredSettingDefinition` / `EnumSettingDefinition` 构造函数达 **31 参数**，
+   深度依赖 `Moniker / RegistrationType / DefaultValueDefinition / ProviderInfo /
+   DefinitionLogContext / ExpressionParser.Token` 等内部类型。
+2. 唯一消费入口为 `UnifiedSettings.CompositionRoot.GetExternalProviderState`
+   （非公开）—— 即外部区域经 MEF 组装进 CompositionRoot。
+3. 该 Definition 形态与 **VisualStudio.Extensibility SettingCategory 声明式模型的生成产物一致**。
+
+### 结论修正
+
+| 方案 | 修正后评估 |
+|------|-----------|
+| A 手工反射构造外部区域 | **降级为不推荐**：31 参内部 ctor 无兼容承诺，随 Dev18 更新随时破坏 |
+| B VisualStudio.Extensibility `SettingCategory` | **升级为正道**：Dev18 新设置 UI 的官方接入模型；需以 in-proc Extensibility 包形态提供声明 |
+| C 维持现状 | 仍然有效：旧 Options 页在 VS2026 由兼容模型持续承载 |
+
+### 修订路线
+
+1. Step1 已交付：Provider 桥接实现（`Settings/UnifiedSettingsBridge.cs`，编译+942 测试通过）
+   —— 其 GetValue/SetValue/枚举/事件逻辑与声明式模型解耦，可被任何注册载体复用。
+2. Step2（下一迭代）：新增 in-proc `Extension` 工程引用 Microsoft.VisualStudio.Extensibility，
+   以 `SettingCategory` 声明同一非敏感子集；观察者回写 Instance 单例；与旧页双入口并存。
+3. ApiKey 继续排除在新体系之外（云同步风险），维持 DPAPI 私有存储。
+
+*探针原始输出见 %LocalAppData%\DeepSeekVS\diagnostic-2026-08-23.log（USv2 标记段）。*
