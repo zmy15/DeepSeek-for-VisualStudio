@@ -1132,6 +1132,7 @@ return "<!DOCTYPE html><html lang='" + htmlLang + "'><head><meta charset='UTF-8'
        BuildRenderMathJsFunction() +
        BuildRenderMermaidJsFunction() +
        // ── 页面就绪信号 ──
+       BuildDetoxEmojisJs() +
        "window.__pageReady=true;" +
        "if(window.chrome?.webview)window.chrome.webview.postMessage('__pageReady__');" +
        "setTimeout(function(){window.__scrollToBottom('auto');},100);" +

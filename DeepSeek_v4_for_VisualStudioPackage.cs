@@ -253,6 +253,15 @@ namespace DeepSeek_v4_for_VisualStudio
                 InitializeLocalization();
                 ThemeService.Instance.UserThemeMode = persistedOptions.ThemeMode;
                 DiagnosticLog.Write("[DeepSeek Init] Persisted options loaded OK");
+
+                // ── 生效配置快照（脱敏）：用于核对"选项页所见 = 运行时所用" ──
+                {
+                    string keyTail = persistedOptions.ApiKey is { Length: > 8 } k
+                        ? "***" + k.Substring(k.Length - 4)
+                        : "(empty)";
+                    DiagnosticLog.Write($"[Settings] effective: model={persistedOptions.SelectedModel}, " +
+                        $"key={keyTail}, migrated={persistedOptions.LegacySettingsMigrated}");
+                }
                 return persistedOptions;
             }
             catch (OperationCanceledException)

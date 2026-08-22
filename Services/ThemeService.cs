@@ -311,7 +311,9 @@ namespace DeepSeek_v4_for_VisualStudio.Services
         /// <summary>
         /// 获取当前主题对应的页面 CSS（用于 WebView2）。
         /// </summary>
-        public string PageCss => IsLight ? LightPageCss : DarkPageCss;
+        public string PageCss => (IsLight ? LightPageCss : DarkPageCss)
+            + ".icf{font-family:'Segoe Fluent Icons','Segoe MDL2 Assets';font-size:12px;line-height:1;"
+            + "margin:0 4px 0 0;vertical-align:-1px;display:inline-block}";
 
         #endregion
 
