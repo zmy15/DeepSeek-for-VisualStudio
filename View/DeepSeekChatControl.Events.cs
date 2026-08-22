@@ -1343,6 +1343,7 @@ namespace DeepSeek_v4_for_VisualStudio.View
 
         private void SessionComboBox_SelectionChanged(object sender, SelectionChangedEventArgs e)
         {
+            if (_suppressSessionSelection) return; // 程序化填充期间忽略
             if (SessionComboBox.SelectedItem is ChatSession session && session != _activeSession)
             {
                 SwitchToSession(session);

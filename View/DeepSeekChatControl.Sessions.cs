@@ -371,17 +371,28 @@ namespace DeepSeek_v4_for_VisualStudio.View
         {
             if (_sessionsContainer == null) return;
 
-            // 按最后活跃时间倒序排列
+            // 交互原则：当前会话钉在顶部，其余按最后活跃时间倒序，
+            // 避免用户悬停选择时列表因活跃时间变化而重排跳动。
             var sortedSessions = _sessionsContainer.Sessions
-                .OrderByDescending(s => s.LastActiveAt)
+                .OrderByDescending(s => _activeSession != null && s.Id == _activeSession.Id)
+                .ThenByDescending(s => s.LastActiveAt)
                 .ToList();
 
-            SessionComboBox.ItemsSource = null;
-            SessionComboBox.ItemsSource = sortedSessions;
-
-            if (_activeSession != null)
+            // 程序化填充期间抑制 SelectionChanged，避免瞬时 null/重置触发误切换
+            _suppressSessionSelection = true;
+            try
             {
-                SessionComboBox.SelectedItem = sortedSessions.FirstOrDefault(s => s.Id == _activeSession.Id);
+                SessionComboBox.ItemsSource = null;
+                SessionComboBox.ItemsSource = sortedSessions;
+
+                if (_activeSession != null)
+                {
+                    SessionComboBox.SelectedItem = sortedSessions.FirstOrDefault(s => s.Id == _activeSession.Id);
+                }
+            }
+            finally
+            {
+                _suppressSessionSelection = false;
             }
         }
 

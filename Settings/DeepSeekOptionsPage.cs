@@ -311,6 +311,10 @@ namespace DeepSeek_v4_for_VisualStudio.Settings
         [DesignerSerializationVisibility(DesignerSerializationVisibility.Visible)]
         public bool ShowContextStats { get; set; } = true;
 
+        /// <summary>旧实例设置迁移已完成标记（防止迁移值再次覆盖新版本中用户手动修改的设置）。</summary>
+        [System.ComponentModel.Browsable(false)]
+        public bool LegacySettingsMigrated { get; set; } = false;
+
         // ═══════════════════════════════════════════════
         //  可观测性 (Telemetry) 设置 — P0
         // ═══════════════════════════════════════════════

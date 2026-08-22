@@ -128,6 +128,9 @@ namespace DeepSeek_v4_for_VisualStudio.View
         private ContextCompressorService? _compressorService;
         private MemoryService? _memoryService;
         private bool _isGenerating;
+
+        /// <summary>程序化填充会话下拉时抑制 SelectionChanged（P2 交互修复）。</summary>
+        private bool _suppressSessionSelection;
         private string _webSearchEngine = "Off"; // "Off" | "Baidu" | "DuckDuckGo"
 
         // ── 文件上传 ──
@@ -570,6 +573,7 @@ namespace DeepSeek_v4_for_VisualStudio.View
 
             // ── 订阅设置变更事件，支持热切换配置 ──
             DeepSeekOptionsPage.SettingsChanged += OnOcrSettingsChanged;
+            DeepSeekOptionsPage.SettingsChanged += OnCoreSettingsChanged;
 
             // ── 订阅 diff 预览状态事件，刷新全局控制栏 ──
             EditorDiffMarkerService.Instance.PendingDiffCountChanged += RefreshDiffGlobalBar;
@@ -891,6 +895,7 @@ namespace DeepSeek_v4_for_VisualStudio.View
             _disposed = true;
 
             DeepSeekOptionsPage.SettingsChanged -= OnOcrSettingsChanged;
+            DeepSeekOptionsPage.SettingsChanged -= OnCoreSettingsChanged;
 
             // ── 取消主题事件订阅 ──
             _themeService.ThemeChanged -= OnThemeChanged;

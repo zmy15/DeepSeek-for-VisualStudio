@@ -239,10 +239,15 @@ namespace DeepSeek_v4_for_VisualStudio
                 var persistedOptions = (DeepSeekOptionsPage)GetDialogPage(typeof(DeepSeekOptionsPage));
                 DeepSeekOptionsPage.Instance = persistedOptions;
 
-                // ── 跨实例设置迁移（问题 2）：新 hive 无配置时从其他 VS 实例导入 ──
-                if (string.IsNullOrWhiteSpace(persistedOptions.ApiKey))
+                // ── 跨实例设置迁移（问题 2）：仅在未迁移过时执行一次，防止覆盖用户在新版本中的修改 ──
+                if (!persistedOptions.LegacySettingsMigrated)
                 {
-                    Settings.SettingsMigration.TryMigrateInto(persistedOptions);
+                    if (string.IsNullOrWhiteSpace(persistedOptions.ApiKey))
+                    {
+                        Settings.SettingsMigration.TryMigrateInto(persistedOptions);
+                    }
+                    persistedOptions.LegacySettingsMigrated = true;
+                    persistedOptions.SaveSettingsToStorage();
                 }
 
                 InitializeLocalization();

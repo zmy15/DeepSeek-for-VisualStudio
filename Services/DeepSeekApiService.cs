@@ -370,6 +370,13 @@ namespace DeepSeek_v4_for_VisualStudio.Services
 
         public void UpdateModel(string model) => _model = model;
 
+        /// <summary>运行时更新 API Key（P1：选项页保存后即时生效，无需重启）。</summary>
+        public void UpdateApiKey(string apiKey)
+        {
+            _httpClient.DefaultRequestHeaders.Authorization =
+                new System.Net.Http.Headers.AuthenticationHeaderValue("Bearer", apiKey ?? string.Empty);
+        }
+
         /// <summary>当前使用的模型标识（用于视觉模型等能力分支判断）。</summary>
         public string CurrentModel => _model;
 

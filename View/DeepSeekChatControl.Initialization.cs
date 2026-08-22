@@ -1,4 +1,4 @@
-﻿using DeepSeek_v4_for_VisualStudio.Models;
+using DeepSeek_v4_for_VisualStudio.Models;
 using DeepSeek_v4_for_VisualStudio.Services;
 using DeepSeek_v4_for_VisualStudio.Services.Agents;
 using DeepSeek_v4_for_VisualStudio.Settings;
@@ -239,9 +239,36 @@ namespace DeepSeek_v4_for_VisualStudio.View
         /// 设置变更事件回调（用户点击 Options 对话框的"确定"/"应用"时触发）。
         /// 热重载 OCR、Web 搜索、模型等配置，无需重启聊天窗口。
         /// </summary>
+        /// <summary>
+        /// 选项页保存后即时应用核心设置（P1：ApiKey/模型/思考模式热更新）。
+        /// </summary>
+        private void OnCoreSettingsChanged()
+        {
+            try
+            {
+                if (_apiService == null || _options == null) return;
+
+                if (!string.IsNullOrWhiteSpace(_options.ApiKey))
+                    _apiService.UpdateApiKey(_options.ApiKey);
+
+                var model = (string?)ModelComboBox?.SelectedItem ?? _options.SelectedModel;
+                if (!string.IsNullOrWhiteSpace(model))
+                    _apiService.UpdateModel(model);
+
+                var thinking = ThinkingCheckBox?.IsChecked ?? _options.IsThinkingEnabled;
+                var effort = EffortComboBox?.SelectedItem as string ?? _options.ReasoningEffort ?? "high";
+                _apiService.ConfigureThinking(thinking, effort);
+            }
+            catch (Exception ex)
+            {
+                Logger.Warn($"[Settings] 核心设置热更新失败: {ex.Message}");
+            }
+        }
+
         private void OnOcrSettingsChanged()
         {
-            Logger.Info("[Settings] 检测到设置变更，热重载配置...");
+            Logger.Info("[Settings] 检测到设置变更，正在刷新...");
+            OnCoreSettingsChanged();
             try
             {
                 // 刷新 _options 引用（DialogPage 属性已由 VS 自动更新）
