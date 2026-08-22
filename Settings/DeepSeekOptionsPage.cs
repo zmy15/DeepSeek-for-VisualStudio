@@ -43,6 +43,10 @@ namespace DeepSeek_v4_for_VisualStudio.Settings
         /// 订阅此事件可实现设置热切换，无需重启聊天窗口。
         /// </summary>
         public static event Action? SettingsChanged;
+        /// <summary>
+        /// 触发一次设置热更新（Unified Settings 桥接 SetValue 后调用）。
+        /// </summary>
+        internal void ApplyRuntimeHotUpdates() => SettingsChanged?.Invoke();
 
         /// <summary>
         /// 全局实例引用，在 Package 初始化时设置，方便静态工具类读取设置。

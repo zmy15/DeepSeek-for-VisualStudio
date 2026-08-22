@@ -254,6 +254,9 @@ namespace DeepSeek_v4_for_VisualStudio
                 ThemeService.Instance.UserThemeMode = persistedOptions.ThemeMode;
                 DiagnosticLog.Write("[DeepSeek Init] Persisted options loaded OK");
 
+                // ── P1 原型：Unified Settings 外部区域注册探针（仅诊断，无副作用）──
+                Settings.UnifiedSettingsRegistrationProbe.Run();
+
                 // ── 生效配置快照（脱敏）：用于核对"选项页所见 = 运行时所用" ──
                 {
                     string keyTail = persistedOptions.ApiKey is { Length: > 8 } k
