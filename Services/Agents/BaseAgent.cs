@@ -2859,13 +2859,11 @@ namespace DeepSeek_v4_for_VisualStudio.Services.Agents
         /// <summary>
         /// 根据工具类型返回合适的超时时间（仅对非交互式、非构建类工具生效）。
         /// 交互式工具和构建类工具由 IsInteractiveTool 直接跳过超时。
+        /// 分档策略见 <see cref="Services.Tools.ToolTimeoutPolicy"/>（P2，序号 22）。
         /// </summary>
         private static TimeSpan GetToolTimeout(string toolName)
         {
-            return toolName switch
-            {
-                _ => TimeSpan.FromSeconds(60),  // 默认 60 秒
-            };
+            return Services.Tools.ToolTimeoutPolicy.GetTimeout(toolName);
         }
 
         /// <summary>

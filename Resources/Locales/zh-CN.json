@@ -148,6 +148,8 @@
     "inlineEdit.emptyResponse":  "AI 未返回有效代码，请重试或换一种描述",
     "inlineEdit.noChange":  "AI 判断选区无需修改",
     "inlineEdit.failed":  "AI Edit 失败: {0}",
+    "settings.llmTimeoutSeconds.displayName":  "LLM 请求超时（秒）",
+    "settings.llmTimeoutSeconds.description":  "单次 LLM API 请求的超时时间。默认 300 秒；流式场景另有 120 秒无数据断线检测，不受此项影响。",
     "settings.language.displayName":  "界面语言 / Language",
     "settings.language.description":  "选择显示语言。选择「自动」则跟随系统语言。\nSelect display language. 'Auto' follows system language.",
     "settings.approvalMode.displayName":  "审批模式",

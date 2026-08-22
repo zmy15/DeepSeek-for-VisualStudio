@@ -327,6 +327,12 @@ namespace DeepSeek_v4_for_VisualStudio.Settings
         [DesignerSerializationVisibility(DesignerSerializationVisibility.Visible)]
         public bool EnableIdeContextInjection { get; set; } = true;
 
+        [LocalizedCategory("settings.category.context")]
+        [LocalizedDisplayName("settings.llmTimeoutSeconds.displayName")]
+        [LocalizedDescription("settings.llmTimeoutSeconds.description")]
+        [DesignerSerializationVisibility(DesignerSerializationVisibility.Visible)]
+        public int LlmTimeoutSeconds { get; set; } = 300;
+
         // ═══════════════════════════════════════════════
         //  国际化 (i18n) 设置
         // ═══════════════════════════════════════════════

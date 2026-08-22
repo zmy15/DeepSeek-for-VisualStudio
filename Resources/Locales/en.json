@@ -148,6 +148,8 @@
     "inlineEdit.emptyResponse":  "AI returned no valid code. Retry or rephrase your instruction",
     "inlineEdit.noChange":  "AI determined no change is needed",
     "inlineEdit.failed":  "AI Edit failed: {0}",
+    "settings.llmTimeoutSeconds.displayName":  "LLM request timeout (seconds)",
+    "settings.llmTimeoutSeconds.description":  "Timeout for a single LLM API request. Default 300 seconds; streaming has a separate 120-second no-data disconnect detection that is unaffected by this setting.",
     "settings.language.displayName":  "Display Language / 显示语言",
     "settings.language.description":  "Choose display language. Select 'Auto' to follow system language.\n选择显示语言。「自动」则跟随系统语言。",
     "settings.approvalMode.displayName":  "Approval Mode",

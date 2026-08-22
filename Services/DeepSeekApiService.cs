@@ -280,7 +280,7 @@ namespace DeepSeek_v4_for_VisualStudio.Services
             Interlocked.Add(ref _totalFimCompletionTokens, usage.CompletionTokens);
         }
 
-        public DeepSeekApiService(string apiKey, string model = "deepseek-v4-pro")
+        public DeepSeekApiService(string apiKey, string model = "deepseek-v4-pro", int? requestTimeoutSeconds = null)
         {
             _model = model;
 
@@ -296,10 +296,15 @@ namespace DeepSeek_v4_for_VisualStudio.Services
                 AllowAutoRedirect = true,
             };
 
+            // ── LLM 请求超时可配置（P2，序号 22）；默认保持原行为 5 分钟 ──
+            int timeoutSeconds = requestTimeoutSeconds ?? 300;
+            if (timeoutSeconds < 30) timeoutSeconds = 30;       // 下限：避免误配导致请求必失败
+            if (timeoutSeconds > 3600) timeoutSeconds = 3600;   // 上限：1 小时
+
             _httpClient = new HttpClient(handler)
             {
                 BaseAddress = new Uri(BaseUrl),
-                Timeout = TimeSpan.FromMinutes(5)
+                Timeout = TimeSpan.FromSeconds(timeoutSeconds)
             };
 
             _httpClient.DefaultRequestHeaders.Authorization =
