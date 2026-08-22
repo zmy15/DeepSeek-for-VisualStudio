@@ -27,7 +27,6 @@ namespace DeepSeek_v4_for_VisualStudio.Services.IdeContext
     public sealed class IdeContextTracker
     {
         private const int MaxDiagnosticsToCollect = 50;
-        private const int MinSymbolLength = 2;
 
         private volatile IdeContextSnapshot? _current;
 
@@ -92,7 +91,7 @@ namespace DeepSeek_v4_for_VisualStudio.Services.IdeContext
 
             // ── 符号启发式（光标处标识符；非语义解析，够用于"快速定位"）──
             string lineText = containingLine.GetText();
-            s.SymbolAtCursor = ExtractIdentifierAt(lineText, s.CursorColumn - 1);
+            s.SymbolAtCursor = IdeContextSnapshot.ExtractIdentifierAt(lineText, s.CursorColumn - 1);
             if (!string.IsNullOrWhiteSpace(s.SymbolAtCursor))
                 s.SymbolLineText = lineText.Trim();
 
@@ -125,36 +124,6 @@ namespace DeepSeek_v4_for_VisualStudio.Services.IdeContext
                 .GetExport<IVsEditorAdaptersFactoryService>()?.Value;
 
             return adapter?.GetWpfTextView(vsTextView);
-        }
-
-        /// <summary>
-        /// 提取光标处标识符（字母/数字/下划线）。短于 2 字符视为噪音返回 null。
-        /// </summary>
-        internal static string? ExtractIdentifierAt(string lineText, int columnIndex0Based)
-        {
-            if (string.IsNullOrEmpty(lineText)) return null;
-
-            bool IsWord(char c) => char.IsLetterOrDigit(c) || c == '_';
-
-            // net472 无 Math.Clamp，手动收敛
-            int i = columnIndex0Based;
-            if (i < 0) i = 0;
-            if (i > lineText.Length - 1) i = lineText.Length - 1;
-
-            if (!IsWord(lineText[i]))
-            {
-                // 光标可能停在词尾后一格：尝试前一位
-                if (i > 0 && IsWord(lineText[i - 1])) i--;
-                else return null;
-            }
-
-            int start = i;
-            while (start > 0 && IsWord(lineText[start - 1])) start--;
-            int end = i;
-            while (end < lineText.Length - 1 && IsWord(lineText[end + 1])) end++;
-
-            string word = lineText.Substring(start, end - start + 1);
-            return word.Length >= MinSymbolLength ? word : null;
         }
 
         /// <summary>

@@ -215,5 +215,40 @@ namespace DeepSeek_v4_for_VisualStudio.Models
                 _ => "",
             };
         }
+
+        // ───────────────────── 符号提取（P1-A Case B 验收核心） ─────────────────────
+
+        internal const int MinSymbolLength = 2;
+
+        /// <summary>
+        /// 提取光标处标识符（字母/数字/下划线）。短于 <see cref="MinSymbolLength"/> 字符视为噪音返回 null。
+        /// 词法启发式，非语义解析；列号为 0-based。
+        /// </summary>
+        public static string? ExtractIdentifierAt(string lineText, int columnIndex0Based)
+        {
+            if (string.IsNullOrEmpty(lineText)) return null;
+
+            bool IsWord(char c) => char.IsLetterOrDigit(c) || c == '_';
+
+            // net472 无 Math.Clamp，手动收敛
+            int i = columnIndex0Based;
+            if (i < 0) i = 0;
+            if (i > lineText.Length - 1) i = lineText.Length - 1;
+
+            if (!IsWord(lineText[i]))
+            {
+                // 光标可能停在词尾后一格：尝试前一位
+                if (i > 0 && IsWord(lineText[i - 1])) i--;
+                else return null;
+            }
+
+            int start = i;
+            while (start > 0 && IsWord(lineText[start - 1])) start--;
+            int end = i;
+            while (end < lineText.Length - 1 && IsWord(lineText[end + 1])) end++;
+
+            string word = lineText.Substring(start, end - start + 1);
+            return word.Length >= MinSymbolLength ? word : null;
+        }
     }
 }

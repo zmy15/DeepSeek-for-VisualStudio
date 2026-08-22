@@ -236,5 +236,53 @@ namespace DeepSeek_v4_for_VisualStudio.Tests.Unit.Models
         {
             IdeContextSnapshot.GetFenceLanguage(file).Should().Be(expected);
         }
+
+        // ──────────────── 符号提取（Case B 验收核心） ────────────────
+
+        // 列号语义：0-based，指向光标左侧字符；光标停在词尾后一格时左偏好归属前词
+        [Theory]
+        [InlineData("void Renderer::Draw()", 7, "Renderer")]    // 词中
+        [InlineData("void Renderer::Draw()", 13, "Renderer")]   // 词尾后一格
+        [InlineData("foo->Update();", 6, "Update")]             // 词首
+        public void ExtractIdentifierAt_InsideOrAdjacentWord_ReturnsWord(string line, int col, string expected)
+        {
+            IdeContextSnapshot.ExtractIdentifierAt(line, col).Should().Be(expected);
+        }
+
+        [Fact]
+        public void ExtractIdentifierAt_OnSeparatorWithoutLeftWord_ReturnsNull()
+        {
+            IdeContextSnapshot.ExtractIdentifierAt("a + b", 2).Should().BeNull();       // 光标在 '+' 上，左侧非词
+            IdeContextSnapshot.ExtractIdentifierAt("::Draw()", 1).Should().BeNull();    // 第二个 ':' 上
+        }
+
+        [Fact]
+        public void ExtractIdentifierAt_SpaceAfterWord_PrefersLeftWord()
+        {
+            // 设计行为（与主流编辑器一致）：两词之间的空格位归属左侧词
+            IdeContextSnapshot.ExtractIdentifierAt("foo bar", 3).Should().Be("foo");
+        }
+
+        [Theory]
+        [InlineData("_count123", 0, "_count123")]   // 下划线/数字词
+        [InlineData("x", 0, null)]                  // 单字符视为噪音
+        public void ExtractIdentifierAt_WordShapeRules(string line, int col, string? expected)
+        {
+            IdeContextSnapshot.ExtractIdentifierAt(line, col).Should().Be(expected);
+        }
+
+        [Fact]
+        public void ExtractIdentifierAt_ColumnBeyondEol_ClampsToLastChar()
+        {
+            IdeContextSnapshot.ExtractIdentifierAt("abc", 999).Should().Be("abc");
+            IdeContextSnapshot.ExtractIdentifierAt("abc ", 999).Should().Be("abc"); // 收敛到空格后回退
+        }
+
+        [Fact]
+        public void ExtractIdentifierAt_EmptyLine_ReturnsNull()
+        {
+            IdeContextSnapshot.ExtractIdentifierAt("", 0).Should().BeNull();
+            IdeContextSnapshot.ExtractIdentifierAt("   ", 1).Should().BeNull();
+        }
     }
 }
