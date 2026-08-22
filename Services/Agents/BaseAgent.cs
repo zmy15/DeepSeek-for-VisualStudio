@@ -2896,9 +2896,10 @@ namespace DeepSeek_v4_for_VisualStudio.Services.Agents
             }
             sw.Stop();
 
-            bool success = !result.StartsWith("❌") && !result.StartsWith("⏱️");
-            metrics.RecordToolCall(round, tc.Function.Name, sw.ElapsedMilliseconds, success,
-                success ? null : result.Truncate(200));
+            // ── P2-B：结果分类唯一权威点（❌/⏱️ 约定集中在 ToolExecutionOutcome）──
+            var outcome = Models.ToolExecutionOutcome.FromRaw(tc.Function.Name, result, sw.ElapsedMilliseconds);
+            metrics.RecordToolCall(round, tc.Function.Name, sw.ElapsedMilliseconds, outcome.Success,
+                outcome.Success ? null : result.Truncate(200));
             return result;
         }
 
