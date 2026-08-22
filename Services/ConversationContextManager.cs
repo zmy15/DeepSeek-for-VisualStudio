@@ -45,6 +45,9 @@ namespace DeepSeek_v4_for_VisualStudio.Services
         /// <summary>搜索结果上下文（独立存储，注入为 system 消息）</summary>
         private string? _searchContext;
 
+        /// <summary>IDE 实时态上下文（P1-A：活动文件/光标/选区/符号/诊断摘要，注入 volatile 块最前）</summary>
+        private string? _ideContext;
+
         /// <summary>Skill 发现上下文（独立存储）</summary>
         private string? _skillContext;
 
@@ -253,6 +256,22 @@ namespace DeepSeek_v4_for_VisualStudio.Services
         public void SetSearchContext(string? searchContext)
         {
             _searchContext = searchContext;
+        }
+
+        /// <summary>
+        /// 设置 IDE 实时态上下文（P1-A）。
+        /// 由 View 在每次用户消息发送前捕获快照并格式化后传入；传 null 表示禁用或清空。
+        /// Token 记账与 RAG 上下文一致。
+        /// </summary>
+        public void SetIdeContext(string? ideContext)
+        {
+            if (!string.IsNullOrEmpty(_ideContext))
+                _estimatedTokens -= EstimateTokens(_ideContext);
+
+            _ideContext = ideContext;
+
+            if (!string.IsNullOrEmpty(_ideContext))
+                _estimatedTokens += EstimateTokens(_ideContext);
         }
 
         /// <summary>
@@ -750,6 +769,10 @@ namespace DeepSeek_v4_for_VisualStudio.Services
         public string? BuildVolatileContextBlock()
         {
             var parts = new List<string>();
+
+            // ── IDE 实时态快照（P1-A：最贴近用户当前意图，置于易变块最前）──
+            if (!string.IsNullOrWhiteSpace(_ideContext))
+                parts.Add(_ideContext!);
 
             // ── 活跃文件 Working Set ──
             if (_activeFileTracker != null)
@@ -1369,6 +1392,7 @@ namespace DeepSeek_v4_for_VisualStudio.Services
             _systemPrompt = null;
             _fixedSystemPrompt = null;
             _searchContext = null;
+            _ideContext = null;
             _skillContext = null;
             _alwaysInjectSkillsContext = null;
             _ragContext = null;
