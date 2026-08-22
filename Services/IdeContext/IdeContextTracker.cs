@@ -139,11 +139,11 @@ namespace DeepSeek_v4_for_VisualStudio.Services.IdeContext
                     .GetExport<IErrorProviderFactory>()?.Value;
                 if (factory == null) return null;
 
-                SimpleTagger<ErrorTag> table = factory.GetErrorTable(view.TextBuffer);
+                SimpleTagger<ErrorTag> tagger = factory.GetErrorTagger(view.TextBuffer);
                 var fullSpan = new SnapshotSpan(view.TextSnapshot, 0, view.TextSnapshot.Length);
 
                 var result = new List<IdeDiagnosticItem>();
-                foreach (var mapping in table.GetTagSpans(fullSpan))
+                foreach (var mapping in tagger.GetTags(new NormalizedSnapshotSpanCollection(fullSpan)))
                 {
                     if (result.Count >= MaxDiagnosticsToCollect) break;
 
@@ -156,9 +156,8 @@ namespace DeepSeek_v4_for_VisualStudio.Services.IdeContext
                     if (severity.Length == 0) continue;
 
                     int lineNo = 0;
-                    var snapSpans = mapping.Span.GetSpans(view.TextBuffer);
-                    if (snapSpans.Count > 0)
-                        lineNo = snapSpans[0].Start.GetContainingLine().LineNumber + 1;
+                    // SimpleTagger.GetTags 返回的 Span 已是快照解析后的 SnapshotSpan
+                    lineNo = mapping.Span.Start.GetContainingLine().LineNumber + 1;
 
                     string message = (mapping.Tag.ToolTipContent?.ToString() ?? "")
                         .Replace('\r', ' ').Replace('\n', ' ').Trim();

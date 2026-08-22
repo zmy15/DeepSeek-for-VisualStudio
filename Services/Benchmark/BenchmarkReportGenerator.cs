@@ -104,11 +104,12 @@ namespace DeepSeek_v4_for_VisualStudio.Services.Benchmark
                 if (s.CacheHitRate is double c) { cacheSum += c; cacheCount++; }
 
                 var agentKey = s.Agents.FirstOrDefault() ?? "(none)";
-                a.ByAgent[agentKey] = a.ByAgent.GetValueOrDefault(agentKey) + 1;
+                a.ByAgent.TryGetValue(agentKey, out var agentCount);
+                a.ByAgent[agentKey] = agentCount + 1;
 
                 if (!string.IsNullOrEmpty(s.TaskCategory))
                 {
-                    var cur = a.ByTaskCategory.GetValueOrDefault(s.TaskCategory);
+                    a.ByTaskCategory.TryGetValue(s.TaskCategory!, out var cur);
                     a.ByTaskCategory[s.TaskCategory!] =
                         (cur.Total + 1, cur.Success + (s.Result == AgentSessionResult.Success ? 1 : 0));
                 }

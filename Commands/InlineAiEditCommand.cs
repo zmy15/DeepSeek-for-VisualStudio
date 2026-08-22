@@ -224,8 +224,8 @@ namespace DeepSeek_v4_for_VisualStudio.Commands
             try
             {
                 var line = view.TextViewLines.GetTextViewLineContainingBufferPosition(span.Start);
-                double x = line != null ? line.Bounds.Left : 40;
-                double y = line != null ? line.Bounds.Top : 40;
+                double x = line != null ? line.Left : 40;
+                double y = line != null ? line.Top : 40;
                 return view.VisualElement.PointToScreen(new Point(x, y));
             }
             catch
