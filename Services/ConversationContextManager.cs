@@ -847,7 +847,8 @@ namespace DeepSeek_v4_for_VisualStudio.Services
                     contentBytes = System.Text.Encoding.UTF8.GetByteCount(entry.Content);
                 if (!string.IsNullOrEmpty(entry.ReasoningContent))
                     contentBytes += System.Text.Encoding.UTF8.GetByteCount(entry.ReasoningContent);
-                int entryTokens = Math.Max(1, contentBytes / 2);
+                int entryTokens = Math.Max(1, contentBytes / 2)
+                    + EstimateMultimodalTokens(entry.MultimodalContent);
 
                 // 检测到新的 user 消息 → 轮次+1
                 if (entry.Role == "user" && entry.TurnIndex > 0)
@@ -928,6 +929,7 @@ namespace DeepSeek_v4_for_VisualStudio.Services
                 var entry = _entries[i];
                 entriesToCompress.Add(entry);
                 removedTokens += EstimateTokens(entry.Content);
+                removedTokens += EstimateMultimodalTokens(entry.MultimodalContent);
                 if (!string.IsNullOrEmpty(entry.ReasoningContent))
                     removedTokens += EstimateTokens(entry.ReasoningContent);
             }
@@ -1009,6 +1011,7 @@ namespace DeepSeek_v4_for_VisualStudio.Services
             for (int i = entryIndex; i < _entries.Count; i++)
             {
                 _estimatedTokens -= EstimateTokens(_entries[i].Content);
+                _estimatedTokens -= EstimateMultimodalTokens(_entries[i].MultimodalContent);
                 if (!string.IsNullOrEmpty(_entries[i].ReasoningContent))
                     _estimatedTokens -= EstimateTokens(_entries[i].ReasoningContent);
             }
@@ -1085,12 +1088,173 @@ namespace DeepSeek_v4_for_VisualStudio.Services
             int tokens = 0;
             foreach (var part in parts)
             {
-                tokens += EstimateTokens(part.Text);
-                tokens += EstimateTokens(part.ImageUrl?.Url);
-                tokens += EstimateTokens(part.File?.FileData);
-                tokens += EstimateTokens(part.File?.Filename);
+                if (part.Type == "text")
+                {
+                    tokens += EstimateTokens(part.Text);
+                }
+                else if (part.Type == "image_url")
+                {
+                    // 图片按尺寸/张数估算，绝不把 base64 data URI 当文本字符计数
+                    tokens += EstimateImageTokens(part.ImageUrl?.Url);
+                }
+                else if (part.Type == "file")
+                {
+                    // file_id 引用极小；file_data 是 base64 数据，同样不能当文本计数
+                    tokens += EstimateTokens(part.File?.FileId);
+                    if (part.File?.FileData != null)
+                        tokens += EstimateImageTokens(part.File.FileData);
+                    tokens += EstimateTokens(part.File?.Filename);
+                }
+                else
+                {
+                    // 未知类型兜底
+                    tokens += EstimateTokens(part.Text);
+                }
             }
             return tokens;
+        }
+
+        /// <summary>
+        /// 估算单张图片的 token 数，依据 DeepSeek Vision 文档的尺寸换算规则：
+        /// 推理前会缩放，使有效面积落在约 [384×384, 800×800] 之间，上限约 384 token/张。
+        /// https://api-docs.deepseek.com/guides/vision/#token-usage
+        /// </summary>
+        private static int EstimateImageTokens(string? imageUrl)
+        {
+            if (string.IsNullOrWhiteSpace(imageUrl))
+                return 0;
+
+            const int tokMin = 85;
+            const int tokMax = 384;
+            const double minArea = 384.0 * 384.0;
+            const double maxArea = 800.0 * 800.0;
+            const double pixelsPerToken = 1667.0;
+
+            // 外链 http(s) URL：拿不到本地尺寸，按中等图片估算
+            if (!imageUrl.StartsWith("data:", StringComparison.OrdinalIgnoreCase))
+                return 256;
+
+            int comma = imageUrl.IndexOf(',');
+            if (comma < 0 || comma + 1 >= imageUrl.Length)
+                return 256;
+
+            try
+            {
+                byte[] bytes = Convert.FromBase64String(imageUrl.Substring(comma + 1));
+                if (TryGetImageDimensions(bytes, out int width, out int height))
+                {
+                    double area = (double)width * height;
+                    double effectiveArea = Math.Min(maxArea, Math.Max(minArea, area));
+                    int tok = (int)Math.Round(effectiveArea / pixelsPerToken);
+                    return Math.Max(tokMin, Math.Min(tokMax, tok));
+                }
+            }
+            catch
+            {
+                // 解析失败按中等图片兜底，避免计数异常
+            }
+
+            return 256;
+        }
+
+        /// <summary>
+        /// 从图像字节中解析宽高。支持 PNG / JPEG / GIF / WebP(VP8X/VP8L)；失败返回 false。
+        /// </summary>
+        private static bool TryGetImageDimensions(byte[] b, out int width, out int height)
+        {
+            width = 0;
+            height = 0;
+            if (b == null || b.Length < 24) return false;
+
+            // PNG：签名 + IHDR，宽高在 offset 16/20（大端）
+            if (b[0] == 0x89 && b[1] == 0x50 && b[2] == 0x4E && b[3] == 0x47)
+            {
+                width = (b[16] << 24) | (b[17] << 16) | (b[18] << 8) | b[19];
+                height = (b[20] << 24) | (b[21] << 16) | (b[22] << 8) | b[23];
+                return width > 0 && height > 0;
+            }
+
+            // GIF：宽高在 offset 6/8（小端）
+            if (b[0] == 'G' && b[1] == 'I' && b[2] == 'F' && b.Length >= 10)
+            {
+                width = b[6] | (b[7] << 8);
+                height = b[8] | (b[9] << 8);
+                return width > 0 && height > 0;
+            }
+
+            // JPEG：FF D8 FF，扫描 SOF 标记
+            if (b[0] == 0xFF && b[1] == 0xD8)
+                return TryGetJpegDimensions(b, out width, out height);
+
+            // WebP：RIFF .... WEBP
+            if (b.Length >= 30
+                && b[0] == 'R' && b[1] == 'I' && b[2] == 'F' && b[3] == 'F'
+                && b[8] == 'W' && b[9] == 'E' && b[10] == 'B' && b[11] == 'P')
+                return TryGetWebPDimensions(b, out width, out height);
+
+            return false;
+        }
+
+        private static bool TryGetJpegDimensions(byte[] b, out int width, out int height)
+        {
+            width = 0;
+            height = 0;
+            int i = 2;
+            while (i + 9 < b.Length)
+            {
+                if (b[i] != 0xFF)
+                {
+                    i++;
+                    continue;
+                }
+
+                int marker = b[i + 1];
+                if (marker == 0xFF) { i++; continue; }            // 填充字节
+                if (marker == 0xD9) break;                        // EOI
+                if (marker == 0xD8 || marker == 0x01) { i += 2; continue; }
+                if (marker >= 0xD0 && marker <= 0xD7) { i += 2; continue; } // RSTn
+
+                int segLen = (b[i + 2] << 8) | b[i + 3];
+                if (segLen < 2) break;
+
+                // SOF0~SOF15，排除 DHT(0xC4)/JPG(0xC8)/DAC(0xCC)
+                bool isSof = marker >= 0xC0 && marker <= 0xCF
+                    && marker != 0xC4 && marker != 0xC8 && marker != 0xCC;
+                if (isSof)
+                {
+                    height = (b[i + 5] << 8) | b[i + 6];
+                    width = (b[i + 7] << 8) | b[i + 8];
+                    return width > 0 && height > 0;
+                }
+
+                i += 2 + segLen;
+            }
+            return false;
+        }
+
+        private static bool TryGetWebPDimensions(byte[] b, out int width, out int height)
+        {
+            width = 0;
+            height = 0;
+
+            // VP8X（扩展）：canvas 尺寸在 offset 24/27（24 位小端，值为尺寸-1）
+            if (b[12] == 'V' && b[13] == 'P' && b[14] == '8' && b[15] == 'X')
+            {
+                width = 1 + (b[24] | (b[25] << 8) | (b[26] << 16));
+                height = 1 + (b[27] | (b[28] << 8) | (b[29] << 16));
+                return width > 0 && height > 0;
+            }
+
+            // VP8L（无损）：chunk payload 首字节 0x2F，随后 4 字节小端含 14bit 宽-1 / 高-1
+            if (b.Length >= 26 && b[12] == 'V' && b[13] == 'P' && b[14] == '8' && b[15] == 'L')
+            {
+                int v = b[21] | (b[22] << 8) | (b[23] << 16) | (b[24] << 24);
+                width = (v & 0x3FFF) + 1;
+                height = ((v >> 14) & 0x3FFF) + 1;
+                return width > 0 && height > 0;
+            }
+
+            return false;
         }
 
         private static List<ChatContentPart>? CloneContentParts(List<ChatContentPart>? parts)
@@ -1136,11 +1300,25 @@ namespace DeepSeek_v4_for_VisualStudio.Services
         {
             if (_compressor == null || _isCompressing) return;
 
-            double threshold = _compressor.Config.CompressionThreshold;
-            int preserveTurns = _compressor.Config.PreserveRecentTurns;
-            int minToCompress = _compressor.Config.MinTurnsToCompress;
+            var config = _compressor.Config;
+            double threshold = config.CompressionThreshold;
+            double aggressiveThreshold = config.AggressiveThreshold;
+            int minToCompress = config.MinTurnsToCompress;
 
+            // 目标：压回到 CompressionThreshold（默认 85%）以下
             int targetBudget = (int)(TokenBudget * threshold);
+
+            // ── 两级压缩 ──
+            // 超过 AggressiveThreshold（默认 95%）→ 严重压缩：只保留最近 1 轮；
+            // 否则按 PreserveRecentTurns（默认 3 轮）保留最近轮次。
+            bool severe = EstimatedTokens > TokenBudget * aggressiveThreshold;
+            int preserveTurns = severe ? 1 : config.PreserveRecentTurns;
+
+            if (severe)
+            {
+                Logger.Info($"[ContextManager] 严重压缩触发: 使用率 > {aggressiveThreshold:P0}，" +
+                    $"仅保留最近 1 轮 (当前 {EstimatedTokens:N0}/{TokenBudget:N0})");
+            }
 
             while (EstimatedTokens > targetBudget
                 && TurnCount > preserveTurns + minToCompress)
@@ -1186,6 +1364,7 @@ namespace DeepSeek_v4_for_VisualStudio.Services
             foreach (var entry in entriesToCompress)
             {
                 removedTokens += EstimateTokens(entry.Content);
+                removedTokens += EstimateMultimodalTokens(entry.MultimodalContent);
                 if (!string.IsNullOrEmpty(entry.ReasoningContent))
                     removedTokens += EstimateTokens(entry.ReasoningContent);
                 _entries.Remove(entry);
@@ -1242,6 +1421,7 @@ namespace DeepSeek_v4_for_VisualStudio.Services
             for (int i = startIdx; i < endIdx; i++)
             {
                 _estimatedTokens -= EstimateTokens(_entries[i].Content);
+                _estimatedTokens -= EstimateMultimodalTokens(_entries[i].MultimodalContent);
                 if (!string.IsNullOrEmpty(_entries[i].ReasoningContent))
                     _estimatedTokens -= EstimateTokens(_entries[i].ReasoningContent);
             }

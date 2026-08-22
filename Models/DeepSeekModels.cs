@@ -548,6 +548,13 @@ namespace DeepSeek_v4_for_VisualStudio.Models
         [DataMember]
         public List<string> AttachedImagePaths { get; set; } = new();
 
+        /// <summary>
+        /// PDF 附件在本机的完整路径，与视觉模型直传对应，
+        /// 供重试/回退恢复时重新渲染 PDF 页面为图片。
+        /// </summary>
+        [DataMember]
+        public List<string> AttachedPdfPaths { get; set; } = new();
+
         // ======== 树状结构字段 ========
 
         /// <summary>

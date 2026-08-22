@@ -114,6 +114,8 @@ public class AskAgentTests
         agent.Definition.AllowedTools.Should().Contain("fetch_webpage");
         agent.Definition.AllowedTools.Should().Contain("memory");
         agent.Definition.AllowedTools.Should().Contain("git");
+        agent.Definition.AllowedTools.Should().Contain("run_in_terminal");
+        agent.Definition.AllowedTools.Should().Contain("get_terminal_output");
         // Ask agent has built-in search/read tools for self-service code lookup
         agent.Definition.AllowedTools.Should().Contain("symbol_search");
         agent.Definition.AllowedTools.Should().Contain("file_search");
@@ -131,7 +133,6 @@ public class AskAgentTests
         agent.Definition.AllowedTools.Should().NotContain("replace_string_in_file");
         agent.Definition.AllowedTools.Should().NotContain("create_file");
         agent.Definition.AllowedTools.Should().NotContain("delete_file");
-        agent.Definition.AllowedTools.Should().NotContain("run_in_terminal");
     }
 
     #endregion
@@ -144,8 +145,11 @@ public class AskAgentTests
         AskAgent.AskTools.Should().Contain("runSubagent");
         AskAgent.AskTools.Should().Contain("request_handoff");
         AskAgent.AskTools.Should().Contain("fetch_webpage");
+        AskAgent.AskTools.Should().Contain("capture_window");
         AskAgent.AskTools.Should().Contain("memory");
         AskAgent.AskTools.Should().Contain("git");
+        AskAgent.AskTools.Should().Contain("run_in_terminal");
+        AskAgent.AskTools.Should().Contain("get_terminal_output");
         // Ask agent has built-in search/read tools
         AskAgent.AskTools.Should().Contain("symbol_search");
         AskAgent.AskTools.Should().Contain("file_search");
@@ -162,7 +166,6 @@ public class AskAgentTests
         AskAgent.AskTools.Should().NotContain("create_file");
         AskAgent.AskTools.Should().NotContain("create_directory");
         AskAgent.AskTools.Should().NotContain("delete_file");
-        AskAgent.AskTools.Should().NotContain("run_in_terminal");
         AskAgent.AskTools.Should().NotContain("apply_patch");
     }
 

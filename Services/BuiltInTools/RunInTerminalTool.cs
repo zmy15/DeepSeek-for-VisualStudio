@@ -39,6 +39,15 @@ namespace DeepSeek_v4_for_VisualStudio.Services.BuiltInTools
         /// <summary>同步模式最大等待时间（防止进程僵死导致 Agent 永久卡住）</summary>
         private static readonly TimeSpan SyncTimeout = TimeSpan.FromMinutes(10);
 
+        /// <summary>
+        /// 当前调用 Agent 类型（由 BaseAgent 在执行前设置，用于运行时权限校验）。
+        /// AskAgent / ExploreAgent 只能执行不修改文件的终端命令。
+        /// </summary>
+        public static AgentType? CurrentAgentType { get; set; }
+
+        /// <summary>是否为只读 Agent（Ask/Explore）——禁止终端修改文件。</summary>
+        private static bool IsReadOnlyAgent => CurrentAgentType is AgentType.Ask or AgentType.Explore;
+
         /// <summary>检测到的 Python 运行环境信息。</summary>
         internal sealed class PythonEnvironment
         {
@@ -301,6 +310,64 @@ namespace DeepSeek_v4_for_VisualStudio.Services.BuiltInTools
         }
 
         /// <summary>
+        /// 只读 Agent（Ask/Explore）的终端限制：检测命令是否会修改文件。
+        /// 覆盖文件写入/创建/删除/移动/复制/重命名命令、输出重定向、交互式编辑器、
+        /// git 写操作、sed -i 原地编辑，以及 curl/wget 下载写文件。
+        /// </summary>
+        internal static bool DetectFileEditingCommand(string command)
+        {
+            if (string.IsNullOrWhiteSpace(command)) return false;
+
+            string c = command.Trim();
+
+            // ── 输出重定向写入文件（`>` 覆盖 / `>>` 追加）──
+            // PowerShell 中裸 `>` 是写文件重定向；比较运算用 -gt/-lt，无歧义。
+            if (c.Contains(">>"))
+                return true;
+            if (System.Text.RegularExpressions.Regex.IsMatch(
+                c, @"(?<![<>=+\-])\s>(?!=)\s*\S"))
+                return true;
+
+            // ── 文件修改类命令（匹配命令起始或 | ; ( & 之后）──
+            const string fileVerbs =
+                // 写内容 / 导出
+                @"set-content|add-content|clear-content|out-file|tee-object|tee|"
+                + @"export-csv|export-clixml|"
+                // 创建 / 删除 / 移动 / 复制 / 重命名（含别名与 cmd 内建）
+                + @"new-item|touch|remove-item|rmdir|move-item|copy-item|rename-item|"
+                + @"rm|mv|move|cp|copy|ren|rename|rd|del|erase|xcopy|robocopy|"
+                // 交互式编辑器
+                + @"notepad\+\+|notepad|gvim|vim|vi|nano|code";
+
+            if (System.Text.RegularExpressions.Regex.IsMatch(
+                c, @"(?ix)(?:^|[\|\;\(]|&\s*)\s*(?:" + fileVerbs + @")\b"))
+                return true;
+
+            // ── git 写操作（与 git 工具的只读白名单一致：status/diff/log/show 放行）──
+            if (System.Text.RegularExpressions.Regex.IsMatch(
+                c, @"(?ix)\bgit\s+(?:add|commit|push|pull|checkout|switch|restore|reset|stash|merge|rebase|rm|mv|clean|apply|am|branch|tag|cherry-pick)\b"))
+                return true;
+
+            // ── sed -i 原地编辑文件 ──
+            if (System.Text.RegularExpressions.Regex.IsMatch(
+                c, @"(?ix)\bsed\b[^\r\n;|]{0,80}(?:-i\b|--in-place\b)"))
+                return true;
+
+            // ── curl/wget 下载写入本地文件（-o/-O/--output/-OutFile）──
+            if (System.Text.RegularExpressions.Regex.IsMatch(
+                c, @"(?ix)\b(?:curl|wget|iwr|invoke-webrequest)\b[^\r\n;|]{0,120}(?:-outfile\b|--output\b|\s-o\b|-O\b)"))
+                return true;
+
+            return false;
+        }
+
+        /// <summary>生成只读 Agent 文件修改命令拦截结果文本。</summary>
+        internal static string FormatFileEditBlocked(string command)
+        {
+            return LocalizationService.Instance.Format("tool.runTerminal.fileEditBlocked", command);
+        }
+
+        /// <summary>
         /// 检测 python -c / py -c 等内联代码中的危险调用（os.system、shutil.rmtree、subprocess 等）。
         /// </summary>
         private static DangerousCommandKind DetectPythonInlineDanger(string command)
@@ -443,6 +510,13 @@ namespace DeepSeek_v4_for_VisualStudio.Services.BuiltInTools
                 return FormatDangerBlocked(command, rawDangerKind);
             }
 
+            // ── 只读 Agent 限制：Ask/Explore 不得通过终端修改文件（原始命令）──
+            if (IsReadOnlyAgent && DetectFileEditingCommand(command))
+            {
+                Logger.Warn($"[RunInTerminal] ⛔ 只读 Agent 的文件修改命令被拦截 ({CurrentAgentType}): {command.Truncate(150)}");
+                return FormatFileEditBlocked(command);
+            }
+
             // ── Unix 风格命令检测与修正（安全网：即使 AI prompt 已要求 PowerShell，仍有概率输出 Unix 命令）──
             string? unixWarning = DetectUnixStyleCommand(command);
 
@@ -482,6 +556,13 @@ namespace DeepSeek_v4_for_VisualStudio.Services.BuiltInTools
             {
                 Logger.Warn($"[RunInTerminal] ⛔ 危险命令被拦截（修正后） ({normalizedDangerKind}): {command.Truncate(150)}");
                 return FormatDangerBlocked(command, normalizedDangerKind);
+            }
+
+            // ── 只读 Agent 限制（修正后的命令，覆盖 cmd /c 剥离与 Unix→PowerShell 转换结果）──
+            if (IsReadOnlyAgent && DetectFileEditingCommand(command))
+            {
+                Logger.Warn($"[RunInTerminal] ⛔ 只读 Agent 的文件修改命令被拦截（修正后）({CurrentAgentType}): {command.Truncate(150)}");
+                return FormatFileEditBlocked(command);
             }
 
             // ── Python 环境提示（python / py / pip 命令附加可用性信息）──
