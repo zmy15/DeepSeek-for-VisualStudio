@@ -145,6 +145,22 @@ namespace DeepSeek_v4_for_VisualStudio.View
 
                 // ── 审批控制栏 ──
                 ApplyBorderBrush(FindParentBorder(ApprovalModeComboBox), panelBg, panelBorder);
+                if (ApprovalAreaBorder != null)
+                {
+                    ApprovalAreaBorder.Background = panelBg;
+                    ApprovalAreaBorder.BorderBrush = panelBorder;
+                }
+                if (ApprovalModeLabel != null) ApprovalModeLabel.Foreground = textColor;
+                if (BalanceLabel != null) BalanceLabel.Foreground = mutedText;
+
+                // ── P-B 历史浮层与标题 ──
+                if (HistoryPopupBorder != null)
+                {
+                    HistoryPopupBorder.Background = panelBg;
+                    HistoryPopupBorder.BorderBrush = panelBorder;
+                }
+                if (HistoryListBox != null) HistoryListBox.Foreground = textColor;
+                if (CurrentSessionTitle != null) CurrentSessionTitle.Foreground = textColor;
                 // Update the "审批模式:" label (TextBlock sibling of ApprovalModeComboBox)
                 UpdateApprovalLabel(panelBg, textColor);
                 if (ApprovalModeComboBox != null) ApprovalModeComboBox.Foreground = textColor;

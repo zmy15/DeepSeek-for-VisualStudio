@@ -8,6 +8,7 @@ using System.Linq;
 using System.Text.Json;
 using System.Threading;
 using System.Threading.Tasks;
+using System.Windows.Controls;
 using System.Windows;
 
 namespace DeepSeek_v4_for_VisualStudio.View
@@ -394,6 +395,115 @@ namespace DeepSeek_v4_for_VisualStudio.View
             {
                 _suppressSessionSelection = false;
             }
+
+            // ── P-B：同步 Copilot 式历史浮层与标题 ──
+            RefreshHistoryUI();
+        }
+
+        /// <summary>历史浮层条目视图模型。</summary>
+        internal sealed class HistoryItemViewModel
+        {
+            public string Id { get; set; } = string.Empty;
+            public string Title { get; set; } = string.Empty;
+            public string LastActiveText { get; set; } = string.Empty;
+            public bool IsCurrent { get; set; }
+            public string DeleteVisibility => IsCurrent ? "Collapsed" : "Visible";
+        }
+
+        private static string FormatRelativeTime(DateTime t)
+        {
+            var span = DateTime.Now - t;
+            if (span.TotalMinutes < 1) return "刚刚";
+            if (span.TotalMinutes < 60) return $"{(int)span.TotalMinutes} 分钟前";
+            if (span.TotalHours < 24) return $"{(int)span.TotalHours} 小时前";
+            if (span.TotalDays < 30) return $"{(int)span.TotalDays} 天前";
+            return t.ToString("yyyy-MM-dd");
+        }
+
+        /// <summary>刷新历史浮层列表与当前会话标题。</summary>
+        private void RefreshHistoryUI()
+        {
+            try
+            {
+                if (CurrentSessionTitle != null)
+                    CurrentSessionTitle.Text = _activeSession?.Title ?? string.Empty;
+
+                if (HistoryListBox == null || _sessionsContainer == null) return;
+
+                var items = _sessionsContainer.Sessions
+                    .OrderByDescending(s => _activeSession != null && s.Id == _activeSession.Id)
+                    .ThenByDescending(s => s.LastActiveAt)
+                    .Select(s => new HistoryItemViewModel
+                    {
+                        Id = s.Id,
+                        Title = string.IsNullOrWhiteSpace(s.Title) ? "(未命名对话)" : s.Title,
+                        LastActiveText = FormatRelativeTime(s.LastActiveAt),
+                        IsCurrent = _activeSession != null && s.Id == _activeSession.Id,
+                    })
+                    .ToList();
+
+                _suppressSessionSelection = true;
+                try
+                {
+                    HistoryListBox.ItemsSource = items;
+                }
+                finally
+                {
+                    _suppressSessionSelection = false;
+                }
+            }
+            catch (Exception ex)
+            {
+                Logger.Warn($"[History] 刷新失败: {ex.Message}");
+            }
+        }
+
+        private void HistoryToggleButton_Click(object sender, RoutedEventArgs e)
+        {
+            RefreshHistoryUI();
+            HistoryPopup.IsOpen = !HistoryPopup.IsOpen;
+        }
+
+        private void HistoryListBox_SelectionChanged(object sender, SelectionChangedEventArgs e)
+        {
+            if (_suppressSessionSelection) return;
+            if (HistoryListBox.SelectedItem is HistoryItemViewModel vm && _sessionsContainer != null)
+            {
+                var target = _sessionsContainer.Sessions.FirstOrDefault(s => s.Id == vm.Id);
+                if (target != null && target != _activeSession)
+                {
+                    SwitchToSession(target);
+                }
+            }
+            HistoryPopup.IsOpen = false;
+        }
+
+        private void DeleteHistoryItem_Click(object sender, RoutedEventArgs e)
+        {
+            if ((sender is System.Windows.Controls.Button btn ? btn.Tag as string : null) is not string id)
+                return;
+
+            if (_activeSession != null && _activeSession.Id == id)
+            {
+                DeleteCurrentSession();   // 复用既有确认+清理流程
+                RefreshHistoryUI();
+                return;
+            }
+
+            var result = System.Windows.MessageBox.Show(
+                LocalizationService.Instance["chat.confirmDeleteConversation"] ?? "删除此对话？",
+                LocalizationService.Instance["chat.deleteConversation"] ?? "删除对话",
+                System.Windows.MessageBoxButton.YesNo,
+                System.Windows.MessageBoxImage.Warning);
+            if (result != System.Windows.MessageBoxResult.Yes) return;
+
+            if (_sessionsContainer != null)
+            {
+                var target = _sessionsContainer.Sessions.FirstOrDefault(s => s.Id == id);
+                if (target != null) _sessionsContainer.Sessions.Remove(target);
+                ChatPersistenceService.SaveSessions(_solutionPath, _sessionsContainer);
+            }
+            RefreshHistoryUI();
         }
 
         /// <summary>
