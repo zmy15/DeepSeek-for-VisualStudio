@@ -137,6 +137,8 @@
     "settings.showContextStats.description":  "在状态栏显示当前 Token 使用量（已用/预算）。",
     "settings.enableTelemetryExport.displayName":  "导出会话指标",
     "settings.enableTelemetryExport.description":  "每次 Agent 会话结束后，将 TTFT、轮次、Token、工具调用等指标导出为 JSON 文件到 %LocalAppData%\\DeepSeekVS\\telemetry\\，用于性能分析与 Benchmark。",
+    "settings.enableIdeContextInjection.displayName":  "注入编辑器上下文",
+    "settings.enableIdeContextInjection.description":  "每条消息发送时，将当前活动文件、光标位置、选中代码与当前文件的错误/警告摘要自动提供给 AI（注入为易变上下文，不影响缓存命中）。深度查询仍可通过 get_errors 等工具完成。",
     "settings.language.displayName":  "界面语言 / Language",
     "settings.language.description":  "选择显示语言。选择「自动」则跟随系统语言。\nSelect display language. 'Auto' follows system language.",
     "settings.approvalMode.displayName":  "审批模式",

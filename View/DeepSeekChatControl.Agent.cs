@@ -296,6 +296,9 @@ namespace DeepSeek_v4_for_VisualStudio.View
         /// Agent 工作流主入口：分解任务 → 显示步骤计划 → 逐步执行 → 显示变更摘要。
         /// 注意：此方法在后台线程中调用，访问 UI 前必须切换到主线程。
         /// </summary>
+        /// <summary>IDE 实时态追踪器（P1-A，惰性创建；仅 UI 线程使用）</summary>
+        private Services.IdeContext.IdeContextTracker? _ideContextTracker;
+
         private async Task RunAgentWorkflowAsync(
             string userText,
             string fileContext = "",
@@ -326,6 +329,31 @@ namespace DeepSeek_v4_for_VisualStudio.View
                 }
 
                 StatusLabel.Text = LocalizationService.Instance["agent.status.analyzing"];
+
+                // ── P1-A IDE Context：捕获编辑器实时态并注入 volatile 块（设置开关控制）──
+                //    在 UI 线程上单次捕获；Agent 每轮只读快照，不重复扫描 VS。
+                try
+                {
+                    if (_options?.EnableIdeContextInjection == true)
+                    {
+                        _ideContextTracker ??= new Services.IdeContext.IdeContextTracker();
+                        _ideContextTracker.CaptureFromActiveView();
+                        _contextManager.SetIdeContext(
+                            _ideContextTracker.Current?.ToPromptBlock(_solutionPath));
+                        if (_ideContextTracker.Current != null)
+                            Logger.Info($"[IdeContext] 已注入: {_ideContextTracker.Current.FilePath} " +
+                                        $"(选区={_ideContextTracker.Current.HasSelection}, " +
+                                        $"诊断={_ideContextTracker.Current.Diagnostics.Count})");
+                    }
+                    else
+                    {
+                        _contextManager.SetIdeContext(null);
+                    }
+                }
+                catch (Exception ideEx)
+                {
+                    Logger.Warn($"[IdeContext] 注入失败: {ideEx.Message}");
+                }
 
                 // ── 清理上一轮 Agent 执行的追踪状态 ──
                 lock (_lock)

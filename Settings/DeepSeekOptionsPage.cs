@@ -321,6 +321,12 @@ namespace DeepSeek_v4_for_VisualStudio.Settings
         [DesignerSerializationVisibility(DesignerSerializationVisibility.Visible)]
         public bool EnableTelemetryExport { get; set; } = true;
 
+        [LocalizedCategory("settings.category.context")]
+        [LocalizedDisplayName("settings.enableIdeContextInjection.displayName")]
+        [LocalizedDescription("settings.enableIdeContextInjection.description")]
+        [DesignerSerializationVisibility(DesignerSerializationVisibility.Visible)]
+        public bool EnableIdeContextInjection { get; set; } = true;
+
         // ═══════════════════════════════════════════════
         //  国际化 (i18n) 设置
         // ═══════════════════════════════════════════════

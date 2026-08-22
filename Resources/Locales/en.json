@@ -137,6 +137,8 @@
     "settings.showContextStats.description":  "Show current token usage in the status bar (used/budget).",
     "settings.enableTelemetryExport.displayName":  "Export Session Metrics",
     "settings.enableTelemetryExport.description":  "After each agent session, export metrics (TTFT, turns, tokens, tool calls) as a JSON file to %LocalAppData%\\DeepSeekVS\\telemetry\\ for performance analysis and benchmarking.",
+    "settings.enableIdeContextInjection.displayName":  "Inject Editor Context",
+    "settings.enableIdeContextInjection.description":  "On each message, automatically provide the AI with the active file, cursor position, selected code and a summary of current-file errors/warnings (injected as volatile context; does not affect prefix cache hits). Deep queries remain available via tools like get_errors.",
     "settings.language.displayName":  "Display Language / 显示语言",
     "settings.language.description":  "Choose display language. Select 'Auto' to follow system language.\n选择显示语言。「自动」则跟随系统语言。",
     "settings.approvalMode.displayName":  "Approval Mode",
