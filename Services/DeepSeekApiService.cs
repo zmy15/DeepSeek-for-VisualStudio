@@ -1311,7 +1311,7 @@ namespace DeepSeek_v4_for_VisualStudio.Services
         {
             var request = new DeepSeekFimRequest
             {
-                Model = _model,
+                Model = ResolveFimModel(),
                 Prompt = prompt,
                 Suffix = suffix,
                 MaxTokens = maxTokens ?? 256,
@@ -1345,6 +1345,15 @@ namespace DeepSeek_v4_for_VisualStudio.Services
 
             return result?.Choices?[0]?.Text ?? string.Empty;
         }
+
+        /// <summary>
+        /// 解析 FIM 补全实际发送的模型名。
+        /// deepseek-v4-flash-vision-exp 不支持 FIM 补全，回退到 deepseek-v4-flash。
+        /// </summary>
+        private string ResolveFimModel()
+            => DeepSeekModelCatalog.IsVisionModel(_model)
+                ? DeepSeekModelCatalog.Flash
+                : _model;
 
         /// <summary>
         /// 验证 API Key 是否有效。发送一个最小请求，检查响应。
