@@ -21,7 +21,7 @@
 
 ## 📖 Overview
 
-**DeepSeek v4 for Visual Studio**is a Visual Studio 2022+ extension that deeply embeds the DeepSeek V4 large language model into the IDE. It provides a native-grade chat experience through **WebView2**, supporting multi-agent collaboration, code editing, inline completions, terminal command execution, web search, OCR image recognition, file parsing, and MCP external tool integration.
+**DeepSeek v4 for Visual Studio**is a Visual Studio 2022+ extension that deeply embeds the DeepSeek V4 large language model into the IDE. It provides a native-grade chat experience through **WebView2**, supporting multi-agent collaboration, code editing, inline completions, terminal command execution, web search, OCR image recognition, multimodal image understanding, file parsing, and MCP external tool integration.
 
 **Core architecture** is built on .NET Framework 4.7.2 + WPF + WebView2, using Visual Studio SDK 17.14, compatible with Visual Studio 2022 17.14 and above.
 
@@ -32,6 +32,7 @@
 | Feature | Description |
 |---------|-------------|
 | 🧠 **DeepSeek V4** | Streaming chat, Deep Reasoning, Pro/Flash dual models, resumable streaming, Prefix Cache |
+| 👁️ **Multimodal Vision** | `deepseek-v4-flash-vision-exp` vision model: image understanding, window screenshot analysis, per-page PDF reading, webpage image reading |
 | 🤖 **Multi-Agent** | Five agents (Ask/Explore/Plan/Edit/Build), Handoff auto-collaboration, live plan monitoring, VS build integration |
 | 📐 **Skills System** | Markdown (SKILL.md) reusable AI workflows, triggered by `/` slash commands |
 | 🔧 **MCP Protocol** | Connect external tool servers (HTTP + stdio), auto-classify and inject into agents |
@@ -83,6 +84,8 @@ git clone https://github.com/zmy15/DeepSeek-v4-for-VisualStudio.git
 | Web Search | Baidu Qianfan | 1,500 free calls/month |
 | OCR Engine | PaddleOCR-Sharp | Local offline recognition, no network needed |
 | Token Budget | 900000 | Fully utilize the 1M context window |
+
+> 💡 For "seeing" images (image understanding / screenshot analysis / PDF reading), switch the model to `deepseek-v4-flash-vision-exp` — see "Multimodal Image Understanding" below.
 
 ---
 
@@ -234,6 +237,21 @@ Powered by DeepSeek FIM API (`api.deepseek.com/beta/completions`):
 | PaddleOCR-Sharp | Local offline | Sdcb.PaddleOCR + OpenCvSharp |
 | Windows Built-in | System API | Windows 10/11 |
 | MCP Remote | MCP Protocol | External OCR service |
+
+> 💡 OCR only **extracts text**; to **understand** the semantic content of images / screenshots / PDFs (layout, charts, context), switch the model to `deepseek-v4-flash-vision-exp` (see "Multimodal Image Understanding" below).
+
+### Multimodal Image Understanding (deepseek-v4-flash-vision-exp)
+
+After switching the model to `deepseek-v4-flash-vision-exp`, the AI can directly "see" images instead of only extracting text:
+
+| Capability | Description |
+|------------|-------------|
+| 🖼️ **Image Understanding** | Drag-drop / pasted image attachments are sent directly to the vision model to recognize content, describe scenes, and answer image-related questions |
+| 📸 **Window Screenshot Analysis** | The `capture_window` tool captures a target window so the AI can inspect it for UI / error diagnosis |
+| 📄 **Per-page PDF Reading** | PDFs are rendered page-by-page into images and sent directly (up to 20 pages); layout / tables / formulas are understood without OCR first |
+| 🌐 **Webpage Image Reading** | During web search / page fetch, image URLs on the page are fed directly to the vision model |
+
+> ⚠️ The vision model does not support inline FIM completion; it automatically falls back to `deepseek-v4-flash` for completions.
 
 ---
 

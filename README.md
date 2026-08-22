@@ -21,7 +21,7 @@
 
 ## 📖 简介
 
-**DeepSeek v4 for Visual Studio**是一款将 DeepSeek V4 大语言模型深度嵌入 Visual Studio 2022+ 的 AI 编程助手扩展。它通过 **WebView2** 提供原生级聊天体验，并支持多智能体协作、代码编辑、行内补全、终端命令执行、联网搜索、OCR 图像识别、文件解析以及 MCP 外部工具集成。
+**DeepSeek v4 for Visual Studio**是一款将 DeepSeek V4 大语言模型深度嵌入 Visual Studio 2022+ 的 AI 编程助手扩展。它通过 **WebView2** 提供原生级聊天体验，并支持多智能体协作、代码编辑、行内补全、终端命令执行、联网搜索、OCR 图像识别、多模态图像理解、文件解析以及 MCP 外部工具集成。
 
 **核心架构**基于 .NET Framework 4.7.2 + WPF + WebView2，使用 Visual Studio SDK 17.14 构建，兼容 Visual Studio 2022 17.14 及以上版本。
 
@@ -32,6 +32,7 @@
 | 特性 | 说明 |
 |------|------|
 | 🧠 **DeepSeek V4** | 流式对话、深度思考 (Reasoning)、Pro/Flash 双模型、断点续传、Prefix Cache |
+| 👁️ **多模态视觉** | `deepseek-v4-flash-vision-exp` 视觉模型：图片理解、窗口截图分析、PDF 逐页直读、网页图片直读 |
 | 🤖 **多智能体** | Ask / Explore / Plan / Edit / Build 五种 Agent，Handoff 自动协作，实时计划监控，VS 构建集成 |
 | 📐 **Skills 技能** | Markdown (SKILL.md) 定义可复用 AI 工作流，`/` 斜杠命令触发 |
 | 🔧 **MCP 协议** | 连接外部工具服务器（HTTP + stdio），自动分类注入对应 Agent |
@@ -83,6 +84,8 @@ git clone https://github.com/zmy15/DeepSeek-v4-for-VisualStudio.git
 | 联网搜索 | 百度千帆 | 每月 1500 次免费额度 |
 | OCR 引擎 | PaddleOCR-Sharp | 本地离线识别，无网络依赖 |
 | Token Budget | 900000 | 充分利用 1M 上下文窗口 |
+
+> 💡 需要「看图」时（图片理解 / 截图分析 / PDF 直读），把模型切换到 `deepseek-v4-flash-vision-exp`，详见下文「多模态图像理解」。
 
 ---
 
@@ -234,6 +237,21 @@ AI 通过 `memory` 工具管理三层持久化记忆：
 | PaddleOCR-Sharp | 本地离线 | Sdcb.PaddleOCR + OpenCvSharp |
 | Windows 内置 | 系统 API | Windows 10/11 |
 | MCP 远程 | MCP 协议 | 外部 OCR 服务 |
+
+> 💡 OCR 只负责**提取文字**；若要**理解**图片 / 截图 / PDF 的语义内容（结合布局、图表、上下文），请切换模型到 `deepseek-v4-flash-vision-exp`（见下方「多模态图像理解」）。
+
+### 多模态图像理解（deepseek-v4-flash-vision-exp）
+
+将模型切换为 `deepseek-v4-flash-vision-exp` 后，AI 可以直接「看懂」图像，而不只是提取文字：
+
+| 能力 | 说明 |
+|------|------|
+| 🖼️ **图片理解** | 拖拽 / 粘贴图片附件时直传视觉模型，识别内容、描述画面、解答图片相关问题 |
+| 📸 **窗口截图分析** | `capture_window` 工具截取指定窗口，AI 直接查看截图进行界面 / 报错诊断 |
+| 📄 **PDF 逐页直读** | PDF 自动逐页渲染为图片直传（最多 20 页），排版 / 表格 / 公式也能看懂，无需先 OCR |
+| 🌐 **网页图片直读** | 联网搜索 / 抓取网页时，页面图片 URL 直接喂给视觉模型理解 |
+
+> ⚠️ 视觉模型不支持行内 FIM 补全，启用时会自动回退到 `deepseek-v4-flash` 完成补全。
 
 ---
 
