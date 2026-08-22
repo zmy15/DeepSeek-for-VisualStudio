@@ -406,9 +406,9 @@
     "input.fileChangesDetected":  "📊 File Changes Detected",
     "input.contextStatsLabel":  "Tokens:",
     "═══ Approval Mode ═══":  "═══ Approval Mode ═══",
-    "approval.blockAll":    "Block all",
-    "approval.allowAll":    "Allow all",
-    "approval.smartBlock":    "Smart block",
+    "approval.blockAll":  "Block all",
+    "approval.allowAll":  "Allow all",
+    "approval.smartBlock":  "Smart block",
     "═══ Status / Notifications ═══":  "═══ Status / Notifications ═══",
     "status.buildSuccess":  "Build succeeded",
     "status.buildFailed":  "Build failed",
@@ -1575,5 +1575,7 @@
     "tool.runInTerminal.commandLabel":  "Command: {0}",
     "tool.runSubagent.param.agentName":  "Sub-agent name. Use \"Explore\" for codebase exploration and search.",
     "tool.runSubagent.param.prompt":  "Full task description delegated to the sub-agent, including search targets and desired detail level (quick/medium/thorough).",
-    "tool.runSubagent.param.description":  "Short (3-5 word) task summary for logging and tracking."
+    "tool.runSubagent.param.description":  "Short (3-5 word) task summary for logging and tracking.",
+    "chat.loadEarlier":  "Load earlier messages",
+    "chat.loadEarlierMore":  "{0} more"
 }

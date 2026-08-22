@@ -2172,6 +2172,10 @@ namespace DeepSeek_v4_for_VisualStudio.View
                         if (msgIndex >= 0 && !string.IsNullOrEmpty(newText))
                             _ = HandleEditConfirmAsync(msgIndex, newText);
                     }
+                    else if (type == "loadEarlier")
+                    {
+                        _ = LoadEarlierMessagesAsync();
+                    }
                     else if (type == "editMessageCancel")
                     {
                         int msgIndex = obj.TryGetProperty("messageIndex", out var editCancelIdxProp)

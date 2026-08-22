@@ -215,6 +215,35 @@ namespace DeepSeek_v4_for_VisualStudio.Services
         /// <summary>
         /// 向 StringBuilder 追加 JSON 字符串值（手动转义，避免分配）。
         /// </summary>
+        /// <summary>
+        /// 「加载更早的消息」按钮 HTML（窗口化分页，P1 性能）。
+        /// </summary>
+        public static string BuildLoadEarlierButtonHtml(int remainCount)
+        {
+            var L = LocalizationService.Instance;
+            string label = L["chat.loadEarlier"];
+            string more = string.Format(L["chat.loadEarlierMore"], remainCount);
+            return "<div id='load-earlier-wrap' style='text-align:center;padding:8px 0;'>"
+                 + "<button id='load-earlier-btn' class='msg-action-btn' onclick='window.__loadEarlier()' "
+                 + "style='padding:4px 14px;font-size:11px;'>"
+                 + EscapeHtml(label + "（" + more + "）")
+                 + "</button></div>";
+        }
+
+        /// <summary>
+        /// 构造前插历史批次的 webview 消息（prependHtml，P1 窗口化分页）。
+        /// </summary>
+        public static string BuildPrependOlderJson(string html, bool hasMore, int insertedCount)
+        {
+            var sb = new StringBuilder(256 + html.Length);
+            sb.Append("{\"type\":\"prependHtml\",\"hasMore\":").Append(hasMore ? "true" : "false");
+            sb.Append(",\"inserted\":").Append(insertedCount);
+            sb.Append(",\"html\":");
+            AppendJsonString(sb, html);
+            sb.Append('}');
+            return sb.ToString();
+        }
+
         private static void AppendJsonString(StringBuilder sb, string value)
         {
             sb.Append('"');

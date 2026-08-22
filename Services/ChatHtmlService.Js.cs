@@ -344,6 +344,9 @@ window.__editMessage=function(msgIndex){
 window.__editMessageConfirm=function(msgIndex,newText){
     window.__sendToHost({type:'editMessageConfirm',messageIndex:msgIndex,text:newText});
 };
+window.__loadEarlier=function(){
+    window.__sendToHost({type:'loadEarlier'});
+};
 window.__editMessageCancel=function(msgIndex){
     window.__sendToHost({type:'editMessageCancel',messageIndex:msgIndex});
 };
@@ -617,6 +620,11 @@ window._showCopyFeedback=function(msgIndex){
                     // 仅更新状态栏（避免额外通信）
                     var st=document.getElementById('status-text');
                     if(st&&msg.text)st.textContent=msg.text;
+                }else if(msg.type==='prependHtml'){
+                    var cc2=document.getElementById('chat-container');
+                    if(cc2){cc2.insertAdjacentHTML('afterbegin',msg.html);}
+                    var lb=document.getElementById('load-earlier-wrap');
+                    if(lb&&!msg.hasMore){lb.parentNode.removeChild(lb);}
                 }else if(msg.type==='appendHtml'){
                     // ── 增量追加 HTML（避免 NavigateToString 全量刷新导致滚动/闪烁）──
                     var temp=document.createElement('div');

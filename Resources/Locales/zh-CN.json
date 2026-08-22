@@ -405,9 +405,9 @@
     "input.fileChangesDetected":  "📊 检测到文件变更",
     "input.contextStatsLabel":  "Token:",
     "═══ Approval Mode ═══":  "═══ Approval Mode ═══",
-    "approval.blockAll":    "全部拦截",
-    "approval.allowAll":    "全部放行",
-    "approval.smartBlock":    "智能拦截",
+    "approval.blockAll":  "全部拦截",
+    "approval.allowAll":  "全部放行",
+    "approval.smartBlock":  "智能拦截",
     "═══ Status / Notifications ═══":  "═══ Status / Notifications ═══",
     "status.buildSuccess":  "构建成功",
     "status.buildFailed":  "构建失败",
@@ -1574,5 +1574,7 @@
     "tool.runInTerminal.commandLabel":  "命令: {0}",
     "tool.runSubagent.param.agentName":  "子 Agent 名称。使用 \"Explore\" 进行代码库探索和搜索。",
     "tool.runSubagent.param.prompt":  "委派给子 Agent 的完整任务描述，包括搜索目标、期望的详细程度（quick/medium/thorough）等。",
-    "tool.runSubagent.param.description":  "简短（3-5 词）任务摘要，用于日志和追踪。"
+    "tool.runSubagent.param.description":  "简短（3-5 词）任务摘要，用于日志和追踪。",
+    "chat.loadEarlier":  "加载更早的消息",
+    "chat.loadEarlierMore":  "还有 {0} 条"
 }
