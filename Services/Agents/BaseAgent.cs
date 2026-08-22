@@ -1241,31 +1241,35 @@ namespace DeepSeek_v4_for_VisualStudio.Services.Agents
                         var tc = toolCalls[i];
                         string toolResult = toolResults[i];
 
+                        // ── fetch_webpage：剥离图片块，视觉模型时提取图片 URL 直传给视觉模型 ──
+                        List<string>? webImageUrls = null;
+                        string resultText = toolResult;
+                        if (tc.Function.Name == "fetch_webpage")
+                        {
+                            var (cleanText, imageUrls) = WebSearchService.ParseWebImagesBlock(toolResult);
+                            resultText = cleanText;
+                            if (imageUrls.Count > 0
+                                && DeepSeekModelCatalog.IsVisionModel(_apiService.CurrentModel))
+                            {
+                                webImageUrls = imageUrls;
+                            }
+                        }
+
                         // ── 裁剪工具结果以保护上下文（与 ContextManager.AddToolResult 保持一致）──
-                        string contextResult = CompactToolResultForAgent(tc.Function.Name, toolResult);
+                        string contextResult = CompactToolResultForAgent(tc.Function.Name, resultText);
 
                         // ── 🔑 runSubagent 结果放到 [user] 之后、[agent] 之前，
                         //     保持前缀不被破坏，确保 DeepSeek Prefix Cache 跨轮次命中。──
                         if (tc.Function.Name == "runSubagent")
                         {
-                            messages.Insert(messages.Count - 1, new ChatApiMessage
-                            {
-                                Role = "tool",
-                                Content = contextResult,
-                                ToolCallId = tc.Id,
-                                Name = tc.Function.Name
-                            });
+                            messages.Insert(messages.Count - 1,
+                                BuildToolResultMessage(tc.Id, tc.Function.Name, contextResult, webImageUrls));
                             // 不递增 toolInsertPos——runSubagent 结果不属于主历史前缀
                         }
                         else
                         {
-                            messages.Insert(toolInsertPos, new ChatApiMessage
-                            {
-                                Role = "tool",
-                                Content = contextResult,
-                                ToolCallId = tc.Id,
-                                Name = tc.Function.Name
-                            });
+                            messages.Insert(toolInsertPos,
+                                BuildToolResultMessage(tc.Id, tc.Function.Name, contextResult, webImageUrls));
                             toolInsertPos++;
                         }
 
@@ -2904,6 +2908,41 @@ namespace DeepSeek_v4_for_VisualStudio.Services.Agents
             {
                 return rawResult ?? string.Empty;
             }
+        }
+
+        /// <summary>
+        /// 构建工具结果消息。视觉模型的 fetch_webpage 结果会把图片 URL 作为
+        /// image_url 内容块附加，让视觉模型直读网页图片；否则只返回纯文本。
+        /// </summary>
+        private static ChatApiMessage BuildToolResultMessage(
+            string toolCallId, string toolName, string contextResult, List<string>? webImageUrls)
+        {
+            var message = new ChatApiMessage
+            {
+                Role = "tool",
+                Content = contextResult,
+                ToolCallId = toolCallId,
+                Name = toolName,
+            };
+
+            if (webImageUrls is { Count: > 0 })
+            {
+                var parts = new List<ChatContentPart>
+                {
+                    new ChatContentPart { Type = "text", Text = contextResult },
+                };
+                foreach (string u in webImageUrls)
+                {
+                    parts.Add(new ChatContentPart
+                    {
+                        Type = "image_url",
+                        ImageUrl = new ChatImageUrl { Url = u },
+                    });
+                }
+                message.MultimodalContent = parts;
+            }
+
+            return message;
         }
 
         /// <summary>

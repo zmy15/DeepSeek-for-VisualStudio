@@ -364,6 +364,10 @@ namespace DeepSeek_v4_for_VisualStudio.Services
         }
 
         public void UpdateModel(string model) => _model = model;
+
+        /// <summary>当前使用的模型标识（用于视觉模型等能力分支判断）。</summary>
+        public string CurrentModel => _model;
+
         public void ConfigureThinking(bool enabled, string effort = "high")
         {
             _thinkingEnabled = enabled;

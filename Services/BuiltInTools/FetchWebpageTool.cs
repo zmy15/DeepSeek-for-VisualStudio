@@ -1,4 +1,4 @@
-using DeepSeek_v4_for_VisualStudio.Models;
+﻿using DeepSeek_v4_for_VisualStudio.Models;
 using DeepSeek_v4_for_VisualStudio.Utils;
 using System;
 using System.Collections.Generic;
@@ -87,7 +87,8 @@ namespace DeepSeek_v4_for_VisualStudio.Services.BuiltInTools
 
                 var visited = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
                 var allContents = new List<string>();
-                await FetchRecursiveAsync(safeUrl, maxDepth, maxContentLength, visited, allContents);
+                var imageUrls = new List<string>();
+                await FetchRecursiveAsync(safeUrl, maxDepth, maxContentLength, visited, allContents, imageUrls);
 
                 if (allContents.Count == 0)
                     return LocalizationService.Instance.Format("tool.fetchWebpage.noContent", url);
@@ -109,7 +110,8 @@ namespace DeepSeek_v4_for_VisualStudio.Services.BuiltInTools
                 sb.AppendLine("=== 网页内容结束 ===");
 
                 string result = sb.ToString();
-                Logger.Info($"[fetch_webpage] 抓取完成: {url}, 共 {allContents.Count} 个页面, {result.Length} 字符");
+                result = WebSearchService.AppendWebImagesBlock(result, imageUrls);
+                Logger.Info($"[fetch_webpage] 抓取完成: {url}, 共 {allContents.Count} 个页面, {imageUrls.Count} 张图片, {result.Length} 字符");
                 return result;
             }
             catch (Exception ex)
@@ -121,22 +123,24 @@ namespace DeepSeek_v4_for_VisualStudio.Services.BuiltInTools
 
         private async Task FetchRecursiveAsync(
             string url, int remainingDepth, int maxContentLength,
-            HashSet<string> visited, List<string> allContents)
+            HashSet<string> visited, List<string> allContents, List<string> imageUrls)
         {
             if (remainingDepth <= 0 || visited.Contains(url) || visited.Count >= 10)
                 return;
 
             visited.Add(url);
 
-            string? content = await _webSearchService!.FetchWebPageContentAsync(url);
-            if (string.IsNullOrWhiteSpace(content))
+            var page = await _webSearchService!.FetchWebPageContentWithImagesAsync(url, maxContentLength: maxContentLength);
+            if (page == null || string.IsNullOrWhiteSpace(page.Text))
                 return;
 
-            allContents.Add(content);
+            allContents.Add(page.Text);
+            if (page.ImageUrls is { Count: > 0 })
+                imageUrls.AddRange(page.ImageUrls);
 
             if (remainingDepth > 1)
             {
-                var childUrls = WebSearchService.ExtractUrls(content);
+                var childUrls = page.LinkUrls;
                 int childCount = 0;
                 foreach (string childUrl in childUrls)
                 {
@@ -145,7 +149,7 @@ namespace DeepSeek_v4_for_VisualStudio.Services.BuiltInTools
                     if (!visited.Contains(childUrl))
                     {
                         childCount++;
-                        await FetchRecursiveAsync(childUrl, remainingDepth - 1, maxContentLength, visited, allContents);
+                        await FetchRecursiveAsync(childUrl, remainingDepth - 1, maxContentLength, visited, allContents, imageUrls);
                     }
                 }
             }
