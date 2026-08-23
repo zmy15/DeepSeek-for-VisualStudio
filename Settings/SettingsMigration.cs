@@ -4,6 +4,7 @@ using System.Collections.Generic;
 using System.IO;
 using System.Linq;
 using System.Runtime.InteropServices;
+using System.Threading.Tasks;
 using DeepSeek_v4_for_VisualStudio.Utils;
 using System.Text.RegularExpressions;
 
@@ -15,9 +16,12 @@ namespace DeepSeek_v4_for_VisualStudio.Settings
     /// 背景：VS 每个实例的 DialogPage 设置存放在各自的 privateregistry.bin 中，
     /// VS2022 的配置不会自动出现在 VS2026（新 hive 完全独立）。
     ///
-    /// 策略：当当前实例 ApiKey 为空时，枚举同机其他实例的 bin，
-    /// 用 RegLoadAppKey 只读挂载，找到 DeepSeekOptionsPage 集合，
-    /// 将非空值按属性名回填到目标 OptionsPage 并走正常 SaveSettingsToStorage 持久化。
+    /// 策略（两阶段拆分）：
+    ///   阶段一 ProbeBestSourceAsync —— 纯 IO（目录枚举 + RegLoadAppKey 只读挂载），
+    ///     不触碰 DialogPage，可在后台线程执行；带自排除（跳过本实例活动 hive）
+    ///     与单 hive 超时兜底。
+    ///   阶段二 ApplyProbedValues —— 把探得值回填到目标 OptionsPage 并走正常
+    ///     SaveSettingsToStorage 持久化；涉及 DialogPage，需在 UI 线程调用。
     /// </summary>
     internal static class SettingsMigration
     {
@@ -29,49 +33,106 @@ namespace DeepSeek_v4_for_VisualStudio.Settings
 
         private const uint KEY_READ = 0x20019;
 
-        /// <summary>尝试从其他实例迁移设置。返回是否发生迁移。</summary>
-        public static bool TryMigrateInto(DeepSeekOptionsPage target)
+        /// <summary>单个 hive 探测的超时上限。RegLoadAppKey 无内建超时，
+        /// 对异常锁定的 hive 需主动放弃以防拖住加载链路。</summary>
+        private const int PerHiveTimeoutMs = 3000;
+
+        /// <summary>探测结果：来源 hive 目录名 + 解码后的设置键值。</summary>
+        public sealed class MigrationProbeResult
+        {
+            public string SourceHive { get; init; } = string.Empty;
+            public Dictionary<string, string> Values { get; init; } = new(StringComparer.OrdinalIgnoreCase);
+        }
+
+        /// <summary>
+        /// 阶段一：枚举同机其他实例的 bin 并读取 DeepSeekOptionsPage 集合（纯 IO，可后台线程调用）。
+        /// 返回最佳来源（含 ApiKey 的最新实例优先）；无有效来源返回 null。
+        /// </summary>
+        /// <param name="excludeHiveName">当前实例自身 hive 目录名（如 "18.0_xxxExp"）；
+        /// 命中则跳过，避免对本实例正在使用的活动注册表做 RegLoadAppKey。null 表示不排除。</param>
+        /// <param name="baseDirOverride">实例根目录覆盖（仅测试用；生产环境使用默认 %LOCALAPPDATA% 路径）。</param>
+        public static async Task<MigrationProbeResult?> ProbeBestSourceAsync(
+            string? excludeHiveName, string? baseDirOverride = null)
         {
             try
             {
-                if (!string.IsNullOrWhiteSpace(target.ApiKey)) return false; // 已有配置
-
-                var baseDir = Path.Combine(
+                var baseDir = baseDirOverride ?? Path.Combine(
                     Environment.GetFolderPath(Environment.SpecialFolder.LocalApplicationData),
                     "Microsoft", "VisualStudio");
 
-                var candidates = Directory.GetDirectories(baseDir)
-                    .Where(d => !d.EndsWith("Exp", StringComparison.OrdinalIgnoreCase)) // 正式实例优先
-                    .Select(d => Path.Combine(d, "privateregistry.bin"))
-                    .Where(File.Exists)
-                    .OrderByDescending(File.GetLastWriteTime);
-
-                foreach (var bin in candidates)
+                foreach (var bin in EnumerateCandidateBins(baseDir, excludeHiveName))
                 {
                     DiagnosticLog.Write($"[Settings] 迁移探测: {bin}");
-                    var values = TryReadValues(bin);
+                    var values = await WithTimeoutAsync(() => TryReadValues(bin), PerHiveTimeoutMs);
                     if (values == null || values.Count == 0)
                     {
                         Logger.Info("[Settings] 迁移探测: 未找到有效 DeepSeekOptionsPage 集合");
                         continue;
                     }
 
-                    int applied = Apply(target, values);
-                    if (applied > 0)
+                    return new MigrationProbeResult
                     {
-                        target.SaveSettingsToStorage();
-                        DiagnosticLog.Write($"[Settings] 已从 {Path.GetFileName(Path.GetDirectoryName(bin))} 迁移 {applied} 项设置");
-                        return true;
-                    }
+                        SourceHive = Path.GetFileName(Path.GetDirectoryName(bin)) ?? string.Empty,
+                        Values = values,
+                    };
                 }
                 Logger.Info("[Settings] 迁移结束：无可迁移来源");
             }
             catch (Exception ex)
             {
-                DiagnosticLog.Write($"[Settings] 迁移失败: {ex.Message}");
+                DiagnosticLog.Write($"[Settings] 迁移探测失败: {ex.Message}");
+            }
+            return null;
+        }
+
+        /// <summary>
+        /// 枚举候选 privateregistry.bin（按最后写入时间倒序）：
+        /// 排除 Exp 后缀 hive（正式实例优先）与当前实例自身 hive（自排除活动注册表）。
+        /// </summary>
+        internal static IEnumerable<string> EnumerateCandidateBins(string baseDir, string? excludeHiveName)
+        {
+            return Directory.GetDirectories(baseDir)
+                .Where(d => !d.EndsWith("Exp", StringComparison.OrdinalIgnoreCase)) // 正式实例优先
+                .Where(d => excludeHiveName == null ||
+                            !string.Equals(Path.GetFileName(d), excludeHiveName, StringComparison.OrdinalIgnoreCase)) // 自排除
+                .Select(d => Path.Combine(d, "privateregistry.bin"))
+                .Where(File.Exists)
+                .OrderByDescending(File.GetLastWriteTime);
+        }
+
+        /// <summary>阶段二（需在 UI 线程调用）：将探得值按属性名回填到目标并持久化。返回是否发生迁移。</summary>
+        public static bool ApplyProbedValues(DeepSeekOptionsPage target, MigrationProbeResult probed)
+        {
+            try
+            {
+                int applied = Apply(target, probed.Values);
+                if (applied > 0)
+                {
+                    target.SaveSettingsToStorage();
+                    DiagnosticLog.Write($"[Settings] 已从 {probed.SourceHive} 迁移 {applied} 项设置");
+                    return true;
+                }
+            }
+            catch (Exception ex)
+            {
+                DiagnosticLog.Write($"[Settings] 迁移应用失败: {ex.Message}");
             }
             return false;
         }
+
+        /// <summary>带超时的受控执行：超时后放弃等待（后台任务自然消亡），返回 default。</summary>
+        internal static async Task<T?> WithTimeoutAsync<T>(Func<T> func, int timeoutMs)
+        {
+            Task<T?> readTask = Task.Run(() => (T?)func());
+            Task completed = await Task.WhenAny(readTask, Task.Delay(timeoutMs));
+            if (completed != readTask)
+            {
+                DiagnosticLog.Write($"[Settings] 迁移探测超时({timeoutMs}ms)");
+                return default;
+            }
+            return readTask.Result;
+        }
+
 
 
         /// <summary>解码 SettingsManager 存储编码：&lt;flag&gt;*&lt;Type&gt;*&lt;value&gt;。</summary>
