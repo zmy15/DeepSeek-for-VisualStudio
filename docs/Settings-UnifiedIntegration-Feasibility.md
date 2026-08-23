@@ -114,3 +114,73 @@ ApiKey 保持现状：旧页编辑 + DPAPI 私有存储；新 UI 对应条目可
 3. ApiKey 继续排除在新体系之外（云同步风险），维持 DPAPI 私有存储。
 
 *探针原始输出见 %LocalAppData%\DeepSeekVS\diagnostic-2026-08-23.log（USv2 标记段）。*
+
+
+---
+
+## 八、Step2 深度调查：VisualStudio.Extensibility 设置声明接入 VS2026 的可行性
+
+> 依据：官方 in-proc 指南、VSExtensibility 实验特性清单、兼容性博客、GitHub #233，
+> 以及本机环境核查（Extensibility 包未缓存、Utilities v17.14 已缓存）。
+
+### 8.1 官方支持的三种混合形态（均适用于本工程）
+
+| 形态 | 说明 | 对我们的适配度 |
+|------|------|--------------|
+| ① 全新 in-proc Extension 工程 | `Extension` 基类 + `RequiresInProcessHosting=true`，可注入全部 VSSDK 服务 | 需新建工程，双 VSIX 并存 |
+| ② 现有 AsyncPackage 内查询 `VisualStudioExtensibility` 实例 | 仅加 `Microsoft.VisualStudio.Extensibility` 包引用，`GetServiceAsync<…>()` | ✅ 改动最小；但只能调用运行期服务，**不支持 `[VisualStudioContribution]` 贡献** |
+| ③ 同工程承载 VSSDK 包 + VSEXT Extension | 移除 `Microsoft.VSSDK.BuildTools`，改引 `Extensibility.Sdk`+`.Build`；csproj 加 `VssdkCompatibleExtension=true`；清单 `ExtensionType="VSSDK+VisualStudio.Extensibility"`；新增 `Extension` 子类 | ⭐ **唯一能让 `SettingCategory` 出现在新设置 UI 的形态** |
+
+### 8.2 关键事实
+
+1. TFM 兼容：in-proc 扩展目标 .NET Framework 4.7.2 —— 与本工程一致。
+2. 版本窗口：VSEXT 仅支持 VS2022+；清单 `[17.14,)` 下界写法与 Dev18「只看下界」的兼容模型吻合。
+3. 设置 API 处于 Preview：需 `#pragma warning disable VSEXTPREVIEW_SETTINGS` 或 csproj NoWarn；
+   官方实验特性清单明确列出 Settings，行为可能变更。
+4. Marketplace 发布：17.9 起 stable SDK 构建的扩展可发布市场；早期 preview-SDK 一刀切禁令已解除，
+   但「实验特性 + NoWarn」能否过审未见明文承诺 —— 发布前需以实际构建物实测一次。
+5. 本机构建链冲突点：官方要求移除 Microsoft.VSSDK.BuildTools 由 Extensibility.Build 接管 VSIX 打包；
+   本工程当前依赖 BuildTools + 自定义合并式 Sdks 工具链（tools/build-vs26.ps1）——
+   切换后该脚本大概率失效，需为 VSEXT 打包路径重做验证。
+6. 观察者代码生成：GenerateObserverClass=true 时 SDK 自动生成强类型观察者并经
+   InitializeServices 的 AddSettingsObservers() 注入 DI —— 天然承接「新 UI 改动 → 写回 Instance」桥接。
+7. 反向同步：旧 Options 页 OnApply 后可通过 ISettingsWriter/批写 API 把新值推回 Unified 存储，
+   保证双入口无漂移（需验证 Writer 在 in-proc 经典包内的可用性）。
+8. 本机 NuGet 缓存中 Extensibility 包未安装 → 还原需联网。
+
+### 8.3 迁移脚手架（形态③，供 Step2 执行时直接取用）
+
+csproj 变更：
+- PropertyGroup 增加 VssdkCompatibleExtension=true 与 NoWarn 追加 VSEXTPREVIEW_SETTINGS
+- 移除 Microsoft.VSSDK.BuildTools 包引用
+- 新增 Microsoft.VisualStudio.Extensibility.Sdk / .Build（PrivateAssets=all）
+
+vsixmanifest 变更：Installation 标签追加 ExtensionType="VSSDK+VisualStudio.Extensibility"
+
+新增代码骨架：
+- DeepSeekExtension : Extension，RequiresInProcessHosting=true，
+  InitializeServices 中 services.AddSettingsObservers()
+- DeepSeekSettingDefinitions：[VisualStudioContribution] SettingCategory +
+  非敏感子集声明（SelectedModel/Thinking/Effort/ApprovalMode/WebSearch/
+  TokenBudget/CompressionThreshold/各开关）；ApiKey 永不入内
+- 生成的 Observer 内：值变化 → 写回 Instance + ApplyRuntimeHotUpdates()
+
+### 8.4 风险矩阵与缓解
+
+| 风险 | 等级 | 缓解 |
+|------|:---:|------|
+| 构建链切换破坏既有打包（含自定义工具链） | 高 | 独立分支执行；先只加壳不声明设置，跑通 VSIX 再进设置声明 |
+| Preview API 行为变更 | 中 | 子集收敛在稳定类型（Boolean/Integer/Enum/String）；NoWarn 显式化便于升级审视 |
+| 市场/本地分发政策不确定 | 中 | 先走 GitHub Release 直发 VSIX；Marketplace 待实测 |
+| 双入口漂移 | 低 | 单一事实源仍为 Instance；双向写穿 + Observer 监听 |
+| ApiKey 泄漏面扩大 | — | 维持排除策略不变（DPAPI 私有存储） |
+
+### 8.5 结论
+
+接入可行且为官方推荐路径；按「先壳后芯」两段式推进以隔离最大风险：
+
+- Step2a（约半天）：独立分支完成 csproj/manifest/Extension 壳改造，
+  Dev18 F5 验证包加载与旧功能零回归（同时检验 tools/build-vs26.ps1 是否需适配）。
+- Step2b（约一天）：声明非敏感子集 SettingCategory + 观察者回写 Instance +
+  旧页反向推写；新旧双入口一致性验收。
+- Step2c：发布通道实测（GitHub Release vs Marketplace）。
