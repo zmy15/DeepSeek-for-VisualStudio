@@ -67,13 +67,18 @@ PreserveRecentTurns / ShowContextStats / EnableTelemetryExport / EnableIdeContex
 ApiKey 保持现状：旧页编辑 + DPAPI 私有存储；新 UI 对应条目可展示为只读状态 + “在旧页修改”跳转链接
 （利用 OpenBackingStoreAsync 打开旧 Options 页命令）。
 
-## 五、建议路线
+## 五、建议路线（✅ 已于 2026-08-23 全部执行，状态见下）
 
-1. **Step 1（原型验证，约 1–2 天）**：方案 A 最小实现 —— 仅挂 SelectedModel/Thinking/Effort/审批模式 四项，
-   在 Dev18 实测注册元数据形态并跑通 GetValue/SetValue/枚举/事件闭环。
-2. **Step 2（补全）**：按 §四 子集全量接入；旧 Options 页保留为高级入口，页头加“在新设置中打开”跳转。
-3. **Step 3（远期评估）**：VisualStudio.Extensibility SettingCategory 待其 API 稳定且支持场景完备后再评估迁移；
-   同时关注 IArraySettingMigrator 是否可用于把历史 DialogPage 存储自动搬入 Unified 作用域。
+1. **Step 1（原型验证）**：✅ **已完成** —— `Settings/UnifiedSettingsBridge.cs` 实现方案 A 最小原型
+   （DeepSeekExternalSettingsProvider + 注册探测），实测结论见 §七。
+2. **Step 2（补全）**：🔶 **部分完成** —— VSEXT SettingCategory 声明已落地（7 项进新 UI，
+   见 §八）。**跳转链接已取消**：经 DLL 符号扫描确认，Dev18 的 Unified Settings UI 并非独立命令，
+   而是整合进 `Tools.Options` 本体——旧 DialogPage 与新 SettingCategory 天然共存于同一对话框，
+   无需额外跳转入口。
+3. **Step 3（远期评估）**：✅ **提前完成** —— 通过 VSSDK+VSEXT 混合构建系统
+   （`DeepSeekExtension.cs` + Extensibility.Sdk 包）实现形态③；
+   GenerateObserverClass 已启用但源生成器未实际产出 Observer 类（阻塞项，
+   备选方案 A/B/C 记录于 Handoff-Context.md §五）。
 
 ## 六、附：本次核实的关键证据
 
