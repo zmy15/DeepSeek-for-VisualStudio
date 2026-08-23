@@ -31,6 +31,12 @@ namespace DeepSeek_v4_for_VisualStudio.View
         {
             InitializeComponent();
 
+            // 主题适配：XAML 默认为深色调色板；浅色 IDE 下运行时递归改写画刷
+            if (Services.ThemeService.Instance.IsLight)
+            {
+                ApplyLightPalette();
+            }
+
             // 应用本地化字符串
             ApplyLocalization();
 
@@ -390,5 +396,44 @@ namespace DeepSeek_v4_for_VisualStudio.View
         }
 
         #endregion
+
+        private void ApplyLightPalette()
+        {
+            var map = new System.Collections.Generic.Dictionary<System.Windows.Media.Color, System.Windows.Media.Color>
+            {
+                [System.Windows.Media.Color.FromRgb(0x25,0x25,0x26)] = System.Windows.Media.Color.FromRgb(0xF6,0xF6,0xF6),
+                [System.Windows.Media.Color.FromRgb(0x2D,0x2D,0x2D)] = System.Windows.Media.Color.FromRgb(0xFF,0xFF,0xFF),
+                [System.Windows.Media.Color.FromRgb(0x3C,0x3C,0x3C)] = System.Windows.Media.Color.FromRgb(0xEE,0xEE,0xEE),
+                [System.Windows.Media.Color.FromRgb(0x50,0x50,0x50)] = System.Windows.Media.Color.FromRgb(0xDD,0xDD,0xDD),
+                [System.Windows.Media.Color.FromRgb(0x55,0x55,0x55)] = System.Windows.Media.Color.FromRgb(0xCC,0xCC,0xCC),
+                [System.Windows.Media.Color.FromRgb(0xD4,0xD4,0xD4)] = System.Windows.Media.Color.FromRgb(0x1E,0x1E,0x1E),
+                [System.Windows.Media.Color.FromRgb(0x88,0x88,0x88)] = System.Windows.Media.Color.FromRgb(0x61,0x61,0x61),
+            };
+            RewriteBrushes(this, map);
+        }
+
+        private static void RewriteBrushes(System.Windows.DependencyObject root, System.Collections.Generic.Dictionary<System.Windows.Media.Color, System.Windows.Media.Color> map)
+        {
+            foreach (object? child in System.Windows.LogicalTreeHelper.GetChildren(root))
+            {
+                if (child is System.Windows.DependencyObject d)
+                {
+                    Swap(d, System.Windows.Controls.Control.BackgroundProperty, map);
+                    Swap(d, System.Windows.Controls.Control.BorderBrushProperty, map);
+                    Swap(d, System.Windows.Controls.Control.ForegroundProperty, map);
+                    Swap(d, System.Windows.Documents.TextElement.ForegroundProperty, map);
+                    Swap(d, System.Windows.Documents.TextElement.BackgroundProperty, map);
+                    RewriteBrushes(d, map);
+                }
+            }
+        }
+
+        private static void Swap(System.Windows.DependencyObject o, System.Windows.DependencyProperty dp, System.Collections.Generic.Dictionary<System.Windows.Media.Color, System.Windows.Media.Color> m)
+        {
+            if (o.GetValue(dp) is System.Windows.Media.SolidColorBrush b && m.TryGetValue(b.Color, out var light))
+            {
+                var nb = new System.Windows.Media.SolidColorBrush(light); nb.Freeze(); o.SetValue(dp, nb);
+            }
+        }
     }
 }
