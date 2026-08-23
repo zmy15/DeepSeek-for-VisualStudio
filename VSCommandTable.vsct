@@ -66,8 +66,14 @@
 		</Bitmaps>
 	</Commands>
 
-	<!-- Ctrl+I：限定在文本编辑器内，不影响其他位置的系统增量搜索 -->
+	<!-- 快捷键映射：
+	     Ctrl+Shift+D  全局：打开/聚焦 DeepSeek Chat 窗口（D = DeepSeek）
+	     Ctrl+I        文本编辑器内：Inline AI Edit（限定编辑器作用域，不影响其他位置的系统增量搜索）
+	     如与用户现有方案冲突，可在 工具 → 选项 → 环境 → 键盘 中自行调整 -->
 	<KeyBindings>
+		<KeyBinding guid="guidDeepSeekCmdSet" id="cmdidShowChatWindow"
+		            editor="guidStdEditor"
+		            mod1="Control Shift" key1="D"/>
 		<KeyBinding guid="guidDeepSeekCmdSet" id="cmdidInlineAiEdit"
 		            editor="guidTextEditorFactory"
 		            mod1="Control" key1="I"/>

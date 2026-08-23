@@ -195,7 +195,7 @@ namespace DeepSeek_v4_for_VisualStudio.View
             };
             WebSearchEngineComboBox.SelectedIndex = idx;
 
-            // 注意：_webSearchEngine 仍为 "Off"，用户需要点击 🌐 按钮开启
+            // 注意：_webSearchEngine 仍为 "Off"，用户需要点击  按钮开启
             // 但搜索引擎已预选为选项页中配置的值
 
             ApplyWebSearchConfig();
@@ -229,8 +229,8 @@ namespace DeepSeek_v4_for_VisualStudio.View
             }
             catch (Exception ex)
             {
-                // ⚠️ 关键：OCR 初始化失败绝不能影响聊天核心功能
-                Logger.Error($"[OCR] ❌ 初始化失败（已降级，不影响聊天）: {ex.GetType().Name} - {ex.Message}", ex);
+                //  关键：OCR 初始化失败绝不能影响聊天核心功能
+                Logger.Error($"[OCR] Error: 初始化失败（已降级，不影响聊天）: {ex.GetType().Name} - {ex.Message}", ex);
                 OcrService.CurrentEngine = OcrEngineType.WindowsBuiltIn;
             }
         }
@@ -374,7 +374,7 @@ namespace DeepSeek_v4_for_VisualStudio.View
 
                 if (enabledConfigs.Count == 0)
                 {
-                    Logger.Info("[MCP] 没有启用的 MCP 服务器，跳过初始化。点击 🔌 按钮配置。");
+                    Logger.Info("[MCP] 没有启用的 MCP 服务器，跳过初始化。点击  按钮配置。");
                     return;
                 }
 
@@ -627,7 +627,7 @@ namespace DeepSeek_v4_for_VisualStudio.View
                 // .sln 项目优先返回 .sln 文件路径
                 if (!string.IsNullOrWhiteSpace(solutionFile))
                 {
-                    Logger.Info($"[Workspace] ✅ IVsSolution → .sln 项目: {solutionFile}");
+                    Logger.Info($"[Workspace]  IVsSolution → .sln 项目: {solutionFile}");
                     return solutionFile;
                 }
 
@@ -635,7 +635,7 @@ namespace DeepSeek_v4_for_VisualStudio.View
                 if (!string.IsNullOrWhiteSpace(solutionDir))
                 {
                     string dir = solutionDir.TrimEnd(Path.DirectorySeparatorChar, Path.AltDirectorySeparatorChar);
-                    Logger.Info($"[Workspace] ✅ IVsSolution → Open Folder 项目: {dir}");
+                    Logger.Info($"[Workspace]  IVsSolution → Open Folder 项目: {dir}");
                     return dir;
                 }
 

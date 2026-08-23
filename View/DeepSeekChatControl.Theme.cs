@@ -175,9 +175,8 @@ namespace DeepSeek_v4_for_VisualStudio.View
 
                 // ── 按钮文字颜色 ──
                 if (ClearButton != null) ClearButton.Foreground = textColor;
-                if (SendButton != null) SendButton.Foreground = accentBlue;
+                // 发送/停止按钮使用 AccentButton 样式：白字 + 强调底色，不随主题覆盖前景色
                 if (NewChatButton != null) NewChatButton.Foreground = accentGreen;
-                if (StopButton != null) StopButton.Foreground = new SolidColorBrush(Color.FromRgb(0xE0, 0x60, 0x60));
                 if (UploadButton != null) UploadButton.Foreground = new SolidColorBrush(Color.FromRgb(0xCE, 0x91, 0x78));
                 if (DeleteSessionButton != null) DeleteSessionButton.Foreground = mutedText;
                 if (WebSearchToggleButton != null) WebSearchToggleButton.Foreground = textColor;

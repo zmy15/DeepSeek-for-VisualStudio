@@ -135,6 +135,51 @@
             <Setter Property="VerticalContentAlignment" Value="Center"/>
         </Style>
 
+        <!-- 强调按钮样式（发送等主操作）：与 TransparentButton 同一几何语言（圆角 3、居中内容），
+             仅保留强调底色以区分主次，悬停/按下态为强调色的加深/减淡 -->
+        <Style x:Key="AccentButton" TargetType="Button">
+            <Setter Property="Background" Value="#2D5A8C"/>
+            <Setter Property="BorderBrush" Value="#2D5A8C"/>
+            <Setter Property="BorderThickness" Value="1"/>
+            <Setter Property="Foreground" Value="#FFFFFF"/>
+            <Setter Property="FontSize" Value="12"/>
+            <Setter Property="Cursor" Value="Hand"/>
+            <Setter Property="Padding" Value="12,4"/>
+            <Setter Property="MinHeight" Value="24"/>
+            <Setter Property="VerticalAlignment" Value="Center"/>
+            <Setter Property="SnapsToDevicePixels" Value="True"/>
+            <Setter Property="Template">
+                <Setter.Value>
+                    <ControlTemplate TargetType="Button">
+                        <Border x:Name="AccentBorder"
+                                Background="{TemplateBinding Background}"
+                                BorderBrush="{TemplateBinding BorderBrush}"
+                                BorderThickness="{TemplateBinding BorderThickness}"
+                                CornerRadius="3"
+                                SnapsToDevicePixels="True">
+                            <ContentPresenter HorizontalAlignment="Center" VerticalAlignment="Center"
+                                              Margin="{TemplateBinding Padding}"/>
+                        </Border>
+                        <ControlTemplate.Triggers>
+                            <Trigger Property="IsMouseOver" Value="True">
+                                <Setter TargetName="AccentBorder" Property="Background" Value="#3A6BA6"/>
+                                <Setter TargetName="AccentBorder" Property="BorderBrush" Value="#3A6BA6"/>
+                            </Trigger>
+                            <Trigger Property="IsPressed" Value="True">
+                                <Setter TargetName="AccentBorder" Property="Background" Value="#24496F"/>
+                                <Setter TargetName="AccentBorder" Property="BorderBrush" Value="#24496F"/>
+                            </Trigger>
+                            <Trigger Property="IsEnabled" Value="False">
+                                <Setter Property="Foreground" Value="#888888"/>
+                                <Setter TargetName="AccentBorder" Property="Background" Value="#3C3C3C"/>
+                                <Setter TargetName="AccentBorder" Property="BorderBrush" Value="#555555"/>
+                            </Trigger>
+                        </ControlTemplate.Triggers>
+                    </ControlTemplate>
+                </Setter.Value>
+            </Setter>
+        </Style>
+
         <!-- 透明按钮样式 -->
         <Style x:Key="TransparentButton" TargetType="Button">
             <Setter Property="Background" Value="Transparent"/>
@@ -350,7 +395,7 @@
                            Foreground="#E0E0E0"
                            FontSize="12"
                            VerticalAlignment="Center"
-                           Text="📊 检测到文件变更" />
+                           Text="检测到文件变更" />
                 <TextBlock Grid.Column="1"
                            x:Name="DiffGlobalDetail"
                            Foreground="#90B090"
@@ -359,7 +404,7 @@
                            Margin="10,0,0,0" />
                 <StackPanel Grid.Column="2" Orientation="Horizontal">
                     <Button x:Name="UndoAllButton"
-                            Content="↩️ 撤销全部"
+                            Content="撤销全部"
                             Click="UndoAllDiffButton_Click"
                             Background="#5C2A2A"
                             Foreground="#E0E0E0"
@@ -370,7 +415,7 @@
                             Padding="8,2"
                             Margin="0,0,4,0" />
                     <Button x:Name="AcceptAllButton"
-                            Content="✅ 接受全部"
+                            Content="接受全部"
                             Click="AcceptAllDiffButton_Click"
                             Background="#1A6A2A"
                             Foreground="#E0E0E0"
@@ -454,28 +499,28 @@
                             Padding="2"
                             MinWidth="200">
                         <StackPanel>
-                            <MenuItem x:Name="AddActiveDocMenuItem" Header="📄 添加活动文档"
+                            <MenuItem x:Name="AddActiveDocMenuItem" Header="添加活动文档"
                                       Click="AddActiveDocument_Click"
                                       ToolTip="将当前编辑器中的活动文档内容添加到对话上下文"
                                       Background="#2D2D2D" Foreground="#D4D4D4"
                                       Padding="10,6" FontSize="13" />
-                            <MenuItem x:Name="AddProjectFileMenuItem" Header="📁 添加项目文件…"
+                            <MenuItem x:Name="AddProjectFileMenuItem" Header="添加项目文件…"
                                       Click="AddProjectFiles_Click"
                                       ToolTip="从项目中选择文件添加到对话上下文"
                                       Background="#2D2D2D" Foreground="#D4D4D4"
                                       Padding="10,6" FontSize="13" />
-                            <MenuItem x:Name="AddAllFilesMenuItem" Header="📦 添加项目全部文件"
+                            <MenuItem x:Name="AddAllFilesMenuItem" Header="添加项目全部文件"
                                       Click="AddAllProjectFiles_Click"
                                       ToolTip="一键将当前解决方案中所有项目的源代码文件添加到对话上下文"
                                       Background="#2D2D2D" Foreground="#D4D4D4"
                                       Padding="10,6" FontSize="13" />
                             <Separator Background="#555555" Margin="4,2" />
-                            <MenuItem x:Name="AddSelectionMenuItem" Header="✂️ 添加选中代码块"
+                            <MenuItem x:Name="AddSelectionMenuItem" Header="添加选中代码块"
                                       Click="AddSelectedCode_Click"
                                       ToolTip="将编辑器中当前选中的代码块添加到对话上下文"
                                       Background="#2D2D2D" Foreground="#D4D4D4"
                                       Padding="10,6" FontSize="13" />
-                            <MenuItem x:Name="AddDebugMenuItem" Header="🐛 添加调试输出"
+                            <MenuItem x:Name="AddDebugMenuItem" Header="添加调试输出"
                                       Click="AddDebugOutput_Click"
                                       ToolTip="将 Visual Studio 输出窗口中的调试信息添加到对话上下文"
                                       Background="#2D2D2D" Foreground="#D4D4D4"
@@ -561,7 +606,7 @@
                                                 <ColumnDefinition Width="Auto" />
                                             </Grid.ColumnDefinitions>
                                             <TextBlock Grid.Column="0"
-                                                       Text="{Binding Name, StringFormat='📌 /{0}'}"
+                                                       Text="{Binding Name, StringFormat='/{0}'}"
                                                        Foreground="#6CAFD9"
                                                        FontWeight="SemiBold"
                                                        FontSize="12"
@@ -834,16 +879,14 @@
                     <StackPanel Grid.Column="1" Orientation="Horizontal" VerticalAlignment="Center">
                         <Button x:Name="StopButton" Content="&#xE71A;" FontFamily="Segoe Fluent Icons"
                                 Click="StopButton_Click"
-                                Style="{StaticResource TransparentButton}"
-                                FontSize="14" Padding="6,4"
-                                Visibility="Collapsed" />
+                                Style="{StaticResource AccentButton}"
+                                FontSize="13"
+                                Visibility="Collapsed"
+                                ToolTip="停止生成 (Esc)" />
                         <Button x:Name="SendButton" Content="&#xE724;" FontFamily="Segoe Fluent Icons"
                                 Click="SendButton_Click"
-                                Background="#2D5A8C"
-                                Foreground="#FFFFFF"
-                                FontSize="14" Padding="10,5"
-                                BorderBrush="#2D5A8C"
-                                Cursor="Hand"
+                                Style="{StaticResource AccentButton}"
+                                FontSize="13"
                                 ToolTip="发送 (Enter)" />
                     </StackPanel>
                 </Grid>

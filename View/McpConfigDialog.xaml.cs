@@ -262,7 +262,7 @@ namespace DeepSeek_v4_for_VisualStudio.View
 
             // 显示进度条和状态
             btn.IsEnabled = false;
-            btn.Content = "⏳";
+            btn.Content = "";
             TestStatusBorder.Visibility = Visibility.Visible;
             TestProgressBar.IsIndeterminate = true;
             TestStatusText.Text = string.Format(LocalizationService.Instance["mcp.dialog.connecting"], config.Name);
@@ -282,7 +282,7 @@ namespace DeepSeek_v4_for_VisualStudio.View
                 {
                     _ = Dispatcher.BeginInvoke(new Action(() =>
                     {
-                        TestStatusText.Text = $"⏳ {msg}";
+                        TestStatusText.Text = $" {msg}";
                     }));
                 };
 

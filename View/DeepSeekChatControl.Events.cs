@@ -356,7 +356,7 @@ namespace DeepSeek_v4_for_VisualStudio.View
                 var doc = dte?.ActiveDocument;
                 if (doc == null)
                 {
-                    StatusLabel.Text = "⚠️ 没有打开的活动文档";
+                    StatusLabel.Text = " 没有打开的活动文档";
                     return;
                 }
 
@@ -438,8 +438,8 @@ namespace DeepSeek_v4_for_VisualStudio.View
                 }
                 RefreshAttachedFilesUI();
                 StatusLabel.Text = addedCount > 0
-                    ? $"📁 已添加 {addedCount} 个文件到上下文"
-                    : "⚠️ 未添加新文件（已存在或格式不支持）";
+                    ? $"已添加 {addedCount} 个文件到上下文"
+                    : " 未添加新文件（已存在或格式不支持）";
                 Logger.Info($"[AddContext] 项目文件已添加: {addedCount} 个");
             }
         }
@@ -491,8 +491,8 @@ namespace DeepSeek_v4_for_VisualStudio.View
 
                 RefreshAttachedFilesUI();
                 StatusLabel.Text = addedCount > 0
-                    ? $"📦 已添加 {addedCount} 个项目文件到上下文" + (skippedCount > 0 ? $" (跳过 {skippedCount} 个)" : "")
-                    : "⚠️ 未找到可添加的源代码文件";
+                    ? $"已添加 {addedCount} 个项目文件到上下文" + (skippedCount > 0 ? $" (跳过 {skippedCount} 个)" : "")
+                    : " 未找到可添加的源代码文件";
                 Logger.Info($"[AddContext] 项目全部文件已添加: {addedCount} 个, 跳过: {skippedCount} 个");
             }
             catch (Exception ex)
@@ -658,8 +658,8 @@ namespace DeepSeek_v4_for_VisualStudio.View
                 int referencedFileCount = await ExtractAndAddReferencedFilesAsync(debugOutput);
 
                 StatusLabel.Text = referencedFileCount > 0
-                    ? $"🐛 已添加调试输出 ({debugOutput.Length} 字符) + {referencedFileCount} 个关联文件"
-                    : $"🐛 已添加调试输出 ({debugOutput.Length} 字符)";
+                    ? $"已添加调试输出 ({debugOutput.Length} 字符) + {referencedFileCount} 个关联文件"
+                    : $"已添加调试输出 ({debugOutput.Length} 字符)";
                 Logger.Info($"[AddContext] 调试输出已添加: {tempPath}, 长度={debugOutput.Length}, 关联文件={referencedFileCount} 个");
             }
             catch (Exception ex)
@@ -979,14 +979,14 @@ namespace DeepSeek_v4_for_VisualStudio.View
                     {
                         Name = s.Name,
                         Description = s.AlwaysInject
-                            ? $"🔄 {L["popup.skillDesc.alwaysInject"]} — {s.Description}"
+                            ? $"{L["popup.skillDesc.alwaysInject"]} - {s.Description}"
                             : s.Description,
                         Source = s.Source switch
                         {
                             SkillSource.Project => L["popup.skillSource.project"],
                             SkillSource.User => L["popup.skillSource.user"],
                             SkillSource.BuiltIn => L["popup.skillSource.package"],
-                            _ => "❓"
+                            _ => ""
                         },
                         IsMeta = false,
                         SkillDefinition = s,
@@ -1153,7 +1153,7 @@ namespace DeepSeek_v4_for_VisualStudio.View
                     new AgentSuggestionItem
                     {
                         Name = "ask",
-                        Icon = "💬",
+                        Icon = "",
                         Description = L["popup.agentDesc.ask"],
                         ArgumentHint = L["popup.agentHint.ask"],
                         AgentType = AgentType.Ask,
@@ -1161,7 +1161,7 @@ namespace DeepSeek_v4_for_VisualStudio.View
                     new AgentSuggestionItem
                     {
                         Name = "explore",
-                        Icon = "🔍",
+                        Icon = "",
                         Description = L["popup.agentDesc.explore"],
                         ArgumentHint = L["popup.agentHint.explore"],
                         AgentType = AgentType.Explore,
@@ -1169,7 +1169,7 @@ namespace DeepSeek_v4_for_VisualStudio.View
                     new AgentSuggestionItem
                     {
                         Name = "plan",
-                        Icon = "📋",
+                        Icon = "",
                         Description = L["popup.agentDesc.plan"],
                         ArgumentHint = L["popup.agentHint.plan"],
                         AgentType = AgentType.Plan,
@@ -1177,7 +1177,7 @@ namespace DeepSeek_v4_for_VisualStudio.View
                     new AgentSuggestionItem
                     {
                         Name = "edit",
-                        Icon = "🔨",
+                        Icon = "",
                         Description = L["popup.agentDesc.edit"],
                         ArgumentHint = L["popup.agentHint.edit"],
                         AgentType = AgentType.Edit,
@@ -1185,7 +1185,7 @@ namespace DeepSeek_v4_for_VisualStudio.View
                     new AgentSuggestionItem
                     {
                         Name = "build",
-                        Icon = "🔧",
+                        Icon = "",
                         Description = L["popup.agentDesc.build"],
                         ArgumentHint = L["popup.agentHint.build"],
                         AgentType = AgentType.Build,
@@ -1479,7 +1479,7 @@ namespace DeepSeek_v4_for_VisualStudio.View
                     string newEngine = selected switch
                     {
                         string s when s.Contains("百度") || s.Contains("Baidu") => "Baidu",
-                        string s when s.Contains("Bing") || s.Contains("🌐") => "Bing",
+                        string s when s.Contains("Bing") => "Bing",
                         _ => "DuckDuckGo"
                     };
                     _webSearchEngine = newEngine;
@@ -1626,7 +1626,7 @@ namespace DeepSeek_v4_for_VisualStudio.View
                 string newEngine = selected switch
                 {
                     string s when s.Contains("百度") || s.Contains("Baidu") => "Baidu",
-                    string s when s.Contains("Bing") || s.Contains("🌐") => "Bing",
+                    string s when s.Contains("Bing") => "Bing",
                     _ => "DuckDuckGo"
                 };
 
@@ -2351,8 +2351,8 @@ namespace DeepSeek_v4_for_VisualStudio.View
                                     await ChatWebView.CoreWebView2.ExecuteScriptAsync(
                                         "var p=document.getElementById('file-delete-confirm');if(p)p.remove();");
                                     StatusLabel.Text = confirmed
-                                        ? $"✅ 已删除 {filePaths.Count} 个文件"
-                                        : "❌ 已取消删除";
+                                        ? $"已删除 {filePaths.Count} 个文件"
+                                        : "Error: 已取消删除";
                                 }
                                 catch { }
                             }
@@ -2398,7 +2398,7 @@ namespace DeepSeek_v4_for_VisualStudio.View
                 if (error != null)
                 {
                     await ThreadHelper.JoinableTaskFactory.SwitchToMainThreadAsync();
-                    StatusLabel.Text = $"⚠️ {error}";
+                    StatusLabel.Text = $" {error}";
                     Logger.Warn($"[ApplyCode] 写入失败: {error}");
                 }
             });

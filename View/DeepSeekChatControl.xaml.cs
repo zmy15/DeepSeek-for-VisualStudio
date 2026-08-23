@@ -433,9 +433,9 @@ namespace DeepSeek_v4_for_VisualStudio.View
             // 联网搜索: 默认关闭
             var L = LocalizationService.Instance;
             WebSearchEngineComboBox.ItemsSource = new[] {
-                "🔍 " + L["websearch.searchEngine.baidu"],
-                "🌐 " + L["websearch.searchEngine.bing"],
-                "🦆 " + L["websearch.searchEngine.duckduckgo"]
+ " " + L["websearch.searchEngine.baidu"],
+ " " + L["websearch.searchEngine.bing"],
+ " " + L["websearch.searchEngine.duckduckgo"]
             };
             WebSearchEngineComboBox.SelectedIndex = 0; // 默认百度
 
@@ -797,8 +797,8 @@ namespace DeepSeek_v4_for_VisualStudio.View
                 if (estimatedTokens > 0)
                 {
                     string ctxLabel = LocalizationService.Instance["agent.panel.contextLabel"];
-                    string warnIcon = usagePercent > 90 ? " ⚠️" : usagePercent > 70 ? " ℹ️" : "";
-                    ctxPart = $"📐 {ctxLabel}: {FormatTokens(estimatedTokens)}/{FormatTokens(tokenBudget)} ({usagePercent:F0}%){warnIcon}";
+                    string warnIcon = usagePercent > 90 ? " " : usagePercent > 70 ? " " : "";
+                    ctxPart = $" {ctxLabel}: {FormatTokens(estimatedTokens)}/{FormatTokens(tokenBudget)} ({usagePercent:F0}%){warnIcon}";
                 }
             }
 

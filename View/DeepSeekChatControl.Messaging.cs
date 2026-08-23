@@ -91,7 +91,7 @@ namespace DeepSeek_v4_for_VisualStudio.View
                 _isGenerating = true;
             }
 
-            // ── 🚀 立即更新 UI：清空输入框、禁用按钮，让用户看到即时反馈 ──
+            // ──  立即更新 UI：清空输入框、禁用按钮，让用户看到即时反馈 ──
             InputTextBox.Text = string.Empty;
             UpdateButtonsState();
 
@@ -268,7 +268,7 @@ namespace DeepSeek_v4_for_VisualStudio.View
             else
                 fullUserContent = effectiveUserText ?? string.Empty;
 
-            // ── 🚀 立即显示用户消息气泡（在路由/技能调用之前）──
+            // ──  立即显示用户消息气泡（在路由/技能调用之前）──
             var earlyUserMsg = new ChatMessage
             {
                 Role = "user",
@@ -485,7 +485,7 @@ namespace DeepSeek_v4_for_VisualStudio.View
                         string snippet = (pr.Content ?? "").Truncate(200);
                         sb.AppendLine($"- {pr.FileName}");
                         if (!string.IsNullOrWhiteSpace(snippet))
-                            sb.AppendLine($"  内容片段: {snippet}");
+                            sb.AppendLine($"内容片段: {snippet}");
                     }
                 }
             }
@@ -827,7 +827,7 @@ namespace DeepSeek_v4_for_VisualStudio.View
                 return argumentsJson;
 
             // ── OCR 参数格式提醒 ──
-            Logger.Info($"[OCR] 📋 调用 OCR 工具 `{toolName}`，期望参数格式:\n" +
+            Logger.Info($"[OCR]  调用 OCR 工具 `{toolName}`，期望参数格式:\n" +
                 "  • input_data (必需): 文件路径、URL 或 Base64 字符串\n" +
                 "  • output_mode (可选, 默认 \"simple\"): \"simple\" | \"detailed\"\n" +
                 "  • file_type (可选): \"image\" | \"pdf\" | null（input_data 为 URL 时必需）");
@@ -837,7 +837,7 @@ namespace DeepSeek_v4_for_VisualStudio.View
                 var args = JsonSerializer.Deserialize<Dictionary<string, JsonElement>>(argumentsJson);
                 if (args == null || args.Count == 0)
                 {
-                    Logger.Warn($"[OCR] ⚠️ OCR 工具 `{toolName}` 未收到任何参数！请确保传入 input_data。");
+                    Logger.Warn($"[OCR]  OCR 工具 `{toolName}` 未收到任何参数！请确保传入 input_data。");
                     return argumentsJson;
                 }
 
@@ -874,7 +874,7 @@ namespace DeepSeek_v4_for_VisualStudio.View
                     bool hasFileType = args.ContainsKey("file_type") || args.ContainsKey("type");
                     if (!hasFileType)
                     {
-                        Logger.Warn($"[OCR] ⚠️ input_data 为 URL 但未提供 file_type 参数！\n" +
+                        Logger.Warn($"[OCR]  input_data 为 URL 但未提供 file_type 参数！\n" +
                             "  • 请补充 \"file_type\": \"image\" 或 \"file_type\": \"pdf\"\n" +
                             $"  • 当前 URL: {imageValue.Substring(0, Math.Min(80, imageValue.Length))}...");
                     }
@@ -956,7 +956,7 @@ namespace DeepSeek_v4_for_VisualStudio.View
                 double rate = usage.CacheHitRate;
 
                 string roundInfo = round > 0 ? $"[轮次#{round}] " : "";
-                string level = rate >= 0.90 ? "🟢" : rate >= 0.50 ? "🟡" : rate >= 0.20 ? "🟠" : "🔴";
+                string level = rate >= 0.90 ? "" : rate >= 0.50 ? "" : rate >= 0.20 ? "" : "";
 
                 Logger.Info($"[Cache] {level} {roundInfo}命中率: {usage.CacheHitRatePercent} " +
                     $"(命中 {hit:N0} / 未命中 {miss:N0} / 总计 {total:N0} tokens)");
@@ -980,7 +980,7 @@ namespace DeepSeek_v4_for_VisualStudio.View
                 if (totalCacheable == 0) return;
 
                 double aggregateRate = (double)totalHit / totalCacheable;
-                string level = aggregateRate >= 0.90 ? "🟢" : aggregateRate >= 0.50 ? "🟡" : aggregateRate >= 0.20 ? "🟠" : "🔴";
+                string level = aggregateRate >= 0.90 ? "" : aggregateRate >= 0.50 ? "" : aggregateRate >= 0.20 ? "" : "";
 
                 Logger.Info($"[Cache] ═══════════════════════════════════════");
                 Logger.Info($"[Cache] {level} 累计汇总 ({finalRound} 轮)");

@@ -27,7 +27,7 @@ namespace DeepSeek_v4_for_VisualStudio.Services
              '⏱️':'E81C','🚀':'E945','🧠':'E81C','📄':'E8A5','📎':'E723','🗑️':'E74D',
              '🎯':'E945','📊':'E9D2','🔧':'E90F','⚙️':'E713','🔌':'E713','💬':'E8BD',
              '📷':'E722','🖼️':'E7C3','⚡':'E945'};
-    var RE=/[\uD83C-\uDBFF][\uDC00-\uDFFF]|[\u2600-\u27BF\u2B00-\u2BFF\u23E9-\u23FA]\uFE0F?|[\u2600-\u27BF\u2B00-\u2BFF\u23E9-\u23FA]/g;
+    var RE=/[\uD83C-\uDBFF][\uDC00-\uDFFF]|[\u2139\u2300-\u23FF\u2460-\u24FF\u2600-\u27BF\u2B00-\u2BFF\u2900-\u297F]\uFE0F?|[\u2190-\u21FF\u25A0-\u25FF]\uFE0F/g;
     function detoxText(node){
         var text=node.nodeValue;
         RE.lastIndex=0;
@@ -123,7 +123,7 @@ window.decorateCodeBlocks=function(container){
                 try{document.execCommand('copy');ok=true;}catch(e){}
                 document.body.removeChild(ta);
             }
-            if(ok){copyBtn.textContent='✓ Copied';copyBtn.style.background='#1a3a1a';copyBtn.style.color='#6cd96c';}
+            if(ok){copyBtn.textContent='Copied';copyBtn.style.background='#1a3a1a';copyBtn.style.color='#6cd96c';}
             setTimeout(function(){copyBtn.textContent='\uE8C8 Copy';copyBtn.style.fontFamily=""'Segoe Fluent Icons','Segoe MDL2 Assets'"";copyBtn.style.background='';copyBtn.style.color='';},2000);
         };
         pre.appendChild(copyBtn);
@@ -434,7 +434,7 @@ window._showCopyFeedback=function(msgIndex){
     var btn=document.getElementById('copy-btn-'+msgIndex);
     if(!btn)return;
     btn.classList.add('copied');
-    btn.textContent='✓';
+    btn.textContent='\uE8C8';
     btn.style.position='';
     setTimeout(function(){
         btn.classList.remove('copied');
@@ -466,7 +466,7 @@ window._showCopyFeedback=function(msgIndex){
             +'color:#d4d4d4;max-width:340px;display:none;box-shadow:0 4px 14px rgba(0,0,0,.4);';
         var head=document.createElement('div');
         head.id='ctx-debug-head';
-        head.textContent='▸ Context';
+        head.textContent='Context';
         head.style.cssText='padding:4px 10px;cursor:pointer;user-select:none;color:#9CDCFE;';
         var body=document.createElement('div');
         body.id='ctx-debug-body';
@@ -474,7 +474,7 @@ window._showCopyFeedback=function(msgIndex){
         head.addEventListener('click',function(){
             var open=body.style.display!=='none';
             body.style.display=open?'none':'block';
-            head.textContent=(open?'▸':'▾')+' Context';
+            head.textContent='Context';
         });
         p.appendChild(head);p.appendChild(body);
         document.body.appendChild(p);
@@ -527,7 +527,7 @@ window._showCopyFeedback=function(msgIndex){
                         },250);
                     }
                 }else if(msg.type==='streamEnd'){
-                    // ★ 先取消待处理的 rAF 和定时器，防止 _flushStreamBuf 覆盖已渲染的 Markdown
+                    // 先取消待处理的 rAF 和定时器，防止 _flushStreamBuf 覆盖已渲染的 Markdown
                     if(_rafTimer){clearTimeout(_rafTimer);_rafTimer=null;}
                     _rafPending=false;
                     delete _streamBuf[msg.i];  // 清除可能残留的流式缓冲，避免 textNode 覆盖 innerHTML
@@ -541,7 +541,7 @@ window._showCopyFeedback=function(msgIndex){
                         containerEl.style.whiteSpace = '';
                     }
 
-                    // ★ 渲染 Markdown（独立于 _flushStreamBuf，不受其异常影响）
+                    // 渲染 Markdown（独立于 _flushStreamBuf，不受其异常影响）
                     if (msg.html) {
                         try {
                             var container = containerEl;
@@ -580,7 +580,7 @@ window._showCopyFeedback=function(msgIndex){
                             // ── innerHTML 渲染失败时的降级：显示带样式的错误提示 ──
                             console.error('[DeepSeek] streamEnd render error:', renderErr);
                             if (containerEl) {
-                                containerEl.innerHTML = '<div style=\'padding:12px;border-left:3px solid #e07878;background:#2a1a1a;color:#e07878;font-size:12px\'>⚠️ Markdown 渲染失败，请刷新页面重试。原始内容已保留在下方。</div>' +
+                                containerEl.innerHTML = '<div style=\'padding:12px;border-left:3px solid #e07878;background:#2a1a1a;color:#e07878;font-size:12px\'>Markdown 渲染失败，请刷新页面重试。原始内容已保留在下方。</div>' +
                                     '<pre style=\'max-height:300px;overflow-y:auto;font-size:11px;margin-top:8px\'>' +
                                     (msg.rawContent||'').replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;') +
                                     '</pre>';
@@ -594,7 +594,7 @@ window._showCopyFeedback=function(msgIndex){
                             var retryBtn=document.createElement('button');
                             retryBtn.id='retry-btn-'+msg.i;
                             retryBtn.className='msg-action-btn retry-btn';
-                            retryBtn.textContent='↻';
+                            retryBtn.textContent=msg.retryLabel||'Retry';
                             retryBtn.title=msg.retryTitle||'Regenerate response';
                             retryBtn.onclick=function(){window.__retryMessage(msg.i);};
                             var row=document.querySelector('#msg-'+msg.i+' .msg-actions-row');
@@ -607,7 +607,7 @@ window._showCopyFeedback=function(msgIndex){
                             var copyBtn=document.createElement('button');
                             copyBtn.id='copy-btn-'+msg.i;
                             copyBtn.className='msg-action-btn copy-msg-btn';
-                            copyBtn.textContent='\uE8C8 Copy';copyBtn.style.fontFamily=""'Segoe Fluent Icons','Segoe MDL2 Assets'"";
+                            copyBtn.textContent=msg.copyBtn||'Copy';
                             copyBtn.title=msg.copyLabel||'Copy this response';
                             copyBtn.onclick=function(){window.__copyMessage(msg.i);};
                             var row2=document.querySelector('#msg-'+msg.i+' .msg-actions-row');
@@ -618,7 +618,7 @@ window._showCopyFeedback=function(msgIndex){
                     } catch(btnErr) {
                         console.error('[DeepSeek] streamEnd button injection error:', btnErr);
                     }
-                    // ★ 清除状态栏文本
+                    // 清除状态栏文本
                     var st = document.getElementById('status-text');
                     if (st) st.textContent = '';
                 }else if(msg.type==='streamStatus'){
@@ -666,7 +666,7 @@ window._showCopyFeedback=function(msgIndex){
 
             // 更新正文内容
             if(container&&msg.c!==undefined){
-                // ★ 防护：若 streamEnd 已将 _textNode 显式置为 null，说明已渲染完成，
+                // 防护：若 streamEnd 已将 _textNode 显式置为 null，说明已渲染完成，
                 //    此时不应再创建 textNode 覆盖 innerHTML（防止 late chunk 竞态）
                 if(container._textNode===null)continue;
                 var textNode=container._textNode;

@@ -206,6 +206,8 @@ namespace DeepSeek_v4_for_VisualStudio.Services
             AppendJsonString(sb, L["chat.html.retryButton"]);
             sb.Append(",\"retryTitle\":");
             AppendJsonString(sb, L["chat.html.retryButtonTitle"]);
+            sb.Append(",\"copyBtn\":");
+            AppendJsonString(sb, L["chat.html.copyButton"]);
             sb.Append(",\"copyLabel\":");
             AppendJsonString(sb, L["chat.html.copyButtonTitle"]);
             sb.Append('}');
@@ -273,7 +275,7 @@ namespace DeepSeek_v4_for_VisualStudio.Services
 
         /// <summary>
         /// 构建 Handoff 按钮的 JavaScript 注入脚本。
-        /// 在消息底部渲染一个"▶ 开始实现"按钮，点击后触发 Agent Handoff。
+        /// 在消息底部渲染一个" 开始实现"按钮，点击后触发 Agent Handoff。
         /// </summary>
         /// <param name="messageIndex">要附加按钮的消息索引</param>
         /// <param name="targetAgent">目标 Agent 类型（如 "Edit"）</param>
@@ -293,7 +295,7 @@ namespace DeepSeek_v4_for_VisualStudio.Services
     var btn=document.createElement('button');
     btn.id='handoff-btn-{messageIndex}';
     btn.className='msg-action-btn handoff-btn';
-    btn.textContent='▶ {escapedLabel}';
+    btn.textContent='{escapedLabel}';
     btn.title='{EscapeJsString(L["chat.html.handoffButtonTitle"])}';
     btn.style.cssText='background:#28a745;color:#fff;border:none;padding:8px 20px;border-radius:6px;cursor:pointer;font-size:14px;margin:10px 0;font-weight:600;opacity:1;';
     btn.onmouseover=function(){{this.style.background='#218838';}};
@@ -363,7 +365,7 @@ namespace DeepSeek_v4_for_VisualStudio.Services
 
             var sb = new StringBuilder();
             sb.Append("<details class='search-results-card' open='true'>");
-            sb.Append($"<summary>🌐 {label} ({results.Count} {L["chat.html.webSearchResults"]})</summary>");
+            sb.Append($"<summary> {label} ({results.Count} {L["chat.html.webSearchResults"]})</summary>");
 
             foreach (var result in results)
             {
@@ -377,7 +379,7 @@ namespace DeepSeek_v4_for_VisualStudio.Services
                 sb.Append($"<span class='search-result-url'>{escapedUrl}</span>");
                 sb.Append($"<div class='search-result-snippet'>{escapedSnippet}</div>");
                 if (!string.IsNullOrWhiteSpace(result.Date))
-                    sb.Append($"<span class='search-result-date'>📅 {escapedDate}</span>");
+                    sb.Append($"<span class='search-result-date'> {escapedDate}</span>");
                 sb.Append("</div>");
             }
 
@@ -541,10 +543,10 @@ namespace DeepSeek_v4_for_VisualStudio.Services
         {
             // ── 编辑按钮（仅在有索引时渲染） ──
             string editBtnHtml = messageIndex >= 0
-                ? $"<button id='edit-btn-{messageIndex}' class='msg-action-btn edit-btn' onclick='window.__editMessage({messageIndex})' title='{L["chat.html.editButtonTitle"]}'>✏️</button>"
+                ? $"<button id='edit-btn-{messageIndex}' class='msg-action-btn edit-btn' onclick='window.__editMessage({messageIndex})' title='{L["chat.html.editButtonTitle"]}'>{EscapeHtml(L["chat.html.editButton"])}</button>"
                 : "";
 
-            // ── 文件附件 𠅂
+            // ── 文件附件 
             string fileBlocksHtml = BuildFileAttachmentHtml(attachedFiles);
             string imagePreviewHtml = BuildImageThumbnailHtml(
                 attachedImageDataUris,
@@ -562,7 +564,7 @@ namespace DeepSeek_v4_for_VisualStudio.Services
                     string agentPrefix = cleanContent.Substring(0, firstSpace);     // e.g. "@ask"
                     string agentName = agentPrefix.Substring(1);                    // e.g. "ask"
                     cleanContent = cleanContent.Substring(firstSpace + 1).TrimStart();
-                    agentBadgeHtml = $"<div class='agent-route-badge'>🎯 {System.Net.WebUtility.HtmlEncode(agentName)}</div>";
+                    agentBadgeHtml = $"<div class='agent-route-badge'> {System.Net.WebUtility.HtmlEncode(agentName)}</div>";
                 }
             }
 
@@ -578,7 +580,7 @@ namespace DeepSeek_v4_for_VisualStudio.Services
             sb.Append($"<div class='msg-content' id='msg-body-{messageIndex}'>{body}</div>");
             sb.Append(editBtnHtml);
             sb.Append("</div>");
-            sb.Append("<div class='msg-avatar user'>👤</div>");
+            sb.Append("<div class='msg-avatar user'></div>");
             sb.Append("</div>");
         }
 
@@ -628,7 +630,7 @@ namespace DeepSeek_v4_for_VisualStudio.Services
                 if (!file.Success || string.IsNullOrEmpty(file.Content))
                 {
                     string errorMsg = System.Net.WebUtility.HtmlEncode(file.Error ?? L["chat.html.fileParseFailed"]);
-                    blocks.Append("<div style='display:inline-block;background:#5c1a1a;color:#e07878;padding:2px 8px;border-radius:3px;font-size:10px;margin:2px'>📎 ");
+                    blocks.Append("<div style='display:inline-block;background:#5c1a1a;color:#e07878;padding:2px 8px;border-radius:3px;font-size:10px;margin:2px'> ");
                     blocks.Append(escapedFileName).Append(" — ").Append(errorMsg);
                     blocks.Append("</div>");
                     continue;
@@ -640,7 +642,7 @@ namespace DeepSeek_v4_for_VisualStudio.Services
                 string borderColor = isImage ? "#6b3fa0" : isPdf ? "#8b4513" : "#3a5a3a";
                 string bgColor = isImage ? "#1a1a2e" : isPdf ? "#1e150a" : "#1a2e1a";
                 string summaryColor = isImage ? "#b98eff" : isPdf ? "#d4a76a" : "#7ec87e";
-                string icon = isImage ? "🖼️" : isPdf ? "📄" : "📎";
+                string icon = isImage ? "" : isPdf ? "" : "";
                 string tag = isImage ? "OCR" : isPdf ? "PDF" : (file.Truncated ? L["chat.html.fileTruncated"] : "");
 
                 string escapedContent = System.Net.WebUtility.HtmlEncode(
@@ -649,7 +651,7 @@ namespace DeepSeek_v4_for_VisualStudio.Services
                         : file.Content) ?? string.Empty);
 
                 blocks.Append($"<details class='file-attachment' style='margin-bottom:3px;border:1px solid {borderColor};border-radius:4px;background:{bgColor};overflow:hidden'>");
-                blocks.Append($"<summary style='cursor:pointer;padding:3px 8px;color:{summaryColor};font-size:11px;font-weight:600;list-style:none'>{icon} {escapedFileName}");
+                blocks.Append($"<summary style='cursor:pointer;padding:3px 8px;color:{summaryColor};font-size:11px;font-weight:600;list-style:none'>{escapedFileName}");
                 if (!string.IsNullOrEmpty(tag))
                     blocks.Append($" <span style='color:#c8a84e;font-size:9px'>({tag})</span>");
                 blocks.Append("</summary>");
@@ -683,9 +685,9 @@ namespace DeepSeek_v4_for_VisualStudio.Services
 
             return
                 $"<div class='branch-nav'>" +
-                $"<button class='branch-nav-btn' onclick='window.__navigateBranch(\"{nodeId}\",-1)' title='{prevTitle}' {(isFirst ? "disabled" : "")}>◀</button>" +
+                $"<button class='branch-nav-btn' onclick='window.__navigateBranch(\"{nodeId}\",-1)' title='{prevTitle}' {(isFirst ? "disabled" : "")}>&#8249;</button>" +
                 $"<span class='branch-nav-label'>{branchLabel}</span>" +
-                $"<button class='branch-nav-btn' onclick='window.__navigateBranch(\"{nodeId}\",1)' title='{nextTitle}' {(isLast ? "disabled" : "")}>▶</button>" +
+                $"<button class='branch-nav-btn' onclick='window.__navigateBranch(\"{nodeId}\",1)' title='{nextTitle}' {(isLast ? "disabled" : "")}>&#8250;</button>" +
                 $"</div>";
         }
 
@@ -717,14 +719,14 @@ namespace DeepSeek_v4_for_VisualStudio.Services
                 : "";
 
             string streamingDots = isStreaming
-                ? " <span style='color:#4fc1ff;font-size:10px'>● ● ●</span>" : "";
+                ? " <span style='color:#4fc1ff;font-size:10px'>&#8226; &#8226; &#8226;</span>" : "";
 
             string retryBtnHtml = !isStreaming && !msg.IsHtml
-                ? $"<button id='retry-btn-{idx}' class='msg-action-btn retry-btn' onclick='window.__retryMessage({idx})' title='{L["chat.html.retryButtonTitle"]}'>↻</button>"
+                ? $"<button id='retry-btn-{idx}' class='msg-action-btn retry-btn' onclick='window.__retryMessage({idx})' title='{L["chat.html.retryButtonTitle"]}'>{EscapeHtml(L["chat.html.retryButton"])}</button>"
                 : "";
 
             string copyBtnHtml = !isStreaming && !string.IsNullOrEmpty(msg.Content)
-                ? $"<button id='copy-btn-{idx}' class='msg-action-btn copy-msg-btn' onclick='window.__copyMessage({idx})' title='{L["chat.html.copyButtonTitle"]}'>📋</button>"
+                ? $"<button id='copy-btn-{idx}' class='msg-action-btn copy-msg-btn' onclick='window.__copyMessage({idx})' title='{L["chat.html.copyButtonTitle"]}'>{EscapeHtml(L["chat.html.copyButton"])}</button>"
                 : "";
 
             // ── 分支导航统一放在用户气泡下方，不在此处渲染 ──
@@ -919,7 +921,7 @@ namespace DeepSeek_v4_for_VisualStudio.Services
             }
             catch (Exception ex)
             {
-                // ★ 记录异常详情，便于排查哪种 Markdown 语法导致渲染失败
+                //  记录异常详情，便于排查哪种 Markdown 语法导致渲染失败
                 Logger.Error($"[Markdown] RenderMarkdownToHtml 失败 (内容长度: {markdown?.Length ?? 0}): {ex.Message}", ex);
 
                 // ── 降级：保留原始 Markdown 原文，方便用户复制后重试 ──
@@ -1014,7 +1016,7 @@ namespace DeepSeek_v4_for_VisualStudio.Services
                     }
 
                     // ── 检测文件名（支持带路径前缀如 src/db_engine.cpp）──
-                    // ★ 用安全方法提取扩展名，避免 Path.GetExtension 对含非法字符的文本抛 ArgumentException
+                    //  用安全方法提取扩展名，避免 Path.GetExtension 对含非法字符的文本抛 ArgumentException
                     string ext = SafeGetExtension(filePathCore);
                     if (string.IsNullOrEmpty(ext) || !SourceFileExtensions.Contains(ext))
                     {
@@ -1207,9 +1209,9 @@ return "<!DOCTYPE html><html lang='" + htmlLang + "'><head><meta charset='UTF-8'
 
                 string bulletText = step.Status switch
                 {
-                    AgentStepStatus.Completed => "✓",
-                    AgentStepStatus.InProgress => "●",
-                    AgentStepStatus.Failed => "✗",
+                    AgentStepStatus.Completed => "",
+                    AgentStepStatus.InProgress => "",
+                    AgentStepStatus.Failed => "",
                     AgentStepStatus.Skipped => "—",
                     AgentStepStatus.WaitingApproval => "?",
                     _ => step.Index.ToString(),
@@ -1386,7 +1388,7 @@ return "<!DOCTYPE html><html lang='" + htmlLang + "'><head><meta charset='UTF-8'
                 {
                     string fileName = System.IO.Path.GetFileName(filePath);
                     fileItemsHtml.Append("<div class=\"file-item\">");
-                    fileItemsHtml.Append("<span class=\"file-icon\">📄</span>");
+                    fileItemsHtml.Append("<span class=\"file-icon\"></span>");
                     fileItemsHtml.Append("<span class=\"file-path\" title=\"");
                     fileItemsHtml.Append(EscapeHtml(filePath));
                     fileItemsHtml.Append("\">");
@@ -1405,7 +1407,7 @@ return "<!DOCTYPE html><html lang='" + htmlLang + "'><head><meta charset='UTF-8'
 
             string cardInnerHtml =
                 "<div class=\"file-delete-card-header\">" +
-                "<span class=\"icon\">🗑️</span>" +
+ "<span class=\"icon\"></span>" +
                 "<span class=\"title\">" + L["chat.html.deleteConfirmTitle"] + "</span>" +
                 "</div>" +
                 "<div class=\"file-delete-card-body\">" +
@@ -1466,7 +1468,7 @@ return "<!DOCTYPE html><html lang='" + htmlLang + "'><head><meta charset='UTF-8'
 
             string cardInnerHtml =
                 "<div class=\"terminal-approval-card-header\">" +
-                "<span class=\"icon\">🖥️</span>" +
+ "<span class=\"icon\"></span>" +
                 "<span class=\"title\">" + EscapeHtml(request.Title) + "</span>" +
                 "</div>" +
                 "<div class=\"terminal-approval-card-body\">" +
@@ -1474,7 +1476,7 @@ return "<!DOCTYPE html><html lang='" + htmlLang + "'><head><meta charset='UTF-8'
                 "<div class=\"warning-text\">" + L["chat.html.terminalWarning"] + "</div>" +
                 "<div class=\"cmd-block\">" + EscapeHtml(request.Command) + "</div>" +
                 (!string.IsNullOrEmpty(explanation)
-                    ? "<div class=\"cmd-explanation\">📝 " + EscapeHtml(explanation) + "</div>"
+                    ? "<div class=\"cmd-explanation\"> " + EscapeHtml(explanation) + "</div>"
                     : "") +
                 "<div class=\"warning-text\" style=\"color:#CEA85C;font-weight:600\">" + L["chat.html.terminalConfirm"] + "</div>" +
                 "</div>" +
@@ -1609,10 +1611,10 @@ return "<!DOCTYPE html><html lang='" + htmlLang + "'><head><meta charset='UTF-8'
     panel.className='agent-task-panel';
     panel.innerHTML=
         '<div class=""agent-task-panel-header"" onclick=""var p=document.getElementById(\'agent-task-panel-{pid}\');if(p)p.classList.toggle(\'collapsed\')"">'+
-        '<span class=""task-icon"">🤖</span>'+
+ '<span class=""task-icon""></span>'+
         '<span class=""task-title"" id=""agent-task-title-status-{pid}"">{escapedTitleStatus}</span>'+
         '<span class=""task-progress"" id=""agent-task-progress-{pid}"">{progressText}</span>'+
-        '<button class=""task-close"" id=""agent-task-close-{pid}"" onclick=""(function(e){{e.stopPropagation();window.__sendToHost({{type:\'dismissTaskPanel\',planId:\'{pid}\'}});var p=document.getElementById(\'agent-task-panel-{pid}\');if(p&&p.parentNode)p.parentNode.removeChild(p);}})(event);return false;"" title=""{closeTitle}"">✕</button>'+
+ '<button class=""task-close"" id=""agent-task-close-{pid}"" onclick=""(function(e){{e.stopPropagation();window.__sendToHost({{type:\'dismissTaskPanel\',planId:\'{pid}\'}});var p=document.getElementById(\'agent-task-panel-{pid}\');if(p&&p.parentNode)p.parentNode.removeChild(p);}})(event);return false;"" title=""{closeTitle}""></button>'+
         '</div>'+
         '<div class=""agent-task-panel-body"" id=""agent-task-body-{pid}"">'+{escapedPlanHtml}+'</div>';
 
@@ -1660,10 +1662,10 @@ return "<!DOCTYPE html><html lang='" + htmlLang + "'><head><meta charset='UTF-8'
 
                 string bulletText = step.Status switch
                 {
-                    AgentStepStatus.Completed => "✓",
-                    AgentStepStatus.InProgress => "●",
-                    AgentStepStatus.Failed => "✗",
-                    AgentStepStatus.Skipped => "—",
+                    AgentStepStatus.Completed => LocalizationService.Instance["agent.step.completed"],
+                    AgentStepStatus.InProgress => "...",
+                    AgentStepStatus.Failed => LocalizationService.Instance["agent.step.failed"],
+                    AgentStepStatus.Skipped => "-",
                     AgentStepStatus.WaitingApproval => "?",
                     _ => step.Index.ToString(),
                 };
@@ -1694,7 +1696,7 @@ return "<!DOCTYPE html><html lang='" + htmlLang + "'><head><meta charset='UTF-8'
             int completed = plan.Steps.Count(s => s.Status == AgentStepStatus.Completed);
             int failed = plan.Steps.Count(s => s.Status == AgentStepStatus.Failed);
             int total = plan.Steps.Count;
-            string statusIcon = plan.IsCancelled ? "⚠️" : (failed > 0 ? "⚠️" : "✅");
+            string statusIcon = plan.IsCancelled ? "" : (failed > 0 ? "" : "");
             string statusColor = plan.IsCancelled ? "#E07878" : (failed > 0 ? "#C8A84E" : "#4EC9B0");
             string statusText = plan.IsCancelled ? L["chat.html.taskCancelled"] : (failed > 0 ? string.Format(L["chat.html.taskPartialSuccess"], completed, total, failed) : string.Format(L["chat.html.taskAllSuccess"], completed, total));
             string escapedStatusIcon = EscapeJsString(statusIcon);

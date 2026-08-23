@@ -1670,22 +1670,15 @@ namespace DeepSeek_v4_for_VisualStudio.View
 
             // ── 格式化为可读的思考内容 ──
 
-            // Emoji 前缀（locale-independent）：状态指示、文件操作、工具调用
-            if (msg.StartsWith("📄") || msg.StartsWith("📖") || msg.Contains("已读取") || msg.Contains("read file"))
+            // 结果标记行（文本前缀，locale 无关）与文件读取状态原样保留
+            if (msg.StartsWith("Error: ") || msg.StartsWith("Timeout: ") || msg.StartsWith("[BLOCKED] "))
                 return msg;
-            if (msg.StartsWith("✅") || msg.StartsWith("❌") || msg.StartsWith("⚠️"))
-                return msg;
-            if (msg.StartsWith("🔨") || msg.StartsWith("🔧"))
-                return msg;
-            // 工具调用 emoji：编辑、创建、终端、搜索、目录等
-            if (msg.StartsWith("✏️") || msg.StartsWith("📝") || msg.StartsWith("💻") || msg.StartsWith("📋")
-                || msg.StartsWith("📂") || msg.StartsWith("🔍") || msg.StartsWith("🔎") || msg.StartsWith("🌐")
-                || msg.StartsWith("🗑️"))
+            if (msg.Contains("已读取") || msg.Contains("read file"))
                 return msg;
 
             // Phase 进度指示（中英文通用：包含 "/3:" 的模式）
             if (msg.StartsWith("阶段") || msg.StartsWith("Phase") || msg.Contains("/3:"))
-                return $"🔍 {msg}";
+                return $" {msg}";
 
             // Plan Agent 开始（中英文）
             if (msg.StartsWith("Plan Agent 开始规划") || msg.StartsWith("Plan Agent started planning"))
@@ -1706,7 +1699,7 @@ namespace DeepSeek_v4_for_VisualStudio.View
                 return LocalizationService.Instance["status.buildVerified"];
             if ((msg.Contains("编译") || msg.Contains("build") || msg.Contains("Build"))
                 && (msg.Contains("失败") || msg.Contains("错误") || msg.Contains("failed") || msg.Contains("error")))
-                return $"⚠️ {msg}";
+                return $" {msg}";
 
             // Edit Agent 步骤前缀（使用 i18n）
             var L = LocalizationService.Instance;
@@ -1715,32 +1708,32 @@ namespace DeepSeek_v4_for_VisualStudio.View
 
             // ── ExploreAgent 委托和发现日志 ──
             if (msg.StartsWith("[EditAgent] 委托 ExploreAgent") || msg.StartsWith("[EditAgent] delegated ExploreAgent"))
-                return $"🔍 {msg.Replace("[EditAgent] ", "")}";
+                return $" {msg.Replace("[EditAgent] ", "")}";
             if (msg.StartsWith("[EditAgent] ExploreAgent 返回") || msg.StartsWith("[EditAgent] ExploreAgent returned"))
-                return $"📁 {msg.Replace("[EditAgent] ", "")}";
+                return $" {msg.Replace("[EditAgent] ", "")}";
             if (msg.StartsWith("[EditAgent]"))
-                return $"📝 {msg.Replace("[EditAgent] ", "")}";
+                return $" {msg.Replace("[EditAgent] ", "")}";
 
             // ── Plan Agent 转发的 Explore 日志 ──
             if (msg.StartsWith("[Explore] [Discover]"))
                 return string.Empty; // Explore 内部发现日志不展示
             if (msg.StartsWith("[Explore]"))
-                return $"🔍 {msg.Replace("[Explore] ", "")}";
+                return $" {msg.Replace("[Explore] ", "")}";
 
             // ── Plan Agent 自身进度日志（[Plan] 前缀）──
             if (msg.StartsWith("[Plan]"))
-                return $"📋 {msg.Replace("[Plan] ", "")}";
+                return $" {msg.Replace("[Plan] ", "")}";
 
             // ── Plan Agent 关键日志（中英文通用匹配）──
-            // 匹配模式: "Phase X/Y:", "步骤 X/Y:", "step X/Y:", "📄 plan.md"
+            // 匹配模式: "Phase X/Y:", "步骤 X/Y:", "step X/Y:", " plan.md"
             if (msg.Contains(" plan.md") || msg.Contains(": 成功") || msg.Contains(": succeeded"))
                 return msg;
 
             // 其他日志：以 ERROR/WARN 级别展示简要信息
             if (entry.Level == "ERROR")
-                return $"❌ {msg}";
+                return $"Error: {msg}";
             if (entry.Level == "WARN")
-                return $"⚠️ {msg}";
+                return $" {msg}";
 
             // ── Plan/Explore Agent 的 INFO 日志：展示进度给用户 ──
             // 包含这些关键词的 INFO 日志对用户有意义，不应过滤
@@ -1921,7 +1914,7 @@ namespace DeepSeek_v4_for_VisualStudio.View
                     string verifyResult = await ChatWebView.CoreWebView2.ExecuteScriptAsync(verifyJs);
                     if (verifyResult?.Contains("MISSING") == true)
                     {
-                        Logger.Warn("[Agent] ⚠️ 问题 UI 注入后验证失败: DOM 中未找到 #agent-questions 元素!");
+                        Logger.Warn("[Agent]  问题 UI 注入后验证失败: DOM 中未找到 #agent-questions 元素!");
                         // 检查可能的原因
                         string containerCheck = await ChatWebView.CoreWebView2.ExecuteScriptAsync(
                             "var c=document.getElementById('chat-container');" +
@@ -1931,7 +1924,7 @@ namespace DeepSeek_v4_for_VisualStudio.View
                     }
                     else
                     {
-                        Logger.Info($"[Agent] ✅ 问题 UI 已成功注入 DOM (verify={verifyResult})");
+                        Logger.Info($"[Agent]  问题 UI 已成功注入 DOM (verify={verifyResult})");
                     }
                 }
                 catch (Exception ex)
@@ -1951,9 +1944,9 @@ namespace DeepSeek_v4_for_VisualStudio.View
             // ── 更新实时思考气泡 ──
             string icon = args.ChangeType.ToLowerInvariant() switch
             {
-                "create" => "📄 新建",
-                "delete" => "🗑️ 删除",
-                _ => "✏️ 修改",
+                "create" => "新建",
+                "delete" => "删除",
+                _ => "修改",
             };
             string fileName = System.IO.Path.GetFileName(args.FilePath);
             AppendAgentThinking($"{icon} `{fileName}` ({args.Detail})");
