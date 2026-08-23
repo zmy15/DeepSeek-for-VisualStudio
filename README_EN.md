@@ -76,6 +76,17 @@ git clone https://github.com/zmy15/DeepSeek-v4-for-VisualStudio.git
 2. **Open Settings**: `Tools → Options → DeepSeek Chat` → Paste API Key → Select model
 3. **Open Chat Window**: `View → Other Windows → DeepSeek Chat` (or click toolbar button)
 
+### Keyboard Shortcuts
+
+| Shortcut | Action |
+|----------|--------|
+| `Ctrl+Shift+D` | Open / focus DeepSeek Chat window (global) |
+| `Ctrl+I` | Inline AI Edit in the editor (selection → prompt → preview) |
+| `Enter` | Send message (chat input) |
+| `Ctrl+Enter` | New line (chat input) |
+
+> If a shortcut conflicts with your scheme, remap it via `Tools → Options → Environment → Keyboard` (search "DeepSeek").
+
 | Recommended Setting | Value | Notes |
 |--------------------|-------|-------|
 | Model | `deepseek-v4-pro` | Flagship model, strongest reasoning |
