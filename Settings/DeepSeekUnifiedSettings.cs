@@ -17,7 +17,10 @@ namespace DeepSeek_v4_for_VisualStudio
     {
         [VisualStudioContribution]
         internal static SettingCategory GeneralCategory { get; } =
-            new("deepseekGeneral", "DeepSeek Chat");
+            new("deepseekGeneral", "DeepSeek Chat")
+            {
+                GenerateObserverClass = true,
+            };
 
         // ── 行为开关 ──
 

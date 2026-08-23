@@ -15,5 +15,11 @@ namespace DeepSeek_v4_for_VisualStudio
         {
             RequiresInProcessHosting = true,
         };
+
+        protected override void InitializeServices(IServiceCollection services)
+        {
+            base.InitializeServices(services);
+            services.AddSettingsObservers();
+        }
     }
 }
