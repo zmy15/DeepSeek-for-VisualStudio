@@ -75,6 +75,9 @@ namespace DeepSeek_v4_for_VisualStudio.Settings
                 // 回退到自动检测（中文），表现为"切换失效"。
                 ApplyLanguageSetting();
                 SettingsChanged?.Invoke();
+
+                // ── P2 Step2b：旧页改动 → 推送到 Unified Settings（新设置 UI 双入口同步）──
+                UnifiedSettingsSync.PushFromPage(this);
             }
         }
 

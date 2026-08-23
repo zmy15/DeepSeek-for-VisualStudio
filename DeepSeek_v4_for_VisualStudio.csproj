@@ -19,6 +19,12 @@
   <ItemGroup>
     <ProjectCapability Include="CreateVsixContainer" />
   </ItemGroup>
+  <!-- Phase A：ProvideProfile 注册资源（16001-16003），LogicalName 遵循 VS 包资源查找约定 -->
+  <ItemGroup>
+    <EmbeddedResource Update="VSPackage.resx">
+      <LogicalName>VSPackage.resx</LogicalName>
+    </EmbeddedResource>
+  </ItemGroup>
   <ItemGroup>
     <Reference Include="System.Design" />
     <Reference Include="System.Net.Http" />

@@ -189,3 +189,190 @@ vsixmanifest 变更：Installation 标签追加 ExtensionType="VSSDK+VisualStudi
 - Step2b（约一天）：声明非敏感子集 SettingCategory + 观察者回写 Instance +
   旧页反向推写；新旧双入口一致性验收。
 - Step2c：发布通道实测（GitHub Release vs Marketplace）。
+
+---
+
+## 九、对照官方《扩展用户设置和选项》文档的最新版本切换分析（2026-08-24）
+
+> 输入：learn.microsoft.com/zh-cn/visualstudio/extensibility/extending-user-settings-and-options
+> （含子页：创建选项页 / 创建设置类别 / 使用设置存储 / 写入用户设置存储）
+> 方法：官方文档能力面 × 本工程现状 × 已有探针证据 三方交叉
+
+### 9.1 官方文档树的能力面（该 URL 覆盖什么）
+
+| 子页 | 官方机制 | 解决的问题 |
+|------|----------|-----------|
+| 创建选项页 | `DialogPage` + `[ProvideOptionPage]` | 工具→选项 页 UI + 持久化 |
+| 创建设置类别 | `DialogPage` 派生 + `[ProvideProfile(isToolsOptionPage:true)]` + 三个资源 ID | **导入和导出设置向导**勾选项、`.vssettings` 往来、随配置漫游 |
+| 使用/写入设置存储 | `new ShellSettingsManager(serviceProvider)` → `GetReadOnlySettingsStore(scope)` / 可写 User 存储 | 扩展对设置存储的**编程式读写**（任意集合/属性名） |
+
+关键定性：**该文档树描述的是经典 VSSDK 设置模型**。VS2026「新版设置 UI」（Unified Settings /
+`IExternalSettingsProvider` / VisualStudio.Extensibility `SettingCategory`）不在此文档树内 ——
+后者属于 VisualStudio.Extensibility 文档体系。因此"切换到最新版本"在官方文档语境下存在
+两条正交路径，需分开评估。
+
+### 9.2 现状对照官方能力面的差距清单
+
+| 官方能力 | 本工程现状 | 差距影响 |
+|----------|-----------|---------|
+| `[ProvideOptionPage]` | ✅ 已有（DeepSeekOptionsPage） | 无 |
+| `[ProvideProfile]` 设置类别 | ❌ **缺失**（feasibility §一已确认） | 不参与导入/导出向导、不随 VS 配置漫游 —— 与官方模型的功能性缺口 |
+| ShellSettingsManager 编程读写 | ⭕ 未系统使用（迁移走 RegLoadAppKey 私有挂载） | 旧↔新值同步缺少官方桥 |
+
+### 9.3 可行性判定
+
+| 路径 | 内容 | 可行性 | 判定依据 |
+|------|------|:------:|---------|
+| **P1 经典补全**：给 DeepSeekOptionsPage 加 `[ProvideProfile]` | 官方文档完整支持，纯声明式增量 | **高**（0.5 天） | 仅需资源 ID + attribute；不动存储格式（仍写实例私有存储）；VS2022/2026 双端由兼容模型承载 |
+| **P2 新版 UI 接入**：Unified Settings（SettingCategory 形态③） | 链接文档未覆盖；但 §八已给出完整蓝图且壳已落地（DeepSeekExtension.cs + 7 项声明） | **中高**（1–2 天收尾） | 唯一阻塞 = 观察者源生成器未产出（§五 Handoff）；备选：ISettingsWriter 反向批写替代生成观察者 |
+| P3 外部区域手工反射构造 | §七已降级为不推荐（31 参内部 ctor 无兼容承诺） | 低 | 放弃 |
+
+结论：**P1+P2 组合可行**。P1 立即消除漫游/导出缺口且零风险；P2 是"进新 UI"的唯一官方正道，
+剩余工作集中在观察者回写与双向同步两个点上。
+
+### 9.4 实现方案（分阶段）
+
+**Phase A — 经典模型补全（P1，先做，独立可交付）**
+1. VSPackage.resx/.vsct 资源：新增 CategoryName/ObjectName/Description 三个字符串资源 ID；
+   注意 zh-CN/en 双语卫星资源。
+2. Package 头追加：
+   `[ProvideProfile(typeof(DeepSeekOptionsPage), "DeepSeek Chat", "General", <catId>, <objId>, isToolsOptionPage:true, DescriptionResourceID = <descId>)]`
+   （与现有 `[ProvideOptionPage]` 同页复用，无需新类）。
+3. 验证：工具→导入和导出设置 向导中出现"DeepSeek Chat"勾选点；导出 `.vssettings` 含全部
+   非 DPAPI 属性；ApiKey 密文行为确认（DPAPI 值以密文字符串进出，本机可解，跨机不可解 —— 符合预期）。
+
+**Phase B — 新版 UI 收尾（P2，按 §8.3 脚手架继续）**
+1. 观察者回写（二选一，先 B 后 A 尝试）：
+   - B1：排查 GenerateObserverClass 未产出原因（Extensibility.Sdk 版本 / Clean+Build 顺序 /
+     obj 产物核查），产出后 Observer 内写回 `DeepSeekOptionsPage.Instance` + 热更新链；
+   - B2 兜底：放弃生成观察者，改用 `SVsUnifiedSettingsManager` 的 ISettingsWriter 在
+     旧页 OnApply 时反向批写 + `IVsNotifyUnifiedSettings` interop 订阅变更（Handoff 方案 B/C）。
+2. 双入口一致性验收矩阵：新 UI 改值 → Instance 生效；旧页改值 → 新 UI 刷新；
+   重启后两入口读数一致；TokenBudget 等"构造期捕获型"消费点补充热更新或标注需重启。
+3. ApiKey 维持排除策略不变（云同步/JSON 导出泄漏面，§四结论继续有效）。
+
+**Phase C — 回归与发布**
+1. 全量 vstest + Exp hive F5 冒烟（沿用 ColdStart-Fix-Verification.md 流程）；
+2. 发布通道实测按 Step2c。
+
+### 9.5 与既有资产的关系
+
+- `Settings/DeepSeekUnifiedSettings.cs`（7 项声明）→ Phase B 直接复用，无需改动；
+- `Settings/UnifiedSettingsBridge.cs`（Provider 原型）→ 其 GetValue/SetValue 枚举映射逻辑
+  可迁入 B2 兜底的读写适配层；
+- `DeepSeekExtension.cs`（形态③壳）→ 已满足 P2 的包形态前提；
+- Phase A 与上述全部正交，可立即合入主干。
+
+### 9.6 Phase A/B 实施状态（✅ 2026-08-24 落地 + 运行时实测）
+
+**Phase A（ProvideProfile 补全）— ✅ 完成**
+- 新增 `VSPackage.resx`（数据项以数字字符串 "16001/16002/16003" 命名，官方约定）；
+  csproj 以 `<EmbeddedResource Update="VSPackage.resx"><LogicalName>VSPackage.resx</LogicalName></EmbeddedResource>`
+  附加元数据（SDK 默认通配已含 resx，显式 Include 会触发 NETSDK1022）
+- Package 特性修正：`[ProvideProfile(..., 16001, 16002, isToolsOptionPage:true, DescriptionResourceID=16003)]`
+  （资源 ID 为**位置参数**；CategoryResourceID/ObjectNameResourceID 并非命名属性）
+- 导入/导出向导与配置漫游即此声明生效
+
+**Phase B（双向同步桥）— ✅ 基础设施完成；写入依赖引擎注册可见性（见下）**
+- 新增 `Settings/UnifiedSettingsSync.cs`：
+  - 服务获取：占位类型携带 `SVsUnifiedSettingsManager` GUID。**实测关键修正：服务 GUID =
+    `{E3684F31-344E-42EA-9047-B620FDC7AC25}`**（取自 Dev18
+    Microsoft.Internal.VisualStudio.Interop.dll），≠ ISettingsManager 接口 GUID
+    （2f26e586-…，用后者查询返回 null）
+  - 推（旧→新）：`GetWriter(callerId, eventSource:PackageGuid)` 逐项 Enqueue+Commit；
+  - 拉（新→旧）：`reader.SubscribeToChanges(handler, monikers)` → 回写 Instance +
+    `ApplyRuntimeHotUpdates()`；含回声抑制窗口
+  - fail-open：服务缺失/异常时停用桥接并记日志，旧页功能零影响
+- **Moniker 格式实测确认**：`<category>.<settingId>`（如 `deepseekGeneral.deepseekThinking`），
+  与 `bin\.vsextension\settingsRegistration.json` 一致 —— 该文件由构建管线正常生成
+  （Handoff 所述"观察者源生成器未产出"不影响声明注册；且发现 Sdk 包 17.14.40608 在本机
+  缓存为空壳——仅元数据无分析器，属 NuGet 还原损坏，必要时清缓存重置）
+
+**运行时实测结论（Exp hive，diagnostic 日志）**
+
+| 步骤 | 结果 |
+|------|------|
+| 服务获取（修正 GUID 后） | ✅ acquired |
+| 订阅 7 个 moniker | ✅ |
+| 宿主激活 `GetServiceAsync(VisualStudioExtensibility)` | ✅ ok |
+| RequireRegistration 读回 | ❌ **NotRegistered**（全部 7 项） |
+| EnqueueChange ×7 | ✅ 全部接受 |
+| Commit | ❌ InternalError（message=对应 moniker） |
+
+判定：写入被拒的直接原因是**设置引擎尚未加载我们的 SettingCategory 注册**——
+VSEXT in-proc 扩展的 settingsRegistration.json 需扩展宿主按需装载（典型时机：
+用户首次打开新版设置 UI 枚举类别）。宿主激活调用本身不足以令引擎收录外部注册。
+
+**桥接已内置自愈**：初始化时最长等待 120s 轮询注册可见性；不可见则保持订阅并在每次旧页
+OnApply 时重试推送。一旦引擎可见（用户打开过一次新版设置 UI 后），链路即闭环：
+旧页 Apply → 推送成功 → 新 UI 显示当前值；新 UI 改值 → 订阅回调 → Instance 热更新。
+
+### 9.7 待人工验收一步
+
+1. 启动 Exp 实例 → 打开 工具→选项（新版设置页）→ 确认出现 "DeepSeek Chat" 类别与 7 项设置
+2. 在旧入口（原 DeepSeek Chat 页）改任一开关并应用 → 诊断日志应出现
+   `[USync] push(onApply) ... commit=Success` → 新 UI 中该值同步
+3. 在新 UI 改值 → 诊断日志应出现 `[USync] pulled N value(s)` → 运行行为即时变化
+
+### 9.8 运行时验收补充记录与根因定位（2026-08-24 深夜）
+
+人工验收实际观察：**新设置 UI 中 DeepSeek Chat 仅显示「前往 General（旧版本设置位置）」
+跳转卡片**，7 项声明未出现。追加插桩后获得决定性证据链：
+
+| 实验 | 结果 |
+|------|------|
+| `DeepSeekExtension` 构造器/InitializeServices 插桩 | **从未执行** —— VSEXT 宿主未加载本扩展 |
+| `GetServiceAsync(VisualStudioExtensibility)` 宿主激活 | 服务存在（ok），但不触发本扩展装载 |
+| pkgdef 全文 | **零 VSEXT 键**（无 dotnetExtensibility 服务/目录注册；仅经典键） |
+| 部署布局 | `.vsextension/{extension.json,settingsRegistration.json}` 均正确落位 |
+| 引擎读回 | RequireRegistration=NotRegistered（引擎不认识 moniker） |
+
+**根因判定**：声明式注册是纯数据（settingsRegistration.json），但本机 Dev18 构建
+（18.0_ba3bb658，内部构建号）的设置引擎**未从扩展目录摄取该数据** —— 高度疑似
+VSEXT Settings 预览特性在当前构建/航班下关闭，或该内部构建的宿主尚未实现
+混合 VSIX 的声明式设置摄取。非本工程代码缺陷：
+
+- 生成产物完整（extension.json / settingsRegistration.json / 清单 ExtensionType 正确）
+- 部署布局符合官方形态
+- 同一管线在正式渠道 VS2022 17.14+/VS2026 GA 上按官方文档应为受支持路径（需复测）
+
+**Phase B 桥接现状**：基础设施全部就绪且运行时验证至引擎边界；一旦引擎可见注册
+（换构建/开启航班/未来版本），订阅+推送+回写即自动闭环，无需再改代码。
+
+### 9.9 后续可选路线
+
+| 选项 | 内容 | 适用 |
+|------|------|------|
+| A 复测环境 | 换 VS2026 公开正式版/GA 渠道重装同一 VSIX 验证 | 判定是否构建航班问题（推荐首选，成本≈0） |
+| B 方案 A' 兜底 | 实现 `IExternalSettingsProvider` MEF 导出（经典 MefComponent 资产直进目录，
+不依赖 VSEXT 宿主）；注册元数据形态需 1–2 轮 Dev18 实测 | 需要"现在就进新 UI"时 |
+| C 维持现状 | 新 UI 显示旧页跳转卡（当前行为），旧页功能完整 | 可接受时 |
+
+### 9.10 方案 A 复测结论（✅ 2026-08-24 正式实例全链路打通）
+
+将同一 VSIX（1.2.2，含 Phase A/B 全部改动）部署至 **VS2026 正式实例**
+（`18.0_ba3bb658` 主 hive，公开渠道 Community 版）并实测：
+
+```
+06:31:26.909 [USync] push(initial) ok=7/7                      ← 7 项全部提交成功
+06:31:26.910 [USync] readback deepseekGeneral.deepseekThinking reg=Success any=Success value=True
+    …（7 项 reg=Success any=Success，值与 Instance 一致，TokenBudget=900000 ✓）
+06:31:28.574 [USync] pulled 7 value(s) from Unified Settings → Instance ← 订阅回写闭环
+```
+
+| 验证点 | 结果 |
+|--------|------|
+| SettingCategory 引擎注册 | ✅ RequireRegistration=Success |
+| ISettingsWriter 批写+Commit | ✅ ok=7/7 |
+| 存储值落盘与回读一致 | ✅ |
+| 变更订阅 → 回写 Instance | ✅ pulled 7 |
+
+**最终判定**：
+1. Phase A/B 实现正确，声明式接入在正式渠道 VS2026 上完整可用；
+2. Exp hive（18.0_ba3bb658Exp）的 NotRegistered 现象为该实验实例环境特有
+   （宿主未装载混合扩展部分），非代码缺陷 —— 与 §9.8 判定吻合；
+3. 双入口一致性验收（新 UI 改值 ↔ 旧页改值互同步）具备全部自动化前提，
+   剩余为人工目视确认新 UI 渲染效果。
+
+*注意：主实例更新采用部署目录直接覆盖（当时 VS2022 编译进程阻塞 VSIXInstaller，
+exit=2004）；后续版本升级建议正常走 VSIXInstaller。*

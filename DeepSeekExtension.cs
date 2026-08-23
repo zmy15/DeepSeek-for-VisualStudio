@@ -1,5 +1,6 @@
 using Microsoft.VisualStudio.Extensibility;
 using Microsoft.Extensions.DependencyInjection;
+using DeepSeek_v4_for_VisualStudio.Utils;
 
 namespace DeepSeek_v4_for_VisualStudio
 {
@@ -16,10 +17,17 @@ namespace DeepSeek_v4_for_VisualStudio
             RequiresInProcessHosting = true,
         };
 
+        public DeepSeekExtension()
+        {
+            DiagnosticLog.Write("[VSEXT] DeepSeekExtension ctor");
+        }
+
         protected override void InitializeServices(IServiceCollection services)
         {
+            DiagnosticLog.Write("[VSEXT] InitializeServices enter");
             base.InitializeServices(services);
             services.AddSettingsObservers();
+            DiagnosticLog.Write("[VSEXT] InitializeServices exit (AddSettingsObservers done)");
         }
     }
 }
