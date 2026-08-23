@@ -1296,6 +1296,8 @@
     "codeAction.writeFailedStatus":  "❌ Write failed: {0}",
     "═══ MCP Config ═══":  "═══ MCP Config ═══",
     "mcp.dialog.connecting":  "Connecting to {0}...",
+    "mcp.dialog.testOk": "OK",
+    "mcp.dialog.testFail": "Error",
     "mcp.dialog.connected":  "{0} connected! Server: {1} Version: {2} Tools ({3}): {4}",
     "mcp.dialog.versionUnknown":  "Unknown",
     "mcp.dialog.noTools":  "{0} connected but provided no tools. Please check server configuration.",

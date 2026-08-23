@@ -1295,6 +1295,8 @@
     "codeAction.writeFailedStatus":  "❌ 写入失败: {0}",
     "═══ MCP Config ═══":  "═══ MCP Config ═══",
     "mcp.dialog.connecting":  "正在连接 {0}...",
+    "mcp.dialog.testOk": "成功",
+    "mcp.dialog.testFail": "失败",
     "mcp.dialog.connected":  "{0} 连接成功！ 服务器: {1} 版本: {2} 工具 ({3}): {4}",
     "mcp.dialog.versionUnknown":  "未知",
     "mcp.dialog.noTools":  "{0} 连接成功但未提供任何工具。 请检查服务器配置是否正确。",

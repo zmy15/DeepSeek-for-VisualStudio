@@ -118,7 +118,7 @@
 
         <!-- ═══ 标题 ═══ -->
         <TextBlock Grid.Row="0" x:Name="TitleLabel"
-                   Text="⚙️ MCP Server Configuration"
+                   Text="MCP Server Configuration"
                    FontSize="18" FontWeight="Bold"
                    Margin="0,0,0,12"/>
 
@@ -219,13 +219,13 @@
 
                                         <!-- 操作按钮 -->
                                         <StackPanel Grid.Row="0" Grid.Column="2" Orientation="Horizontal">
-                                            <Button Content=" Test" Style="{StaticResource ToolbarButton}"
+                                            <Button Content="Test" Style="{StaticResource ToolbarButton}"
                                                     FontSize="11" Foreground="#4EC9B0"
                                                     Tag="{Binding}"
                                                     Click="TestServerButton_Click"
                                                     ToolTip="Test connection to this MCP server"/>
-                                            <Button Content="✕" Style="{StaticResource ToolbarButton}"
-                                                    FontSize="12" Foreground="#F48771"
+                                            <Button Content="Delete" Style="{StaticResource ToolbarButton}"
+                                                    FontSize="11" Foreground="#F48771"
                                                     Tag="{Binding}"
                                                     Click="DeleteServerButton_Click"
                                                     ToolTip="Delete this server"/>

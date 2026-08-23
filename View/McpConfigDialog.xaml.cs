@@ -301,7 +301,7 @@ namespace DeepSeek_v4_for_VisualStudio.View
                         toolNames);
                     TestStatusText.Foreground = new System.Windows.Media.SolidColorBrush(
                         System.Windows.Media.Color.FromRgb(0x4E, 0xC9, 0xB0));
-                    btn.Content = "\u2713";
+                    btn.Content = LocalizationService.Instance["mcp.dialog.testOk"];
                     btn.Foreground = new System.Windows.Media.SolidColorBrush(
                         System.Windows.Media.Color.FromRgb(0x4E, 0xC9, 0xB0));
                     Logger.Info($"[MCP Config] '{config.Name}' 测试成功: {client.Tools.Count} 工具");
@@ -332,7 +332,7 @@ namespace DeepSeek_v4_for_VisualStudio.View
                 TestStatusText.Text = string.Format(LocalizationService.Instance["mcp.dialog.protocolError"], config.Name, ex.Message);
                 TestStatusText.Foreground = new System.Windows.Media.SolidColorBrush(
                     System.Windows.Media.Color.FromRgb(0xF4, 0x87, 0x71));
-                btn.Content = "\u2715";
+                btn.Content = LocalizationService.Instance["mcp.dialog.testFail"];
                 btn.Foreground = new System.Windows.Media.SolidColorBrush(
                     System.Windows.Media.Color.FromRgb(0xF4, 0x87, 0x71));
                 Logger.Error($"[MCP Config] '{config.Name}' MCP 错误: {ex.Message}");
@@ -348,7 +348,7 @@ namespace DeepSeek_v4_for_VisualStudio.View
                 TestStatusText.Text = string.Format(LocalizationService.Instance["mcp.dialog.connectionFailed"], config.Name, ex.Message, errorHint);
                 TestStatusText.Foreground = new System.Windows.Media.SolidColorBrush(
                     System.Windows.Media.Color.FromRgb(0xF4, 0x87, 0x71));
-                btn.Content = "\u2715";
+                btn.Content = LocalizationService.Instance["mcp.dialog.testFail"];
                 btn.Foreground = new System.Windows.Media.SolidColorBrush(
                     System.Windows.Media.Color.FromRgb(0xF4, 0x87, 0x71));
                 Logger.Error($"[MCP Config] '{config.Name}' 测试失败: {ex.Message}", ex);
