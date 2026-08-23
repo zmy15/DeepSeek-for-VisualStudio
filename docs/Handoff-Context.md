@@ -52,9 +52,12 @@ powershell -File tools\build-vs26.ps1
 
 ### Step2c：观察者桥接（SettingCategory → Instance 回写）
 - SettingCategory 已声明于 `Settings/DeepSeekUnifiedSettings.cs`（7 项 Boolean/Integer）
-- 需在 `DeepSeekExtension.InitializeServices` 中调用 `services.AddSettingsObservers()`
-- 生成的 Observer 类需桥接到 `DeepSeekOptionsPage.Instance` 属性写入 + `ApplyRuntimeHotUpdates()`
-- **阻塞点**：生成的 Observer 类 API 形态未知，需实际编译后检查生成代码
+- 已启用 `GenerateObserverClass = true` 并调用 `services.AddSettingsObservers()`
+- **新发现阻塞**：源生成器未实际产出 `GeneralCategoryObserver.g.cs`（Clean+Build 后 obj 下无该文件）
+  - 早前失败构建日志中曾出现该文件路径，说明生成器识别了标记但可能因后续错误中断
+  - 需检查 Extensibility.Sdk 版本是否完整支持 GenerateObserverClass
+  - 或改用方案 B：通过 `IVsNotifyUnifiedSettings` interop 订阅变化事件
+  - 或方案 C：在消费点直接读取 Unified Settings 值（每次调用时同步，无需缓存）
 
 ### MCP 对话框主题适配
 - `View/McpConfigDialog.xaml` 有 42 个硬编码色值
