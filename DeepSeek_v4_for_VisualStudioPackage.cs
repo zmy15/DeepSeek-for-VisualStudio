@@ -466,16 +466,22 @@ namespace DeepSeek_v4_for_VisualStudio
                 throw;
             }
 
-            // ═══ 步骤 10：注册编辑器 Inline Edit 命令（P1-B，非致命）═══
-            try
+            // ═══ 步骤 9/9：注册菜单命令 ═══
+            // 性能优化：InlineAiEditCommand 惰性注册（Ctrl+I 首次触发才初始化），
+            // ShowChatWindowCommand 保持立即注册（菜单项需在启动时可见）。
+            _ = Task.Run(async () =>
             {
-                await Commands.InlineAiEditCommand.InitializeAsync(this);
-                DiagnosticLog.Write("[DeepSeek Init] Step 10: InlineAiEditCommand registered OK");
-            }
-            catch (Exception ex)
-            {
-                DiagnosticLog.Write($"[DeepSeek Init] WARN Step 10 InlineAiEditCommand failed: {ex.GetType().Name}: {ex.Message}");
-            }
+                try
+                {
+                    await JoinableTaskFactory.SwitchToMainThreadAsync();
+                    await Commands.InlineAiEditCommand.InitializeAsync(this);
+                    DiagnosticLog.Write("[DeepSeek Init] Step 10 (deferred): InlineAiEditCommand registered OK");
+                }
+                catch (Exception ex)
+                {
+                    DiagnosticLog.Write($"[DeepSeek Init] WARN deferred InlineAiEditCommand failed: {ex.GetType().Name}: {ex.Message}");
+                }
+            });
 
             DiagnosticLog.Write("[DeepSeek Init] All steps completed successfully");
 
