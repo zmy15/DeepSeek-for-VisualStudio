@@ -821,13 +821,17 @@
                                 <TextBlock Text="&#xE713;" FontSize="13" FontFamily="Segoe Fluent Icons" />
                             </Button.Content>
                         </Button>
-                    </StackPanel>
-
-                    <!-- 右侧: 发送控制（P3 去拥挤：联网/MCP 移至左侧设置组）-->
-                    <StackPanel Grid.Column="1" Orientation="Horizontal" VerticalAlignment="Center">
+                        <!-- 清空按钮：置于左侧设置组末尾，与发送保持远距离防误触 -->
                         <Button x:Name="ClearButton" Content="清空" Click="ClearButton_Click"
                                 Style="{StaticResource TransparentButton}"
-                                Margin="0,0,4,0" FontSize="12" Foreground="#888888" />
+                                Margin="6,0,0,0" Padding="8,2"
+                                FontSize="12" Foreground="#888888"
+                                BorderBrush="#555555" BorderThickness="1"
+                                ToolTip="清空当前对话（需确认）" />
+                    </StackPanel>
+
+                    <!-- 右侧: 仅发送控制（清空已移至左侧组，防误触）-->
+                    <StackPanel Grid.Column="1" Orientation="Horizontal" VerticalAlignment="Center">
                         <Button x:Name="StopButton" Content="&#xE71A;" FontFamily="Segoe Fluent Icons"
                                 Click="StopButton_Click"
                                 Style="{StaticResource TransparentButton}"

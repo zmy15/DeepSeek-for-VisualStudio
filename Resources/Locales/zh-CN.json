@@ -1577,6 +1577,8 @@
     "tool.runSubagent.param.agentName":  "子 Agent 名称。使用 \"Explore\" 进行代码库探索和搜索。",
     "tool.runSubagent.param.prompt":  "委派给子 Agent 的完整任务描述，包括搜索目标、期望的详细程度（quick/medium/thorough）等。",
     "tool.runSubagent.param.description":  "简短（3-5 词）任务摘要，用于日志和追踪。",
+    "chat.clearConfirmTitle": "清空对话",
+    "chat.clearConfirm": "确定要清空整个对话吗？此操作不可恢复。",
     "chat.loadEarlier":  "加载更早的消息",
     "chat.loadEarlierMore":  "还有 {0} 条"
 }

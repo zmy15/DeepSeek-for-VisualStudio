@@ -193,6 +193,15 @@ namespace DeepSeek_v4_for_VisualStudio.View
 
         private void ClearButton_Click(object sender, RoutedEventArgs e)
         {
+            // 二次确认：清空不可恢复，防止误触丢失会话
+            var msg = LocalizationService.Instance["chat.clearConfirm"];
+            var title = LocalizationService.Instance["chat.clearConfirmTitle"];
+            if (System.Windows.MessageBox.Show(msg, title,
+                    MessageBoxButton.OKCancel, MessageBoxImage.Warning,
+                    MessageBoxResult.Cancel) != MessageBoxResult.OK)
+            {
+                return;
+            }
             ClearConversation();
         }
 
