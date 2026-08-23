@@ -1,5 +1,41 @@
 # 更新日志
 
+## [Unreleased]
+
+### 修复
+- **空白实例启动卡死（根因修复）**：
+  - `UnifiedSettingsRegistrationProbe` 全域反射扫描曾同步运行在 UI 线程
+    （实测热实例冻结 UI 18.7 秒，冷/空白实例可达分钟级）——现仅 Debug 构建
+    保留并移入后台线程延迟执行，Release 构建完全剔除
+  - 设置迁移拆分两阶段：`RegLoadAppKey` 挂载探测（慢 IO）移至后台线程，
+    DialogPage 回填/保存留主线程；新增当前 hive 自排除与单 hive 3 秒超时兜底，
+    不再探测本实例正在使用的活动 privateregistry.bin
+  - 自动弹出聊天窗口改为标记门控：仅在用户显式打开过后（写入
+    `%LocalAppData%\DeepSeekVS\chat-window-opened.flag`）的后续会话恢复弹出；
+    空白/未使用实例启动保持安静，由工具栏 / 菜单 / Ctrl+Shift+D 主动触发
+- 加载链路各阶段（GetDialogPage / 迁移 / 总耗时）补充计时诊断日志
+- **发送按钮样式统一**：新增 `AccentButton` 样式（圆角/悬停/按下/禁用态与整体按钮语言一致），
+  发送与停止按钮改用该样式，不再使用系统默认模板
+- **重新生成 / 复制按钮尺寸统一**：重试、复制、编辑消息按钮改为本地化文本标签，
+  并以相同 `min-width/min-height/padding/font-size` 渲染，深浅主题下均严格等宽等高
+
+### 变更
+- **设置体系接入新版 UI（Phase A/B 落地）**：
+  - Phase A：`[ProvideProfile]` 注册资源补全（VSPackage.resx 16001-16003），
+    设置加入 导入和导出向导 与 VS 配置漫游
+  - Phase B：新增 `Settings/UnifiedSettingsSync.cs` 双向同步桥 ——
+    旧选项页 OnApply 后经 `ISettingsWriter` 批写 Unified 存储；
+    订阅存储变更回写 Instance 并触发热更新；服务键经实测修正为
+    `{E3684F31-344E-42EA-9047-B620FDC7AC25}`；服务缺失时 fail-open 降级
+  - 已知边界：Unified Settings 引擎对新声明 moniker 的可见性需新版设置 UI 首次枚举后生效，
+    桥内置 120s 轮询与旧页 Apply 重试自愈（详见 docs/Settings-UnifiedIntegration-Feasibility.md §9.6）
+- **快捷键映射补全**：新增全局 `Ctrl+Shift+D` 打开/聚焦聊天窗口
+  （`Ctrl+I` 行内编辑保持不变；均可经 工具 → 选项 → 环境 → 键盘 调整）
+- **彻底移除 emoji**：产品源码（C#/XAML/内置 HTML/CSS/JS）与中英文本地化资源中的全部
+  emoji / 装饰符号清除或替换为文本；工具结果的 `❌`/`⏱️`/`⛔` 前缀契约迁移为
+  `Error:` / `Timeout:` / `[BLOCKED]` 文本标记（`ToolExecutionOutcome.Classify`
+  唯一解析点同步更新）；WebView2 渲染层 Emoji→Fluent 兜底映射保留用于模型输出
+
 ## [1.2.0] — 2026-08-23（Phase 1.5：Context & Evaluation Driven Refinement）
 
 > 基线 `644068a` (v1.1.14) → 本版本共 **34 个提交**；含上游 `feature/v1.1.15` 全量合入。
