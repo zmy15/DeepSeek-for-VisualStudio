@@ -76,6 +76,17 @@ git clone https://github.com/zmy15/DeepSeek-v4-for-VisualStudio.git
 2. **打开设置**：`工具 → 选项 → DeepSeek Chat` → 粘贴 API Key → 选择模型
 3. **打开聊天窗口**：`视图 → 其他窗口 → DeepSeek Chat`（或点击工具栏按钮）
 
+### 快捷键
+
+| 快捷键 | 作用 |
+|--------|------|
+| `Ctrl+Shift+D` | 打开 / 聚焦 DeepSeek Chat 窗口（全局） |
+| `Ctrl+I` | 编辑器内 Inline AI Edit（选区 → 指令 → 预览） |
+| `Enter` | 发送消息（聊天输入框内） |
+| `Ctrl+Enter` | 输入框内换行 |
+
+> 如与现有方案冲突，可在 `工具 → 选项 → 环境 → 键盘` 中搜索 "DeepSeek" 自行调整。
+
 | 推荐设置 | 值 | 说明 |
 |----------|-----|------|
 | 模型 | `deepseek-v4-pro` | 旗舰模型，推理能力最强 |
