@@ -68,7 +68,7 @@ namespace DeepSeek_v4_for_VisualStudio.Services.BuiltInTools
         public override string GetResultSummary(string toolResult)
         {
             if (string.IsNullOrEmpty(toolResult)) return LocalizationService.Instance["tool.common.noResult"];
-            if (toolResult.StartsWith("❌")) return toolResult;
+            if (toolResult.StartsWith("Error: ")) return toolResult;
 
             if (toolResult.Contains("0 个错误") || toolResult.Contains("0 errors"))
                 return LocalizationService.Instance["tool.getErrors.noErrors"];
@@ -121,13 +121,13 @@ namespace DeepSeek_v4_for_VisualStudio.Services.BuiltInTools
                         {
                             sb.AppendLine($"**{e.ErrorCode ?? "Error"}** ({e.Category}, {e.Priority}): {e.Description}");
                             if (!string.IsNullOrEmpty(e.FileName))
-                                sb.AppendLine($"  📄 `{e.FileName}`" +
+                                sb.AppendLine($"`{e.FileName}`" +
                                     (e.Line > 0 ? $":{e.Line}" : "") +
                                     (e.Column > 0 ? $":{e.Column}" : ""));
                             if (!string.IsNullOrEmpty(e.Project))
-                                sb.AppendLine($"  📦 项目: {e.Project}");
+                                sb.AppendLine($"项目: {e.Project}");
                             if (!string.IsNullOrEmpty(e.SubCategory))
-                                sb.AppendLine($"  🏷️ 子类别: {e.SubCategory}");
+                                sb.AppendLine($"子类别: {e.SubCategory}");
                             sb.AppendLine();
                         }
                         return sb.ToString().TrimEnd();
@@ -194,7 +194,7 @@ namespace DeepSeek_v4_for_VisualStudio.Services.BuiltInTools
                         Logger.Info("[BuiltInTool] get_errors: 构建仍在进行中，提示 AI 等待");
                         return LocalizationService.Instance["tool.getErrors.buildInProgress"] + "\n\n" +
                                "请等待构建完成后再调用 `get_errors`。\n" +
-                               "💡 提示：CMake 项目构建通常需要 1-5 分钟，大型项目可能更长。";
+ " 提示：CMake 项目构建通常需要 1-5 分钟，大型项目可能更长。";
                     }
 
                     return null;

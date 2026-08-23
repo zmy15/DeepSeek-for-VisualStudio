@@ -32,7 +32,7 @@ namespace DeepSeek_v4_for_VisualStudio.Services.BuiltInTools
 
     /// <summary>
     /// run_in_terminal 工具 — 在终端中运行命令。
-    /// ⚠️ 编译/构建命令会被拦截，提示使用 build_solution 工具。
+    ///  编译/构建命令会被拦截，提示使用 build_solution 工具。
     /// </summary>
     public class RunInTerminalTool : BuiltInToolBase
     {
@@ -482,7 +482,7 @@ namespace DeepSeek_v4_for_VisualStudio.Services.BuiltInTools
         public override string GetResultSummary(string toolResult)
         {
             if (string.IsNullOrEmpty(toolResult)) return LocalizationService.Instance["tool.common.noResult"];
-            if (toolResult.StartsWith("❌") || toolResult.StartsWith("⛔")) return toolResult;
+            if (toolResult.StartsWith("Error: ") || toolResult.StartsWith("[BLOCKED] ")) return toolResult;
             if (toolResult.Contains("exit code: 0") || toolResult.Contains("ExitCode: 0"))
                 return LocalizationService.Instance["tool.runTerminal.success"];
             return LocalizationService.Instance["tool.runTerminal.executed"];
@@ -506,14 +506,14 @@ namespace DeepSeek_v4_for_VisualStudio.Services.BuiltInTools
             var rawDangerKind = DetectDangerousCommand(command);
             if (rawDangerKind != DangerousCommandKind.None)
             {
-                Logger.Warn($"[RunInTerminal] ⛔ 危险命令被拦截 ({rawDangerKind}): {command.Truncate(150)}");
+                Logger.Warn($"[RunInTerminal] [BLOCKED] 危险命令被拦截 ({rawDangerKind}): {command.Truncate(150)}");
                 return FormatDangerBlocked(command, rawDangerKind);
             }
 
             // ── 只读 Agent 限制：Ask/Explore 不得通过终端修改文件（原始命令）──
             if (IsReadOnlyAgent && DetectFileEditingCommand(command))
             {
-                Logger.Warn($"[RunInTerminal] ⛔ 只读 Agent 的文件修改命令被拦截 ({CurrentAgentType}): {command.Truncate(150)}");
+                Logger.Warn($"[RunInTerminal] [BLOCKED] 只读 Agent 的文件修改命令被拦截 ({CurrentAgentType}): {command.Truncate(150)}");
                 return FormatFileEditBlocked(command);
             }
 
@@ -554,14 +554,14 @@ namespace DeepSeek_v4_for_VisualStudio.Services.BuiltInTools
             var normalizedDangerKind = DetectDangerousCommand(command);
             if (normalizedDangerKind != DangerousCommandKind.None)
             {
-                Logger.Warn($"[RunInTerminal] ⛔ 危险命令被拦截（修正后） ({normalizedDangerKind}): {command.Truncate(150)}");
+                Logger.Warn($"[RunInTerminal] [BLOCKED] 危险命令被拦截（修正后） ({normalizedDangerKind}): {command.Truncate(150)}");
                 return FormatDangerBlocked(command, normalizedDangerKind);
             }
 
             // ── 只读 Agent 限制（修正后的命令，覆盖 cmd /c 剥离与 Unix→PowerShell 转换结果）──
             if (IsReadOnlyAgent && DetectFileEditingCommand(command))
             {
-                Logger.Warn($"[RunInTerminal] ⛔ 只读 Agent 的文件修改命令被拦截（修正后）({CurrentAgentType}): {command.Truncate(150)}");
+                Logger.Warn($"[RunInTerminal] [BLOCKED] 只读 Agent 的文件修改命令被拦截（修正后）({CurrentAgentType}): {command.Truncate(150)}");
                 return FormatFileEditBlocked(command);
             }
 
@@ -715,7 +715,7 @@ namespace DeepSeek_v4_for_VisualStudio.Services.BuiltInTools
                     var sb = new StringBuilder();
                     if (!string.IsNullOrEmpty(warningPrefix))
                         sb.Append(warningPrefix);
-                    sb.AppendLine($"📟 终端输出 (退出码: {exitCode}):");
+                    sb.AppendLine($"终端输出 (退出码: {exitCode}):");
                     if (!string.IsNullOrWhiteSpace(stdout))
                         sb.AppendLine(stdout);
                     if (!string.IsNullOrWhiteSpace(stderr))
@@ -767,7 +767,7 @@ namespace DeepSeek_v4_for_VisualStudio.Services.BuiltInTools
                 normalized.Contains(" g++ ", StringComparison.OrdinalIgnoreCase))
                 return true;
 
-            // ⚠️ cmake --build 不拦截：build_solution 对 CMake 项目底层用的就是 cmake --build，
+            //  cmake --build 不拦截：build_solution 对 CMake 项目底层用的就是 cmake --build，
             // 且 build_solution 不支持 --target 参数，拦截会导致 AI 无法构建测试目标等非默认 target。
             // 其余原生构建工具（make/ninja）仍拦截，引导使用 build_solution。
             if (normalized.StartsWith("make ", StringComparison.OrdinalIgnoreCase) ||
@@ -905,7 +905,7 @@ namespace DeepSeek_v4_for_VisualStudio.Services.BuiltInTools
             // 匹配类似 ./path/to/file 或 /absolute/path 的模式
             result = System.Text.RegularExpressions.Regex.Replace(
                 result, @"(?<![a-zA-Z])(\./)([^\s;|]+)", @".\$2");
-            // ⚠️ 至少匹配 2 层路径（如 /usr/bin），避免误改 cmd /c、cmd /k 等 Windows 开关
+            //  至少匹配 2 层路径（如 /usr/bin），避免误改 cmd /c、cmd /k 等 Windows 开关
             result = System.Text.RegularExpressions.Regex.Replace(
                 result, @"(?<![a-zA-Z:\)\(])(/[a-zA-Z0-9_\-\.]+){2,}", m =>
                     m.Value.Replace('/', '\\'));

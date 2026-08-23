@@ -579,7 +579,7 @@ namespace DeepSeek_v4_for_VisualStudio.Models
 
         /// <summary>
         /// 分叉原因："edit"（编辑用户消息产生）或 "retry"（重试助手回复产生）。
-        /// 分支导航按钮（◀ 分支 X/Y ▶）始终渲染在用户气泡正下方。
+        /// 分支导航按钮（ 分支 X/Y ）始终渲染在用户气泡正下方。
         /// </summary>
         [DataMember]
         public string? ForkReason { get; set; }

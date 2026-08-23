@@ -212,7 +212,7 @@ namespace DeepSeek_v4_for_VisualStudio.Models
         public string? CodeMemory { get; set; }
 
         /// <summary>
-        /// 🔑 Handoff 时源 Agent 的最终工具循环消息列表（v1.1.10 缓存优化）。
+        ///  Handoff 时源 Agent 的最终工具循环消息列表（v1.1.10 缓存优化）。
         /// 设置后，目标 Agent 的 BuildContextAwareMessages 将复用此列表作为前缀，
         /// 而非从 ContextManager 重建，确保 Handoff 前后消息结构一致，
         /// DeepSeek Prefix Cache 可直接命中。

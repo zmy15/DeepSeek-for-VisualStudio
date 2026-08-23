@@ -67,7 +67,7 @@ namespace DeepSeek_v4_for_VisualStudio.Services.Agents
             set
             {
                 RegisterExploreAgent(value, ref _exploreAgent);
-                base.ExploreAgent = value; // 🔑 同步到基类属性，确保 ExecuteToolAsync 可见
+                base.ExploreAgent = value; //  同步到基类属性，确保 ExecuteToolAsync 可见
             }
         }
 
@@ -1023,7 +1023,7 @@ namespace DeepSeek_v4_for_VisualStudio.Services.Agents
                 AddLog("INFO", LocalizationService.Instance["agent.log.verifyPhaseStarted"]);
 
                 // ── 验证阶段专用 system prompt（从 i18n 加载，支持中英切换）──
-                // ⚠️ 缓存优化：作为 extraSystemMessages 注入而非替换 messages[0]，
+                //  缓存优化：作为 extraSystemMessages 注入而非替换 messages[0]，
                 //    保持 Definition.SystemPrompt 在 messages[0] 不变，
                 //    使 DeepSeek Prompt Cache 能命中编辑阶段已缓存的前缀。
                 string verifySystemPrompt = LocalizationService.Instance.Format(
@@ -1068,7 +1068,7 @@ namespace DeepSeek_v4_for_VisualStudio.Services.Agents
                     string.Join(", ", changes.Select(c => Path.GetFileName(c.FilePath))),
                     verifyExploreContext,
                     sanityWarnings != null
-                        ? $"⚠️ **Sanity check found potential issues**: {sanityWarnings}\nPlease pay special attention to bracket/parenthesis matching; use read_file to check near file ends if needed.\n\n"
+                        ? $" **Sanity check found potential issues**: {sanityWarnings}\nPlease pay special attention to bracket/parenthesis matching; use read_file to check near file ends if needed.\n\n"
                         : "\n");
 
                 // ── 使用 Definition.SystemPrompt 保持缓存前缀，验证指令通过 extraSystemMessages 注入 ──
@@ -1212,7 +1212,7 @@ namespace DeepSeek_v4_for_VisualStudio.Services.Agents
             if (untouched.Count > 0)
             {
                 AddLog("WARN", string.Format(
-                    "[EditAgent] ⚠️ 步骤自检：步骤描述中提到了 {0} 个文件，但以下文件未被本次编辑修改: {1}。" +
+ "[EditAgent]  步骤自检：步骤描述中提到了 {0} 个文件，但以下文件未被本次编辑修改: {1}。" +
                     "如果这些修改在后续步骤中完成则可忽略，否则可能是遗漏。",
                     mentionedFiles.Count,
                     string.Join(", ", untouched)));
@@ -1264,14 +1264,8 @@ namespace DeepSeek_v4_for_VisualStudio.Services.Agents
                 }
             }
 
-            // 模式3: 勾号+步骤 "✅ 步骤2、3" / "✔ 步骤2 完成" / "✓ step 2 done"
-            var checkPatterns = new[]
-            {
-                @"[✅✔☑✓]\s*步骤\s*(\d+(?:[、,，\s]+(?:和|及|与)?\s*\d+)*)",
-                @"[✅✔☑✓]\s*step\s*(\d+(?:[,\s]+(?:and\s+)?\d+)*)",
-                @"步骤\s*(\d+(?:[、,，\s]+(?:和|及|与)?\s*\d+)*)\s*[✅✔☑✓]",
-                @"step\s*(\d+(?:[,\s]+(?:and\s+)?\d+)*)\s*[✅✔☑✓]",
-            };
+            // 模式3（原"勾号+步骤"）：勾号字形已随 emoji 清理移除，
+            // 无完成词的裸步骤列表不再作为自动完成依据，避免误标
 
             // 模式4: 范围式声明 "步骤1-6 已完成" / "步骤1~6" / "步骤1到6" / "步骤1至6"
             // "steps 1 through 6 done" / "steps 1-6 completed"
@@ -1281,7 +1275,6 @@ namespace DeepSeek_v4_for_VisualStudio.Services.Agents
                 @"步骤\s*(\d+)\s*[-~—–]\s*(\d+)\s*[也已均都随之一同顺并]*\s*(?:完成|做完|搞定)",
                 @"步骤\s*(\d+)\s*(?:到|至|一直到)\s*(\d+)\s*[也已均都随之一同顺并]*\s*(?:完成|做完|搞定)",
                 @"(?:也|已|同样|一并|同时)\s*完成(?:了)?\s*步骤\s*(\d+)\s*[-~—–到至]\s*(\d+)",
-                @"[✅✔☑✓]\s*步骤\s*(\d+)\s*[-~—–到至]\s*(\d+)",
                 @"steps?\s*(\d+)\s*(?:through|to|-|~|&amp;)\s*(\d+)\s*(?:are\s+)?(?:also\s+)?(?:done|completed|finished)",
             };
             foreach (var pattern in rangePatterns)
@@ -1299,14 +1292,6 @@ namespace DeepSeek_v4_for_VisualStudio.Services.Agents
                     }
                 }
             }
-            foreach (var pattern in checkPatterns)
-            {
-                foreach (System.Text.RegularExpressions.Match m in
-                    System.Text.RegularExpressions.Regex.Matches(response, pattern, System.Text.RegularExpressions.RegexOptions.IgnoreCase))
-                {
-                    ParseStepNumbers(m.Groups[1].Value, autoCompletedIndices);
-                }
-            }
 
             // 过滤：仅处理当前步骤之后的 Pending 步骤
             var toAutoComplete = autoCompletedIndices
@@ -1319,7 +1304,7 @@ namespace DeepSeek_v4_for_VisualStudio.Services.Agents
             {
                 s.Status = AgentStepStatus.Completed;
                 s.ResultSummary = $"(由步骤{completedStep.Index}的 AI 输出自动标记完成)";
-                AddLog("INFO", $"[EditAgent] 📋 步骤{s.Index}「{s.Title}」由 AI 声明完成，自动标记");
+                AddLog("INFO", $"[EditAgent]  步骤{s.Index}「{s.Title}」由 AI 声明完成，自动标记");
             }
 
             if (toAutoComplete.Count > 0)
@@ -1401,7 +1386,7 @@ namespace DeepSeek_v4_for_VisualStudio.Services.Agents
             if (neverTouched.Count > 0)
             {
                 AddLog("WARN", string.Format(
-                    "[EditAgent] 📋 Plan 追踪：计划步骤中引用了 {0} 个文件，其中 {1} 个文件在所有步骤中均未被修改: {2}。" +
+ "[EditAgent]  Plan 追踪：计划步骤中引用了 {0} 个文件，其中 {1} 个文件在所有步骤中均未被修改: {2}。" +
                     "请确认这些文件是否确实无需修改，或是否存在遗漏。",
                     allMentioned.Count, neverTouched.Count,
                     string.Join(", ", neverTouched.Take(10))));
@@ -1410,7 +1395,7 @@ namespace DeepSeek_v4_for_VisualStudio.Services.Agents
             if (extraModified.Count > 0)
             {
                 AddLog("INFO", string.Format(
-                    "[EditAgent] 📋 Plan 追踪：实际修改了 {0} 个计划中未明确列出的文件: {1}。" +
+ "[EditAgent]  Plan 追踪：实际修改了 {0} 个计划中未明确列出的文件: {1}。" +
                     "这可能是合理的关联修改，也可能是范围蔓延。",
                     extraModified.Count,
                     string.Join(", ", extraModified.Take(10))));
@@ -1418,7 +1403,7 @@ namespace DeepSeek_v4_for_VisualStudio.Services.Agents
 
             if (neverTouched.Count == 0 && extraModified.Count == 0)
             {
-                AddLog("INFO", $"[EditAgent] 📋 Plan 追踪：计划中引用的 {allMentioned.Count} 个文件与实际修改一致 ✅");
+                AddLog("INFO", $"[EditAgent]  Plan 追踪：计划中引用的 {allMentioned.Count} 个文件与实际修改一致 ");
             }
         }
 
@@ -2329,7 +2314,9 @@ namespace DeepSeek_v4_for_VisualStudio.Services.Agents
             string oneLine = buildResult.Split(new[] { '\r', '\n' },
                 StringSplitOptions.RemoveEmptyEntries).FirstOrDefault() ?? buildResult;
 
-            bool success = buildResult.Contains("✅")
+            bool success = buildResult.Contains("构建成功")
+                || buildResult.Contains("构建通过")
+                || buildResult.Contains("build succeeded")
                 || buildResult.Contains("0 个错误")
                 || buildResult.Contains("0 errors");
             if (success)
@@ -2382,8 +2369,8 @@ namespace DeepSeek_v4_for_VisualStudio.Services.Agents
             // 第2层：代码记忆（跨步骤持久化，未读新文件/未修改文件时不变）
             if (!string.IsNullOrEmpty(context.CodeMemory))
             {
-                sb.AppendLine("## 📋 代码记忆（前面步骤读取的关键文件内容，可直接使用，无需重复 read_file）");
-                sb.AppendLine("> ⚠️ 以下内容来自前面步骤的 read_file 结果，这些文件在之前步骤中**未被修改**。已被修改过的文件已自动排除。");
+                sb.AppendLine("##  代码记忆（前面步骤读取的关键文件内容，可直接使用，无需重复 read_file）");
+                sb.AppendLine(">  以下内容来自前面步骤的 read_file 结果，这些文件在之前步骤中**未被修改**。已被修改过的文件已自动排除。");
                 sb.AppendLine();
                 sb.AppendLine(context.CodeMemory);
                 sb.AppendLine();
@@ -2425,7 +2412,7 @@ namespace DeepSeek_v4_for_VisualStudio.Services.Agents
                         string overview = ExtractPlanMdOverview(planMd);
                         if (!string.IsNullOrEmpty(overview))
                         {
-                            sb.AppendLine("## 📄 计划概述");
+                            sb.AppendLine("##  计划概述");
                             sb.AppendLine(overview);
                             sb.AppendLine();
                         }
@@ -2465,7 +2452,7 @@ namespace DeepSeek_v4_for_VisualStudio.Services.Agents
                     if (!string.IsNullOrEmpty(context.CodeMemory))
                     {
                         var cmMatches = System.Text.RegularExpressions.Regex.Matches(
-                            context.CodeMemory, @"### 📄 `([^`]+)`");
+                            context.CodeMemory, @"###  `([^`]+)`");
                         foreach (System.Text.RegularExpressions.Match m in cmMatches)
                             codeMemoryFileNames.Add(m.Groups[1].Value);
                     }
@@ -2481,7 +2468,7 @@ namespace DeepSeek_v4_for_VisualStudio.Services.Agents
                     if (safeFiles.Count > 0)
                     {
                         sb.AppendLine("## 前面步骤已读取的文件内容（可直接使用，无需重复调用 read_file）");
-                        sb.AppendLine("> ⚠️ 以下文件内容来自前面步骤的读取缓存，这些文件在之前步骤中**未被修改**，内容仍然有效。已被修改过的文件已自动排除。");
+                        sb.AppendLine(">  以下文件内容来自前面步骤的读取缓存，这些文件在之前步骤中**未被修改**，内容仍然有效。已被修改过的文件已自动排除。");
                         sb.AppendLine();
 
                         const int maxFilesToInclude = 10;
@@ -2501,7 +2488,7 @@ namespace DeepSeek_v4_for_VisualStudio.Services.Agents
                             if (truncated)
                                 content = content.Substring(0, maxCharsPerFile) + "\n... (内容已截断，如需完整内容请使用 read_file)";
 
-                            sb.AppendLine($"### 📄 `{filePath}`");
+                            sb.AppendLine($"###  `{filePath}`");
                             sb.AppendLine("```");
                             sb.AppendLine(content);
                             sb.AppendLine("```");
@@ -2513,7 +2500,7 @@ namespace DeepSeek_v4_for_VisualStudio.Services.Agents
 
                         if (included < safeFiles.Count)
                         {
-                            sb.AppendLine($"> 💡 还有 {safeFiles.Count - included} 个已缓存文件未显示（超出大小限制）。如需要，请使用 read_file 读取。");
+                            sb.AppendLine($">  还有 {safeFiles.Count - included} 个已缓存文件未显示（超出大小限制）。如需要，请使用 read_file 读取。");
                             sb.AppendLine();
                         }
 
@@ -2570,7 +2557,7 @@ namespace DeepSeek_v4_for_VisualStudio.Services.Agents
             {
                 "### 3.", "### 2.", "### 3 ", "### 2 ",
                 "## 详细步骤", "## Detailed Steps",
-                "## 📝", "## 实现步骤", "## Implementation",
+ "## ", "## 实现步骤", "## Implementation",
                 "## 步骤", "## Steps"
             };
 
@@ -2871,7 +2858,7 @@ namespace DeepSeek_v4_for_VisualStudio.Services.Agents
 
             bool approved = await RequestPermissionAsync(
                 $"确认修改项目文件: {fileName}",
-                $"即将修改项目配置文件 `{fileName}`\n\n路径: {filePath}\n\n{desc}\n\n⚠️ 修改项目文件可能影响构建配置和项目结构。",
+                $"即将修改项目配置文件 `{fileName}`\n\n路径: {filePath}\n\n{desc}\n\n 修改项目文件可能影响构建配置和项目结构。",
                 "file_write",
                 detail,
                 effectivePurpose);
@@ -3192,10 +3179,10 @@ namespace DeepSeek_v4_for_VisualStudio.Services.Agents
                 sb.AppendLine(L["edit.summary.stepExecutionHeader"]);
                 foreach (var step in plan.Steps)
                 {
-                    string statusIcon = step.Status == AgentStepStatus.Completed ? "✅"
-                        : step.Status == AgentStepStatus.Failed ? "❌"
-                        : step.Status == AgentStepStatus.Skipped ? "⏭️"
-                        : "🔄";
+                    string statusIcon = step.Status == AgentStepStatus.Completed ? ""
+                        : step.Status == AgentStepStatus.Failed ? "Error: "
+                        : step.Status == AgentStepStatus.Skipped ? ""
+                        : "";
                     string summary = !string.IsNullOrWhiteSpace(step.ResultSummary)
                         ? step.ResultSummary!
                         : LocalizationService.Instance["agent.step.noDetail"];
@@ -3266,7 +3253,7 @@ namespace DeepSeek_v4_for_VisualStudio.Services.Agents
                 int skipped = plan.Steps.Count(s => s.Status == AgentStepStatus.Skipped);
 
                 sb.AppendLine(L.Format("edit.summary.executionHeader", plan.Title, 
-                    $"✅ {completed} / ❌ {failed} / ⏭️ {skipped}"));
+                    $" {completed} / Error: {failed} /  {skipped}"));
             }
 
             // 文件变更
@@ -3590,7 +3577,7 @@ namespace DeepSeek_v4_for_VisualStudio.Services.Agents
                 if (bestProject != null)
                 {
                     bestProject.ProjectItems.AddFromFile(filePath);
-                    Logger.Info($"[EditAgent] ✅ 已将文件加入项目: {Path.GetFileName(filePath)} → {bestProject.Name}");
+                    Logger.Info($"[EditAgent]  已将文件加入项目: {Path.GetFileName(filePath)} → {bestProject.Name}");
                 }
                 else
                 {
@@ -3746,8 +3733,8 @@ namespace DeepSeek_v4_for_VisualStudio.Services.Agents
                             }
                         }
 
-                        // 判断操作是否成功（✅ 开头表示成功）
-                        if (!toolResult.StartsWith("✅")) continue;
+                        // 判断操作是否成功（以 Error:/Timeout: 标记开头表示失败）
+                        if (toolResult.StartsWith("Error: ") || toolResult.StartsWith("Timeout: ")) continue;
 
                         // 估算行数变更（从工具结果中提取 +N -M 模式）
                         int linesAdded = 0;
@@ -3891,7 +3878,7 @@ namespace DeepSeek_v4_for_VisualStudio.Services.Agents
         /// <summary>
         /// 检查执行日志中是否有编译警告或失败信号。
         /// 仅匹配明确的构建失败标记（错误代码、构建摘要行），避免
-        /// 因日志中包含 "build"/"Build"/"❌" 等通用词而产生误判。
+        /// 因日志中包含 "build"/"Build"/"Error: " 等通用词而产生误判。
         /// 用于判断是否应建议 Handoff 到 Build Agent。
         /// </summary>
         private bool HasBuildWarningsInLogs()
@@ -3904,10 +3891,10 @@ namespace DeepSeek_v4_for_VisualStudio.Services.Agents
 
                 string msg = log.Message ?? string.Empty;
 
-                // ── 明确的构建/编译失败标记（含 ❌ 前缀）──
-                if (msg.Contains("❌ 构建失败") || msg.Contains("❌ 编译失败")
-                    || msg.Contains("❌ build") || msg.Contains("❌ Build")
-                    || msg.Contains("❌ CMake") || msg.Contains("❌ MSBuild"))
+                // ── 明确的构建/编译失败标记（含 Error: 前缀）──
+                if (msg.Contains("Error: 构建失败") || msg.Contains("Error: 编译失败")
+                    || msg.Contains("Error: build") || msg.Contains("Error: Build")
+                    || msg.Contains("Error: CMake") || msg.Contains("Error: MSBuild"))
                     return true;
 
                 // ── 编译器/MSBuild 错误代码 ──
@@ -3936,7 +3923,7 @@ namespace DeepSeek_v4_for_VisualStudio.Services.Agents
                     return true;
 
                 // ── 最终编译验证的警告日志（中/英文 locale）──
-                if (msg.Contains("⚠️ 最终编译") || msg.Contains("Final build has issues")
+                if (msg.Contains(" 最终编译") || msg.Contains("Final build has issues")
                     || (msg.IndexOf("final build", StringComparison.OrdinalIgnoreCase) >= 0
                         && (msg.IndexOf("failed", StringComparison.OrdinalIgnoreCase) >= 0
                             || msg.IndexOf("issues", StringComparison.OrdinalIgnoreCase) >= 0
@@ -4246,10 +4233,10 @@ namespace DeepSeek_v4_for_VisualStudio.Services.Agents
             {
                 string icon = step.Status switch
                 {
-                    AgentStepStatus.Completed => "✅",
-                    AgentStepStatus.Failed => "❌",
-                    AgentStepStatus.Skipped => "⏭",
-                    _ => "⬜",
+                    AgentStepStatus.Completed => "",
+                    AgentStepStatus.Failed => "Error: ",
+                    AgentStepStatus.Skipped => "",
+                    _ => "",
                 };
                 string summary = !string.IsNullOrWhiteSpace(step.ResultSummary)
                     ? step.ResultSummary!

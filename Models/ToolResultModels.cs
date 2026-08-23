@@ -10,10 +10,10 @@ namespace DeepSeek_v4_for_VisualStudio.Models
         /// <summary>执行成功</summary>
         Success = 0,
 
-        /// <summary>工具级失败（❌ 前缀约定）</summary>
+        /// <summary>工具级失败（Error: 前缀约定）</summary>
         ToolError = 1,
 
-        /// <summary>超时被终止（⏱️ 前缀约定，归入 System 故障族）</summary>
+        /// <summary>超时被终止（Timeout: 前缀约定，归入 System 故障族）</summary>
         Timeout = 2,
     }
 
@@ -48,13 +48,13 @@ namespace DeepSeek_v4_for_VisualStudio.Models
 
         /// <summary>
         /// 结果字符串约定的唯一权威解析点：
-        /// ❌ = 工具错误；⏱️ = 超时；其余 = 成功。
+        /// Error: = 工具错误；Timeout: = 超时；其余 = 成功。
         /// </summary>
         public static ToolResultKind Classify(string? output)
         {
             if (string.IsNullOrEmpty(output)) return ToolResultKind.Success;
-            if (output.StartsWith("⏱️", StringComparison.Ordinal)) return ToolResultKind.Timeout;
-            if (output.StartsWith("❌", StringComparison.Ordinal)) return ToolResultKind.ToolError;
+            if (output.StartsWith("Timeout: ", StringComparison.Ordinal)) return ToolResultKind.Timeout;
+            if (output.StartsWith("Error: ", StringComparison.Ordinal)) return ToolResultKind.ToolError;
             return ToolResultKind.Success;
         }
     }

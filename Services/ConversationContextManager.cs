@@ -129,7 +129,7 @@ namespace DeepSeek_v4_for_VisualStudio.Services
         /// </summary>
         public double CompressionAggressiveness { get; set; } = 0.5;
 
-        // ── 🔑 缓存边界快照（v1.1.10）──
+        // ──  缓存边界快照（v1.1.10）──
         //     Agent Handoff 时，在注入过渡消息前保存 _entries 的快照索引，
         //     目标 Agent 可调用 BuildApiMessagesUpToSnapshot() 仅包含边界前的历史，
         //     使前缀缓存跨 Agent 切换时仍能命中。
@@ -139,7 +139,7 @@ namespace DeepSeek_v4_for_VisualStudio.Services
         private int? _cacheSnapshotEntryIndex;
 
         /// <summary>
-        /// 🔑 缓存边界快照时的 dynamicBlock 冻结副本（v1.1.10）。
+        ///  缓存边界快照时的 dynamicBlock 冻结副本（v1.1.10）。
         /// 快照活跃时，BuildApiMessages 使用此冻结版本替代实时 BuildDynamicContextBlock()，
         /// 防止压缩摘要/搜索/RAG/记忆等动态内容变化导致前缀缓存断裂。
         /// null = 无快照或快照时 dynamicBlock 为空。
@@ -155,7 +155,7 @@ namespace DeepSeek_v4_for_VisualStudio.Services
         {
             _cacheSnapshotEntryIndex = _entries.Count;
             _cachedDynamicBlock = BuildDynamicContextBlock();
-            Logger.Info($"[ContextManager] 🔑 缓存边界快照已保存: entryIndex={_cacheSnapshotEntryIndex}, dynamicBlock={(_cachedDynamicBlock?.Length ?? 0)}chars");
+            Logger.Info($"[ContextManager]  缓存边界快照已保存: entryIndex={_cacheSnapshotEntryIndex}, dynamicBlock={(_cachedDynamicBlock?.Length ?? 0)}chars");
         }
 
         /// <summary>获取当前对话轮次数（一个 user 消息 = 一轮）</summary>
@@ -189,7 +189,7 @@ namespace DeepSeek_v4_for_VisualStudio.Services
                     MultimodalContent = CloneContentParts(entry.MultimodalContent),
                 };
 
-                // 🔑 序列化保真度：原样复制 ReasoningContent（null 保持 null），
+                //  序列化保真度：原样复制 ReasoningContent（null 保持 null），
                 //     不使用 ?? string.Empty 兜底。JsonIgnoreCondition.WhenWritingNull
                 //     会省略 null 但序列化 "" → JSON 字节不同 → 前缀缓存断裂。
                 if (entry.Role == "assistant" && entry.HasToolCalls)
@@ -428,10 +428,10 @@ namespace DeepSeek_v4_for_VisualStudio.Services
             if (hasText)
                 content = StringExtensions.SanitizeUserInput(content);
 
-            // ── 🔑 缓存边界快照：新用户消息意味着新对话轮次，清除旧快照 ──
+            // ──  缓存边界快照：新用户消息意味着新对话轮次，清除旧快照 ──
             if (_cacheSnapshotEntryIndex.HasValue)
             {
-                Logger.Info($"[ContextManager] 🔑 新用户消息，清除缓存边界快照 (was at entry {_cacheSnapshotEntryIndex})");
+                Logger.Info($"[ContextManager]  新用户消息，清除缓存边界快照 (was at entry {_cacheSnapshotEntryIndex})");
                 _cacheSnapshotEntryIndex = null;
             }
 
@@ -451,7 +451,7 @@ namespace DeepSeek_v4_for_VisualStudio.Services
             else
                 AutoTrimIfNeeded();
 
-            // ── 🔑 v1.1.11：冻结动态上下文块，确保同轮次内后续API调用
+            // ──  v1.1.11：冻结动态上下文块，确保同轮次内后续API调用
             //     messages[2] 内容不变 → DeepSeek前缀缓存可持续命中。──
             _cachedDynamicBlock = BuildDynamicContextBlock();
         }
@@ -464,7 +464,7 @@ namespace DeepSeek_v4_for_VisualStudio.Services
         /// <param name="toolCalls">工具调用列表（可为 null）</param>
         public void AddAssistantMessage(string? content, string? reasoningContent = null, List<ToolCall>? toolCalls = null)
         {
-            // ── 🔑 前缀缓存优化：写时合并连续 assistant 消息 ──
+            // ──  前缀缓存优化：写时合并连续 assistant 消息 ──
             //     如果上一条也是 assistant，合并内容而非新增条目，
             //     避免 BuildApiMessages 产生连续 assistant 消息，进而触发 ChatStreamAsync
             //     的合并逻辑修改消息内容 → 破坏 DeepSeek Prefix Cache 前缀。
@@ -730,7 +730,7 @@ namespace DeepSeek_v4_for_VisualStudio.Services
 
             // 即使用户记忆中没有中文，也始终确保英文回复（因为用户用英文提问）
             return memoryHasChinese
-                ? "⚠️ LANGUAGE OVERRIDE: The user is writing in English. Even though some context or memory content above is in Chinese, you MUST respond in English. The memory content is metadata — the user's actual communication language is English."
+                ? " LANGUAGE OVERRIDE: The user is writing in English. Even though some context or memory content above is in Chinese, you MUST respond in English. The memory content is metadata — the user's actual communication language is English."
                 : null;
         }
 

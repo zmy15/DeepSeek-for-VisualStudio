@@ -1,4 +1,4 @@
-﻿using DeepSeek_v4_for_VisualStudio.Models;
+using DeepSeek_v4_for_VisualStudio.Models;
 using DeepSeek_v4_for_VisualStudio.Utils;
 using System;
 using System.Collections.Generic;
@@ -390,9 +390,9 @@ namespace DeepSeek_v4_for_VisualStudio.Services
         /// 连接复用诊断日志 — 记录 ServicePoint 当前连接状态。
         /// 
         /// 用途：监控 Agent 间是否复用同一 TCP 连接。
-        ///   - CurrentConnections 持续为 1 且无新建 → 连接被复用 ✅
-        ///   - CurrentConnections 频繁升降 → 连接在回收重建 ⚠️
-        ///   - 每次请求都是新 ServicePoint → 连接未曾复用 🔴
+        ///   - CurrentConnections 持续为 1 且无新建 → 连接被复用 
+        ///   - CurrentConnections 频繁升降 → 连接在回收重建 
+        ///   - 每次请求都是新 ServicePoint → 连接未曾复用 
         /// </summary>
         private void LogConnectionReuseDiagnostics()
         {
@@ -548,7 +548,7 @@ namespace DeepSeek_v4_for_VisualStudio.Services
             // 2. assistant 消息有 tool_calls 时可以没有 content，但不能既无 content 又无 tool_calls
             // 3. 不能有连续的相同 role 消息（user-user, assistant-assistant）→ 合并而非丢弃
             //
-            // 🔑 缓存关键（v1.1.10）：所有清理操作在 SHALLOW CLONE 上进行，
+            //  缓存关键（v1.1.10）：所有清理操作在 SHALLOW CLONE 上进行，
             //    不修改原始 ChatApiMessage 对象，确保下次请求的前缀不变，
             //    DeepSeek Prefix Cache 可持续命中。
             var cleanedMessages = new List<ChatApiMessage>();
@@ -732,7 +732,7 @@ namespace DeepSeek_v4_for_VisualStudio.Services
                 }
             }
 
-            // ── 🔍 诊断：遍历所有 tool 消息，记录哪些会被移除及原因 ──
+            // ──  诊断：遍历所有 tool 消息，记录哪些会被移除及原因 ──
             int totalToolMsgs = 0;
             var orphanDetails = new List<string>();
             for (int i = 0; i < request.Messages.Count; i++)
@@ -854,7 +854,7 @@ namespace DeepSeek_v4_for_VisualStudio.Services
             //     在发送前对比 system prompt + tool catalog 的 SHA-256 指纹，
             //     检测前缀漂移并记录日志，保障 V4 自动前缀缓存命中率可观测。
             //     
-            //     🔑 v1.1.11：仅对使用标准 SharedImmutablePrefix 的调用执行检查。
+            //      v1.1.11：仅对使用标准 SharedImmutablePrefix 的调用执行检查。
             //     非标准调用（如代码变更总结、API Key 验证等）使用自定义短 prompt，
             //     不应污染 PrefixCache 的 pinned 基准，避免导致后续正常调用误判漂移。
             if (PrefixCache != null)
@@ -872,7 +872,7 @@ namespace DeepSeek_v4_for_VisualStudio.Services
 
                     if (!driftInfo.IsInitialPin)
                     {
-                        string driftTag = driftInfo.HasDrift ? "⚠️ 漂移" : "✅ 稳定";
+                        string driftTag = driftInfo.HasDrift ? " 漂移" : " 稳定";
                         Logger.Info($"[Cache] 前缀指纹状态: {driftTag} | 稳定性={PrefixCache.StabilityRatio:P1} ({PrefixCache.StableChecks}/{PrefixCache.TotalChecks})");
                     }
                 }
@@ -1015,20 +1015,20 @@ namespace DeepSeek_v4_for_VisualStudio.Services
                     int cacheableTotal = hit + miss;
                     if (cacheableTotal <= 0)
                     {
-                        Logger.Info($"[Cache] ⚪ API调用完成: 无可缓存数据 (prompt {LastUsage.PromptTokens:N0} tokens)");
+                        Logger.Info($"[Cache]  API调用完成: 无可缓存数据 (prompt {LastUsage.PromptTokens:N0} tokens)");
                         return;
                     }
 
                     double rate = (double)hit / cacheableTotal;
-                    string level = rate >= 0.90 ? "🟢" : rate >= 0.50 ? "🟡" : rate >= 0.20 ? "🟠" : "🔴";
+                    string level = rate >= 0.90 ? "" : rate >= 0.50 ? "" : rate >= 0.20 ? "" : "";
 
                     const int bytesPerToken = 3;
                     int msg0TokenEstimate = msg0Length / bytesPerToken;
                     string missBoundary;
                     if (msg0Length > 0 && hit >= msg0TokenEstimate * 0.8)
-                        missBoundary = $"✅ messages[0] 命中 → miss 在对话历史/动态块之后";
+                        missBoundary = $"messages[0] 命中 → miss 在对话历史/动态块之后";
                     else if (msg0Length > 0)
-                        missBoundary = $"🔴 messages[0] 未完全命中！命中={hit} tokens, messages[0]≈{msg0TokenEstimate} tokens → SharedImmutablePrefix 可能已变化";
+                        missBoundary = $"messages[0] 未完全命中！命中={hit} tokens, messages[0]≈{msg0TokenEstimate} tokens → SharedImmutablePrefix 可能已变化";
                     else
                         missBoundary = "（无分段数据）";
 

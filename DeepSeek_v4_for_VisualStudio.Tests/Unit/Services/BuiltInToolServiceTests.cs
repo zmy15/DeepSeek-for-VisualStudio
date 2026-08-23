@@ -133,7 +133,7 @@ public class BuiltInToolServiceTests
         var result = await service.ExecuteBuiltInToolAsync("list_dir", "{}");
 
         result.Should().NotBeNull();
-        result.Should().Contain("❌");
+        result.Should().Contain("Error: ");
     }
 
     [Fact]
@@ -148,7 +148,7 @@ public class BuiltInToolServiceTests
             var result = await service.ExecuteBuiltInToolAsync("create_directory", args);
 
             result.Should().NotBeNull();
-            result.Should().Contain("✅");
+            result.Should().NotContain("Error: ");
             Directory.Exists(tempDir).Should().BeTrue();
         }
         finally
@@ -167,7 +167,7 @@ public class BuiltInToolServiceTests
         var result = await service.ExecuteBuiltInToolAsync("read_file", args);
 
         result.Should().NotBeNull();
-        result.Should().Contain("❌");
+        result.Should().Contain("Error: ");
     }
 
     [Fact]
@@ -178,7 +178,7 @@ public class BuiltInToolServiceTests
         var result = await service.ExecuteBuiltInToolAsync("get_terminal_output", "{}");
 
         result.Should().NotBeNull();
-        result.Should().Contain("❌");
+        result.Should().Contain("Error: ");
     }
 
     #endregion
@@ -192,7 +192,6 @@ public class BuiltInToolServiceTests
 
         var text = BuiltInToolService.GetToolCallDisplayText("list_dir", args);
 
-        text.Should().Contain("📂");
         text.Should().Contain("test");
     }
 
@@ -203,7 +202,6 @@ public class BuiltInToolServiceTests
 
         var text = BuiltInToolService.GetToolCallDisplayText("read_file", args);
 
-        text.Should().Contain("📄");
         text.Should().Contain("Program.cs");
     }
 
@@ -239,9 +237,9 @@ public class BuiltInToolServiceTests
     [Fact]
     public void GetToolResultSummary_ErrorResult_ReturnsErrorDirectly()
     {
-        var summary = BuiltInToolService.GetToolResultSummary("read_file", "❌ 文件不存在");
+        var summary = BuiltInToolService.GetToolResultSummary("read_file", "Error: 文件不存在");
 
-        summary.Should().Be("❌ 文件不存在");
+        summary.Should().Be("Error: 文件不存在");
     }
 
     [Fact]
@@ -249,7 +247,7 @@ public class BuiltInToolServiceTests
     {
         var summary = BuiltInToolService.GetToolResultSummary("build_solution", "构建成功！0 errors");
 
-        summary.Should().Be("✅ 构建成功");
+        summary.Should().Be("构建成功");
     }
 
     [Fact]

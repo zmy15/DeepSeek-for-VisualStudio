@@ -179,7 +179,7 @@ namespace DeepSeek_v4_for_VisualStudio.Services.BuiltInTools
         public override string GetResultSummary(string toolResult)
         {
             if (string.IsNullOrEmpty(toolResult)) return L["tool.common.noResult"];
-            if (toolResult.StartsWith("❌") || toolResult.StartsWith("⛔")) return toolResult;
+            if (toolResult.StartsWith("Error: ") || toolResult.StartsWith("[BLOCKED] ")) return toolResult;
             if (toolResult.Contains("exit code: 0"))
                 return L["tool.git.success"];
             return L["tool.git.executed"];
@@ -230,7 +230,7 @@ namespace DeepSeek_v4_for_VisualStudio.Services.BuiltInTools
 
             // ── 构建 git 命令行 ──
             string gitCommand = BuildGitCommand(operation, args, gitDir);
-            if (gitCommand.StartsWith("⛔"))
+            if (gitCommand.StartsWith("[BLOCKED] "))
                 return gitCommand; // 被硬拒绝的操作
 
             // ── 执行 git 命令 ──
@@ -249,7 +249,7 @@ namespace DeepSeek_v4_for_VisualStudio.Services.BuiltInTools
 
         /// <summary>
         /// 根据操作类型和参数构建安全的 git 命令。
-        /// 返回以 "⛔" 开头的字符串表示操作被硬拒绝。
+        /// 返回以 "[BLOCKED] " 开头的字符串表示操作被硬拒绝。
         /// </summary>
         private string BuildGitCommand(string operation, Dictionary<string, JsonElement> args, string repoDir)
         {
@@ -310,7 +310,7 @@ namespace DeepSeek_v4_for_VisualStudio.Services.BuiltInTools
                     {
                         string message = GetStringArg(args, "message");
                         if (string.IsNullOrWhiteSpace(message))
-                            return "⛔ " + L["tool.git.commitNoMessage"];
+                            return "[BLOCKED] " + L["tool.git.commitNoMessage"];
                         var files = GetStringArrayArg(args, "files");
                         string escapedMsg = EscapeArg(message);
                         if (files == null || files.Length == 0)
@@ -326,7 +326,7 @@ namespace DeepSeek_v4_for_VisualStudio.Services.BuiltInTools
 
                         // 硬拒绝：强制删除分支
                         if (delete && force)
-                            return $"⛔ " + L["tool.git.branchForceDeleteBlocked"];
+                            return $"[BLOCKED] " + L["tool.git.branchForceDeleteBlocked"];
 
                         if (delete)
                             return string.IsNullOrEmpty(branch)
@@ -343,7 +343,7 @@ namespace DeepSeek_v4_for_VisualStudio.Services.BuiltInTools
                     {
                         string branch = GetStringArg(args, "branch");
                         if (string.IsNullOrEmpty(branch))
-                            return "⛔ " + L["tool.git.checkoutNoBranch"];
+                            return "[BLOCKED] " + L["tool.git.checkoutNoBranch"];
                         return $"checkout \"{EscapeArg(branch)}\"";
                     }
 
@@ -369,11 +369,11 @@ namespace DeepSeek_v4_for_VisualStudio.Services.BuiltInTools
                         {
                             string lower = branch.ToLowerInvariant();
                             if (lower == "main" || lower == "master")
-                                return $"⛔ " + L["tool.git.pushForceMainBlocked"];
+                                return $"[BLOCKED] " + L["tool.git.pushForceMainBlocked"];
                         }
                         // 硬拒绝：任何 force push
                         if (force)
-                            return $"⛔ " + L["tool.git.pushForceBlocked"];
+                            return $"[BLOCKED] " + L["tool.git.pushForceBlocked"];
 
                         return string.IsNullOrEmpty(branch)
                             ? $"push {EscapeArg(remote)}"
@@ -403,7 +403,7 @@ namespace DeepSeek_v4_for_VisualStudio.Services.BuiltInTools
 
                         // 硬拒绝：reset --hard
                         if (mode == "hard")
-                            return $"⛔ " + L["tool.git.resetHardBlocked"];
+                            return $"[BLOCKED] " + L["tool.git.resetHardBlocked"];
 
                         // 如果指定了 path，为 unstage 操作（reset HEAD <path>）
                         if (!string.IsNullOrEmpty(path))
@@ -420,7 +420,7 @@ namespace DeepSeek_v4_for_VisualStudio.Services.BuiltInTools
                     }
 
                 default:
-                    return $"⛔ Unknown operation: {operation}";
+                    return $"[BLOCKED] Unknown operation: {operation}";
             }
         }
 
@@ -459,7 +459,7 @@ namespace DeepSeek_v4_for_VisualStudio.Services.BuiltInTools
             {
                 try { process.Kill(); } catch { }
                 process.Dispose();
-                return $"⏱️ " + string.Format(L["tool.git.timeout"], SyncTimeout.TotalSeconds);
+                return $"Timeout: " + string.Format(L["tool.git.timeout"], SyncTimeout.TotalSeconds);
             }
 
             await Task.Run(() => process.WaitForExit()).ConfigureAwait(false);
@@ -468,7 +468,7 @@ namespace DeepSeek_v4_for_VisualStudio.Services.BuiltInTools
             string stderr = stderrTask.Result;
 
             var sb = new StringBuilder();
-            sb.AppendLine($"📟 git 输出 (退出码: {exitCode}):");
+            sb.AppendLine($"git 输出 (退出码: {exitCode}):");
             if (!string.IsNullOrWhiteSpace(stdout))
                 sb.AppendLine(stdout.TrimEnd());
             if (!string.IsNullOrWhiteSpace(stderr))

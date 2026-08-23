@@ -216,8 +216,8 @@ namespace DeepSeek_v4_for_VisualStudio.Services
         /// 应在每次构建 API 请求前调用。
         /// 
         /// 两级处理策略：
-        /// - system prompt 变化 → ⚠️ Warning + 完全 re-pin（真正的缓存失效风险）
-        /// - 仅 tool 集变化 → ℹ️ Info + 静默更新 tool 指纹（多 Agent/多阶段架构正常行为）
+        /// - system prompt 变化 →  Warning + 完全 re-pin（真正的缓存失效风险）
+        /// - 仅 tool 集变化 →  Info + 静默更新 tool 指纹（多 Agent/多阶段架构正常行为）
         /// </summary>
         /// <param name="currentSystemPromptFingerprint">当前 system prompt 指纹</param>
         /// <param name="currentToolCatalogFingerprint">当前 tool catalog 指纹</param>
@@ -259,8 +259,8 @@ namespace DeepSeek_v4_for_VisualStudio.Services
 
             // ── 检测到变化 ──
             //     区分两个层级：
-            //     - system prompt 变化 → ⚠️ Warning（真正的缓存失效风险）
-            //     - 仅 tool 集变化 → ℹ️ Info（多 Agent/多阶段架构中的正常行为）
+            //     - system prompt 变化 →  Warning（真正的缓存失效风险）
+            //     - 仅 tool 集变化 →  Info（多 Agent/多阶段架构中的正常行为）
             var driftInfo = new PrefixDriftInfo
             {
                 HasDrift = spChanged,        // 只有 system prompt 漂移才算真正的 drift
@@ -282,7 +282,7 @@ namespace DeepSeek_v4_for_VisualStudio.Services
                 _stableChecks = 1;
 
                 string cause = toolChanged ? "system prompt 和 tool 集均变化" : "system prompt 变化";
-                Logger.Warn($"[PrefixCache] ⚠️ 前缀漂移检测: {cause} | " +
+                Logger.Warn($"[PrefixCache]  前缀漂移检测: {cause} | " +
                             $"旧指纹={TruncateFingerprint(driftInfo.PreviousCombinedFingerprint)} → " +
                             $"新指纹={TruncateFingerprint(currentCombinedFingerprint)} | " +
                             $"已自动 re-pin。稳定性={StabilityRatio:P1} ({_stableChecks}/{_totalChecks})");
@@ -294,10 +294,10 @@ namespace DeepSeek_v4_for_VisualStudio.Services
                 _pinnedCombinedFingerprint = ComputeCombinedFingerprint(_pinnedSystemPromptFingerprint!, currentToolCatalogFingerprint);
                 _stableChecks++;  // tool 变化不算漂移，计为稳定
 
-                Logger.Info($"[PrefixCache] 🔧 tool 集更新（非漂移）: " +
+                Logger.Info($"[PrefixCache]  tool 集更新（非漂移）: " +
                             $"旧 tool 指纹={TruncateFingerprint(driftInfo.PreviousToolCatalogFingerprint)} → " +
                             $"新 tool 指纹={TruncateFingerprint(currentToolCatalogFingerprint)} | " +
-                            $"system prompt 保持稳定 ✅");
+                            $"system prompt 保持稳定 ");
             }
 
             return driftInfo;

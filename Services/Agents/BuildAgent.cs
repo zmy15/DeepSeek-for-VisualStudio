@@ -174,7 +174,7 @@ namespace DeepSeek_v4_for_VisualStudio.Services.Agents
                 {
                     AddLog("WARN", L["agent.log.buildStillHasErrors"]);
                     PlanBuildOutcomeReconciler.MarkBuildFailed(context.ActivePlan, aiResponse);
-                    result.Content += "\n\n⚠️ " + L["agent.log.buildStillHasErrors"];
+                    result.Content += "\n\n " + L["agent.log.buildStillHasErrors"];
                 }
                 else
                 {
@@ -355,10 +355,10 @@ namespace DeepSeek_v4_for_VisualStudio.Services.Agents
                 sb.AppendLine("## 步骤执行情况");
                 foreach (var step in plan.Steps)
                 {
-                    string statusIcon = step.Status == AgentStepStatus.Completed ? "✅"
-                        : step.Status == AgentStepStatus.Failed ? "❌"
-                        : step.Status == AgentStepStatus.Skipped ? "⏭️"
-                        : "🔄";
+                    string statusIcon = step.Status == AgentStepStatus.Completed ? ""
+                        : step.Status == AgentStepStatus.Failed ? "Error: "
+                        : step.Status == AgentStepStatus.Skipped ? ""
+                        : "";
                     string summary = !string.IsNullOrWhiteSpace(step.ResultSummary)
                         ? step.ResultSummary!
                         : "(无)";
@@ -367,7 +367,7 @@ namespace DeepSeek_v4_for_VisualStudio.Services.Agents
                 sb.AppendLine();
             }
 
-            // ── 最终构建通过结论（权威覆盖，防止 AI 引用早期 ❌ 步骤状态）──
+            // ── 最终构建通过结论（权威覆盖，防止 AI 引用早期 Error: 步骤状态）──
             if (plan.FinalBuildSucceeded)
             {
                 sb.AppendLine(L["agent.build.handoffFinalPassed"]);
@@ -375,14 +375,14 @@ namespace DeepSeek_v4_for_VisualStudio.Services.Agents
             }
 
             // ── 注明构建已完成 ──
-            sb.AppendLine("✅ 构建验证已完成，请生成最终变更总结。");
+            sb.AppendLine(" 构建验证已完成，请生成最终变更总结。");
 
             return sb.ToString();
         }
 
         /// <summary>
         /// 最终构建通过后清理旧的计划摘要记忆，
-        /// 让 Ask Agent 基于已被回写成功状态的计划生成总结，而不是旧 ❌ 状态。
+        /// 让 Ask Agent 基于已被回写成功状态的计划生成总结，而不是旧 Error: 状态。
         /// </summary>
         private async Task ClearStalePlanSummaryMemoryAsync(AgentContext context)
         {

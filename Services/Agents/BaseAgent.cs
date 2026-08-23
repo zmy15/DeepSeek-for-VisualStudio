@@ -112,7 +112,7 @@ namespace DeepSeek_v4_for_VisualStudio.Services.Agents
         /// 所有 API 调用统一发送此完整工具集，保持 tools JSON 不变。
         /// 工具调用由客户端按 Agent 白名单拦截。
         /// 
-        /// 🔑 双重合并：优先通过 BuiltInToolService 获取（已合并内置+MCP），
+        ///  双重合并：优先通过 BuiltInToolService 获取（已合并内置+MCP），
         ///    同时兜底直接查询 McpManager 确保 MCP 工具不遗漏。
         /// </summary>
         protected List<ToolDefinition> BuildFullToolSet()
@@ -130,7 +130,7 @@ namespace DeepSeek_v4_for_VisualStudio.Services.Agents
                 }
             }
 
-            // ── 🔑 兜底合并：直接从 McpManager 获取 MCP 工具（防止 BuiltInToolService 的
+            // ──  兜底合并：直接从 McpManager 获取 MCP 工具（防止 BuiltInToolService 的
             //    _mcpManager 引用因初始化时序问题而过时）──
             if (McpManager != null && McpManager.AllTools.Count > 0)
             {
@@ -379,7 +379,7 @@ namespace DeepSeek_v4_for_VisualStudio.Services.Agents
 
             var sb = new StringBuilder();
             // toolChoice: "none" — 简短回答无需工具调用，防止 AI 生成工具调用 XML 污染输出
-            // 🔑 传入完整工具集以保持 Prefix Cache 稳定
+            //  传入完整工具集以保持 Prefix Cache 稳定
             await foreach (var chunk in _apiService.ChatStreamAsync(messages, TryGetFullToolSet(), ct, maxTokens, toolChoice: "none"))
             {
                 if (IsContentChunk(chunk))
@@ -397,7 +397,7 @@ namespace DeepSeek_v4_for_VisualStudio.Services.Agents
             var messages = BuildContextAwareMessages(systemPrompt, userPrompt);
 
             var sb = new StringBuilder();
-            // 🔑 传入完整工具集 + toolChoice:"none" 以保持 Prefix Cache 稳定
+            //  传入完整工具集 + toolChoice:"none" 以保持 Prefix Cache 稳定
             await foreach (var chunk in _apiService.ChatStreamAsync(messages, TryGetFullToolSet(), ct, maxTokens, temperature: temperature, responseFormat: responseFormat, toolChoice: "none"))
             {
                 if (chunk.StartsWith("[THINKING]"))
@@ -429,7 +429,7 @@ namespace DeepSeek_v4_for_VisualStudio.Services.Agents
             var messages = BuildContextAwareMessages(systemPrompt, userPrompt, extraSystemMessages);
 
             var sb = new StringBuilder();
-            // 🔑 传入完整工具集以保持 Prefix Cache 稳定
+            //  传入完整工具集以保持 Prefix Cache 稳定
             await foreach (var chunk in _apiService.ChatStreamAsync(messages, TryGetFullToolSet(), ct, maxTokens, toolChoice, temperature, responseFormat))
             {
                 if (chunk.StartsWith("[THINKING]"))
@@ -447,7 +447,7 @@ namespace DeepSeek_v4_for_VisualStudio.Services.Agents
         protected async Task<string> CallAiWithHistoryAsync(List<ChatApiMessage> history, CancellationToken ct, int maxTokens = 4096, string? responseFormat = null)
         {
             var sb = new StringBuilder();
-            // 🔑 传入完整工具集 + toolChoice:"none" 以保持 Prefix Cache 稳定
+            //  传入完整工具集 + toolChoice:"none" 以保持 Prefix Cache 稳定
             await foreach (var chunk in _apiService.ChatStreamAsync(history, TryGetFullToolSet(), ct, maxTokens, responseFormat: responseFormat, toolChoice: "none"))
             {
                 if (IsContentChunk(chunk))
@@ -460,7 +460,7 @@ namespace DeepSeek_v4_for_VisualStudio.Services.Agents
         /// <summary>
         /// 使用预构建消息列表调用 AI（支持 toolChoice 和 temperature 参数）。
         /// 
-        /// 🔑 缓存关键：与 CallAiLongAsync 不同，此方法直接使用传入的 messages，
+        ///  缓存关键：与 CallAiLongAsync 不同，此方法直接使用传入的 messages，
         /// 不通过 BuildContextAwareMessages 重建。这使得跨阶段的对话延续成为可能——
         /// 对齐阶段的 tool call 历史可以直接传递给设计阶段，DeepSeek Prefix Cache
         /// 可以匹配整个对齐对话前缀，而非仅匹配 system prompt。
@@ -473,7 +473,7 @@ namespace DeepSeek_v4_for_VisualStudio.Services.Agents
         /// <param name="responseFormat">JSON Output 模式: "json_object" 启用，null 不启用</param>
         /// <summary>
         /// 使用预构建消息列表调用 AI（支持 toolChoice 和 temperature 参数）。
-        /// 🔑 始终传入完整工具集 + toolChoice="none" 以保持 Prefix Cache 稳定。
+        ///  始终传入完整工具集 + toolChoice="none" 以保持 Prefix Cache 稳定。
         /// </summary>
         public async Task<string> CallAiWithMessagesAsync(
             List<ChatApiMessage> messages,
@@ -485,7 +485,7 @@ namespace DeepSeek_v4_for_VisualStudio.Services.Agents
             string? model = null,
             bool? thinkingEnabled = null)
         {
-            // 🔑 传入完整工具集以保持 Prefix Cache 稳定
+            //  传入完整工具集以保持 Prefix Cache 稳定
             var fullTools = TryGetFullToolSet();
             var sb = new StringBuilder();
             await foreach (var chunk in _apiService.ChatStreamAsync(messages, fullTools, ct, maxTokens, toolChoice, temperature, responseFormat, model, thinkingEnabled))
@@ -572,7 +572,7 @@ namespace DeepSeek_v4_for_VisualStudio.Services.Agents
         {
             var messages = ctxManager.BuildApiMessages();
             var sb = new StringBuilder();
-            // 🔑 传入完整工具集 + toolChoice:"none" 以保持 Prefix Cache 稳定
+            //  传入完整工具集 + toolChoice:"none" 以保持 Prefix Cache 稳定
             await foreach (var chunk in _apiService.ChatStreamAsync(messages, TryGetFullToolSet(), ct, maxTokens, responseFormat: responseFormat, toolChoice: "none"))
             {
                 if (IsContentChunk(chunk))
@@ -605,7 +605,7 @@ namespace DeepSeek_v4_for_VisualStudio.Services.Agents
         protected List<ChatApiMessage> BuildContextAwareMessages(
             string systemPrompt, string userPrompt, int maxRecentTurns = int.MaxValue)
         {
-            // ── 🔑 Handoff 消息复用（v1.1.10）：若源 Agent 传递了工具循环消息列表，
+            // ──  Handoff 消息复用（v1.1.10）：若源 Agent 传递了工具循环消息列表，
             //    直接复用作为前缀，不再从 ContextManager 重建。
             //    这确保 Handoff 前后消息结构完全一致，DeepSeek Prefix Cache 可直接命中。
             List<ChatApiMessage>? forwarded = Context?.ForwardedMessages;
@@ -782,7 +782,7 @@ namespace DeepSeek_v4_for_VisualStudio.Services.Agents
 
             int round = BuiltInTools?.CurrentRound ?? 0;
 
-            // ── 🔑 v1.1.11：固定后缀插入点 ──
+            // ──  v1.1.11：固定后缀插入点 ──
             // 消息结构：[0..3]prefix + [4..]历史 + [volatile] + [user] + [tool_calls...] + [agent]
             // 工具循环中新增 assistant/tool 插入到 user 之后、agent 之前，
             // 保持 agent 固定在最后，user 留在工具结果之前。
@@ -794,7 +794,7 @@ namespace DeepSeek_v4_for_VisualStudio.Services.Agents
                 {
                     var L = LocalizationService.Instance;
                     Logger.Warn($"[Agent:{Definition.Name}] {string.Format(L["agent.log.safetyLimit"], safetyLimit)}");
-                    contentBuilder.Append($"\n\n> ⚠️ {string.Format(L["agent.log.safetyLimit"], safetyLimit)}");
+                    contentBuilder.Append($"\n\n>  {string.Format(L["agent.log.safetyLimit"], safetyLimit)}");
                     metrics?.MarkTerminated("safety_limit");
                     break;
                 }
@@ -811,7 +811,7 @@ namespace DeepSeek_v4_for_VisualStudio.Services.Agents
                 contentBuilder.Clear();
 
                 // ── 获取工具定义 ──
-                // 🔑 Prefix Cache 优化：始终发送完整工具集（所有内置 + MCP 工具），
+                //  Prefix Cache 优化：始终发送完整工具集（所有内置 + MCP 工具），
                 //    保持 tools JSON 跨 Agent/阶段不变，最大化 DeepSeek Prefix Cache 命中率。
                 //    工具调用由客户端按白名单拦截（见下方拦截逻辑）。
                 //    白名单为空表示明确"不允许任何工具"：此时显式传 tool_choice:"none"，
@@ -957,7 +957,7 @@ namespace DeepSeek_v4_for_VisualStudio.Services.Agents
                         // 用户取消导致的流释放，不重试
                         Logger.Info($"[Agent:{Definition.Name}] 流式调用被取消令牌中断");
                         if (contentBuilder.Length == 0)
-                            contentBuilder.Append("\n\n> ⏏️ 操作已被取消。");
+                            contentBuilder.Append("\n\n>  操作已被取消。");
                         streamSuccess = true; // 不视为失败，正常退出
                     }
                     catch (ObjectDisposedException) when (!ct.IsCancellationRequested && streamAttempt < maxStreamAttempts - 1)
@@ -979,7 +979,7 @@ namespace DeepSeek_v4_for_VisualStudio.Services.Agents
                         // 用户取消导致的 IO 异常，不重试
                         Logger.Info($"[Agent:{Definition.Name}] 流式调用被取消令牌中断 (IO)");
                         if (contentBuilder.Length == 0)
-                            contentBuilder.Append("\n\n> ⏏️ 操作已被取消。");
+                            contentBuilder.Append("\n\n>  操作已被取消。");
                         streamSuccess = true;
                     }
                     catch (IOException) when (!ct.IsCancellationRequested && streamAttempt < maxStreamAttempts - 1)
@@ -1000,7 +1000,7 @@ namespace DeepSeek_v4_for_VisualStudio.Services.Agents
                         // 用户取消，不重试
                         Logger.Info($"[Agent:{Definition.Name}] 流式调用被取消");
                         if (contentBuilder.Length == 0)
-                            contentBuilder.Append("\n\n> ⏏️ 操作已被取消。");
+                            contentBuilder.Append("\n\n>  操作已被取消。");
                         streamSuccess = true;
                     }
                 }
@@ -1014,7 +1014,7 @@ namespace DeepSeek_v4_for_VisualStudio.Services.Agents
                         string partial = contentBuilder.Length > 0 ? contentBuilder.ToString() : savedPartialContent;
                         contentBuilder.Clear();
                         contentBuilder.Append(partial);
-                        contentBuilder.Append($"\n\n> ⚠️ 网络连接在 {maxStreamAttempts} 次重试后仍未恢复。请点击重试按钮从中断处继续。");
+                        contentBuilder.Append($"\n\n>  网络连接在 {maxStreamAttempts} 次重试后仍未恢复。请点击重试按钮从中断处继续。");
                     }
                     else
                     {
@@ -1105,7 +1105,7 @@ namespace DeepSeek_v4_for_VisualStudio.Services.Agents
                     }
                 }
 
-                // ── 🔑 客户端白名单拦截：标记不在 effectiveWhitelist 中的工具调用 ──
+                // ──  客户端白名单拦截：标记不在 effectiveWhitelist 中的工具调用 ──
                 //    因为 API 请求始终发送完整工具集（Prefix Cache 优化），
                 //    AI 可能调用不在当前 Agent/阶段白名单中的工具。
                 //    标记后统一在执行阶段返回拒绝消息，并终止本轮工具循环。
@@ -1130,7 +1130,7 @@ namespace DeepSeek_v4_for_VisualStudio.Services.Agents
                             .Select(tc => tc.Function.Name));
                         rejectedToolRounds++;
                         rejectedToolThisRound = true;
-                        Logger.Warn($"[Agent:{Definition.Name}] 🚫 白名单拦截 {blockedToolIndices.Count} 个工具: {blockedNames}（白名单: {string.Join(", ", effectiveWhitelist)}）");
+                        Logger.Warn($"[Agent:{Definition.Name}]  白名单拦截 {blockedToolIndices.Count} 个工具: {blockedNames}（白名单: {string.Join(", ", effectiveWhitelist)}）");
                     }
                 }
 
@@ -1147,7 +1147,7 @@ namespace DeepSeek_v4_for_VisualStudio.Services.Agents
                     if (hasDedup)
                     {
                         int skipped = toolCalls.Count - dedupedIndices.Count;
-                        Logger.Info($"[Agent:{Definition.Name}] 🔄 去重: 跳过 {skipped} 个重复工具调用（{toolCalls.Count} → {dedupedIndices.Count} 个唯一调用）");
+                        Logger.Info($"[Agent:{Definition.Name}]  去重: 跳过 {skipped} 个重复工具调用（{toolCalls.Count} → {dedupedIndices.Count} 个唯一调用）");
                     }
 
                     // ── 通知工具调用（含详细信息，每轮仅一次，去重后只通知唯一调用）──
@@ -1157,7 +1157,7 @@ namespace DeepSeek_v4_for_VisualStudio.Services.Agents
                         string summary = BuiltInToolService.GetToolCallDisplayText(tc.Function.Name, tc.Function.Arguments);
                         // MCP 工具标注：即使与内置工具同名，也标注来源
                         if (McpManager != null && McpManager.AllTools.Any(t => string.Equals(t.Name, tc.Function.Name, StringComparison.OrdinalIgnoreCase)))
-                            summary = summary.Replace("🔧", "🔌 MCP");
+                            summary = summary.Replace("", " MCP");
                         onToolCall?.Invoke(summary);
                     }
 
@@ -1167,14 +1167,14 @@ namespace DeepSeek_v4_for_VisualStudio.Services.Agents
                         var tc = toolCalls[idx];
                         string summary = BuiltInToolService.GetToolCallDisplayText(tc.Function.Name, tc.Function.Arguments);
                         if (McpManager != null && McpManager.AllTools.Any(t => string.Equals(t.Name, tc.Function.Name, StringComparison.OrdinalIgnoreCase)))
-                            summary = summary.Replace("🔧", "🔌 MCP");
+                            summary = summary.Replace("", " MCP");
                         toolCallHistory.Add((round, summary));
                     }
                     // 保留最近 20 条记录防止内存增长
                     while (toolCallHistory.Count > 20)
                         toolCallHistory.RemoveAt(0);
 
-                    // ── 🔑 子Agent/Handoff缓存优化：在插入 assistant(tool_calls) 前捕获消息列表，
+                    // ──  子Agent/Handoff缓存优化：在插入 assistant(tool_calls) 前捕获消息列表，
                     //     供 runSubagent(ExploreAgent) 或 request_handoff 目标 Agent 复用
                     //     本轮 API 调用实际使用过的缓存前缀。
                     //     必须在 Insert 之前捕获：Insert 后 messages[4] 从 system 变为
@@ -1192,7 +1192,7 @@ namespace DeepSeek_v4_for_VisualStudio.Services.Agents
                     }
 
                     // ── 添加 assistant 消息（含工具调用）──
-                    // 🔑 v1.1.11：插入到 user 之后、agent 之前
+                    //  v1.1.11：插入到 user 之后、agent 之前
                     messages.Insert(toolInsertPos, new ChatApiMessage
                     {
                         Role = "assistant",
@@ -1211,7 +1211,7 @@ namespace DeepSeek_v4_for_VisualStudio.Services.Agents
                             toolCalls);
                     }
 
-                    // ── 🔑 Explore 子代理消息注入：记录 ContextManager 当前条目数
+                    // ──  Explore 子代理消息注入：记录 ContextManager 当前条目数
                     //     （在 AddAssistantMessage 之后，避免注入时重复读取本条 assistant）。
                     //     供 runSubagent 执行后回读 Explore 内部工具循环消息。──
                     int cmCountBefore = Context?.ContextManager?.MessageCount ?? 0;
@@ -1228,7 +1228,7 @@ namespace DeepSeek_v4_for_VisualStudio.Services.Agents
                                 ? string.Join(", ", effectiveWhitelist)
                                 : "无";
                             return Task.FromResult(
-                                $"❌ 工具 '{tc.Function.Name}' 在当前 Agent/阶段不可用。\n" +
+                                $"Error: 工具 '{tc.Function.Name}' 在当前 Agent/阶段不可用。\n" +
                                 $"原因：该工具不在当前白名单中。\n" +
                                 $"当前可用工具: {allowedList}\n" +
                                 "这是确定性配置错误，不要重复调用该工具。\n" +
@@ -1243,7 +1243,7 @@ namespace DeepSeek_v4_for_VisualStudio.Services.Agents
                     }).ToList();
                     var dedupedResults = await Task.WhenAll(toolTasks).ConfigureAwait(false);
 
-                    // ── 🔑 记录 Explore 执行后的 CM 条目数（tool 结果尚未写入），
+                    // ──  记录 Explore 执行后的 CM 条目数（tool 结果尚未写入），
                     //     用于精确读取 Explore 内部消息（不含即将写入的 runSubagent tool 结果）。──
                     int cmCountAfterExplore = Context?.ContextManager?.MessageCount ?? 0;
 
@@ -1300,7 +1300,7 @@ namespace DeepSeek_v4_for_VisualStudio.Services.Agents
                         // ── 裁剪工具结果以保护上下文（与 ContextManager.AddToolResult 保持一致）──
                         string contextResult = CompactToolResultForAgent(tc.Function.Name, resultText);
 
-                        // ── 🔑 runSubagent 结果放到 [user] 之后、[agent] 之前，
+                        // ──  runSubagent 结果放到 [user] 之后、[agent] 之前，
                         //     保持前缀不被破坏，确保 DeepSeek Prefix Cache 跨轮次命中。──
                         if (tc.Function.Name == "runSubagent")
                         {
@@ -1336,23 +1336,23 @@ namespace DeepSeek_v4_for_VisualStudio.Services.Agents
                         loopDetected = true;
                         PendingHandoffRequest = null;
                         var distinctRejectedTools = string.Join(", ", rejectedToolNames.Distinct(StringComparer.OrdinalIgnoreCase));
-                        Logger.Warn($"[Agent:{Definition.Name}] 🚫 连续 {rejectedToolRounds} 轮白名单拒绝，终止工具循环: {distinctRejectedTools}");
+                        Logger.Warn($"[Agent:{Definition.Name}]  连续 {rejectedToolRounds} 轮白名单拒绝，终止工具循环: {distinctRejectedTools}");
                         metrics?.MarkTerminated("whitelist_rejection");
 
                         var terminatedBuilder = new StringBuilder().Append(contentBuilder);
-                        terminatedBuilder.Append($"\n\n> ⚠️ 连续 {rejectedToolRounds} 轮调用白名单外工具: {distinctRejectedTools}。");
+                        terminatedBuilder.Append($"\n\n>  连续 {rejectedToolRounds} 轮调用白名单外工具: {distinctRejectedTools}。");
                         terminatedBuilder.Append("\n> 已终止工具循环。请检查阶段工具配置后重新发起任务。");
                         contentBuilder.Clear();
                         contentBuilder.Append(terminatedBuilder.ToString());
                         break;
                     }
 
-                    // ── 🔑 Explore 子代理消息注入（v1.1.11）：将 Explore 内部工具循环消息
+                    // ──  Explore 子代理消息注入（v1.1.11）：将 Explore 内部工具循环消息
                     //     回注到父 Agent 的 messages 列表，确保后续轮次从 ContextManager
                     //     重建时前缀结构完全一致。
                     //     Explore 执行期间通过 AddAssistantMessage/AddToolResult 写入
                     //     ContextManager 的消息，在此刻读出。
-                    //     🔑 v1.1.12：注入到 [user] 之后、[agent] 之前，
+                    //      v1.1.12：注入到 [user] 之后、[agent] 之前，
                     //     与 runSubagent 工具结果同位置，保持前缀不被破坏以最大化缓存命中。──
                     if (toolCalls.Any(tc => tc.Function.Name == "runSubagent")
                         && Context?.ContextManager != null)
@@ -1368,7 +1368,7 @@ namespace DeepSeek_v4_for_VisualStudio.Services.Agents
                                 {
                                     messages.Insert(messages.Count - 1, em);
                                 }
-                                Logger.Info($"[Agent:{Definition.Name}] 🔄 注入 Explore 子代理消息: " +
+                                Logger.Info($"[Agent:{Definition.Name}]  注入 Explore 子代理消息: " +
                                     $"{exploreMessages.Count} 条 (CM 索引 {cmCountBefore}→{cmCountAfterExplore})" +
                                     $" → 末尾注入 (pos={messages.Count - 1 - exploreMessages.Count}..{messages.Count - 2})");
                             }
@@ -1378,8 +1378,8 @@ namespace DeepSeek_v4_for_VisualStudio.Services.Agents
                     // ── 移交检测：如果 AI 调用了 request_handoff，立即终止循环 ──
                     if (PendingHandoffRequest != null)
                     {
-                        Logger.Info($"[Agent:{Definition.Name}] 🔄 检测到移交请求 → {PendingHandoffRequest.TargetAgent}，终止工具循环");
-                        // ── 🔑 保存工具循环消息列表，供 Handoff 目标 Agent 复用前缀 ──
+                        Logger.Info($"[Agent:{Definition.Name}]  检测到移交请求 → {PendingHandoffRequest.TargetAgent}，终止工具循环");
+                        // ──  保存工具循环消息列表，供 Handoff 目标 Agent 复用前缀 ──
                         //     浅克隆即可，不调用 CleanIncompleteToolChains：
                         //     - ChatStreamAsync Rule 5 在每次 API 调用时已统一处理孤儿 assistant
                         //     - CleanIncompleteToolChains 会修改消息内容（剥离 tool_calls），
@@ -1393,7 +1393,7 @@ namespace DeepSeek_v4_for_VisualStudio.Services.Agents
                                 CaptureLastSentMessagesForCache()
                                 ?? new List<ChatApiMessage>(messages);
                         }
-                        contentBuilder.Append("\n\n> 🔄 任务已移交给 " + PendingHandoffRequest.TargetAgent + " Agent...");
+                        contentBuilder.Append("\n\n>  任务已移交给 " + PendingHandoffRequest.TargetAgent + " Agent...");
                         break;
                     }
 
@@ -1439,7 +1439,7 @@ namespace DeepSeek_v4_for_VisualStudio.Services.Agents
                                 // 结果相同 → 真正的死循环，终止
                                 loopDetected = true;
                                 PendingHandoffRequest = null;
-                                Logger.Warn($"[Agent:{Definition.Name}] 🔄 检测到循环调用: {toolName} 已重复 {repeatCount} 次且每次返回相同结果");
+                                Logger.Warn($"[Agent:{Definition.Name}]  检测到循环调用: {toolName} 已重复 {repeatCount} 次且每次返回相同结果");
                                 metrics?.MarkTerminated("loop_detected");
 
                                 var terminatedBuilder = new StringBuilder();
@@ -1447,11 +1447,11 @@ namespace DeepSeek_v4_for_VisualStudio.Services.Agents
 
                                 if (toolCallHistory.Count > 0)
                                 {
-                                    terminatedBuilder.Append("\n\n---\n### 🔙 此前 AI 执行的操作\n");
+                                    terminatedBuilder.Append("\n\n---\n###  此前 AI 执行的操作\n");
                                     int startRound = toolCallHistory[0].Round;
                                     foreach (var (r, summary) in toolCallHistory)
                                     {
-                                        string prefix = r == round ? "🔄" : $"第{r - startRound + 1}轮";
+                                        string prefix = r == round ? "" : $"第{r - startRound + 1}轮";
                                         terminatedBuilder.AppendLine($"- {prefix} {summary}");
                                     }
                                 }
@@ -1460,10 +1460,10 @@ namespace DeepSeek_v4_for_VisualStudio.Services.Agents
                                 {
                                     string result = toolResults[i];
                                     if (!string.IsNullOrWhiteSpace(result))
-                                        terminatedBuilder.Append($"\n\n### 📋 最后一次 `{toolCalls[i].Function.Name}` 结果\n\n{result.Truncate(3000)}");
+                                        terminatedBuilder.Append($"\n\n###  最后一次 `{toolCalls[i].Function.Name}` 结果\n\n{result.Truncate(3000)}");
                                 }
 
-                                terminatedBuilder.Append($"\n\n> ⚠️ 检测到 `{toolName}` 重复调用 {repeatCount} 次且每次返回相同结果，已自动终止循环。请根据以上工具结果修复问题后重新请求。");
+                                terminatedBuilder.Append($"\n\n>  检测到 `{toolName}` 重复调用 {repeatCount} 次且每次返回相同结果，已自动终止循环。请根据以上工具结果修复问题后重新请求。");
                                 contentBuilder.Clear();
                                 contentBuilder.Append(terminatedBuilder.ToString());
                                 break;
@@ -1474,7 +1474,7 @@ namespace DeepSeek_v4_for_VisualStudio.Services.Agents
                                 if (currentResult != null)
                                     lastResultBySignature[sig] = currentResult;
                                 callSignatureHistory.RemoveAll(s => s == sig);
-                                Logger.Info($"[Agent:{Definition.Name}] 🔄 {toolName} 重复 {repeatCount} 次但结果不同，可能是用户在修复问题，继续执行");
+                                Logger.Info($"[Agent:{Definition.Name}]  {toolName} 重复 {repeatCount} 次但结果不同，可能是用户在修复问题，继续执行");
                             }
                         }
                         else
@@ -1496,7 +1496,7 @@ namespace DeepSeek_v4_for_VisualStudio.Services.Agents
                     while (callSignatureHistory.Count > 30)
                         callSignatureHistory.RemoveAt(0);
 
-                    // 检测连续错误：检查本轮 tool 消息是否全部以 ❌ 开头
+                    // 检测连续错误：检查本轮 tool 消息是否全部以 Error: 开头
                     if (!loopDetected)
                     {
                         // toolInsertPos 在插入 assistant + N 条 tool 后指向 agent 消息，
@@ -1505,7 +1505,7 @@ namespace DeepSeek_v4_for_VisualStudio.Services.Agents
                         bool allErrors = toolCalls.Count > 0;
                         for (int i = toolMsgStart; i < messages.Count && allErrors; i++)
                         {
-                            if (messages[i].Role == "tool" && !(messages[i].Content ?? "").StartsWith("❌"))
+                            if (messages[i].Role == "tool" && !(messages[i].Content ?? "").StartsWith("Error: "))
                                 allErrors = false;
                         }
 
@@ -1518,7 +1518,7 @@ namespace DeepSeek_v4_for_VisualStudio.Services.Agents
                         {
                             loopDetected = true;
                             PendingHandoffRequest = null;
-                            Logger.Warn($"[Agent:{Definition.Name}] 🔄 连续 {consecutiveErrorRounds} 轮工具调用全部返回错误，强制结束");
+                            Logger.Warn($"[Agent:{Definition.Name}]  连续 {consecutiveErrorRounds} 轮工具调用全部返回错误，强制结束");
                             metrics?.MarkTerminated("consecutive_errors");
 
                             // ── 附加上次 AI 的上下文总结和最后一次工具调用结果摘要 ──
@@ -1530,11 +1530,11 @@ namespace DeepSeek_v4_for_VisualStudio.Services.Agents
                             // 2. 历史工具调用总结
                             if (toolCallHistory.Count > 0)
                             {
-                                terminatedBuilder.Append("\n\n---\n### 🔙 此前 AI 执行的操作\n");
+                                terminatedBuilder.Append("\n\n---\n###  此前 AI 执行的操作\n");
                                 int startRound = toolCallHistory[0].Round;
                                 foreach (var (r, summary) in toolCallHistory)
                                 {
-                                    string prefix = r == round ? "🔄" : $"第{r - startRound + 1}轮";
+                                    string prefix = r == round ? "" : $"第{r - startRound + 1}轮";
                                     terminatedBuilder.AppendLine($"- {prefix} {summary}");
                                 }
                             }
@@ -1545,11 +1545,11 @@ namespace DeepSeek_v4_for_VisualStudio.Services.Agents
                                 string result = toolResults[i];
                                 if (!string.IsNullOrWhiteSpace(result))
                                 {
-                                    terminatedBuilder.Append($"\n\n### 📋 最后一次 `{toolCalls[i].Function.Name}` 结果\n\n{result.Truncate(3000)}");
+                                    terminatedBuilder.Append($"\n\n###  最后一次 `{toolCalls[i].Function.Name}` 结果\n\n{result.Truncate(3000)}");
                                 }
                             }
 
-                            terminatedBuilder.Append($"\n\n> ⚠️ 连续 {consecutiveErrorRounds} 轮工具调用均失败，已自动终止。");
+                            terminatedBuilder.Append($"\n\n>  连续 {consecutiveErrorRounds} 轮工具调用均失败，已自动终止。");
                             contentBuilder.Clear();
                             contentBuilder.Append(terminatedBuilder.ToString());
                         }
@@ -1587,7 +1587,7 @@ namespace DeepSeek_v4_for_VisualStudio.Services.Agents
                 double rate = usage.CacheHitRate;
 
                 string roundInfo = round > 0 ? $"[轮次#{round}] " : "";
-                string level = rate >= 0.90 ? "🟢" : rate >= 0.50 ? "🟡" : rate >= 0.20 ? "🟠" : "🔴";
+                string level = rate >= 0.90 ? "" : rate >= 0.50 ? "" : rate >= 0.20 ? "" : "";
 
                 Logger.Info($"[Cache] {level} {roundInfo}命中率: {usage.CacheHitRatePercent} " +
                     $"(命中 {hit:N0} / 未命中 {miss:N0} / 总计 {total:N0} tokens)");
@@ -1613,7 +1613,7 @@ namespace DeepSeek_v4_for_VisualStudio.Services.Agents
                 if (totalCacheable == 0) return;
 
                 double aggregateRate = (double)totalHit / totalCacheable;
-                string level = aggregateRate >= 0.90 ? "🟢" : aggregateRate >= 0.50 ? "🟡" : aggregateRate >= 0.20 ? "🟠" : "🔴";
+                string level = aggregateRate >= 0.90 ? "" : aggregateRate >= 0.50 ? "" : aggregateRate >= 0.20 ? "" : "";
 
                 Logger.Info($"[Cache] ═══════════════════════════════════════");
                 Logger.Info($"[Cache] {level} 本次工作流汇总 ({finalRound} 轮)");
@@ -1644,7 +1644,7 @@ namespace DeepSeek_v4_for_VisualStudio.Services.Agents
                 if (totalCacheable == 0) return string.Empty;
 
                 double rate = (double)totalHit / totalCacheable;
-                string icon = rate >= 0.90 ? "🟢" : rate >= 0.50 ? "🟡" : rate >= 0.20 ? "🟠" : "🔴";
+                string icon = rate >= 0.90 ? "" : rate >= 0.50 ? "" : rate >= 0.20 ? "" : "";
 
                 return $"\n\n---\n\n{icon} **Cache 命中率: {rate * 100:F1}%**" +
                     $" · {totalHit:N0} 命中 / {totalMiss:N0} 未命中" +
@@ -1680,7 +1680,7 @@ namespace DeepSeek_v4_for_VisualStudio.Services.Agents
                 catch (Exception ex)
                 {
                     Logger.Error($"[Agent:{Definition.Name}] 工具 {tc.Function.Name} 执行异常: {ex.Message}", ex);
-                    return $"❌ 工具执行异常: {ex.Message}";
+                    return $"Error: 工具执行异常: {ex.Message}";
                 }
             }
 
@@ -1700,20 +1700,20 @@ namespace DeepSeek_v4_for_VisualStudio.Services.Agents
                 {
                     // 超时 — 取消工具执行
                     timeoutCts.Cancel();
-                    Logger.Warn($"[Agent:{Definition.Name}] ⏱️ 工具 {tc.Function.Name} 执行超时 ({timeout.TotalSeconds:F0}s)，已终止");
-                    return $"⏱️ 工具 {tc.Function.Name} 执行超时（{timeout.TotalSeconds:F0}s），已跳过。";
+                    Logger.Warn($"[Agent:{Definition.Name}] Timeout: 工具 {tc.Function.Name} 执行超时 ({timeout.TotalSeconds:F0}s)，已终止");
+                    return $"Timeout: 工具 {tc.Function.Name} 执行超时（{timeout.TotalSeconds:F0}s），已跳过。";
                 }
             }
             catch (OperationCanceledException) when (!ct.IsCancellationRequested)
             {
                 // 仅由 timeoutCts 触发（非外部 ct）
-                Logger.Warn($"[Agent:{Definition.Name}] ⏱️ 工具 {tc.Function.Name} 执行超时 ({timeout.TotalSeconds:F0}s)，已终止");
-                return $"⏱️ 工具 {tc.Function.Name} 执行超时（{timeout.TotalSeconds:F0}s），已跳过。";
+                Logger.Warn($"[Agent:{Definition.Name}] Timeout: 工具 {tc.Function.Name} 执行超时 ({timeout.TotalSeconds:F0}s)，已终止");
+                return $"Timeout: 工具 {tc.Function.Name} 执行超时（{timeout.TotalSeconds:F0}s），已跳过。";
             }
             catch (Exception ex)
             {
                 Logger.Error($"[Agent:{Definition.Name}] 工具 {tc.Function.Name} 执行异常: {ex.Message}", ex);
-                return $"❌ 工具执行异常: {ex.Message}";
+                return $"Error: 工具执行异常: {ex.Message}";
             }
         }
 
@@ -1727,7 +1727,7 @@ namespace DeepSeek_v4_for_VisualStudio.Services.Agents
             argumentsJson = DeepSeekChatControl.SanitizeOcrToolArguments(toolName, argumentsJson);
 
             // ── 注入 ExploreHandler 到 BuiltInToolService（桥接 Agent.ExploreAgent）──
-            // 🔑 修复：确保即使 BaseAgent.ExploreAgent 为 null 也能找到 ExploreAgent。
+            //  修复：确保即使 BaseAgent.ExploreAgent 为 null 也能找到 ExploreAgent。
             // 场景：AskAgent 的 ExploreAgent 可能由 AgentFactory 通过不同类型引用设置。
             var effectiveExploreAgent = ExploreAgent
                 ?? (this as AskAgent)?.ExploreAgent
@@ -1747,7 +1747,7 @@ namespace DeepSeek_v4_for_VisualStudio.Services.Agents
                 {
                     try
                     {
-                        // ── 🔑 子Agent缓存优化：消费父Agent保存的ForwardedMessages，
+                        // ──  子Agent缓存优化：消费父Agent保存的ForwardedMessages，
                         //     使ExploreAgent复用父Agent的API缓存前缀。──
                         ctx.ForwardedMessages = Context?.ForwardedMessages;
                         if (Context != null)
@@ -1774,7 +1774,7 @@ namespace DeepSeek_v4_for_VisualStudio.Services.Agents
                             ContextManager = Context?.ContextManager,
                             FileReadCache = exploreFileCache,
                             DiscoveredFiles = Context?.DiscoveredFiles,
-                            // 🔑 子Agent缓存优化：继承父Agent当前消息列表作为前缀，
+                            //  子Agent缓存优化：继承父Agent当前消息列表作为前缀，
                             //    使ExploreAgent的首轮API调用可复用父Agent的缓存前缀。
                             ForwardedMessages = ctx.ForwardedMessages,
                         };
@@ -1842,7 +1842,7 @@ namespace DeepSeek_v4_for_VisualStudio.Services.Agents
 
                         return exploreResult.Success
                             ? "(ExploreAgent 完成但无内容)"
-                            : $"❌ ExploreAgent 失败: {exploreResult.ErrorMessage ?? "未知错误"}";
+                            : $"Error: ExploreAgent 失败: {exploreResult.ErrorMessage ?? "未知错误"}";
                     }
                     catch (OperationCanceledException)
                     {
@@ -1852,7 +1852,7 @@ namespace DeepSeek_v4_for_VisualStudio.Services.Agents
                     catch (Exception ex)
                     {
                         Logger.Error($"[BaseAgent] runSubagent 异常: {ex.Message}", ex);
-                        return $"❌ runSubagent 执行异常: {ex.Message}";
+                        return $"Error: runSubagent 执行异常: {ex.Message}";
                     }
                 };
             }
@@ -1871,13 +1871,13 @@ namespace DeepSeek_v4_for_VisualStudio.Services.Agents
                     {
                         request.Rejected = true;
                         request.RejectReason = $"用户通过 @{Definition.Type.ToString().ToLowerInvariant()} 显式指定了你，请直接处理任务，不要移交控制权。";
-                        AddLog("WARN", $"[{Definition.Name}] 🚫 显式路由拦截移交 → {request.TargetAgent}");
+                        AddLog("WARN", $"[{Definition.Name}]  显式路由拦截移交 → {request.TargetAgent}");
                         await Task.CompletedTask;
                         return;
                     }
 
                     PendingHandoffRequest = request;
-                    AddLog("INFO", $"[{Definition.Name}] 🔄 移交请求: → {request.TargetAgent} (原因: {request.Reason})");
+                    AddLog("INFO", $"[{Definition.Name}]  移交请求: → {request.TargetAgent} (原因: {request.Reason})");
                     await Task.CompletedTask;
                 };
             }
@@ -1946,7 +1946,7 @@ namespace DeepSeek_v4_for_VisualStudio.Services.Agents
 
                     string approvalCmd = $"git {operation}";
                     string approvalTitle = operation == "push"
-                        ? $"⚠️ 确认 git push 操作"
+                        ? $"确认 git push 操作"
                         : $"确认 git {operation}: {gitOpDesc}";
 
                     bool approved = await RequestPermissionAsync(
@@ -1960,7 +1960,7 @@ namespace DeepSeek_v4_for_VisualStudio.Services.Agents
                     if (!approved)
                     {
                         AddLog("WARN", $"用户拒绝了 git {operation} 操作");
-                        return $"⏭️ 用户跳过了 git 操作: git {operation}";
+                        return $"用户跳过了 git 操作: git {operation}";
                     }
                     AddLog("INFO", $"用户批准了 git {operation} 操作");
                 }
@@ -1995,7 +1995,7 @@ namespace DeepSeek_v4_for_VisualStudio.Services.Agents
                     && RunInTerminalTool.DetectFileEditingCommand(command))
                 {
                     // 只读 Agent：直接拒绝会修改文件的终端命令，不进入审批流程
-                    AddLog("WARN", $"⛔ 只读 Agent 的文件修改命令被拦截: {command.Truncate(100)}");
+                    AddLog("WARN", $"[BLOCKED] 只读 Agent 的文件修改命令被拦截: {command.Truncate(100)}");
                     return RunInTerminalTool.FormatFileEditBlocked(command);
                 }
 
@@ -2003,7 +2003,7 @@ namespace DeepSeek_v4_for_VisualStudio.Services.Agents
                 {
                     bool approved = await RequestTerminalApprovalAsync(command, explanation, purpose, ct);
                     if (!approved)
-                        return $"⏭️ 用户跳过了终端命令: {command}";
+                        return $"用户跳过了终端命令: {command}";
                 }
             }
 
@@ -2030,7 +2030,7 @@ namespace DeepSeek_v4_for_VisualStudio.Services.Agents
                     var paths = new List<string> { filePath };
                     bool approved = await RequestFileDeleteConfirmationAsync(paths, explanation, purpose, ct);
                     if (!approved)
-                        return $"⏭️ 用户取消了文件删除: {System.IO.Path.GetFileName(filePath)}";
+                        return $"用户取消了文件删除: {System.IO.Path.GetFileName(filePath)}";
                 }
             }
 
@@ -2067,7 +2067,7 @@ namespace DeepSeek_v4_for_VisualStudio.Services.Agents
 
                     bool approved = await RequestPermissionAsync(
                         $"确认{operation}项目外路径: {displayName}",
-                        $"AI 正在尝试{operation}当前项目之外的路径：\n\n`{targetPath}`\n\n⚠️ 该路径不在当前工作区 `{workspaceRoot}` 内。",
+                        $"AI 正在尝试{operation}当前项目之外的路径：\n\n`{targetPath}`\n\n 该路径不在当前工作区 `{workspaceRoot}` 内。",
                         "file_access_outside_workspace",
                         "",
                         $"AI 请求{operation}项目外部路径 `{targetPath}` 以完成任务",
@@ -2075,7 +2075,7 @@ namespace DeepSeek_v4_for_VisualStudio.Services.Agents
                     if (!approved)
                     {
                         AddLog("WARN", LocalizationService.Instance.Format("agent.log.permissionDenied", targetPath));
-                        return $"⛔ 用户拒绝了项目外路径{operation}: {targetPath}\n\n"
+                        return $"[BLOCKED] 用户拒绝了项目外路径{operation}: {targetPath}\n\n"
                             + string.Format(AiPrompts.OutOfWorkspaceWarning, targetPath, workspaceRoot);
                     }
                     AddLog("INFO", LocalizationService.Instance.Format("agent.log.permissionGranted", targetPath));
@@ -2108,7 +2108,7 @@ namespace DeepSeek_v4_for_VisualStudio.Services.Agents
                     };
                     bool approved = await RequestPermissionAsync(
                         $"确认{operation}项目文件: {fileName}",
-                        $"即将{operation}项目配置文件 `{fileName}`\n\n路径: {targetPath}\n\n⚠️ 修改项目文件可能影响构建配置和项目结构。",
+                        $"即将{operation}项目配置文件 `{fileName}`\n\n路径: {targetPath}\n\n 修改项目文件可能影响构建配置和项目结构。",
                         "file_write",
                         "",
                         filePurpose,
@@ -2116,7 +2116,7 @@ namespace DeepSeek_v4_for_VisualStudio.Services.Agents
                     if (!approved)
                     {
                         AddLog("WARN", LocalizationService.Instance.Format("agent.log.projectModDenied", fileName));
-                        return $"⏭️ 用户取消了项目文件{operation}: {fileName}";
+                        return $"用户取消了项目文件{operation}: {fileName}";
                     }
                     AddLog("INFO", LocalizationService.Instance.Format("agent.log.projectModGranted", fileName));
                 }
@@ -2135,7 +2135,7 @@ namespace DeepSeek_v4_for_VisualStudio.Services.Agents
                     }
                     catch (Exception ex)
                     {
-                        return $"❌ MCP 工具调用失败 ({toolName}): {ex.Message}";
+                        return $"Error: MCP 工具调用失败 ({toolName}): {ex.Message}";
                     }
                 }
             }
@@ -2148,7 +2148,7 @@ namespace DeepSeek_v4_for_VisualStudio.Services.Agents
                     return result;
             }
 
-            return $"❌ 未知工具: {toolName}";
+            return $"Error: 未知工具: {toolName}";
         }
 
         #endregion
@@ -2227,7 +2227,7 @@ namespace DeepSeek_v4_for_VisualStudio.Services.Agents
                     // 截断保护
                     if (sb.Length > maxBytes)
                     {
-                        sb.AppendLine("\n> ⚠️ 探索结果已截断（总量超限），完整内容见对话历史。");
+                        sb.AppendLine("\n>  探索结果已截断（总量超限），完整内容见对话历史。");
                         break;
                     }
                 }
@@ -2307,7 +2307,7 @@ namespace DeepSeek_v4_for_VisualStudio.Services.Agents
             if (context.ForwardedMessages == null && handoff.ForwardedMessages != null)
                 context.ForwardedMessages = CloneApiMessages(handoff.ForwardedMessages);
 
-            // ── 🔑 缓存边界快照（v1.1.10）：在 Handoff 前保存 ContextManager 状态 ──
+            // ──  缓存边界快照（v1.1.10）：在 Handoff 前保存 ContextManager 状态 ──
             //     目标 Agent 通过 BuildApiMessages 读取历史时，仅包含边界前的条目，
             //     排除 Handoff 过渡消息（步骤完成通知、最终构建结果等），
             //     使 DeepSeek Prefix Cache 在跨 Agent 切换时仍能命中。
@@ -2318,7 +2318,7 @@ namespace DeepSeek_v4_for_VisualStudio.Services.Agents
             sb.AppendLine(handoff.Prompt);
             sb.AppendLine();
 
-            // ── 🔄 Handoff 上下文提示：避免重复探索 ──
+            // ──  Handoff 上下文提示：避免重复探索 ──
             sb.AppendLine(AiPrompts.HandoffContextPrompt);
             sb.AppendLine();
 
@@ -2350,7 +2350,7 @@ namespace DeepSeek_v4_for_VisualStudio.Services.Agents
                         // 按章节截断：找到 ## 标题边界，在 ~3000 字符附近最近的一个 ## 之前切断
                         const int maxPlanMdChars = 3000;
                         string planOverview = TruncatePlanMdBySection(planMd, maxPlanMdChars);
-                        sb.AppendLine("## 📄 计划概述 (plan.md 开头部分)");
+                        sb.AppendLine("##  计划概述 (plan.md 开头部分)");
                         sb.AppendLine(planOverview);
                     }
                 }
@@ -2366,7 +2366,7 @@ namespace DeepSeek_v4_for_VisualStudio.Services.Agents
             if (!string.IsNullOrWhiteSpace(explorationContext))
             {
                 sb.AppendLine();
-                sb.AppendLine("## 🔍 前一 Agent 的探索结果");
+                sb.AppendLine("##  前一 Agent 的探索结果");
                 sb.AppendLine(explorationContext);
             }
 
@@ -2374,7 +2374,7 @@ namespace DeepSeek_v4_for_VisualStudio.Services.Agents
             if (!string.IsNullOrWhiteSpace(context.CodeMemory))
             {
                 sb.AppendLine();
-                sb.AppendLine("## 💾 代码记忆（跨步骤持久化）");
+                sb.AppendLine("##  代码记忆（跨步骤持久化）");
                 sb.AppendLine(context.CodeMemory);
             }
 
@@ -2508,7 +2508,7 @@ namespace DeepSeek_v4_for_VisualStudio.Services.Agents
 
         /// <summary>
         /// 检测 AI 回复中是否表明编译仍存在错误。
-        /// 使用多层策略：❌ 前缀 → 错误代码正则 → MSBuild 摘要 → 关键词匹配。
+        /// 使用多层策略：Error: 前缀 → 错误代码正则 → MSBuild 摘要 → 关键词匹配。
         /// BuildAgent / EditAgent 共享使用。
         /// </summary>
         protected static bool HasBuildFailure(string aiResponse)
@@ -2516,9 +2516,9 @@ namespace DeepSeek_v4_for_VisualStudio.Services.Agents
             if (string.IsNullOrWhiteSpace(aiResponse))
                 return false;
 
-            // ── 策略1：工具级失败标志 ❌ ──
-            if (aiResponse.Contains("❌ 构建失败") || aiResponse.Contains("❌ 编译失败")
-                || aiResponse.Contains("❌ build") || aiResponse.Contains("❌ Build"))
+            // ── 策略1：工具级失败标志 Error: ──
+            if (aiResponse.Contains("Error: 构建失败") || aiResponse.Contains("Error: 编译失败")
+                || aiResponse.Contains("Error: build") || aiResponse.Contains("Error: Build"))
                 return true;
 
             // ── 策略2：MSBuild / 编译器错误代码 ──
@@ -2547,7 +2547,6 @@ namespace DeepSeek_v4_for_VisualStudio.Services.Agents
             bool hasSuccess = lower.Contains("build succeeded")
                 || lower.Contains("0 个错误")
                 || lower.Contains("0 errors")
-                || lower.Contains("✅")
                 || lower.Contains("编译通过")
                 || lower.Contains("构建成功");
 
@@ -2898,7 +2897,7 @@ namespace DeepSeek_v4_for_VisualStudio.Services.Agents
         /// <summary>
         /// 带遥测的工具执行包装（P0 可观测性）：
         /// 记录每次调用的名称、总耗时（含超时等待）与成败。
-        /// 成败判定沿用结果字符串约定：❌（错误）/ ⏱️（超时）前缀视为失败。
+        /// 成败判定沿用结果字符串约定：Error: （错误）/ Timeout: （超时）前缀视为失败。
         /// </summary>
         private async Task<string> ExecuteToolWithTelemetryAsync(
             Services.Telemetry.AgentMetricsCollector? metrics,
@@ -2925,7 +2924,7 @@ namespace DeepSeek_v4_for_VisualStudio.Services.Agents
             }
             sw.Stop();
 
-            // ── P2-B：结果分类唯一权威点（❌/⏱️ 约定集中在 ToolExecutionOutcome）──
+            // ── P2-B：结果分类唯一权威点（Error: /Timeout: 约定集中在 ToolExecutionOutcome）──
             var outcome = Models.ToolExecutionOutcome.FromRaw(tc.Function.Name, result, sw.ElapsedMilliseconds);
             metrics.RecordToolCall(round, tc.Function.Name, sw.ElapsedMilliseconds, outcome.Success,
                 outcome.Success ? null : result.Truncate(200));
@@ -3730,7 +3729,7 @@ namespace DeepSeek_v4_for_VisualStudio.Services.Agents
                 bool approved = await request.ResponseTcs.Task;
                 // 清理：如果该请求仍在字典中则移除（可能已被 RespondToPermission 移除）
                 _pendingPermissions.TryRemove(request.RequestId, out _);
-                AddLog("INFO", $"{LocalizationService.Instance["agent.log.permissionResult"]}: {(approved ? "✅ 允许" : "❌ 拒绝")} → {title}");
+                AddLog("INFO", $"{LocalizationService.Instance["agent.log.permissionResult"]}: {(approved ? " 允许" : "Error: 拒绝")} → {title}");
                 return approved;
             }
             finally
@@ -3778,7 +3777,7 @@ namespace DeepSeek_v4_for_VisualStudio.Services.Agents
                 // 清理
                 _pendingPermissions.TryRemove(request.RequestId, out _);
                 AddLog("INFO", string.Format(LocalizationService.Instance["agent.log.terminalApprovalResult"],
-                    approved ? "✅ 允许" : "⏭️ 跳过", command));
+                    approved ? " 允许" : " 跳过", command));
                 return approved;
             }
             finally
@@ -3857,7 +3856,7 @@ namespace DeepSeek_v4_for_VisualStudio.Services.Agents
                     if (handlerCount == 0)
                     {
                         // ── 无 UI 处理器订阅 → 无法向用户展示问题，立即返回空答案避免永久阻塞 ──
-                        Logger.Warn($"[Agent:{Definition.Name}] ⚠️ QuestionsRequested 事件无订阅者！" +
+                        Logger.Warn($"[Agent:{Definition.Name}]  QuestionsRequested 事件无订阅者！" +
                             $"无法向用户展示 {questions.Count} 个问题。请检查 Agent 事件绑定链。" +
                             $"当前活跃 Agent: {Definition.Type}, RequestId={request.RequestId}");
                         _pendingQuestions.TryRemove(request.RequestId, out _);
@@ -3884,7 +3883,7 @@ namespace DeepSeek_v4_for_VisualStudio.Services.Agents
             }
             catch (Exception ex)
             {
-                return $"❌ VisualStudio_askQuestions 失败: {ex.Message}";
+                return $"Error: VisualStudio_askQuestions 失败: {ex.Message}";
             }
         }
 
@@ -3955,7 +3954,7 @@ namespace DeepSeek_v4_for_VisualStudio.Services.Agents
                 bool approved = await request.ResponseTcs.Task;
                 // 清理
                 _pendingPermissions.TryRemove(request.RequestId, out _);
-                AddLog("INFO", LocalizationService.Instance.Format("agent.log.fileDeleteConfirm", approved ? "✅ 确认删除" : "❌ 取消", title));
+                AddLog("INFO", LocalizationService.Instance.Format("agent.log.fileDeleteConfirm", approved ? " 确认删除" : "Error: 取消", title));
                 return approved;
             }
             finally
@@ -4147,7 +4146,7 @@ namespace DeepSeek_v4_for_VisualStudio.Services.Agents
                 if (totalChars + estimatedChars > maxTotalChars && totalChars > 0)
                     break;
 
-                sb.AppendLine($"### 📄 `{Path.GetFileName(path)}`");
+                sb.AppendLine($"###  `{Path.GetFileName(path)}`");
                 sb.AppendLine("```cpp");
                 sb.AppendLine(snippet.TrimEnd());
                 sb.AppendLine("```");
@@ -4160,7 +4159,7 @@ namespace DeepSeek_v4_for_VisualStudio.Services.Agents
             {
                 int remaining = maxTotalChars - totalChars;
                 var includedNames = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
-                var nameMatches = Regex.Matches(sb.ToString(), @"### 📄 `([^`]+)`");
+                var nameMatches = Regex.Matches(sb.ToString(), @"###  `([^`]+)`");
                 foreach (Match m in nameMatches)
                     includedNames.Add(m.Groups[1].Value);
 
@@ -4177,7 +4176,7 @@ namespace DeepSeek_v4_for_VisualStudio.Services.Agents
                     string snippet = content.Length > available
                         ? content.Substring(0, available) + "\n// ..."
                         : content;
-                    sb.AppendLine($"### 📄 `{Path.GetFileName(path)}`");
+                    sb.AppendLine($"###  `{Path.GetFileName(path)}`");
                     sb.AppendLine("```cpp");
                     sb.AppendLine(snippet.TrimEnd());
                     sb.AppendLine("```");
@@ -4194,7 +4193,7 @@ namespace DeepSeek_v4_for_VisualStudio.Services.Agents
             if (!string.IsNullOrEmpty(context.CodeMemory))
             {
                 var includedNames = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
-                var nameMatches = Regex.Matches(context.CodeMemory!, @"### 📄 `([^`]+)`");
+                var nameMatches = Regex.Matches(context.CodeMemory!, @"###  `([^`]+)`");
                 foreach (Match m in nameMatches)
                     includedNames.Add(m.Groups[1].Value);
 

@@ -129,8 +129,8 @@ namespace DeepSeek_v4_for_VisualStudio.Services.Benchmark
             var sb = new System.Text.StringBuilder(1024);
             sb.AppendLine($"# {title}");
             sb.AppendLine();
-            sb.AppendLine($"Sessions: {a.Total} | ✅ Success: {a.Success} ({Percent(a.Success, a.Total)}) | " +
-                          $"❌ Failure: {a.Failure} | ⏏️ Cancelled: {a.Cancelled}");
+            sb.AppendLine($"Sessions: {a.Total} |  Success: {a.Success} ({Percent(a.Success, a.Total)}) | " +
+                          $"Error: Failure: {a.Failure} |  Cancelled: {a.Cancelled}");
             sb.AppendLine();
             sb.AppendLine("## Failures by category");
             sb.AppendLine("| Model | Context | Host | System | Unlabeled |");

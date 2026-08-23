@@ -99,7 +99,7 @@ namespace DeepSeek_v4_for_VisualStudio.Services.BuiltInTools
         public override string GetResultSummary(string toolResult)
         {
             if (string.IsNullOrEmpty(toolResult)) return LocalizationService.Instance["tool.common.noResult"];
-            if (toolResult.StartsWith("❌")) return toolResult;
+            if (toolResult.StartsWith("Error: ")) return toolResult;
 
             var readLines = toolResult.Split('\n');
             string firstLine = readLines.Length > 0 ? readLines[0].Trim() : "";
@@ -340,7 +340,7 @@ namespace DeepSeek_v4_for_VisualStudio.Services.BuiltInTools
                 // 文件元数据行
                 resultBuilder.Append($"<file path=\"{filePath}\" total_lines=\"{totalLines}\" shown_lines=\"{shownStart}-{shownEnd}\" truncated=\"{truncated.ToString().ToLowerInvariant()}\"");
                 if (truncatedByLines)
-                    resultBuilder.Append($" next_start_line=\"{nextStart}\"");
+                    resultBuilder.Append($"next_start_line=\"{nextStart}\"");
                 resultBuilder.AppendLine(">");
 
                 // 文件内容

@@ -63,7 +63,7 @@ namespace DeepSeek_v4_for_VisualStudio.Models
         [JsonPropertyName("duration_ms")]
         public long DurationMs { get; set; }
 
-        /// <summary>是否成功（按结果约定判定：非 ❌/⏱️ 前缀视为成功）</summary>
+        /// <summary>是否成功（按结果约定判定：非 Error: /Timeout: 前缀视为成功）</summary>
         [JsonPropertyName("success")]
         public bool Success { get; set; }
 

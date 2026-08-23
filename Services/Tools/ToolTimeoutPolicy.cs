@@ -5,7 +5,7 @@ namespace DeepSeek_v4_for_VisualStudio.Services.Tools
     /// <summary>
     /// 工具超时分档策略（P2，序号 22）。
     ///
-    /// ⚠️ 生效范围说明：交互式/审批类工具（run_in_terminal、编辑族、build_solution、
+    ///  生效范围说明：交互式/审批类工具（run_in_terminal、编辑族、build_solution、
     /// read_file/list_dir/file_search/grep_search/git、runSubagent、askQuestions）
     /// 由 BaseAgent.IsInteractiveTool 直接跳过超时 —— 本策略仅对非豁免工具生效，
     /// 因此分档集中在：诊断/符号查询、网页抓取、记忆操作与其余默认工具。

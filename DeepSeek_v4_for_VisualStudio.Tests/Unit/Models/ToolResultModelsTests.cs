@@ -19,24 +19,24 @@ namespace DeepSeek_v4_for_VisualStudio.Tests.Unit.Models
         [Fact]
         public void Classify_ErrorPrefix_IsToolError()
         {
-            ToolExecutionOutcome.Classify("❌ 工具执行失败: file not found")
+            ToolExecutionOutcome.Classify("Error: 工具执行失败: file not found")
                 .Should().Be(ToolResultKind.ToolError);
         }
 
         [Fact]
         public void Classify_TimeoutPrefix_IsTimeout()
         {
-            ToolExecutionOutcome.Classify("⏱️ 工具 build_solution 执行超时（120s），已终止")
+            ToolExecutionOutcome.Classify("Timeout: 工具 build_solution 执行超时（120s），已终止")
                 .Should().Be(ToolResultKind.Timeout);
         }
 
         [Fact]
         public void FromRaw_PreservesContractFields()
         {
-            var o = ToolExecutionOutcome.FromRaw("read_file", "❌ missing", 123);
+            var o = ToolExecutionOutcome.FromRaw("read_file", "Error: missing", 123);
 
             o.ToolName.Should().Be("read_file");
-            o.Output.Should().Be("❌ missing");       // 外部字符串契约不变
+            o.Output.Should().Be("Error: missing");       // 外部字符串契约不变
             o.DurationMs.Should().Be(123);
             o.Success.Should().BeFalse();
             o.Kind.Should().Be(ToolResultKind.ToolError);

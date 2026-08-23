@@ -541,7 +541,7 @@ namespace DeepSeek_v4_for_VisualStudio.Services
             if (string.IsNullOrEmpty(toolResult))
                 return LocalizationService.Instance["tool.service.noResult"];
 
-            if (toolResult.StartsWith("❌") || toolResult.StartsWith("⛔"))
+            if (toolResult.StartsWith("Error: ") || toolResult.StartsWith("[BLOCKED] "))
                 return toolResult;
 
             try
@@ -575,7 +575,7 @@ namespace DeepSeek_v4_for_VisualStudio.Services
 
         /// <summary>
         /// 为 MCP 外部工具生成显示文本。
-        /// 所有 MCP 工具统一加 🔌 MCP 前缀以区分内置工具。
+        /// 所有 MCP 工具统一加  MCP 前缀以区分内置工具。
         /// OCR 工具额外提示参数格式。
         /// </summary>
         private static string GetMcpToolCallDisplayText(string toolName, Dictionary<string, JsonElement> args)
@@ -612,8 +612,8 @@ namespace DeepSeek_v4_for_VisualStudio.Services
             else
                 result = LocalizationService.Instance.Format("tool.service.callingToolGeneric", toolName, ocrHint);
 
-            // ── MCP 标注：将内置工具的 🔧 替换为 🔌 MCP ──
-            return result.Replace("🔧", "🔌 MCP");
+            // ── MCP 标注：将内置工具的  替换为  MCP ──
+            return result.Replace("", " MCP");
         }
 
         #endregion
