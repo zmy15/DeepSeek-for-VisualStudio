@@ -597,18 +597,23 @@ window._showCopyFeedback=function(msgIndex){
                             retryBtn.textContent='↻';
                             retryBtn.title=msg.retryTitle||'Regenerate response';
                             retryBtn.onclick=function(){window.__retryMessage(msg.i);};
-                            var msgBody=document.getElementById('msg-body-'+msg.i);
-                            if(msgBody)msgBody.parentNode.insertBefore(retryBtn,msgBody.nextSibling);
+                            var row=document.querySelector('#msg-'+msg.i+' .msg-actions-row');
+                            if(!row){row=document.createElement('div');row.className='msg-actions-row';
+                                var bubble=msgDiv2.querySelector('.msg-bubble')||msgDiv2;
+                                bubble.appendChild(row);}
+                            row.insertBefore(retryBtn,row.firstChild);
                         }
                         if(msgDiv2&&!document.getElementById('copy-btn-'+msg.i)){
                             var copyBtn=document.createElement('button');
                             copyBtn.id='copy-btn-'+msg.i;
                             copyBtn.className='msg-action-btn copy-msg-btn';
-                            copyBtn.textContent='\uE8C8';copyBtn.style.fontFamily=""'Segoe Fluent Icons','Segoe MDL2 Assets'"";
+                            copyBtn.textContent='\uE8C8 Copy';copyBtn.style.fontFamily=""'Segoe Fluent Icons','Segoe MDL2 Assets'"";
                             copyBtn.title=msg.copyLabel||'Copy this response';
                             copyBtn.onclick=function(){window.__copyMessage(msg.i);};
-                            var msgBody2=document.getElementById('msg-body-'+msg.i);
-                            if(msgBody2)msgBody2.parentNode.insertBefore(copyBtn,msgBody2.nextSibling);
+                            var row2=document.querySelector('#msg-'+msg.i+' .msg-actions-row');
+                            if(row2)row2.appendChild(copyBtn);
+                            else{var mb=document.getElementById('msg-body-'+msg.i);
+                                if(mb)mb.parentNode.insertBefore(copyBtn,mb.nextSibling);}
                         }
                     } catch(btnErr) {
                         console.error('[DeepSeek] streamEnd button injection error:', btnErr);

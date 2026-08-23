@@ -744,8 +744,14 @@ namespace DeepSeek_v4_for_VisualStudio.Services
             {
                 sb.Append(msg.CacheFooterHtml);
             }
-            sb.Append(retryBtnHtml);
-            sb.Append(copyBtnHtml);
+            // ── 统一 action 行：flex 容器保证重来/复制按钮水平对齐、尺寸一致 ──
+            if (retryBtnHtml.Length > 0 || copyBtnHtml.Length > 0)
+            {
+                sb.Append("<div class='msg-actions-row'>");
+                sb.Append(retryBtnHtml);
+                sb.Append(copyBtnHtml);
+                sb.Append("</div>");
+            }
             sb.Append("</div>");  // closes msg-bubble
             sb.Append("</div>");  // closes msg-wrapper
         }

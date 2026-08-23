@@ -431,7 +431,7 @@
                 Padding="0">
             <Grid Margin="12,6,12,12">
                 <Grid.RowDefinitions>
-                    <RowDefinition Height="*" />
+                    <RowDefinition Height="Auto" />
                     <RowDefinition Height="Auto" />
                     <RowDefinition Height="Auto" />
                     <RowDefinition Height="Auto" />
@@ -488,7 +488,8 @@
                          x:Name="InputTextBox"
                          AcceptsReturn="True"
                          TextWrapping="Wrap"
-                         Height="50"
+                         MinHeight="56"
+                         MaxHeight="150"
                          FontSize="12"
                          Background="Transparent"
                          BorderThickness="0"
@@ -822,20 +823,24 @@
                         </Button>
                     </StackPanel>
 
-                    <!-- 右侧: 仅保留发送控制（P3 去拥挤：联网/MCP 移至左侧设置组）-->
-                    <StackPanel Grid.Column="1" Orientation="Horizontal">
+                    <!-- 右侧: 发送控制（P3 去拥挤：联网/MCP 移至左侧设置组）-->
+                    <StackPanel Grid.Column="1" Orientation="Horizontal" VerticalAlignment="Center">
                         <Button x:Name="ClearButton" Content="清空" Click="ClearButton_Click"
                                 Style="{StaticResource TransparentButton}"
-                                Margin="0,0,2,0" FontSize="12" />
+                                Margin="0,0,4,0" FontSize="12" Foreground="#888888" />
                         <Button x:Name="StopButton" Content="&#xE71A;" FontFamily="Segoe Fluent Icons"
                                 Click="StopButton_Click"
                                 Style="{StaticResource TransparentButton}"
-                                FontSize="14" Padding="4,0"
+                                FontSize="14" Padding="6,4"
                                 Visibility="Collapsed" />
                         <Button x:Name="SendButton" Content="&#xE724;" FontFamily="Segoe Fluent Icons"
                                 Click="SendButton_Click"
-                                Style="{StaticResource TransparentButton}"
-                                Foreground="#6CAFD9" FontSize="14" Padding="4,0" />
+                                Background="#2D5A8C"
+                                Foreground="#FFFFFF"
+                                FontSize="14" Padding="10,5"
+                                BorderBrush="#2D5A8C"
+                                Cursor="Hand"
+                                ToolTip="发送 (Enter)" />
                     </StackPanel>
                 </Grid>
             </Grid>
