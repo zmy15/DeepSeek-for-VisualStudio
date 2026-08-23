@@ -66,7 +66,7 @@ namespace DeepSeek_v4_for_VisualStudio.View
             Title = L["mcp.title"];
 
             // 标题标签
-            TitleLabel.Text = L["mcp.title"];
+            TitleLabel.Text = LocalizationService.Instance["mcp.title"];
 
             // JSON 粘贴区域
             PasteJsonLabel.Text = L["mcp.pasteJson"];
@@ -74,12 +74,12 @@ namespace DeepSeek_v4_for_VisualStudio.View
             // 按钮
             ParseJsonButton.Content = L["mcp.detectAndAdd"];
             ClearJsonButton.Content = L["general.delete"];
-            AddServerButton.Content = "+ " + L["mcp.addServer"];
+            AddServerButton.Content = "+ "+ L["mcp.addServer"];
             SaveButton.Content = L["mcp.save"];
             CancelButton.Content = L["general.cancel"];
 
             // 服务器列表
-            ServersLabel.Text = L["mcp.configuredServers"];
+            ServersLabel.Text = LocalizationService.Instance["mcp.configuredServers"];
 
             // 字段标签 (在 DataTemplate 中，无法通过 x:Name 访问，使用固定英文标签)
             // "Command:", "Args:", "Environment:" 在 XAML 中已设为英文默认值
@@ -220,7 +220,7 @@ namespace DeepSeek_v4_for_VisualStudio.View
             }
             catch (Exception ex)
             {
-                ParseStatusLabel.Text = string.Format("❌ {0}: {1}", LocalizationService.Instance["mcp.status.parseFailed"], ex.Message);
+                ParseStatusLabel.Text = string.Format(" {0}: {1}", LocalizationService.Instance["mcp.status.parseFailed"], ex.Message);
                 ParseStatusLabel.Foreground = new System.Windows.Media.SolidColorBrush(
                     System.Windows.Media.Color.FromRgb(0xF4, 0x87, 0x71));
             }
@@ -295,7 +295,7 @@ namespace DeepSeek_v4_for_VisualStudio.View
                         toolNames);
                     TestStatusText.Foreground = new System.Windows.Media.SolidColorBrush(
                         System.Windows.Media.Color.FromRgb(0x4E, 0xC9, 0xB0));
-                    btn.Content = "✅";
+                    btn.Content = "\u2713";
                     btn.Foreground = new System.Windows.Media.SolidColorBrush(
                         System.Windows.Media.Color.FromRgb(0x4E, 0xC9, 0xB0));
                     Logger.Info($"[MCP Config] '{config.Name}' 测试成功: {client.Tools.Count} 工具");
@@ -326,7 +326,7 @@ namespace DeepSeek_v4_for_VisualStudio.View
                 TestStatusText.Text = string.Format(LocalizationService.Instance["mcp.dialog.protocolError"], config.Name, ex.Message);
                 TestStatusText.Foreground = new System.Windows.Media.SolidColorBrush(
                     System.Windows.Media.Color.FromRgb(0xF4, 0x87, 0x71));
-                btn.Content = "❌";
+                btn.Content = "\u2715";
                 btn.Foreground = new System.Windows.Media.SolidColorBrush(
                     System.Windows.Media.Color.FromRgb(0xF4, 0x87, 0x71));
                 Logger.Error($"[MCP Config] '{config.Name}' MCP 错误: {ex.Message}");
@@ -342,7 +342,7 @@ namespace DeepSeek_v4_for_VisualStudio.View
                 TestStatusText.Text = string.Format(LocalizationService.Instance["mcp.dialog.connectionFailed"], config.Name, ex.Message, errorHint);
                 TestStatusText.Foreground = new System.Windows.Media.SolidColorBrush(
                     System.Windows.Media.Color.FromRgb(0xF4, 0x87, 0x71));
-                btn.Content = "❌";
+                btn.Content = "\u2715";
                 btn.Foreground = new System.Windows.Media.SolidColorBrush(
                     System.Windows.Media.Color.FromRgb(0xF4, 0x87, 0x71));
                 Logger.Error($"[MCP Config] '{config.Name}' 测试失败: {ex.Message}", ex);

@@ -25,6 +25,7 @@ namespace DeepSeek_v4_for_VisualStudio
     [ProvideMenuResource("Menus.ctmenu", 1)]
     [ProvideToolWindow(typeof(DeepSeekChatWindowPane), Style = VsDockStyle.Tabbed)]
     [ProvideOptionPage(typeof(DeepSeekOptionsPage), "DeepSeek Chat", "General", 0, 0, true)]
+    [ProvideProfile(typeof(DeepSeekOptionsPage), "DeepSeek Chat", "General", 0, 0, true)]
     public sealed class DeepSeek_v4_for_VisualStudioPackage : AsyncPackage
     {
         /// <summary>
