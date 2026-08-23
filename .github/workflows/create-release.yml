@@ -84,7 +84,7 @@ jobs:
         $version = $tag -replace '^v', '' -replace '-No-Local-OCR$', ''
         $manifest = 'source.extension.vsixmanifest'
         $content = Get-Content $manifest -Raw
-        $content = $content -replace 'Version="[^"]*"', "Version=`"$version`""
+        $content = $content -creplace '(<Identity\b[^>]*?Version=")[^"]*(")', ('${1}' + $version + '${2}')
         Set-Content $manifest $content -NoNewline
         Write-Host "VSIX 版本号已同步为: $version"
 

@@ -39,4 +39,16 @@ public class ApiKeyProtectionTests
 
         twice.Should().Be(protectedValue);
     }
+
+    [Fact]
+    public void Unprotect_InvalidCiphertext_ReturnsEmptyInsteadOfCiphertext()
+    {
+        // 修复回归：解密失败时绝不能再把密文（"dpapi1:..."）当 API Key 返回，
+        // 否则会把它当 Bearer Token 发送导致服务端 401。
+        const string corrupted = "dpapi1:not-valid-base64!!";
+
+        string result = ApiKeyProtection.Unprotect(corrupted);
+
+        result.Should().BeEmpty();
+    }
 }

@@ -97,6 +97,7 @@ namespace DeepSeek_v4_for_VisualStudio.Services.Agents
             "create_directory",
             // 编辑必需：读取文件（利用缓存命中）
             "read_file",
+            "capture_window",      // 视觉模型直接查看窗口截图
             "get_errors",
             // 终端与构建
             "run_in_terminal",
@@ -124,6 +125,7 @@ namespace DeepSeek_v4_for_VisualStudio.Services.Agents
         {
             // 探索工具
             "read_file",
+            "capture_window",
             "file_search",
             "grep_search",
             "symbol_search",
@@ -151,6 +153,7 @@ namespace DeepSeek_v4_for_VisualStudio.Services.Agents
         {
             "build_solution",
             "read_file",
+            "capture_window",
             "get_errors",
             "replace_string_in_file",
             "multi_replace_string_in_file",
@@ -170,6 +173,7 @@ namespace DeepSeek_v4_for_VisualStudio.Services.Agents
         private static readonly string[] ReadOnlyExecutionTools = new[]
         {
             "read_file",
+            "capture_window",
             "file_search",
             "grep_search",
             "symbol_search",

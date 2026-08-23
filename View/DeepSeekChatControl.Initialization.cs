@@ -35,7 +35,12 @@ namespace DeepSeek_v4_for_VisualStudio.View
         private void InitializeApiService()
         {
             if (_options == null || string.IsNullOrEmpty(_options.ApiKey))
+            {
+                // ── 无 Key：释放旧服务，避免残留旧 Key 继续发送请求 ──
+                _apiService?.Dispose();
+                _apiService = null;
                 return;
+            }
 
             _apiService?.Dispose();
             _apiService = new DeepSeekApiService(_options.ApiKey, _options.SelectedModel);
@@ -271,9 +276,31 @@ namespace DeepSeek_v4_for_VisualStudio.View
             OnCoreSettingsChanged();
             try
             {
+                // ── 记录变更前的 API 配置，判断是否需要重建 API 服务 ──
+                string? oldApiKey = _options?.ApiKey;
+                string? oldModel = _options?.SelectedModel;
+                bool oldThinking = _options?.IsThinkingEnabled ?? true;
+                string? oldEffort = _options?.ReasoningEffort;
+
                 // 刷新 _options 引用（DialogPage 属性已由 VS 自动更新）
                 if (_package != null)
                     _options = _package.Options;
+
+                // ── API Key / 模型 / 思考配置变更时，立即重建 API 服务（无需重启）──
+                // 修复：旧实现只刷新 _options 引用，却不重建 _apiService，
+                // 导致初次填写/修改 API Key 后仍用旧 Key（或空 Key）发请求 → 401，
+                // 必须重启才能生效。
+                bool apiConfigChanged =
+                    !string.Equals(oldApiKey, _options?.ApiKey, StringComparison.Ordinal) ||
+                    !string.Equals(oldModel, _options?.SelectedModel, StringComparison.Ordinal) ||
+                    oldThinking != (_options?.IsThinkingEnabled ?? true) ||
+                    !string.Equals(oldEffort, _options?.ReasoningEffort, StringComparison.Ordinal);
+
+                if (apiConfigChanged)
+                {
+                    Logger.Info("[Settings] API 配置已变更，重建 API 服务...");
+                    InitializeApiService();
+                }
 
                 ApplyBottomAreaScale();
                 ApplyPersistedWebView2Zoom();
