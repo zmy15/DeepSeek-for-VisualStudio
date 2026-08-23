@@ -51,12 +51,13 @@ powershell -File tools\build-vs26.ps1
 ## 五、待办事项（按优先级）
 
 ### 🔴 用户反馈四项（2026-08-23 晚，最高优先级）
-1. **回答气泡下"重来/复制"按钮未合理对齐** — WebView 内 action row 布局
-2. **输入框+按钮区域比例失调**，不符交互逻辑 — 需重新设计输入区布局
-3. **MCP 对话框仍有符号型 emoji**：Test 按钮 ✓、关闭按钮 ✕ 被用户视为 emoji；
-   应改为纯文本（如"测试"/"关闭"）或 Segoe Fluent Icons 字体渲染；
-   且窗口整体布局不符合 VS UI 设计规范（需参照标准 ToolDialog 重排）
-4. **缺少 VS 工具接入** — 新功能需求，待明确范围（哪些 VS 能力：调试器/编辑器/Git 等）
+1. **回答气泡下"重来/复制"按钮未合理对齐** — ⚠️ 排查更正：CSS 类名完好
+   （早前 `.ln` 为 rg -r 标志造成的显示假象）。真正根因需在 Exp 实例用 DevTools
+   检查渲染后的 action row DOM/CSS；静态分析已排除类名缺失。
+2. **输入框+按钮区域比例失调** — 需重新设计输入区布局
+3. **MCP 对话框符号残留** ✅ 已修复（9037acf）：✓/✕/⚙ 全部改为本地化文本，
+   Test 结果按钮显示 OK/成功、Error/失败，Delete 按钮文本化。布局重排仍待做。
+4. **缺少 VS 工具接入** — 新功能需求，待明确范围（调试器变量/编辑器操作/Git 等）
 
 ### Step2c：观察者桥接（SettingCategory → Instance 回写）
 - SettingCategory 已声明于 `Settings/DeepSeekUnifiedSettings.cs`（7 项 Boolean/Integer）
