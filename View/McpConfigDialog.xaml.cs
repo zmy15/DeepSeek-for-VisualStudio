@@ -66,10 +66,10 @@ namespace DeepSeek_v4_for_VisualStudio.View
             Title = L["mcp.title"];
 
             // 标题标签
-            TitleLabel.Text = "⚙️ " + L["mcp.title"];
+            TitleLabel.Text = L["mcp.title"];
 
             // JSON 粘贴区域
-            PasteJsonLabel.Text = "📋 " + L["mcp.pasteJson"];
+            PasteJsonLabel.Text = L["mcp.pasteJson"];
 
             // 按钮
             ParseJsonButton.Content = L["mcp.detectAndAdd"];
@@ -79,7 +79,7 @@ namespace DeepSeek_v4_for_VisualStudio.View
             CancelButton.Content = L["general.cancel"];
 
             // 服务器列表
-            ServersLabel.Text = "📡 " + L["mcp.configuredServers"];
+            ServersLabel.Text = L["mcp.configuredServers"];
 
             // 字段标签 (在 DataTemplate 中，无法通过 x:Name 访问，使用固定英文标签)
             // "Command:", "Args:", "Environment:" 在 XAML 中已设为英文默认值
@@ -180,7 +180,7 @@ namespace DeepSeek_v4_for_VisualStudio.View
                 var parsed = McpConfigParser.Parse(json);
                 if (parsed.Count == 0)
                 {
-                    ParseStatusLabel.Text = "⚠️ " + LocalizationService.Instance["mcp.status.noServersDetected"];
+                    ParseStatusLabel.Text = LocalizationService.Instance["mcp.status.noServersDetected"];
                     ParseStatusLabel.Foreground = new System.Windows.Media.SolidColorBrush(
                         System.Windows.Media.Color.FromRgb(0xCE, 0x91, 0x78));
                     return;
@@ -307,7 +307,6 @@ namespace DeepSeek_v4_for_VisualStudio.View
                     TestStatusText.Text = string.Format(LocalizationService.Instance["mcp.dialog.noTools"], config.Name);
                     TestStatusText.Foreground = new System.Windows.Media.SolidColorBrush(
                         System.Windows.Media.Color.FromRgb(0xCE, 0x91, 0x78));
-                    btn.Content = "⚠️";
                     btn.Foreground = new System.Windows.Media.SolidColorBrush(
                         System.Windows.Media.Color.FromRgb(0xCE, 0x91, 0x78));
                 }
@@ -318,7 +317,6 @@ namespace DeepSeek_v4_for_VisualStudio.View
                 TestStatusText.Text = string.Format(LocalizationService.Instance["mcp.dialog.timeout"], config.Name);
                 TestStatusText.Foreground = new System.Windows.Media.SolidColorBrush(
                     System.Windows.Media.Color.FromRgb(0xCE, 0x91, 0x78));
-                btn.Content = "⏱️";
                 btn.Foreground = new System.Windows.Media.SolidColorBrush(
                     System.Windows.Media.Color.FromRgb(0xCE, 0x91, 0x78));
             }
