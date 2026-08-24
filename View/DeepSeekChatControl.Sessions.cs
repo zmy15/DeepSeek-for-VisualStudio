@@ -358,7 +358,7 @@ namespace DeepSeek_v4_for_VisualStudio.View
                 try
                 {
                     await Microsoft.VisualStudio.Shell.ThreadHelper.JoinableTaskFactory.SwitchToMainThreadAsync();
-                    StatusLabel.Text = $"会话切换失败: {ex.Message}";
+                    StatusLabel.Text = LocalizationService.Instance.Format("status.sessionSwitchFailed", ex.Message);
                 }
                 catch { }
             }
@@ -711,7 +711,7 @@ namespace DeepSeek_v4_for_VisualStudio.View
             catch (Exception ex)
             {
                 Logger.Error($"DeleteCurrentSession 异常: {ex.Message}", ex);
-                StatusLabel.Text = $"删除会话失败: {ex.Message}";
+                    StatusLabel.Text = LocalizationService.Instance.Format("status.sessionDeleteFailed", ex.Message);
             }
         }
 
@@ -772,7 +772,7 @@ namespace DeepSeek_v4_for_VisualStudio.View
             catch (Exception ex)
             {
                 Logger.Error($"ClearCurrentSessionMessages 异常: {ex.Message}", ex);
-                StatusLabel.Text = $"清空消息失败: {ex.Message}";
+                StatusLabel.Text = LocalizationService.Instance.Format("status.messageSaveFailed", ex.Message);
             }
         }
 

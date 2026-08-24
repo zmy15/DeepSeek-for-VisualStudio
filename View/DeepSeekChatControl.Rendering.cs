@@ -192,7 +192,7 @@ namespace DeepSeek_v4_for_VisualStudio.View
                     _ = Microsoft.VisualStudio.Shell.ThreadHelper.JoinableTaskFactory.RunAsync(async () =>
                     {
                         await Microsoft.VisualStudio.Shell.ThreadHelper.JoinableTaskFactory.SwitchToMainThreadAsync();
-                        StatusLabel.Text = $"WebView2 初始化失败: {e.InitializationException?.Message}";
+                        StatusLabel.Text = LocalizationService.Instance.Format("status.webviewInitFailed", e.InitializationException?.Message);
                     });
                 }
                 else

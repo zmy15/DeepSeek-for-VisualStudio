@@ -443,7 +443,7 @@ namespace DeepSeek_v4_for_VisualStudio.View
             UpdateWebSearchToggleAppearance();
 
             // ── 状态信息直接显示在输入区顶部状态行 ──
-            StatusLabel.Text = "正在初始化…";
+            StatusLabel.Text = LocalizationService.Instance["status.initializing"];
 
             // ── 订阅主题变更事件 ──
             _themeService.ThemeChanged += OnThemeChanged;
