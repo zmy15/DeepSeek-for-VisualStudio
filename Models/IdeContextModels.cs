@@ -21,6 +21,39 @@ namespace DeepSeek_v4_for_VisualStudio.Models
     }
 
     /// <summary>
+    /// 调试器局部值条目（只读展示；取值经 EnvDTE 求值，逐项容错）。
+    /// </summary>
+    public sealed class IdeDebuggerValue
+    {
+        public string? Name { get; set; }
+
+        /// <summary>求值结果文本（已截断；不可求值时为占位符）</summary>
+        public string? Value { get; set; }
+    }
+
+    /// <summary>
+    /// 调试器断点暂停态快照（当前栈帧级别，只读、有界）。
+    /// null = 调试器未处于中断状态或捕获失败。
+    /// </summary>
+    public sealed class IdeDebuggerFrame
+    {
+        /// <summary>当前栈帧函数名</summary>
+        public string? Function { get; set; }
+
+        /// <summary>源文件路径（可空：动态代码/优化帧可能缺失）</summary>
+        public string? File { get; set; }
+
+        /// <summary>行号（1-based；未知为 0）</summary>
+        public int Line { get; set; }
+
+        /// <summary>栈帧局部变量（已截断至捕获上限）</summary>
+        public List<IdeDebuggerValue> Locals { get; } = new();
+
+        public bool HasContent =>
+            !string.IsNullOrWhiteSpace(Function) || !string.IsNullOrWhiteSpace(File) || Locals.Count > 0;
+    }
+
+    /// <summary>
     /// IDE 实时态快照（P1-A）。
     /// 每次用户发送消息时由 IdeContextTracker 在 UI 线程捕获一次，
     /// 经 <see cref="ToPromptBlock"/> 格式化后注入 volatile 块 —— 不触碰稳定前缀，保护 Prefix Cache。
@@ -56,18 +89,26 @@ namespace DeepSeek_v4_for_VisualStudio.Models
         /// <summary>当前文件诊断摘要（squiggle 级别）</summary>
         public List<IdeDiagnosticItem> Diagnostics { get; } = new();
 
+        /// <summary>
+        /// 调试器断点暂停态快照（null = 未中断）。
+        /// 断点命中时即便无编辑器视图也可独立构成注入内容。
+        /// </summary>
+        public IdeDebuggerFrame? DebuggerFrame { get; set; }
+
         /// <summary>捕获时间</summary>
         public DateTime CapturedAt { get; set; }
 
         public bool HasSelection => !string.IsNullOrWhiteSpace(SelectionText);
         public int ErrorCount => Diagnostics.Count(d => d.Severity == "error");
         public int WarningCount => Diagnostics.Count(d => d.Severity == "warning");
+        public bool HasDebuggerFrame => DebuggerFrame != null;
 
         /// <summary>是否有任何值得注入的内容。</summary>
         public bool HasContent =>
             !string.IsNullOrWhiteSpace(FilePath)
             || HasSelection
-            || !string.IsNullOrWhiteSpace(SymbolAtCursor);
+            || !string.IsNullOrWhiteSpace(SymbolAtCursor)
+            || HasDebuggerFrame;
 
         // ───────────────────── 格式化常量（测试可见性友好） ─────────────────────
 
@@ -76,6 +117,10 @@ namespace DeepSeek_v4_for_VisualStudio.Models
         internal const int MaxSymbolLineLength = 200;
         internal const int MaxDiagnosticsInBlock = 6;
         internal const int MaxDiagnosticMessageLength = 120;
+        internal const int MaxLocalsInBlock = 12;
+        internal const int MaxLocalNameLength = 60;
+        internal const int MaxLocalValueLength = 160;
+        internal const int MaxDebuggerFunctionLength = 120;
 
         /// <summary>
         /// 格式化为注入 volatile 块的 Markdown 文本。
@@ -109,6 +154,9 @@ namespace DeepSeek_v4_for_VisualStudio.Models
 
             // ── 诊断摘要 ──
             AppendDiagnostics(sb);
+
+            // ── 调试器断点快照 ──
+            AppendDebuggerFrame(sb);
 
             return sb.ToString().TrimEnd();
         }
@@ -168,6 +216,35 @@ namespace DeepSeek_v4_for_VisualStudio.Models
             }
             if (Diagnostics.Count > MaxDiagnosticsInBlock)
                 sb.Append("(+").Append(Diagnostics.Count - MaxDiagnosticsInBlock).AppendLine(" more)");
+        }
+
+        private void AppendDebuggerFrame(StringBuilder sb)
+        {
+            var f = DebuggerFrame;
+            if (f == null) return;
+
+            sb.AppendLine("Debugger: paused");
+            if (!string.IsNullOrWhiteSpace(f.Function))
+                sb.Append("Frame: ").AppendLine(TruncateInline(f.Function, MaxDebuggerFunctionLength));
+            if (!string.IsNullOrWhiteSpace(f.File))
+            {
+                sb.Append("Location: ").Append(GetDisplayPath(f.File, null));
+                if (f.Line > 0) sb.Append(':').Append(f.Line);
+                sb.AppendLine();
+            }
+
+            if (f.Locals.Count == 0) return;
+
+            sb.Append("Locals (").Append(f.Locals.Count).AppendLine("):");
+            foreach (var v in f.Locals.Take(MaxLocalsInBlock))
+            {
+                sb.Append("- ")
+                  .Append(TruncateInline(v.Name ?? "?", MaxLocalNameLength))
+                  .Append(" = ")
+                  .AppendLine(TruncateInline(v.Value ?? "<unavailable>", MaxLocalValueLength));
+            }
+            if (f.Locals.Count > MaxLocalsInBlock)
+                sb.Append("(+").Append(f.Locals.Count - MaxLocalsInBlock).AppendLine(" more)");
         }
 
         // ───────────────────── 辅助方法 ─────────────────────

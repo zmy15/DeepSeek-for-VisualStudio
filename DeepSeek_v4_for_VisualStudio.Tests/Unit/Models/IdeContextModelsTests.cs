@@ -5,8 +5,7 @@ using DeepSeek_v4_for_VisualStudio.Models;
 namespace DeepSeek_v4_for_VisualStudio.Tests.Unit.Models
 {
     /// <summary>
-    /// IdeContextSnapshot 格式化器单元测试（P1-A）。
-    /// </summary>
+    /// IdeContextSnapshot 鏍煎紡鍖栧櫒鍗曞厓娴嬭瘯锛圥1-A锛夈€?    /// </summary>
     public class IdeContextModelsTests
     {
         private static IdeContextSnapshot Snapshot(Action<IdeContextSnapshot>? setup = null)
@@ -16,7 +15,7 @@ namespace DeepSeek_v4_for_VisualStudio.Tests.Unit.Models
             return s;
         }
 
-        // ──────────────── 空态 ────────────────
+        // 鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€ 绌烘€?鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€
 
         [Fact]
         public void ToPromptBlock_EmptySnapshot_ReturnsNull()
@@ -40,7 +39,7 @@ namespace DeepSeek_v4_for_VisualStudio.Tests.Unit.Models
             s.HasContent.Should().BeTrue();
         }
 
-        // ──────────────── 基本格式 ────────────────
+        // 鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€ 鍩烘湰鏍煎紡 鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€
 
         [Fact]
         public void ToPromptBlock_FileOnly_ContainsHeaderCursorAndPath()
@@ -71,7 +70,7 @@ namespace DeepSeek_v4_for_VisualStudio.Tests.Unit.Models
             block.Should().Contain(@"C:\repo\src\Renderer.cpp");
         }
 
-        // ──────────────── 符号与当前行 ────────────────
+        // 鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€ 绗﹀彿涓庡綋鍓嶈 鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€
 
         [Fact]
         public void ToPromptBlock_Symbol_IncludedWithCurrentLine()
@@ -95,7 +94,7 @@ namespace DeepSeek_v4_for_VisualStudio.Tests.Unit.Models
                 s.SymbolLineText = new string('a', 250);
             }).ToPromptBlock();
 
-            block!.Should().Contain(new string('a', 200));      // 截断到上限 200
+            block!.Should().Contain(new string('a', 200));      // truncate at limit 200
             block.Should().NotContain(new string('a', 201));
             block.Should().Contain("…");
         }
@@ -108,7 +107,7 @@ namespace DeepSeek_v4_for_VisualStudio.Tests.Unit.Models
             block!.Should().Contain("Current Line: short line");
         }
 
-        // ──────────────── 选区 ────────────────
+        // 鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€ 閫夊尯 鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€
 
         [Fact]
         public void ToPromptBlock_Selection_SingleLineLabel_AndFenceLanguage()
@@ -150,14 +149,14 @@ namespace DeepSeek_v4_for_VisualStudio.Tests.Unit.Models
             }).ToPromptBlock();
 
             block!.Should().Contain("(selection truncated)");
-            block.Should().Contain("line-40");      // 保留前 40 行
-            block.Should().NotContain("line-41");   // 第 41 行被裁掉
+            block!.Should().Contain("line-40");      // keep first 40 lines
+            block.Should().NotContain("line-41");   // line 41 was cut
         }
 
         [Fact]
         public void Selection_TruncatedByCharBudget_AppendsNoteAndEllipsis()
         {
-            var longLine = new string('x', 3000); // 单行超字符预算
+            var longLine = new string('x', 3000); // one line exceeds char budget
             var block = Snapshot(s =>
             {
                 s.SelectionText = longLine;
@@ -169,7 +168,7 @@ namespace DeepSeek_v4_for_VisualStudio.Tests.Unit.Models
             block.Should().Contain("(selection truncated)");
         }
 
-        // ──────────────── 诊断 ────────────────
+        // 鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€ 璇婃柇 鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€
 
         [Fact]
         public void Diagnostics_CountsFormatted_WithSingularPlural()
@@ -206,9 +205,9 @@ namespace DeepSeek_v4_for_VisualStudio.Tests.Unit.Models
                 s.Diagnostics.Add(new IdeDiagnosticItem { Severity = "error", Line = 99, Message = "CRITICAL" });
             }).ToPromptBlock();
 
-            block!.Should().Contain("- error line 99: CRITICAL");       // 错误排最前
-            block.Should().Match(b => System.Text.RegularExpressions.Regex.IsMatch(b!, @"\(\+3 more\)")); // 9 条只展示 6 条
-            block.Should().NotContain("W6");                            // 被裁掉
+            block!.Should().Contain("- error line 99: CRITICAL");       // errors first
+            block.Should().Match(b => System.Text.RegularExpressions.Regex.IsMatch(b!, @"\(\+3 more\)")); // 9 total, show 6
+            block.Should().NotContain("W6");                            // W6 was cut
         }
 
         [Fact]
@@ -219,12 +218,12 @@ namespace DeepSeek_v4_for_VisualStudio.Tests.Unit.Models
                 s.Diagnostics.Add(new IdeDiagnosticItem { Severity = "error", Line = 2, Message = msg })
             ).ToPromptBlock();
 
-            block!.Length.Should().BeLessThan(msg.Length); // 截断生效
+            block!.Length.Should().BeLessThan(msg.Length); // 鎴柇鐢熸晥
             block.Should().Contain(new string('m', 120));
             block.Should().NotContain(new string('m', 121));
         }
 
-        // ──────────────── 围栏语言映射 ────────────────
+        // 鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€ 鍥存爮璇█鏄犲皠 鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€
 
         [Theory]
         [InlineData("a.cs", "csharp")]
@@ -237,13 +236,13 @@ namespace DeepSeek_v4_for_VisualStudio.Tests.Unit.Models
             IdeContextSnapshot.GetFenceLanguage(file).Should().Be(expected);
         }
 
-        // ──────────────── 符号提取（Case B 验收核心） ────────────────
+        // 鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€ 绗﹀彿鎻愬彇锛圕ase B 楠屾敹鏍稿績锛?鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€
 
-        // 列号语义：0-based，指向光标左侧字符；光标停在词尾后一格时左偏好归属前词
+        // 鍒楀彿璇箟锛?-based锛屾寚鍚戝厜鏍囧乏渚у瓧绗︼紱鍏夋爣鍋滃湪璇嶅熬鍚庝竴鏍兼椂宸﹀亸濂藉綊灞炲墠璇?
         [Theory]
-        [InlineData("void Renderer::Draw()", 7, "Renderer")]    // 词中
-        [InlineData("void Renderer::Draw()", 13, "Renderer")]   // 词尾后一格
-        [InlineData("foo->Update();", 6, "Update")]             // 词首
+        [InlineData("void Renderer::Draw()", 7, "Renderer")]
+        [InlineData("void Renderer::Draw()", 13, "Renderer")]
+        [InlineData("foo->Update();", 6, "Update")]
         public void ExtractIdentifierAt_InsideOrAdjacentWord_ReturnsWord(string line, int col, string expected)
         {
             IdeContextSnapshot.ExtractIdentifierAt(line, col).Should().Be(expected);
@@ -252,20 +251,20 @@ namespace DeepSeek_v4_for_VisualStudio.Tests.Unit.Models
         [Fact]
         public void ExtractIdentifierAt_OnSeparatorWithoutLeftWord_ReturnsNull()
         {
-            IdeContextSnapshot.ExtractIdentifierAt("a + b", 2).Should().BeNull();       // 光标在 '+' 上，左侧非词
-            IdeContextSnapshot.ExtractIdentifierAt("::Draw()", 1).Should().BeNull();    // 第二个 ':' 上
+            IdeContextSnapshot.ExtractIdentifierAt("a + b", 2).Should().BeNull();       // 鍏夋爣鍦?'+' 涓婏紝宸︿晶闈炶瘝
+            IdeContextSnapshot.ExtractIdentifierAt("::Draw()", 1).Should().BeNull();
         }
 
         [Fact]
         public void ExtractIdentifierAt_SpaceAfterWord_PrefersLeftWord()
         {
-            // 设计行为（与主流编辑器一致）：两词之间的空格位归属左侧词
+            // 璁捐琛屼负锛堜笌涓绘祦缂栬緫鍣ㄤ竴鑷达級锛氫袱璇嶄箣闂寸殑绌烘牸浣嶅綊灞炲乏渚ц瘝
             IdeContextSnapshot.ExtractIdentifierAt("foo bar", 3).Should().Be("foo");
         }
 
         [Theory]
-        [InlineData("_count123", 0, "_count123")]   // 下划线/数字词
-        [InlineData("x", 0, null)]                  // 单字符视为噪音
+        [InlineData("_count123", 0, "_count123")]
+        [InlineData("x", 0, null)]
         public void ExtractIdentifierAt_WordShapeRules(string line, int col, string? expected)
         {
             IdeContextSnapshot.ExtractIdentifierAt(line, col).Should().Be(expected);
@@ -275,7 +274,7 @@ namespace DeepSeek_v4_for_VisualStudio.Tests.Unit.Models
         public void ExtractIdentifierAt_ColumnBeyondEol_ClampsToLastChar()
         {
             IdeContextSnapshot.ExtractIdentifierAt("abc", 999).Should().Be("abc");
-            IdeContextSnapshot.ExtractIdentifierAt("abc ", 999).Should().Be("abc"); // 收敛到空格后回退
+            IdeContextSnapshot.ExtractIdentifierAt("abc ", 999).Should().Be("abc"); // 鏀舵暃鍒扮┖鏍煎悗鍥為€€
         }
 
         [Fact]
@@ -284,5 +283,69 @@ namespace DeepSeek_v4_for_VisualStudio.Tests.Unit.Models
             IdeContextSnapshot.ExtractIdentifierAt("", 0).Should().BeNull();
             IdeContextSnapshot.ExtractIdentifierAt("   ", 1).Should().BeNull();
         }
+
+        #region Debugger Frame
+
+        [Fact]
+        public void ToPromptBlock_DebuggerFrame_FormatsFunctionLocationAndLocals()
+        {
+            var s = new IdeContextSnapshot();
+            var f = new IdeDebuggerFrame { Function = "Program.Main()", File = @"C:\Repo\Program.cs", Line = 42 };
+            f.Locals.Add(new IdeDebuggerValue { Name = "count", Value = "3" });
+            f.Locals.Add(new IdeDebuggerValue { Name = "name", Value = "\"abc\"" });
+            s.DebuggerFrame = f;
+
+            var block = s.ToPromptBlock(@"C:\Repo");
+
+            block.Should().NotBeNull();
+            block.Should().Contain("Debugger: paused");
+            block.Should().Contain("Frame: Program.Main()");
+            block.Should().Contain("Program.cs:42");
+            block.Should().Contain("Locals (2)");
+            block.Should().Contain("- count = 3");
+            block.Should().Contain("- name = \"abc\"");
+        }
+
+        [Fact]
+        public void ToPromptBlock_DebuggerFrame_TruncatesLongValues_AndShowsMoreCount()
+        {
+            var s = new IdeContextSnapshot();
+            var f = new IdeDebuggerFrame { Function = new string('F', 200) };
+            for (int i = 0; i < 14; i++)
+                f.Locals.Add(new IdeDebuggerValue { Name = "v" + i, Value = new string('x', 300) });
+            s.DebuggerFrame = f;
+
+            var block = s.ToPromptBlock();
+
+            block.Should().Contain("…");
+            block.Should().Contain("(+2 more)");
+            block.Should().Contain("Locals (14)");
+        }
+
+        [Fact]
+        public void ToPromptBlock_DebuggerFrameOnly_StillInjects()
+        {
+            // 断点命中但无编辑器视图：仅调试器帧也应构成注入内容
+            var s = new IdeContextSnapshot
+            {
+                DebuggerFrame = new IdeDebuggerFrame { Function = "App.Run", File = @"C:\x.cs", Line = 7 },
+            };
+
+            s.HasContent.Should().BeTrue();
+            var block = s.ToPromptBlock();
+            block.Should().Contain("Debugger: paused");
+            block.Should().Contain("Frame: App.Run");
+        }
+
+        [Fact]
+        public void ToPromptBlock_NoDebugger_NoSection()
+        {
+            var s = new IdeContextSnapshot { FilePath = @"C:\a.cs" };
+            s.DebuggerFrame.Should().BeNull();
+            var block = s.ToPromptBlock();
+            block.Should().NotContain("Debugger:");
+        }
+
+        #endregion
     }
 }
