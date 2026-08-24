@@ -17,17 +17,31 @@ jobs:
         fetch-depth: 0
         token: ${{ secrets.GITHUB_TOKEN }}
 
-    - name: Sync no-local-paddleocr branch
+    - name: Sync no-local-paddleocr branch (inline removal)
       run: |
         git config user.name "github-actions[bot]"
         git config user.email "github-actions[bot]@users.noreply.github.com"
 
-        git checkout no-local-paddleocr
+        git checkout no-local-paddleocr 2>/dev/null || git checkout -b no-local-paddleocr origin/master
         git reset --hard origin/master
 
-        # Apply PaddleOCR removal patch — fail loudly if patch is stale
-        git apply .github/workflows/paddleocr-remove.patch
+        # ── 程序化移除：不再依赖静态补丁文件 ──
+
+        # 1) 移除 csproj 中 PaddleOCR / OpenCvSharp 包引用行
+        sed -i '/Sdcb\.PaddleOCR/d;/Sdcb\.PaddleInference/d;/OpenCvSharp4\.runtime\.win/d' DeepSeek_v4_for_VisualStudio.csproj
+
+        # 2) 移除原生 DLL 复制 Target 中 Paddle/OpenCv 条目行
+        sed -i '/paddle_inference_c\.dll/d;/paddle2onnx\.dll/d;/libiomp5md\.dll/d;/mkldnn\.dll/d;/mklml\.dll/d;/onnxruntime\.dll/d;/onnxruntime_providers_shared\.dll/d;/OpenCvSharpExtern\.dll/d' DeepSeek_v4_for_VisualStudio.csproj
+
+        # 3) 验证
+        if grep -q 'Sdcb\.PaddleOCR' DeepSeek_v4_for_VisualStudio.csproj; then
+          echo "::error::PaddleOCR still referenced after removal"
+          exit 1
+        fi
+        echo "PaddleOCR packages removed successfully"
+
         git add -A
+        git diff --cached --quiet && echo "No changes needed" && exit 0
         git commit -m "chore: sync with master + remove PaddleOCR only [skip ci]"
 
         git push --force-with-lease origin no-local-paddleocr
