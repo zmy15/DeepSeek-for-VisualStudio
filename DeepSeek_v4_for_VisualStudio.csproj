@@ -37,7 +37,6 @@
     <PackageReference Include="Microsoft.VSSDK.BuildTools" Version="18.5.40034" />
     <PackageReference Include="Microsoft.VisualStudio.Extensibility.Sdk" Version="17.14.40608" PrivateAssets="all" />
     <PackageReference Include="Microsoft.VisualStudio.Extensibility.Build" Version="17.14.40608" PrivateAssets="all" />
-    <PackageReference Include="Microsoft.VisualStudio.Workspace" Version="17.12.19" />
     <PackageReference Include="Microsoft.Web.WebView2" Version="1.0.3912.50" />
     <PackageReference Include="Microsoft.Windows.SDK.Contracts" Version="10.0.28000.1839" />
     <PackageReference Include="NPOI" Version="2.8.0" />

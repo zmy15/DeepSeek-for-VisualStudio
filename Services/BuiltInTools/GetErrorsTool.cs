@@ -4,6 +4,7 @@ using Microsoft.VisualStudio.Shell;
 using System;
 using System.Collections.Generic;
 using System.IO;
+using System.Linq;
 using System.Text;
 using System.Text.Json;
 using System.Threading;
@@ -157,7 +158,16 @@ namespace DeepSeek_v4_for_VisualStudio.Services.BuiltInTools
                     sb.AppendLine(LocalizationService.Instance["tool.getErrors.buildCheck"]);
                     sb.AppendLine();
                     sb.AppendLine(errors);
+                    AppendLiveErrorList(sb);
                     return sb.ToString().TrimEnd();
+                }
+
+                // 构建输出为空时，Error List 可能仍有实时诊断（如 IDE 分析器/上次构建残留）
+                var liveOnly = await AppendLiveErrorList(new StringBuilder());
+                if (liveOnly.Length > 0)
+                {
+                    liveOnly.Insert(0, LocalizationService.Instance["tool.getErrors.buildCheck"] + Environment.NewLine + Environment.NewLine);
+                    return liveOnly.ToString().TrimEnd();
                 }
 
                 return LocalizationService.Instance["tool.getErrors.noErrorsDetected"];
@@ -167,6 +177,37 @@ namespace DeepSeek_v4_for_VisualStudio.Services.BuiltInTools
                 Logger.Warn($"[BuiltInTool] get_errors 异常: {ex.Message}");
                 return LocalizationService.Instance.Format("tool.getErrors.failed", ex.Message);
             }
+        }
+
+        /// <summary>
+        /// 追加 Error List 实时结构化条目（SVsErrorList → IVsTaskList 全量枚举，上限 30 行）。
+        /// 与构建输出互补：覆盖 IDE 分析器诊断与未触发构建场景。
+        /// </summary>
+        private async Task<StringBuilder> AppendLiveErrorList(StringBuilder sb)
+        {
+            if (_buildService == null) return sb;
+            try
+            {
+                var items = await _buildService.GetAllErrorsAsync(CancellationToken.None);
+                var errors = items.Where(i => i.Category != "warning").Take(30).ToList();
+                if (errors.Count == 0) return sb;
+
+                sb.AppendLine("--- Live Error List (structured) ---");
+                foreach (var e in errors)
+                {
+                    string file = Path.GetFileName(e.FileName ?? "");
+                    string loc = e.Line > 0 ? $":{e.Line}" : "";
+                    string code = string.IsNullOrEmpty(e.ErrorCode) ? "" : $" [{e.ErrorCode}]";
+                    sb.AppendLine($"- {(string.IsNullOrEmpty(file) ? "(no file)" : file + loc)}{code}: {e.Description.Truncate(160)}");
+                }
+                if (items.Count > errors.Count)
+                    sb.AppendLine($"(+{items.Count - errors.Count} warnings/others omitted)");
+            }
+            catch (Exception ex)
+            {
+                Logger.Warn($"[BuiltInTool] 读取实时错误列表失败: {ex.Message}");
+            }
+            return sb;
         }
 
         /// <summary>

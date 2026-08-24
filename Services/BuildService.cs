@@ -768,6 +768,52 @@ namespace DeepSeek_v4_for_VisualStudio.Services
         }
 
         /// <summary>
+        /// 读取 Error List 全部当前错误项（结构化，非选中集）。
+        /// SVsErrorList 服务对象同时实现 IVsTaskList —— 经 EnumTaskItems 枚举全部条目，
+        /// 复用选中项的结构化提取器；结果上限截断防刷屏。
+        /// </summary>
+        public async Task<List<ErrorListItem>> GetAllErrorsAsync(CancellationToken ct)
+        {
+            await ThreadHelper.JoinableTaskFactory.SwitchToMainThreadAsync(ct);
+
+            var results = new List<ErrorListItem>();
+
+            try
+            {
+                var svc = ServiceProvider.GlobalProvider.GetService(typeof(SVsErrorList));
+                if (svc == null)
+                {
+                    Logger.Info("[BuildService] SVsErrorList 服务不可用，无法枚举全部错误项");
+                    return results;
+                }
+
+                if (svc is IVsTaskList classicTaskList)
+                {
+                    classicTaskList.EnumTaskItems(out IVsEnumTaskItems? enumAll);
+                    if (enumAll != null)
+                        results = CollectTaskItemsFromEnum(enumAll);
+                }
+                else
+                {
+                    Logger.Info("[BuildService] SVsErrorList 未实现 IVsTaskList，无法枚举全部错误项");
+                }
+            }
+            catch (Exception ex)
+            {
+                Logger.Warn($"[BuildService] 枚举全部错误项失败: {ex.Message}");
+            }
+
+            if (results.Count > MaxAllErrorsToReturn)
+            {
+                results = results.GetRange(0, MaxAllErrorsToReturn);
+            }
+            return results;
+        }
+
+        /// <summary>GetAllErrorsAsync 返回上限（防异常海量条目刷爆上下文）。</summary>
+        private const int MaxAllErrorsToReturn = 200;
+
+        /// <summary>
         /// 从 IVsEnumTaskItems 枚举器中收集所有错误项的结构化信息。
         /// 同时支持 IVsTaskItem（基础）和 IVsTaskItem2/3（扩展）接口，提取错误码、项目名等扩展字段。
         /// </summary>
