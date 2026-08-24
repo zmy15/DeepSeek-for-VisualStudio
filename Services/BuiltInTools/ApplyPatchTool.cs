@@ -140,6 +140,14 @@ namespace DeepSeek_v4_for_VisualStudio.Services.BuiltInTools
                     var backups = new Dictionary<string, string?>(StringComparer.OrdinalIgnoreCase);
                     bool anyFailed = false;
 
+                    // ── 记录操作前已存在的文件（用于区分"新建"与"修改"，回滚时新建文件应删除而非恢复）──
+                    var existedBefore = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
+                    foreach (var p in patches)
+                    {
+                        string fp = ResolvePath(p.FilePath, workspaceRoot);
+                        if (File.Exists(fp)) existedBefore.Add(fp);
+                    }
+
                     try
                     {
                         foreach (var patch in patches)
@@ -204,6 +212,17 @@ namespace DeepSeek_v4_for_VisualStudio.Services.BuiltInTools
                         {
                             foreach (var kv in backups)
                                 BackupService.RestoreFromBackup(kv.Key, kv.Value);
+
+                            // 新建文件：操作前不存在 → 回滚时应删除
+                            foreach (var p in patches)
+                            {
+                                string fp = ResolvePath(p.FilePath, workspaceRoot);
+                                if (!existedBefore.Contains(fp) && File.Exists(fp))
+                                {
+                                    File.Delete(fp);
+                                    Logger.Info($"[Backup] 已回滚新建文件: {fp}");
+                                }
+                            }
                             Logger.Warn("[Backup] 静态降级路径：部分 patch 失败，已回滚所有文件");
                         }
                         else if (Workspace == null)
