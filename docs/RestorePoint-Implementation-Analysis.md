@@ -1,4 +1,4 @@
-# 「创建还原点」实现调查与分析报告
+﻿# 「创建还原点」实现调查与分析报告
 
 > 日期：2026-08-24　范围：编辑链路全部备份/回滚代码 + 本机实测数据
 > 结论速览：已实现**文件级还原点**（BackupService，双路径触发），整体设计清晰、
@@ -86,16 +86,18 @@ create_file 场景 `CreateBackup` 返回 null（原文件不存在），写入�
 BackupService（A）与 StagedEditWorkspace.Baseline（B）职责相邻，新贡献者易混淆
 「为什么有时有备份有时没有」；建议长期收敛为一套（见 §五）。
 
-## 五、改进路线建议
+## 五、改进路线建议（状态：P0/P1 已于 2026-08-24 落地 ✅）
 
-| 优先级 | 项 | 方案要点 | 预估 |
-|:---:|----|----------|:---:|
-| P0 | 修复 DeleteFileCommitTarget.RollbackAsync | Preflight/Commit 时缓存 `_originalPath = change.FilePath`；Rollback 改为 `RestoreFromBackup(_originalPath, _backupPath)`；补 RollbackAsync 单测（当前 30 项测试恰好遗漏此方法） | 0.5h |
-| P1 | 会话生命周期挂钩 | EditAgent 流结束（finally）调用 EndSession；或按 workspaceRoot 归档子目录 `{ts}_{solutionName}` | 2h |
-| P1 | 保留期策略 | 包初始化时清扫 BaseBackupDir 下 LastWriteTime > N 天（建议 14 天，对齐 DiagnosticLog 惯例）的会话目录 | 1h |
-| P2 | 还原点管理器 | 工具窗列出 sessions→files，支持单文件预览 diff + 一键还原（呼应 README 警告，提升信任度） | 1–2 天 |
-| P2 | 新建文件回滚语义 | backups 字典值增加 `CreatedNew` 标记；RollbackAll 对该类执行 File.Delete | 2h |
-| 远期 | 双轨合一 | 以 StagedEditWorkspace.Baseline 统一承载，BackupService 退化为其持久化后端 | 立项评估 |
+| 优先级 | 项 | 状态 | 落地说明 |
+|:---:|----|:---:|----------|
+| P0 | RollbackAsync 修复 | ✅ | DeleteFileCommitTarget 缓存 `_originalPath`，回滚还原至原路径；新增 4 项提交/回滚单测（含 P0 回归用例） |
+| P1 | 会话生命周期挂钩 | ✅ | EditAgent 计划流 finally 调用 `BackupService.EndSession()`（空目录回收） |
+| P1 | 保留期策略 | ✅ | `CleanupExpiredSessions(14d)` 启动后台清扫；跳过活跃会话；`BaseDirOverride` 支持测试注入 |
+| P2 | 还原点管理器 UI | ⏳ 未立项 | 工具窗列出 sessions→files→一键还原 |
+| P2 | 新建文件回滚语义 | ⏳ 未立项 | backups 字典增加 CreatedNew 标记，回滚时删除 |
+| 远期 | 双轨合一 | ⏳ | 以 StagedEditWorkspace.Baseline 统一承载 |
+
+落地后测试基线：**983/983 通过**（新增 DeleteFileCommitTargetTests 4 项 + 保留期清扫 2 项）。
 
 ## 六、测试覆盖现状
 

@@ -1,4 +1,4 @@
-# 更新日志
+﻿# 更新日志
 
 ## [Unreleased]
 
@@ -29,6 +29,12 @@
     `{E3684F31-344E-42EA-9047-B620FDC7AC25}`；服务缺失时 fail-open 降级
   - 已知边界：Unified Settings 引擎对新声明 moniker 的可见性需新版设置 UI 首次枚举后生效，
     桥内置 120s 轮询与旧页 Apply 重试自愈（详见 docs/Settings-UnifiedIntegration-Feasibility.md §9.6）
+- **还原点体系修复与加固**：
+  - 修复 delete_file 提案的 RollbackAsync 向 RestoreFromBackup 传空路径导致
+    批量回滚时已删除文件无法恢复的 P0 缺陷（缓存原始路径，回滚还原至原位）
+  - 编辑会话生命周期挂钩：EditAgent 计划流结束调用 EndSession 回收空备份目录
+  - 新增保留期策略：启动后台清扫超过 14 天的历史备份会话目录
+    （跳过活跃会话；BackupService.BaseDirOverride 支持测试注入）
 - **VS 工具接入（反馈④ 首批两项落地）**：
   - 调试器断点快照：中断态自动捕获栈帧函数/位置/局部变量注入消息上下文
     （只读有界、逐项容错、无编辑器视图亦可独立注入）
