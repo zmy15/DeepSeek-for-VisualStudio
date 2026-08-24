@@ -29,6 +29,12 @@
     `{E3684F31-344E-42EA-9047-B620FDC7AC25}`；服务缺失时 fail-open 降级
   - 已知边界：Unified Settings 引擎对新声明 moniker 的可见性需新版设置 UI 首次枚举后生效，
     桥内置 120s 轮询与旧页 Apply 重试自愈（详见 docs/Settings-UnifiedIntegration-Feasibility.md §9.6）
+- **VS 工具接入（反馈④ 首批两项落地）**：
+  - 调试器断点快照：中断态自动捕获栈帧函数/位置/局部变量注入消息上下文
+    （只读有界、逐项容错、无编辑器视图亦可独立注入）
+  - get_errors 合并 Error List 实时结构化条目（全量枚举上限 200），
+    构建输出为空时仍可返回 IDE 分析器诊断
+  - 移除零使用的 Microsoft.VisualStudio.Workspace 包引用（VSIX 瘦身）
 - **快捷键映射补全**：新增全局 `Ctrl+Shift+D` 打开/聚焦聊天窗口
   （`Ctrl+I` 行内编辑保持不变；均可经 工具 → 选项 → 环境 → 键盘 调整）
 - **彻底移除 emoji**：产品源码（C#/XAML/内置 HTML/CSS/JS）与中英文本地化资源中的全部

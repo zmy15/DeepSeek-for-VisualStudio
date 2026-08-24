@@ -38,31 +38,18 @@ MEF 导出面（5 类）：`IViewTaggerProvider`、`IWpfTextViewCreationListener
 
 ## 三、与「VS 工具接入」需求相关的缺口（反馈④落地候选）
 
-按价值/成本排序：
+> **状态更新（2026-08-24）**：以下 1、2 两项已落地实现；5 已执行瘦身。
 
-1. **调试器变量接入（未接，缺口最大）**
-   现状：全库零 `EnvDTE.Debugger`/`IVsDebugger` 触点。
-   方案：`DTE.Debugger.GetCurrentStackFrame/LocalVariables` 只读快照注入 IDE 上下文
-   （复用 IdeContextTracker 的 volatile 注入管线，fail-closed），断点命中事件可经
-   `DebuggerEvents.OnEnterBreakMode` 推送 Agent 提示。预估 1–2 天。
-
-2. **错误列表结构化读取**
-   现状：错误来自构建输出解析（正则）+ 编辑器 ErrorTag；`__VSERRORTYPE` 明细未取。
-   方案：`SVsErrorList`→`IVsErrorListEvents`/EnumTasks 或 `EnvDTE80.ErrorItems`，
-   让 get_errors 在「未触发构建」场景也能给出真实 Error List 内容。预估 1 天。
-
-3. **VS 集成终端**
-   现状：RunInTerminalTool 直启 powershell.exe（独立 conhost），与 VS 终端面板无关联。
-   方案：优先探测 Dev18 的终端服务（若暴露），否则维持现状并在工具描述中注明。
-   权衡：集成终端写交互式会话复杂度高，收益中等。
-
-4. **Git 对象模型**
-   现状：git.exe CLI（功能完整、跨版本稳）。替代方案 `IGitExt`/LibGit2Sharp
-   仅在需要工作区级事件订阅（如 HEAD 变更自动刷新上下文）时才有意义。暂缓。
-
-5. **ProjectSystem.Query / Microsoft.VisualStudio.Workspace 包**
-   现状：csproj 已引用但产品代码零使用 —— 死重。建议移除引用瘦身 VSIX，
-   待「项目代码知识图谱」立项时再启用。
+1. ~~**调试器变量接入**~~ ✅ 已实现
+   `IdeContextTracker.TryCaptureDebuggerFrame`：断点中断态捕获当前栈帧函数/位置/局部变量
+   （只读、有界截断、逐项容错），随消息发送注入 volatile 块；无编辑器视图亦可独立注入。
+2. ~~**错误列表结构化读取**~~ ✅ 已实现
+   `IBuildService.GetAllErrorsAsync`：SVsErrorList → IVsTaskList.EnumTaskItems 全量枚举
+   （上限 200），get_errors 输出合并 "Live Error List (structured)" 段；
+   构建输出为空时亦可返回 IDE 分析器诊断。
+3. **VS 集成终端**：维持外部 powershell.exe 现状（集成终端写交互式会话复杂度高，收益中）。
+4. **Git 对象模型**：维持 git.exe CLI（跨版本稳）；仅当需要 HEAD 变更事件订阅时再评估。
+5. ~~**Workspace 包零使用**~~ ✅ 已移除引用（VSIX 瘦身）。
 
 ## 四、风险提示
 
