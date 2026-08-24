@@ -170,7 +170,7 @@ namespace DeepSeek_v4_for_VisualStudio.Services.BuiltInTools
                 sb.AppendLine(LocalizationService.Instance.Format("tool.grepSearch.resultHeader", query, results.Count));
                 sb.AppendLine();
                 if (results.Count == 0)
-                    sb.AppendLine("（未找到匹配结果）");
+                    sb.AppendLine(LocalizationService.Instance["tool.grepSearch.noMatches"]);
                 else
                     foreach (var r in results)
                         sb.AppendLine($"- `{r}`");

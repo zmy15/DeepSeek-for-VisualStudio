@@ -59,9 +59,7 @@ namespace DeepSeek_v4_for_VisualStudio.Services.BuiltInTools
                 return Task.FromResult(LocalizationService.Instance["tool.getTerminalOutput.missingId"]);
 
             return Task.FromResult(
-                $"终端 ID: {id}\n" +
- " 提示：异步终端命令的输出请直接查看 VS 输出窗口或终端面板。\n" +
-                "如果命令仍在运行中，请稍后重试。");
+                LocalizationService.Instance.Format("tool.getTerminalOutput.terminalInfo", id));
         }
     }
 }
