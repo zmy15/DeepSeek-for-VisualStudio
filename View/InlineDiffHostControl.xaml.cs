@@ -435,7 +435,9 @@ namespace DeepSeek_v4_for_VisualStudio.View
                     }
                 }
 
-                StatsLabel.Text = $"+{addedCount} 行新增  -{removedCount} 行删除";
+                var L = LocalizationService.Instance;
+                StatsLabel.Text = string.Format(L["diff.statsAdded"], addedCount)
+                    + "  " + string.Format(L["diff.statsRemoved"], removedCount);
             }
             catch
             {
