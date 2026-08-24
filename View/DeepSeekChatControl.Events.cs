@@ -356,7 +356,7 @@ namespace DeepSeek_v4_for_VisualStudio.View
                 var doc = dte?.ActiveDocument;
                 if (doc == null)
                 {
-                    StatusLabel.Text = " 没有打开的活动文档";
+                    StatusLabel.Text = LocalizationService.Instance["status.noActiveDocument"];
                     return;
                 }
 
