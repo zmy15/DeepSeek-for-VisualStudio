@@ -20,6 +20,11 @@
   并以相同 `min-width/min-height/padding/font-size` 渲染，深浅主题下均严格等宽等高
 
 ### 变更
+- **i18n 缺口修复与阶段二启动**：
+  - 补齐 12 个被引用但未定义的资源键（消除运行时 "[key]" 字面量泄漏）
+  - 同步 en/zh 键集 3 处差异 → 双语各 1558 键完全一致
+  - 阶段二批次1：ListDir/FileSearch/Grep/Terminal 工具输出抽取为资源键；
+    新增 CJK 字面量扫描器（tools/check-cjk-strings.ps1）与存量基线防回流
 - **设置体系接入新版 UI（Phase A/B 落地）**：
   - Phase A：`[ProvideProfile]` 注册资源补全（VSPackage.resx 16001-16003），
     设置加入 导入和导出向导 与 VS 配置漫游
