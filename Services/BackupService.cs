@@ -1,4 +1,4 @@
-using DeepSeek_v4_for_VisualStudio.Utils;
+﻿using DeepSeek_v4_for_VisualStudio.Utils;
 using System;
 using System.Collections.Generic;
 using System.IO;
@@ -31,15 +31,8 @@ namespace DeepSeek_v4_for_VisualStudio.Services
         private static string? _currentSessionDir;
         private static readonly object _sessionLock = new();
 
-        /// <summary>
-        /// 备份根目录覆盖（仅测试注入；生产恒为 null）。
-        /// </summary>
-        internal static string? BaseDirOverride;
-
         /// <summary>默认保留期（天）：超过该时长未被清理的会话目录将在清扫时移除。</summary>
         internal const int DefaultRetentionDays = 14;
-
-        private static string EffectiveBaseDir => BaseDirOverride ?? BaseBackupDir;
 
         /// <summary>
         /// 获取当前会话的备份目录路径。
@@ -65,7 +58,7 @@ namespace DeepSeek_v4_for_VisualStudio.Services
                     return; // 已有活跃会话
 
                 string timestamp = DateTime.Now.ToString("yyyyMMdd_HHmmss");
-                _currentSessionDir = Path.Combine(EffectiveBaseDir, timestamp);
+                _currentSessionDir = Path.Combine(BaseBackupDir, timestamp);
                 Directory.CreateDirectory(_currentSessionDir);
                 Logger.Info($"[BackupService] 备份会话开始: {_currentSessionDir}");
             }
@@ -225,11 +218,11 @@ namespace DeepSeek_v4_for_VisualStudio.Services
         /// 清扫超过保留期的会话目录（启动时后台调用）。
         /// 跳过当前活跃会话；单目录删除失败不中断整体。返回移除的目录数。
         /// </summary>
-        public static int CleanupExpiredSessions(int retentionDays = DefaultRetentionDays)
+        public static int CleanupExpiredSessions(int retentionDays = DefaultRetentionDays, string? baseDirOverride = null)
         {
             try
             {
-                var baseDir = EffectiveBaseDir;
+                var baseDir = baseDirOverride ?? BaseBackupDir;
                 if (!Directory.Exists(baseDir)) return 0;
 
                 var cutoff = DateTime.Now.AddDays(-retentionDays);

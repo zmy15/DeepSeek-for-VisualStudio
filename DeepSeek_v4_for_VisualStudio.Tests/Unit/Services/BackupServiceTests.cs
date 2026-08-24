@@ -598,12 +598,11 @@ public class BackupServiceTests : IDisposable
         File.WriteAllText(Path.Combine(oldDir, "keep.txt"), "x"); // 非空目录才会被清扫
         Directory.SetLastWriteTimeUtc(oldDir, DateTime.UtcNow.AddDays(-30));
 
-        var prevOverride = BackupService.BaseDirOverride;
         try
         {
-            BackupService.BaseDirOverride = root;
+            
 
-            var removed = BackupService.CleanupExpiredSessions(14);
+            var removed = BackupService.CleanupExpiredSessions(14, root);
 
             removed.Should().Be(1);
             Directory.Exists(oldDir).Should().BeFalse("过期会话应被清扫");
@@ -611,7 +610,7 @@ public class BackupServiceTests : IDisposable
         }
         finally
         {
-            BackupService.BaseDirOverride = prevOverride;
+            
             if (Directory.Exists(newDir)) Directory.Delete(newDir, true);
         }
     }
@@ -626,7 +625,6 @@ public class BackupServiceTests : IDisposable
         File.WriteAllText(Path.Combine(activeSession, "f.txt"), "x");
         Directory.SetLastWriteTimeUtc(activeSession, DateTime.UtcNow.AddDays(-30));
 
-        var prevOverride = BackupService.BaseDirOverride;
         var prevSession = BackupService.CurrentSessionDir;
         try
         {
@@ -634,16 +632,16 @@ public class BackupServiceTests : IDisposable
             typeof(BackupService)
                 .GetField("_currentSessionDir", System.Reflection.BindingFlags.NonPublic | System.Reflection.BindingFlags.Static)!
                 .SetValue(null, activeSession);
-            BackupService.BaseDirOverride = root;
+            
 
-            var removed = BackupService.CleanupExpiredSessions(14);
+            var removed = BackupService.CleanupExpiredSessions(14, root);
 
             removed.Should().Be(0, "活跃会话目录不得被清扫");
             Directory.Exists(activeSession).Should().BeTrue();
         }
         finally
         {
-            BackupService.BaseDirOverride = prevOverride;
+            
             typeof(BackupService)
                 .GetField("_currentSessionDir", System.Reflection.BindingFlags.NonPublic | System.Reflection.BindingFlags.Static)!
                 .SetValue(null, prevSession);
