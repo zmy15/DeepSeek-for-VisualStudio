@@ -158,7 +158,7 @@ namespace DeepSeek_v4_for_VisualStudio.Services.BuiltInTools
                     sb.AppendLine(LocalizationService.Instance["tool.getErrors.buildCheck"]);
                     sb.AppendLine();
                     sb.AppendLine(errors);
-                    AppendLiveErrorList(sb);
+                    await AppendLiveErrorList(sb);
                     return sb.ToString().TrimEnd();
                 }
 

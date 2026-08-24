@@ -195,7 +195,7 @@ namespace DeepSeek_v4_for_VisualStudio.Services
                     {
                         Logger.Warn($"[BuildService] 终止进程失败: {killEx.Message}");
                     }
-                    return LocalizationService.Instance["build.cancelled"];
+                    return "Timeout: " + LocalizationService.Instance["build.cancelled"];
                 }
             }
             catch (Exception ex)
@@ -468,11 +468,11 @@ namespace DeepSeek_v4_for_VisualStudio.Services
             if (cancelled != 0)
             {
                 Logger.Info("[BuildService]  构建已取消");
-                return LocalizationService.Instance["build.cancelled"];
+                return "Timeout: " + LocalizationService.Instance["build.cancelled"];
             }
 
             var fullResult = new StringBuilder();
-            fullResult.AppendLine(string.Format(LocalizationService.Instance["build.projectsFailed"], failed));
+            fullResult.AppendLine("Error: " + string.Format(LocalizationService.Instance["build.projectsFailed"], failed));
             fullResult.Append(FormatBuildErrorResult());
             string resultStr = fullResult.ToString();
             Logger.Info($"[BuildService] MSBuild 构建失败, {failed} 个项目失败, 输出长度={resultStr.Length}");
@@ -1380,7 +1380,7 @@ namespace DeepSeek_v4_for_VisualStudio.Services
             {
                 Logger.Info("[BuildService] DTE 回退：构建已被取消");
                 try { dte?.ExecuteCommand("Build.Cancel"); } catch { }
-                return LocalizationService.Instance["build.cancelled"];
+                return "Timeout: " + LocalizationService.Instance["build.cancelled"];
             }
             catch (Exception ex)
             {

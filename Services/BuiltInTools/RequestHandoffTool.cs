@@ -139,7 +139,7 @@ namespace DeepSeek_v4_for_VisualStudio.Services.BuiltInTools
         public override string GetResultSummary(string toolResult)
         {
             if (string.IsNullOrEmpty(toolResult)) return "移交完成";
-            if (toolResult.StartsWith(" HANDOFF_REQUESTED")) return LocalizationService.Instance["tool.requestHandoff.completed"];
+            if (toolResult.StartsWith("HANDOFF_REQUESTED", StringComparison.Ordinal)) return LocalizationService.Instance["tool.requestHandoff.completed"];
             return toolResult.Truncate(80);
         }
     }

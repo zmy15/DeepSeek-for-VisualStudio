@@ -124,7 +124,7 @@ namespace DeepSeek_v4_for_VisualStudio.Services.BuiltInTools
                         }
                         else
                         {
-                            string errorMsg = result.ErrorMessage ?? LocalizationService.Instance["tool.applyPatch.hunkFail"];
+                            string errorMsg = result.ErrorMessage ?? "Error: " + LocalizationService.Instance["tool.applyPatch.hunkFail"];
                             results.Add(errorMsg);
                         }
                     }
@@ -201,7 +201,7 @@ namespace DeepSeek_v4_for_VisualStudio.Services.BuiltInTools
                             }
                             else
                             {
-                                string errorMsg = result.ErrorMessage ?? LocalizationService.Instance["tool.applyPatch.hunkFail"];
+                                string errorMsg = result.ErrorMessage ?? "Error: " + LocalizationService.Instance["tool.applyPatch.hunkFail"];
                                 results.Add(errorMsg);
                                 anyFailed = true;
                             }

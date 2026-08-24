@@ -212,7 +212,9 @@ namespace DeepSeek_v4_for_VisualStudio.Settings
                     if (p.PropertyType == typeof(string))
                     {
                         if (string.IsNullOrWhiteSpace(raw)) continue;
-                        p.SetValue(target, raw);
+                        // 迁移源值可能为 DPAPI 密文（dpapi1:<base64>），需先解密
+                        var plain = ApiKeyProtection.Unprotect(raw);
+                        p.SetValue(target, plain);
                         applied++;
                     }
                     else if (p.PropertyType == typeof(bool))
