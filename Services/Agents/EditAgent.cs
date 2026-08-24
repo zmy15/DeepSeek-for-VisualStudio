@@ -532,8 +532,12 @@ namespace DeepSeek_v4_for_VisualStudio.Services.Agents
                 // ── Toast 通知：任务完成或中断 ──
                 NotifyPlanCompletionViaToast(plan);
 
-                // ── 清理 Plan Agent 生成的 plan.md ──
+                // ── 清理 Plan Agent 生成?plan.md ──
                 await CleanupPlanMarkdownAsync(plan, context);
+
+                // ── 结束本轮编辑会话：清空备份会话目录（空目录回收）──
+                // 此前无调用点，会话目录随进程存活持续累积（见还原点分析报告 P1-1）。
+                BackupService.EndSession();
             }
         }
 

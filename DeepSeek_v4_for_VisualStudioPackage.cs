@@ -509,6 +509,22 @@ namespace DeepSeek_v4_for_VisualStudio
 
             DiagnosticLog.Write("[DeepSeek Init] All steps completed successfully");
 
+            // ── 备份保留期清扫（后台、非 UI 线程）──
+            // 清理超过 14 天的历史备份会话目录，防止失败残留长期累积（对齐 DiagnosticLog 14 天惯例）。
+            _ = Task.Run(() =>
+            {
+                try
+                {
+                    var removed = Services.BackupService.CleanupExpiredSessions();
+                    if (removed > 0)
+                        DiagnosticLog.Write($"[Backup] startup sweep removed {removed} expired session dir(s)");
+                }
+                catch (Exception ex)
+                {
+                    DiagnosticLog.Write($"[Backup] startup sweep failed: {ex.Message}");
+                }
+            });
+
 #if DEBUG
             // ── Unified Settings 注册探针（仅诊断用途）──
             // 历史事故（2026-08-24 启动卡死分析）：全域反射扫描曾同步运行在 UI 线程上

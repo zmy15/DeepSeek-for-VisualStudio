@@ -32,6 +32,16 @@ namespace DeepSeek_v4_for_VisualStudio.Services
         private static readonly object _sessionLock = new();
 
         /// <summary>
+        /// 备份根目录覆盖（仅测试注入；生产恒为 null）。
+        /// </summary>
+        internal static string? BaseDirOverride;
+
+        /// <summary>默认保留期（天）：超过该时长未被清理的会话目录将在清扫时移除。</summary>
+        internal const int DefaultRetentionDays = 14;
+
+        private static string EffectiveBaseDir => BaseDirOverride ?? BaseBackupDir;
+
+        /// <summary>
         /// 获取当前会话的备份目录路径。
         /// </summary>
         public static string? CurrentSessionDir
@@ -55,7 +65,7 @@ namespace DeepSeek_v4_for_VisualStudio.Services
                     return; // 已有活跃会话
 
                 string timestamp = DateTime.Now.ToString("yyyyMMdd_HHmmss");
-                _currentSessionDir = Path.Combine(BaseBackupDir, timestamp);
+                _currentSessionDir = Path.Combine(EffectiveBaseDir, timestamp);
                 Directory.CreateDirectory(_currentSessionDir);
                 Logger.Info($"[BackupService] 备份会话开始: {_currentSessionDir}");
             }
@@ -208,6 +218,51 @@ namespace DeepSeek_v4_for_VisualStudio.Services
                 {
                     Logger.Warn($"[BackupService] 回滚失败: {kvp.Key} — {ex.Message}（备份文件已保留，请手动恢复）");
                 }
+            }
+        }
+
+        /// <summary>
+        /// 清扫超过保留期的会话目录（启动时后台调用）。
+        /// 跳过当前活跃会话；单目录删除失败不中断整体。返回移除的目录数。
+        /// </summary>
+        public static int CleanupExpiredSessions(int retentionDays = DefaultRetentionDays)
+        {
+            try
+            {
+                var baseDir = EffectiveBaseDir;
+                if (!Directory.Exists(baseDir)) return 0;
+
+                var cutoff = DateTime.Now.AddDays(-retentionDays);
+                int removed = 0;
+                foreach (var dir in Directory.GetDirectories(baseDir))
+                {
+                    // 活跃会话永不清理
+                    if (_currentSessionDir != null &&
+                        string.Equals(dir, _currentSessionDir, StringComparison.OrdinalIgnoreCase))
+                        continue;
+
+                    try
+                    {
+                        if (Directory.GetLastWriteTime(dir) < cutoff)
+                        {
+                            Directory.Delete(dir, recursive: true);
+                            removed++;
+                            Logger.Info($"[BackupService] 已清扫过期备份会话: {dir}");
+                        }
+                    }
+                    catch (Exception ex)
+                    {
+                        Logger.Warn($"[BackupService] 清扫会话目录失败（跳过）: {dir} — {ex.Message}");
+                    }
+                }
+                if (removed > 0)
+                    Logger.Info($"[BackupService] 保留期清扫完成：移除 {removed} 个过期会话目录");
+                return removed;
+            }
+            catch (Exception ex)
+            {
+                Logger.Warn($"[BackupService] 保留期清扫失败: {ex.Message}");
+                return 0;
             }
         }
 
