@@ -19,8 +19,6 @@ namespace DeepSeek_v4_for_VisualStudio.Tests.Unit.Services.Editing
         {
             _tempDir = Path.Combine(Path.GetTempPath(), $"deltarget_{Guid.NewGuid():N}");
             Directory.CreateDirectory(_tempDir);
-            // 备份写入本类独立目录，避免污染真实 %LOCALAPPDATA% 及与其他测试类并发互扰
-            BackupService.BaseDirOverride = Path.Combine(_tempDir, "backups");
         }
 
         private string WriteFile(string name, string content)
@@ -109,8 +107,6 @@ namespace DeepSeek_v4_for_VisualStudio.Tests.Unit.Services.Editing
 
         public void Dispose()
         {
-            try { BackupService.EndSession(); } catch { }
-            BackupService.BaseDirOverride = null;
             try { if (Directory.Exists(_tempDir)) Directory.Delete(_tempDir, recursive: true); }
             catch { }
         }
