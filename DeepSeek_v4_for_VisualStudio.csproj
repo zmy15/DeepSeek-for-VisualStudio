@@ -25,6 +25,10 @@
       <LogicalName>VSPackage.resx</LogicalName>
     </EmbeddedResource>
   </ItemGroup>
+  <!-- Phase A：zh-Hans 卫星资源（中文用户导入/导出向导显示中文类别名） -->
+  <ItemGroup>
+    <EmbeddedResource Update="VSPackage.zh-Hans.resx" />
+  </ItemGroup>
   <ItemGroup>
     <Reference Include="System.Design" />
     <Reference Include="System.Net.Http" />
