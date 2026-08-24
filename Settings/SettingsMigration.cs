@@ -224,12 +224,12 @@ namespace DeepSeek_v4_for_VisualStudio.Settings
                     }
                     else if (p.PropertyType == typeof(int))
                     {
-                        p.SetValue(target, int.Parse(raw));
+                        p.SetValue(target, int.Parse(raw, System.Globalization.CultureInfo.InvariantCulture));
                         applied++;
                     }
                     else if (p.PropertyType == typeof(double))
                     {
-                        p.SetValue(target, double.Parse(raw));
+                        p.SetValue(target, double.Parse(raw, System.Globalization.CultureInfo.InvariantCulture));
                         applied++;
                     }
                 }

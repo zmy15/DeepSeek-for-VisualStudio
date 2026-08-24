@@ -243,7 +243,6 @@ namespace DeepSeek_v4_for_VisualStudio.View
         /// <summary>
         /// 设置变更事件回调（用户点击 Options 对话框的"确定"/"应用"时触发）。
         /// 热重载 OCR、Web 搜索、模型等配置，无需重启聊天窗口。
-        /// </summary>
         /// <summary>
         /// 选项页保存后即时应用核心设置（P1：ApiKey/模型/思考模式热更新）。
         /// </summary>
@@ -627,7 +626,6 @@ namespace DeepSeek_v4_for_VisualStudio.View
         ///   - 对文件夹项目 (Open Folder/CMake)，file 为空，dir 为工作区根目录
         /// 
         /// 参考: https://learn.microsoft.com/zh-cn/dotnet/api/microsoft.visualstudio.shell.interop.ivssolution.getsolutioninfo
-        /// </summary>
         /// <summary>
         /// 通过 IVsSolution.GetSolutionInfo 获取项目路径。
         /// - .sln 项目：返回 .sln 文件路径

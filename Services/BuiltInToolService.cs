@@ -612,8 +612,7 @@ namespace DeepSeek_v4_for_VisualStudio.Services
             else
                 result = LocalizationService.Instance.Format("tool.service.callingToolGeneric", toolName, ocrHint);
 
-            // ── MCP 标注：将内置工具的  替换为  MCP ──
-            return result.Replace("", " MCP");
+            return result;
         }
 
         #endregion
