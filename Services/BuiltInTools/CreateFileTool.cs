@@ -73,6 +73,8 @@ namespace DeepSeek_v4_for_VisualStudio.Services.BuiltInTools
 
             filePath = ResolvePath(filePath, workspaceRoot);
 
+            bool existedBefore = File.Exists(filePath);
+
             try
             {
                 string? dir = Path.GetDirectoryName(filePath);
@@ -124,6 +126,16 @@ namespace DeepSeek_v4_for_VisualStudio.Services.BuiltInTools
             }
             catch (Exception ex)
             {
+                // ── 新建文件写入失败时清理残留（回滚到"不存在"状态）──
+                if (!existedBefore && File.Exists(filePath))
+                {
+                    try
+                    {
+                        File.Delete(filePath);
+                        Logger.Warn($"[CreateFile] 写入失败，已清理新建文件: {filePath}");
+                    }
+                    catch { }
+                }
                 return LocalizationService.Instance.Format("tool.createFile.failed", ex.Message);
             }
         }
