@@ -10,7 +10,7 @@
 [![VS](https://img.shields.io/badge/VS-2022%2017.14%2B-purple)]()
 [![.NET](https://img.shields.io/badge/.NET%20Framework-4.7.2-blueviolet)]()
 [![DeepSeek](https://img.shields.io/badge/DeepSeek-V4-green)]()
-[![Platform](https://img.shields.io/badge/platform-Windows%20x64-lightgrey)]()
+[![Platform](https://img.shields.io/badge/platform-Windows%20x64%20%2F%20ARM64-lightgrey)]()
 [![Version](https://img.shields.io/badge/version-1.1.15-blue)]()
 
 [English](README_EN.md)
@@ -55,6 +55,8 @@
 
 从 [Releases](https://github.com/zmy15/DeepSeek-v4-for-VisualStudio/releases) 下载最新 `.vsix`，关闭 Visual Studio 后双击安装。
 
+> **ARM64 支持**：扩展兼容 ARM64 版 Visual Studio（2022 17.14+ / 2026），也兼容 x64。注意：**本地 OCR（完整版）仅支持 x64**；ARM64 设备请使用 **No-Local-OCR** 版本（不含本地 OCR，其余功能完整）。
+
 ### 方式二：从源码编译
 
 ```powershell
@@ -67,7 +69,7 @@ git clone https://github.com/zmy15/DeepSeek-v4-for-VisualStudio.git
 | Visual Studio | 2022 (17.14+) |
 | .NET Framework | 4.7.2 SDK |
 | VS SDK | VS Installer → "Visual Studio 扩展开发" |
-| Windows | 10/11 x64 |
+| Windows | 10/11 x64 / ARM64 |
 
 ---
 
