@@ -9,7 +9,9 @@
     <!-- VSIX settings -->
     <VSSDKBuildToolsAutoSetup>true</VSSDKBuildToolsAutoSetup>
     <GeneratePkgDefFile>true</GeneratePkgDefFile>
-    <StartProgram>C:\Program Files\Microsoft Visual Studio\2022\Professional\Common7\IDE\devenv.exe</StartProgram>
+    <DeployExtension Condition="'$(BuildingInsideVisualStudio)' == 'true'">true</DeployExtension>
+    <StartAction>Program</StartAction>
+    <StartProgram>$(DevEnvDir)devenv.exe</StartProgram>
     <StartArguments>/RootSuffix Exp</StartArguments>
 
     <!-- P2 Step2a：VSEXT 混合模式（与 BuildTools 并存探针） -->

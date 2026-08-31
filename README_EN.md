@@ -10,7 +10,7 @@
 [![VS](https://img.shields.io/badge/VS-2022%2017.14%2B-purple)]()
 [![.NET](https://img.shields.io/badge/.NET%20Framework-4.7.2-blueviolet)]()
 [![DeepSeek](https://img.shields.io/badge/DeepSeek-V4-green)]()
-[![Platform](https://img.shields.io/badge/platform-Windows%20x64-lightgrey)]()
+[![Platform](https://img.shields.io/badge/platform-Windows%20x64%20%2F%20ARM64-lightgrey)]()
 [![Version](https://img.shields.io/badge/version-1.2.2-blue)]()
 
 [中文](README.md)
@@ -55,6 +55,12 @@
 
 Download the latest `.vsix` from [Releases](https://github.com/zmy15/DeepSeek-v4-for-VisualStudio/releases), close Visual Studio, then double-click to install.
 
+> **Architecture support**:
+> - **Full version (with local OCR)**: **x64** only (PaddleOCR / OpenCvSharp native libraries have no ARM64 build yet).
+> - **No-Local-OCR release**: supports both **x64** and **ARM64** (including ARM64 builds of Visual Studio 2022 17.14+ / 2026).
+>
+> On ARM64 devices, download the **No-Local-OCR** release (without local OCR, fully functional otherwise).
+
 ### Option 2: Build from Source
 
 ```powershell
@@ -67,7 +73,7 @@ git clone https://github.com/zmy15/DeepSeek-v4-for-VisualStudio.git
 | Visual Studio | 2022 (17.14+) |
 | .NET Framework | 4.7.2 SDK |
 | VS SDK | VS Installer → "Visual Studio extension development" |
-| Windows | 10/11 x64 |
+| Windows | 10/11 x64 / ARM64 |
 
 ---
 
