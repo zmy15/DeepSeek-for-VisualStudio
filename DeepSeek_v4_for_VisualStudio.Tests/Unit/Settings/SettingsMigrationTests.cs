@@ -146,6 +146,61 @@ public class SettingsMigrationTests : IDisposable
 
     #endregion
 
+    #region HasNoCandidateSource (P1-5a)
+
+    [Fact]
+    public void HasNoCandidateSource_EmptyBaseDir_ReturnsTrue()
+    {
+        var emptyDir = Path.Combine(_tempRoot, "empty-src");
+        Directory.CreateDirectory(emptyDir);
+
+        var result = SettingsMigration.HasNoCandidateSource(excludeHiveName: null, baseDirOverride: emptyDir);
+
+        result.Should().BeTrue("空目录 = 确无来源，可固化一次性迁移标志");
+    }
+
+    [Fact]
+    public void HasNoCandidateSource_MissingBaseDir_ReturnsTrue()
+    {
+        var ghostDir = Path.Combine(_tempRoot, "missing-src");
+
+        var result = SettingsMigration.HasNoCandidateSource(excludeHiveName: null, baseDirOverride: ghostDir);
+
+        result.Should().BeTrue("根目录不存在 = 确无来源");
+    }
+
+    [Fact]
+    public void HasNoCandidateSource_OnlyExpHives_ReturnsTrue()
+    {
+        MakeHive("17.0_xxxExp"); // Exp 后缀被枚举逻辑排除
+
+        var result = SettingsMigration.HasNoCandidateSource(excludeHiveName: null, baseDirOverride: _tempRoot);
+
+        result.Should().BeTrue("只有 Exp hive = 无正式候选来源");
+    }
+
+    [Fact]
+    public void HasNoCandidateSource_OnlyOwnHiveExcluded_ReturnsTrue()
+    {
+        MakeHive("18.0_ownhive");
+
+        var result = SettingsMigration.HasNoCandidateSource(excludeHiveName: "18.0_ownhive", baseDirOverride: _tempRoot);
+
+        result.Should().BeTrue("唯一候选被自排除 = 确无来源");
+    }
+
+    [Fact]
+    public void HasNoCandidateSource_WithCandidate_ReturnsFalse()
+    {
+        MakeHive("17.0_normal");
+
+        var result = SettingsMigration.HasNoCandidateSource(excludeHiveName: null, baseDirOverride: _tempRoot);
+
+        result.Should().BeFalse("存在候选来源 = 不得判定'确无来源'（避免误固化标志导致永不再迁移）");
+    }
+
+    #endregion
+
     public void Dispose()
     {
         try

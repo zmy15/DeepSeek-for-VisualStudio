@@ -319,7 +319,10 @@ namespace DeepSeek_v4_for_VisualStudio.Settings
         public bool ShowContextStats { get; set; } = true;
 
         /// <summary>旧实例设置迁移已完成标记（防止迁移值再次覆盖新版本中用户手动修改的设置）。</summary>
+        /// P1-5b：必须加 DesignerSerializationVisibility(Visible) 才会被 DialogPage 序列化，
+        /// 否则每次启动复位为 false，导致迁移反复执行、反复用旧值覆盖用户新改的设置。
         [System.ComponentModel.Browsable(false)]
+        [System.ComponentModel.DesignerSerializationVisibility(System.ComponentModel.DesignerSerializationVisibility.Visible)]
         public bool LegacySettingsMigrated { get; set; } = false;
 
         // ═══════════════════════════════════════════════

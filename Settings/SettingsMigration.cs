@@ -100,6 +100,29 @@ namespace DeepSeek_v4_for_VisualStudio.Settings
                 .OrderByDescending(File.GetLastWriteTime);
         }
 
+        /// <summary>
+        /// 判定是否存在任意候选来源（区别于"探测失败/被锁"的瞬时失败）。
+        /// P1-5a：用于区分"确无来源"（definitive ⇒ 可固化一次性迁移标志）与
+        /// "暂不可用/超时"（transient ⇒ 不得固化，下次启动应重试）。
+        /// 目录枚举失败视为"不确定"，返回 false，避免据此固化标志导致永不再迁移。
+        /// </summary>
+        public static bool HasNoCandidateSource(string? excludeHiveName, string? baseDirOverride = null)
+        {
+            try
+            {
+                var baseDir = baseDirOverride ?? Path.Combine(
+                    Environment.GetFolderPath(Environment.SpecialFolder.LocalApplicationData),
+                    "Microsoft", "VisualStudio");
+                if (!Directory.Exists(baseDir))
+                    return true; // 根目录不存在 ⇒ 确无来源
+                return !EnumerateCandidateBins(baseDir, excludeHiveName).Any();
+            }
+            catch
+            {
+                return false; // 枚举失败视为"不确定"，不得据此固化标志
+            }
+        }
+
         /// <summary>阶段二（需在 UI 线程调用）：将探得值按属性名回填到目标并持久化。返回是否发生迁移。</summary>
         public static bool ApplyProbedValues(DeepSeekOptionsPage target, MigrationProbeResult probed)
         {

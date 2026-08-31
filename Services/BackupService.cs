@@ -24,7 +24,16 @@ namespace DeepSeek_v4_for_VisualStudio.Services
     /// </summary>
     public static class BackupService
     {
-        private static readonly string BaseBackupDir = Path.Combine(
+        private static string? _baseDirOverride;
+
+        /// <summary>测试隔离注入点：仅单元测试使用，把备份根目录指到临时目录，避免污染真实 AppData。</summary>
+        internal static string? BaseDirOverride
+        {
+            get => _baseDirOverride;
+            set => _baseDirOverride = value;
+        }
+
+        private static string BaseBackupDir => _baseDirOverride ?? Path.Combine(
             Environment.GetFolderPath(Environment.SpecialFolder.LocalApplicationData),
             "DeepSeekVS", "backups");
 

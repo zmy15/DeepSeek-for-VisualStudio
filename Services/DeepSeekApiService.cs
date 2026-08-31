@@ -579,17 +579,10 @@ namespace DeepSeek_v4_for_VisualStudio.Services
                     continue;
                 }
 
-                // ── 浅克隆：后续所有修改仅影响克隆对象，不污染调用方原始消息 ──
-                var clone = new ChatApiMessage
-                {
-                    Role = msg.Role,
-                    Content = msg.Content,
-                    MultimodalContent = msg.MultimodalContent,
-                    ReasoningContent = msg.ReasoningContent,
-                    ToolCalls = msg.ToolCalls,
-                    ToolCallId = msg.ToolCallId,
-                    Name = msg.Name,
-                };
+                // ── 深克隆：后续所有修改仅影响克隆对象，不污染调用方原始消息 ──
+                // 注意：ToolCalls 内的元素同样新建（Rule5 会写 m.ToolCalls / ReasoningContent，
+                // 且泛型阶段式修改不应改到调用方 ConversationContextManager 的对象）。
+                var clone = CloneMessage(msg);
 
                 // ── 规则 3：assistant 消息有 tool_calls 但缺少 reasoning_content → 补全 ──
                 if (clone.Role == "assistant" && clone.ToolCalls != null && clone.ToolCalls.Count > 0 && clone.ReasoningContent == null)
@@ -655,8 +648,13 @@ namespace DeepSeek_v4_for_VisualStudio.Services
                 if (removedCount > 0) parts.Add($"移除了 {removedCount} 条无效消息");
                 if (mergedCount > 0) parts.Add($"合并了 {mergedCount} 条连续消息 ({string.Join(", ", mergedPositions)})");
                 Logger.Warn($"[API] 消息清理完成：{string.Join("，", parts)}，剩余 {cleanedMessages.Count} 条");
-                request.Messages = cleanedMessages;
             }
+
+            // ── P1-3 修复：无条件使用已克隆的 cleanedMessages。──
+            // 即便没有移除/合并（最常见路径），也必须切换到克隆对象，
+            // 保证后续 Rule5/Rule6 对 m.ToolCalls / m.ReasoningContent 的就地修改
+            // 只作用在克隆上，绝不污染调用方（ConversationContextManager）的消息对象。
+            request.Messages = cleanedMessages;
 
             // ── 规则 5：孤立 assistant-with-tool_calls 检测 ──
             // 场景：ExploreAgent/PlanAgent 从 ContextManager 拿到父对话的 assistant(tool_calls)，
@@ -1252,6 +1250,32 @@ namespace DeepSeek_v4_for_VisualStudio.Services
         }
 
         /// <summary>
+        /// 深克隆一条消息（连同 ToolCalls / MultimodalContent 内元素一并新建）。
+        /// 用于保证 API 消息清理（Rule5/6、ReasoningContent 注入）只改动克隆对象，
+        /// 绝不污染调用方（ConversationContextManager）持有的消息实例。
+        /// </summary>
+        internal static ChatApiMessage CloneMessage(ChatApiMessage m)
+        {
+            return new ChatApiMessage
+            {
+                Role = m.Role,
+                Content = m.Content,
+                MultimodalContent = m.MultimodalContent == null ? null : new List<ChatContentPart>(m.MultimodalContent),
+                ReasoningContent = m.ReasoningContent,
+                ToolCalls = m.ToolCalls?.Select(tc => new ToolCall
+                {
+                    Id = tc.Id,
+                    Type = tc.Type,
+                    Function = tc.Function == null
+                        ? new ToolCallFunction()
+                        : new ToolCallFunction { Name = tc.Function.Name, Arguments = tc.Function.Arguments },
+                }).ToList(),
+                ToolCallId = m.ToolCallId,
+                Name = m.Name,
+            };
+        }
+
+        /// <summary>
         /// 非流式调用 API，用于搜索查询优化等需要快速完整响应的场景。
         /// </summary>
         /// <param name="messages">消息列表</param>
@@ -1266,7 +1290,8 @@ namespace DeepSeek_v4_for_VisualStudio.Services
             var request = new DeepSeekChatRequest
             {
                 Model = _model,
-                Messages = new List<ChatApiMessage>(messages),
+                // P1-3 修复：非流式路径同样深克隆，避免对调用方消息对象就地修改（ReasoningContent 注入）
+                Messages = messages.Select(m => CloneMessage(m)).ToList(),
                 Stream = false,
                 Thinking = new ThinkingControl { Type = "disabled" },
                 ReasoningEffort = null,

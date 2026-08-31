@@ -251,20 +251,41 @@ namespace DeepSeek_v4_for_VisualStudio
                 // DialogPage 属性回填 + SaveSettingsToStorage 留在主线程（线程亲和性要求）。
                 if (!persistedOptions.LegacySettingsMigrated)
                 {
+                    // P1-5a：一次性迁移标志只在"迁移成功"或"确无来源"时固化，
+                    // 避免首启瞬时失败（hive 被锁/超时）烧掉标志导致旧设置永不再迁移。
                     try
                     {
                         var swMigrate = System.Diagnostics.Stopwatch.StartNew();
+                        bool migrated = false;
+                        bool definitivelyNothing = false;
+
                         if (string.IsNullOrWhiteSpace(persistedOptions.ApiKey))
                         {
                             var probed = await Settings.SettingsMigration.ProbeBestSourceAsync(TryGetOwnHiveName());
                             if (probed != null)
                             {
-                                Settings.SettingsMigration.ApplyProbedValues(persistedOptions, probed);
+                                migrated = Settings.SettingsMigration.ApplyProbedValues(persistedOptions, probed);
+                            }
+                            else
+                            {
+                                definitivelyNothing = Settings.SettingsMigration.HasNoCandidateSource(TryGetOwnHiveName());
                             }
                         }
-                        persistedOptions.LegacySettingsMigrated = true;
-                        persistedOptions.SaveSettingsToStorage();
-                        DiagnosticLog.Write($"[DeepSeek Init] settings migration stage done in {swMigrate.ElapsedMilliseconds}ms");
+                        else
+                        {
+                            definitivelyNothing = true; // 已有 ApiKey，无需迁移
+                        }
+
+                        if (migrated || definitivelyNothing)
+                        {
+                            persistedOptions.LegacySettingsMigrated = true;
+                            persistedOptions.SaveSettingsToStorage();
+                            DiagnosticLog.Write($"[DeepSeek Init] settings migration stage done in {swMigrate.ElapsedMilliseconds}ms (migrated={migrated}, definitive={definitivelyNothing})");
+                        }
+                        else
+                        {
+                            DiagnosticLog.Write("[DeepSeek Init] settings migration deferred: transient failure, will retry next start");
+                        }
                     }
                     catch (Exception ex)
                     {

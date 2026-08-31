@@ -101,8 +101,15 @@ namespace DeepSeek_v4_for_VisualStudio.Services.BuiltInTools
         /// <summary>
         /// 当前调用 Agent 类型（由 BaseAgent 在执行前设置，用于运行时权限校验）。
         /// AskAgent / ExploreAgent 只能执行只读操作。
+        /// P1-7：用 AsyncLocal 隔离并发 Agent，避免"类级静态可写"被同时运行的
+        /// 其他 Agent 覆盖，导致只读判定被静默绕过或反向误拦。
         /// </summary>
-        public static AgentType? CurrentAgentType { get; set; }
+        private static readonly System.Threading.AsyncLocal<AgentType?> CurrentAgentTypeAsyncLocal = new();
+        public static AgentType? CurrentAgentType
+        {
+            get => CurrentAgentTypeAsyncLocal.Value;
+            set => CurrentAgentTypeAsyncLocal.Value = value;
+        }
 
         public override string Name => "git";
 
