@@ -664,6 +664,18 @@ namespace DeepSeek_v4_for_VisualStudio.Services.BuiltInTools
                 if (isAsync)
                 {
                     string pid = process.Id.ToString();
+                    // ── P2：异步模式必须排空输出管道，否则子进程悬挂 ──
+                    // RedirectStandardOutput/Error = true 但无人读取时，子进程输出超过
+                    // OS 管道缓冲（~4KB）即阻塞在 write 上、永不退出 →
+                    // WaitForExit 悬挂 + 进程泄漏。BeginOutputReadLine/BeginErrorReadLine
+                    // 持续排空管道（回调丢弃输出），保证子进程能自然退出。
+                    // 注：async 输出的获取入口是 get_terminal_output 工具（当前为占位提示），
+                    // 此处仅做排水，不缓冲内容。
+                    process.OutputDataReceived += (_, _) => { };
+                    process.ErrorDataReceived += (_, _) => { };
+                    process.BeginOutputReadLine();
+                    process.BeginErrorReadLine();
+
                     // 不等待进程退出，直接返回。进程由 OS 管理，VS 退出时自动清理。
                     // 注意：不能 using/dispose process，因为 fire-and-forget 任务还需要它。
                     _ = Task.Run(() =>

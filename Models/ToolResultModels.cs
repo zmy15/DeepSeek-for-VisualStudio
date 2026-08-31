@@ -60,5 +60,19 @@ namespace DeepSeek_v4_for_VisualStudio.Models
             if (output.StartsWith("Error: ", StringComparison.Ordinal)) return ToolResultKind.ToolError;
             return ToolResultKind.Success;
         }
+
+        /// <summary>
+        /// 判断内容是否以任一契约前缀开头（Error: / Timeout: / [BLOCKED] ）。
+        /// 供内容型工具（read_file 等）在返回原始文件内容前做防碰撞检查：
+        /// 内容恰好以契约前缀开头时必须包裹（如 &lt;file&gt; 信封），否则会被
+        /// Classify / BaseAgent 连续错误检测误判为工具失败，累计后提前终止工具循环。
+        /// </summary>
+        public static bool StartsWithContractMarker(string? content)
+        {
+            if (string.IsNullOrEmpty(content)) return false;
+            return content.StartsWith("Error: ", StringComparison.Ordinal)
+                || content.StartsWith("Timeout: ", StringComparison.Ordinal)
+                || content.StartsWith("[BLOCKED] ", StringComparison.Ordinal);
+        }
     }
 }

@@ -253,12 +253,12 @@ namespace DeepSeek_v4_for_VisualStudio.View
             List<string> attachedPdfPaths = _attachedFilePaths.Where(IsPdfFile).ToList();
 
             // 构建用户消息内容
-            string analyzeFilesPrompt = "请分析以上文件内容。";
+            string analyzeFilesPrompt = LocalizationService.Instance["messaging.analyzeFilesPrompt"];
             string userDisplayContent = userText ?? string.Empty;
             if (string.IsNullOrEmpty(userDisplayContent)
                 && attachedFileNames.Count > 0
                 && attachedImageDataUris.Count == 0)
-                userDisplayContent = $"[已上传 {attachedFileNames.Count} 个文件]";
+                userDisplayContent = LocalizationService.Instance.Format("chat.uploadedFilesPlaceholder", attachedFileNames.Count);
 
             string fullUserContent;
             if (!string.IsNullOrEmpty(fileContext) && !string.IsNullOrEmpty(effectiveUserText))
@@ -460,10 +460,12 @@ namespace DeepSeek_v4_for_VisualStudio.View
 
                     if (recentMessages.Count > 0)
                     {
-                        sb.AppendLine("最近对话:");
+                        sb.AppendLine(LocalizationService.Instance["messaging.recentConversation"]);
                         foreach (var msg in recentMessages)
                         {
-                            string role = msg.Role == "user" ? "用户" : "AI";
+                            string role = msg.Role == "user"
+                                ? LocalizationService.Instance["chat.role.user"]
+                                : LocalizationService.Instance["chat.role.ai"];
                             string content = (msg.Content ?? "").Truncate(120);
                             if (!string.IsNullOrWhiteSpace(content))
                                 sb.AppendLine($"- {role}: {content}");
@@ -477,7 +479,7 @@ namespace DeepSeek_v4_for_VisualStudio.View
             if (parseResults != null && parseResults.Count > 0)
             {
                 sb.AppendLine();
-                sb.AppendLine("用户附加了以下文件:");
+                sb.AppendLine(LocalizationService.Instance["messaging.attachedFilesHeader"]);
                 foreach (var pr in parseResults)
                 {
                     if (pr.FileName != null)
@@ -485,14 +487,14 @@ namespace DeepSeek_v4_for_VisualStudio.View
                         string snippet = (pr.Content ?? "").Truncate(200);
                         sb.AppendLine($"- {pr.FileName}");
                         if (!string.IsNullOrWhiteSpace(snippet))
-                            sb.AppendLine($"内容片段: {snippet}");
+                            sb.AppendLine(LocalizationService.Instance.Format("messaging.contentSnippet", snippet));
                     }
                 }
             }
             else if (!string.IsNullOrWhiteSpace(fileContext))
             {
                 sb.AppendLine();
-                sb.AppendLine($"用户附加了文件上下文: {fileContext.Truncate(300)}");
+                sb.AppendLine(LocalizationService.Instance.Format("messaging.fileContextHeader", fileContext.Truncate(300)));
             }
 
             string result = sb.ToString().Trim();

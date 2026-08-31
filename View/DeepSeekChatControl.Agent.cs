@@ -1945,12 +1945,12 @@ namespace DeepSeek_v4_for_VisualStudio.View
         /// </summary>
         private void OnAgentFileChangeNotified(AgentFileChangeEventArgs args)
         {
-            // ── 更新实时思考气泡 ──
+            // ── 更新实时思考气泡（标签随 i18n；此前硬编码中文在英文界面泄漏）──
             string icon = args.ChangeType.ToLowerInvariant() switch
             {
-                "create" => "新建",
-                "delete" => "删除",
-                _ => "修改",
+                "create" => LocalizationService.Instance["agent.fileChange.create"],
+                "delete" => LocalizationService.Instance["agent.fileChange.delete"],
+                _ => LocalizationService.Instance["agent.fileChange.modify"],
             };
             string fileName = System.IO.Path.GetFileName(args.FilePath);
             AppendAgentThinking($"{icon} `{fileName}` ({args.Detail})");

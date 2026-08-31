@@ -438,8 +438,8 @@ namespace DeepSeek_v4_for_VisualStudio.View
                 }
                 RefreshAttachedFilesUI();
                 StatusLabel.Text = addedCount > 0
-                    ? $"已添加 {addedCount} 个文件到上下文"
-                    : " 未添加新文件（已存在或格式不支持）";
+                    ? LocalizationService.Instance.Format("status.filesAddedToContext", addedCount)
+                    : LocalizationService.Instance["status.noFilesAdded"];
                 Logger.Info($"[AddContext] 项目文件已添加: {addedCount} 个");
             }
         }
@@ -491,8 +491,9 @@ namespace DeepSeek_v4_for_VisualStudio.View
 
                 RefreshAttachedFilesUI();
                 StatusLabel.Text = addedCount > 0
-                    ? $"已添加 {addedCount} 个项目文件到上下文" + (skippedCount > 0 ? $" (跳过 {skippedCount} 个)" : "")
-                    : " 未找到可添加的源代码文件";
+                    ? LocalizationService.Instance.Format("status.projectFilesAdded", addedCount)
+                        + (skippedCount > 0 ? LocalizationService.Instance.Format("status.projectFilesSkippedSuffix", skippedCount) : "")
+                    : LocalizationService.Instance["status.noSourceFilesFound"];
                 Logger.Info($"[AddContext] 项目全部文件已添加: {addedCount} 个, 跳过: {skippedCount} 个");
             }
             catch (Exception ex)
@@ -2351,8 +2352,8 @@ namespace DeepSeek_v4_for_VisualStudio.View
                                     await ChatWebView.CoreWebView2.ExecuteScriptAsync(
                                         "var p=document.getElementById('file-delete-confirm');if(p)p.remove();");
                                     StatusLabel.Text = confirmed
-                                        ? $"已删除 {filePaths.Count} 个文件"
-                                        : "Error: 已取消删除";
+                                        ? LocalizationService.Instance.Format("status.filesDeleted", filePaths.Count)
+                                        : LocalizationService.Instance["status.deleteCancelled"];
                                 }
                                 catch { }
                             }
