@@ -541,7 +541,8 @@ namespace DeepSeek_v4_for_VisualStudio.Services
             if (string.IsNullOrEmpty(toolResult))
                 return LocalizationService.Instance["tool.service.noResult"];
 
-            if (toolResult.StartsWith("Error: ") || toolResult.StartsWith("[BLOCKED] "))
+            if (toolResult.StartsWith("Error: ") || toolResult.StartsWith("Timeout: ")
+                || toolResult.StartsWith("[BLOCKED] "))
                 return toolResult;
 
             try

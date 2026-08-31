@@ -74,6 +74,8 @@ namespace DeepSeek_v4_for_VisualStudio.Services.BuiltInTools
             filePath = ResolvePath(filePath, workspaceRoot);
 
             bool existedBefore = File.Exists(filePath);
+            // ── 备份路径上提到 try 外：失败路径（含覆盖场景）需要用它回滚 ──
+            string? backupPath = null;
 
             try
             {
@@ -104,7 +106,6 @@ namespace DeepSeek_v4_for_VisualStudio.Services.BuiltInTools
                 }
 
                 // ── 覆盖已存在文件前创建备份 ──
-                string? backupPath = null;
                 if (existed)
                 {
                     backupPath = BackupService.CreateBackup(filePath);
@@ -126,8 +127,13 @@ namespace DeepSeek_v4_for_VisualStudio.Services.BuiltInTools
             }
             catch (Exception ex)
             {
+                // ── 覆盖失败：文件可能已被部分写坏，回滚到备份（P1-1：此前的备份既不恢复又泄漏）──
+                if (existedBefore && backupPath != null)
+                {
+                    BackupService.RestoreFromBackup(filePath, backupPath);
+                }
                 // ── 新建文件写入失败时清理残留（回滚到"不存在"状态）──
-                if (!existedBefore && File.Exists(filePath))
+                else if (!existedBefore && File.Exists(filePath))
                 {
                     try
                     {

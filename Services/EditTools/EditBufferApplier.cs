@@ -42,7 +42,17 @@ namespace DeepSeek_v4_for_VisualStudio.Services.EditTools
             if (string.IsNullOrWhiteSpace(filePath) || fullContent == null)
                 return false;
 
-            await ThreadHelper.JoinableTaskFactory.SwitchToMainThreadAsync();
+            // 契约：任何失败都返回 false（调用方回退磁盘写入），绝不抛出中断调用链。
+            // 无 VS 宿主环境（如单元测试进程）中 JoinableTaskFactory 不可用会抛 NRE，同样回退。
+            try
+            {
+                await ThreadHelper.JoinableTaskFactory.SwitchToMainThreadAsync();
+            }
+            catch (Exception ex)
+            {
+                Logger.Warn($"[BufferWriter] 切换 UI 线程失败（回退磁盘写入）: {Path.GetFileName(filePath)} — {ex.Message}");
+                return false;
+            }
 
             return WriteToOpenDocumentOnUIThread(filePath, fullContent);
         }

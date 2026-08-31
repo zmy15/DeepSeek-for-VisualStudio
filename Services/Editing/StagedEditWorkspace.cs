@@ -651,18 +651,18 @@ namespace DeepSeek_v4_for_VisualStudio.Services.Editing
         /// 单个被追踪文件的内部状态（记录 Baseline 供撤销恢复）。
         /// </summary>
         private sealed class StagedFile
-            {
-                public string FilePath { get; set; } = string.Empty;
-                public string BaselineContent { get; set; } = string.Empty;
-                public string BaselineHash { get; set; } = string.Empty;
-                public DateTime? BaselineLastWriteTimeUtc { get; set; }
-                public ProposedFileOperation Operation { get; set; } = ProposedFileOperation.Modify;
+        {
+            public string FilePath { get; set; } = string.Empty;
+            public string BaselineContent { get; set; } = string.Empty;
+            public string BaselineHash { get; set; } = string.Empty;
+            public DateTime? BaselineLastWriteTimeUtc { get; set; }
+            public ProposedFileOperation Operation { get; set; } = ProposedFileOperation.Modify;
 
-                /// <summary>磁盘备份路径（BackupService）。进程崩溃/OOM 后仍可通过它恢复撤销。</summary>
-                public string? DiskBackupPath { get; set; }
+            /// <summary>磁盘备份路径（BackupService）。进程崩溃/OOM 后仍可通过它恢复撤销。</summary>
+            public string? DiskBackupPath { get; set; }
 
-                /// <summary>差异块列表（Baseline vs 当前，逐块撤销用）</summary>
-                public List<DiffHunkInfo> Hunks { get; set; } = new();
-            }
+            /// <summary>差异块列表（Baseline vs 当前，逐块撤销用）</summary>
+            public List<DiffHunkInfo> Hunks { get; set; } = new();
+        }
     }
 }

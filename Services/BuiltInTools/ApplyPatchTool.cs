@@ -141,11 +141,14 @@ namespace DeepSeek_v4_for_VisualStudio.Services.BuiltInTools
                     bool anyFailed = false;
 
                     // ── 记录操作前已存在的文件（用于区分"新建"与"修改"，回滚时新建文件应删除而非恢复）──
+                    // Move 目的文件同样记录：已存在的目的文件在回滚时不应当被误删。
                     var existedBefore = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
                     foreach (var p in patches)
                     {
-                        string fp = ResolvePath(p.FilePath, workspaceRoot);
-                        if (File.Exists(fp)) existedBefore.Add(fp);
+                        foreach (var fp in EnumerateRollbackPaths(p, workspaceRoot))
+                        {
+                            if (File.Exists(fp)) existedBefore.Add(fp);
+                        }
                     }
 
                     try
@@ -210,19 +213,7 @@ namespace DeepSeek_v4_for_VisualStudio.Services.BuiltInTools
                         // ── 失败回滚（仅直接写盘模式）──
                         if (Workspace == null && anyFailed)
                         {
-                            foreach (var kv in backups)
-                                BackupService.RestoreFromBackup(kv.Key, kv.Value);
-
-                            // 新建文件：操作前不存在 → 回滚时应删除
-                            foreach (var p in patches)
-                            {
-                                string fp = ResolvePath(p.FilePath, workspaceRoot);
-                                if (!existedBefore.Contains(fp) && File.Exists(fp))
-                                {
-                                    File.Delete(fp);
-                                    Logger.Info($"[Backup] 已回滚新建文件: {fp}");
-                                }
-                            }
+                            RollbackStaticPath(patches, workspaceRoot, backups, existedBefore);
                             Logger.Warn("[Backup] 静态降级路径：部分 patch 失败，已回滚所有文件");
                         }
                         else if (Workspace == null)
@@ -238,9 +229,8 @@ namespace DeepSeek_v4_for_VisualStudio.Services.BuiltInTools
                     }
                     catch
                     {
-                        // ── 异常回滚 ──
-                        foreach (var kv in backups)
-                            BackupService.RestoreFromBackup(kv.Key, kv.Value);
+                        // ── 异常回滚：与 anyFailed 分支同一实现（P1-2：此前不删新建文件，残留 AI 半成品）──
+                        RollbackStaticPath(patches, workspaceRoot, backups, existedBefore);
                         throw;
                     }
                 }
@@ -249,6 +239,48 @@ namespace DeepSeek_v4_for_VisualStudio.Services.BuiltInTools
             {
                 return LocalizationService.Instance.Format("tool.applyPatch.failed", ex.Message);
             }
+        }
+
+        /// <summary>
+        /// 静态降级路径的统一回滚：恢复所有备份 + 删除操作前不存在的新建文件（含 Move 目的文件）。
+        /// anyFailed 分支与异常分支共用，保证 all-or-nothing 语义一致。
+        /// </summary>
+        private static void RollbackStaticPath(
+            List<PatchOperation> patches, string? workspaceRoot,
+            Dictionary<string, string?> backups, HashSet<string> existedBefore)
+        {
+            foreach (var kv in backups)
+                BackupService.RestoreFromBackup(kv.Key, kv.Value);
+
+            // 新建文件：操作前不存在 → 回滚时应删除（Move 目的文件同样纳入）
+            foreach (var p in patches)
+            {
+                foreach (var fp in EnumerateRollbackPaths(p, workspaceRoot))
+                {
+                    if (!existedBefore.Contains(fp) && File.Exists(fp))
+                    {
+                        try
+                        {
+                            File.Delete(fp);
+                            Logger.Info($"[Backup] 已回滚新建文件: {fp}");
+                        }
+                        catch (Exception ex)
+                        {
+                            Logger.Warn($"[Backup] 回滚新建文件失败: {fp} — {ex.Message}");
+                        }
+                    }
+                }
+            }
+        }
+
+        /// <summary>
+        /// 枚举一个 patch 操作在回滚时需要检查的路径：源文件 + Move 目的文件（若声明）。
+        /// </summary>
+        private static IEnumerable<string> EnumerateRollbackPaths(PatchOperation p, string? workspaceRoot)
+        {
+            yield return ResolvePath(p.FilePath, workspaceRoot);
+            if (!string.IsNullOrEmpty(p.MoveToPath))
+                yield return ResolvePath(p.MoveToPath, workspaceRoot);
         }
 
         #region ApplyPatch 日志
