@@ -55,7 +55,11 @@
 
 Download the latest `.vsix` from [Releases](https://github.com/zmy15/DeepSeek-v4-for-VisualStudio/releases), close Visual Studio, then double-click to install.
 
-> **ARM64 support**: The extension is compatible with both ARM64 and x64 builds of Visual Studio (2022 17.14+ / 2026). Note: **local OCR (full version) is x64-only**; on ARM64 devices, use the **No-Local-OCR** release (without local OCR, fully functional).
+> **Architecture support**:
+> - **Full version (with local OCR)**: **x64** only (PaddleOCR / OpenCvSharp native libraries have no ARM64 build yet).
+> - **No-Local-OCR release**: supports both **x64** and **ARM64** (including ARM64 builds of Visual Studio 2022 17.14+ / 2026).
+>
+> On ARM64 devices, download the **No-Local-OCR** release (without local OCR, fully functional otherwise).
 
 ### Option 2: Build from Source
 

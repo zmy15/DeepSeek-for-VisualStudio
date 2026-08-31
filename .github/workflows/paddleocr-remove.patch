@@ -397,3 +397,17 @@ index e9e00a5..c4ac7dd 100644
 -        #endregion
      }
  }
+diff --git a/source.extension.vsixmanifest b/source.extension.vsixmanifest
+index 7d84386..e9db826 100644
+--- a/source.extension.vsixmanifest
++++ b/source.extension.vsixmanifest
+@@ -10,6 +10,9 @@
+     <InstallationTarget Id="Microsoft.VisualStudio.Community" Version="[17.14, )">
+       <ProductArchitecture>amd64</ProductArchitecture>
+     </InstallationTarget>
++    <InstallationTarget Id="Microsoft.VisualStudio.Community" Version="[17.14, )">
++      <ProductArchitecture>arm64</ProductArchitecture>
++    </InstallationTarget>
+   </Installation>
+   <Dependencies>
+     <Dependency Id="Microsoft.Framework.NDP" DisplayName="Microsoft .NET Framework" d:Source="Manual" Version="[4.5,)" />

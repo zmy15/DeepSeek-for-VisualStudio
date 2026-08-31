@@ -55,7 +55,11 @@
 
 从 [Releases](https://github.com/zmy15/DeepSeek-v4-for-VisualStudio/releases) 下载最新 `.vsix`，关闭 Visual Studio 后双击安装。
 
-> **ARM64 支持**：扩展兼容 ARM64 版 Visual Studio（2022 17.14+ / 2026），也兼容 x64。注意：**本地 OCR（完整版）仅支持 x64**；ARM64 设备请使用 **No-Local-OCR** 版本（不含本地 OCR，其余功能完整）。
+> **架构支持**：
+> - **完整版（含本地 OCR）**：仅支持 **x64**（PaddleOCR / OpenCvSharp 原生库暂无 ARM64 版本）。
+> - **No-Local-OCR 版**：同时支持 **x64** 与 **ARM64**（含 ARM64 版 Visual Studio 2022 17.14+ / 2026）。
+>
+> ARM64 设备请下载 **No-Local-OCR** 版本（不含本地 OCR，其余功能完整）。
 
 ### 方式二：从源码编译
 
