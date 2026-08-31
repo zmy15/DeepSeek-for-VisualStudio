@@ -414,96 +414,6 @@ namespace DeepSeek_v4_for_VisualStudio.Services
             }
         }
 
-        /// <summary>API 请求序号（用于转储文件命名）</summary>
-        private static int _requestSequence;
-
-        /// <summary>
-        /// 将完整 API 请求体 + 缓存命中统计写入磁盘，供离线分析。
-        /// 文件路径: %TEMP%\DeepSeekCacheDumps\req_{序号}_{时间戳}.json
-        /// </summary>
-        private static void DumpRequestToDisk(string requestJson, int requestBytes,
-            int hitTokens, int missTokens, int cacheableTokens, double hitRate,
-            int messageCount, int toolCount, string? errorMessage = null)
-        {
-            try
-            {
-                int seq = Interlocked.Increment(ref _requestSequence);
-                string dir = Path.Combine(Path.GetTempPath(), "DeepSeekCacheDumps");
-                Directory.CreateDirectory(dir);
-
-                string timestamp = DateTime.Now.ToString("yyyyMMdd_HHmmss_fff");
-                string fileName = $"req_{seq:D4}_{timestamp}.json";
-                string filePath = Path.Combine(dir, fileName);
-
-                // 解析 messages 做摘要（避免文件过大）
-                List<object> msgSummaries;
-                try
-                {
-                    using var doc = JsonDocument.Parse(requestJson);
-                    var msgs = doc.RootElement.GetProperty("messages");
-                    msgSummaries = new List<object>();
-                    foreach (var m in msgs.EnumerateArray())
-                    {
-                        string role = m.GetProperty("role").GetString() ?? "?";
-                        string? content = null;
-                        if (m.TryGetProperty("content", out var c) && c.ValueKind == JsonValueKind.String)
-                            content = c.GetString();
-                        bool hasToolCalls = m.TryGetProperty("tool_calls", out _);
-
-                        msgSummaries.Add(new
-                        {
-                            role,
-                            content_length = content?.Length ?? 0,
-                            content_preview = content?.Substring(0, Math.Min(content?.Length ?? 0, 200)),
-                            has_tool_calls = hasToolCalls
-                        });
-                    }
-                }
-                catch { msgSummaries = new List<object>(); }
-
-                // 解析 requestJson 为 JsonElement，使其在 dump 序列化时使用 relaxed encoder（可读中文）
-                using var fullReqDoc = JsonDocument.Parse(requestJson);
-
-                var dump = new
-                {
-                    sequence = seq,
-                    timestamp = DateTime.Now.ToString("O"),
-                    error = errorMessage,
-                    request = new
-                    {
-                        size_bytes = requestBytes,
-                        size_kb = requestBytes / 1024.0,
-                        message_count = messageCount,
-                        tool_count = toolCount,
-                        messages_summary = msgSummaries,
-                        full_request = fullReqDoc.RootElement
-                    },
-                    cache = errorMessage != null ? null : new
-                    {
-                        hit_tokens = hitTokens,
-                        miss_tokens = missTokens,
-                        cacheable_tokens = cacheableTokens,
-                        hit_rate = hitRate,
-                        hit_rate_pct = $"{hitRate * 100:F1}%"
-                    }
-                };
-
-                var opts = new JsonSerializerOptions
-                {
-                    WriteIndented = true,
-                    Encoder = System.Text.Encodings.Web.JavaScriptEncoder.UnsafeRelaxedJsonEscaping
-                };
-                string dumpJson = JsonSerializer.Serialize(dump, opts);
-                File.WriteAllText(filePath, dumpJson, Encoding.UTF8);
-
-                Logger.Info($"[Dump] 请求已写入磁盘: {fileName} ({requestBytes / 1024}KB)");
-            }
-            catch (Exception ex)
-            {
-                Logger.Warn($"[Dump] 写入磁盘失败: {ex.Message}");
-            }
-        }
-
         public async IAsyncEnumerable<string> ChatStreamAsync(
             IEnumerable<ChatApiMessage> messages,
             List<ToolDefinition>? tools = null,
@@ -802,12 +712,6 @@ namespace DeepSeek_v4_for_VisualStudio.Services
             Logger.Info($"[API] 发送请求: {requestBodyBytes.Length / 1024}KB, 消息数={request.Messages.Count}, 工具数={tools?.Count ?? 0}, maxTokens={maxTokens}");
             Logger.Info($"[API] 消息结构(清洗后): system={diagSys}, user={diagUser}, assistant={diagAst}, tool={diagTool} (含工具调用={diagAstTc})");
 
-            // ── 发送前 dump 请求体，确保 HTTP 400 等错误也能捕获 ──
-            // DumpRequestToDisk(requestJson, requestBodyBytes.Length,
-            //     0, 0, 0, 0,
-            //     request.Messages.Count, tools?.Count ?? 0,
-            //     "(pre-send)");
-
             // ── messages 前缀分段诊断（DeepSeek 缓存仅匹配 messages 字段）──
             int msg0Length = 0;
             try
@@ -953,11 +857,6 @@ namespace DeepSeek_v4_for_VisualStudio.Services
                         }
                         catch { }
                         Logger.Error($"[API] HTTP {statusCode} 是客户端错误，放弃重试。响应: {respSnippet}");
-                        // ── 即使 HTTP 400 也 dump 请求体，便于诊断请求结构问题 ──
-                        // DumpRequestToDisk(requestJson, requestBodyBytes.Length,
-                        //     0, 0, 0, 0,
-                        //     request.Messages.Count, tools?.Count ?? 0,
-                        //     $"HTTP {statusCode}: {respSnippet}");
                         throw;
                     }
 
@@ -978,6 +877,8 @@ namespace DeepSeek_v4_for_VisualStudio.Services
                     double backoff = Math.Pow(2, sendAttempt - 1);
                     Logger.Warn($"[API] HTTP {statusCode} 请求失败 (尝试 {sendAttempt + 1}/{maxSendAttempts})，{backoff}s 后重试…"
                         + (responseBody != null ? $"\n[API] 响应: {responseBody}" : ""));
+                    // ── 真正等待退避（与超时分支一致）；此前只打日志不等待，4 次请求零间隔连发 ──
+                    await Task.Delay(TimeSpan.FromSeconds(backoff), cancellationToken);
                 }
                 catch (TaskCanceledException) when (!cancellationToken.IsCancellationRequested && sendAttempt < maxSendAttempts - 1)
                 {
@@ -1032,10 +933,6 @@ namespace DeepSeek_v4_for_VisualStudio.Services
 
                     Logger.Info($"[Cache] {level} API调用完成: 命中率={rate * 100:F1}% (命中 {hit:N0} / 未命中 {miss:N0} / 可缓存 {cacheableTotal:N0} / prompt {LastUsage.PromptTokens:N0} tokens)\n" +
                         $"        ↳ 边界: {missBoundary}");
-
-                        // DumpRequestToDisk(requestJson, requestBodyBytes.Length,
-                        //     hit, miss, cacheableTotal, rate,
-                        //     request.Messages.Count, tools?.Count ?? 0);
                     }
                 catch (Exception ex)
                 {
@@ -1094,7 +991,9 @@ namespace DeepSeek_v4_for_VisualStudio.Services
                 try
                 {
                     var chunk = JsonSerializer.Deserialize<DeepSeekStreamChunk>(jsonData);
-                    var delta = chunk?.Choices?[0]?.Delta;
+                    // P3-7：空 choices 数组（如仅携带 usage 的尾包）会令索引器抛
+                    // ArgumentOutOfRangeException 且不在下方 catch 白名单内，直接击穿流迭代器。
+                    var delta = chunk?.Choices is { Count: > 0 } ? chunk.Choices[0]?.Delta : null;
                     if (delta != null)
                     {
                         reasoning = delta.ReasoningContent;
@@ -1332,7 +1231,8 @@ namespace DeepSeek_v4_for_VisualStudio.Services
                 AccumulateStats(result.Usage);
             }
 
-            return result?.Choices?[0]?.Message?.Content ?? string.Empty;
+            // P3-7：空 choices 数组防索引越界（与流式路径同一守卫）
+            return result?.Choices is { Count: > 0 } ? result.Choices[0]?.Message?.Content ?? string.Empty : string.Empty;
         }
 
         /// <summary>
@@ -1384,7 +1284,7 @@ namespace DeepSeek_v4_for_VisualStudio.Services
                 AccumulateFimStats(result.Usage);
             }
 
-            return result?.Choices?[0]?.Text ?? string.Empty;
+            return result?.Choices is { Count: > 0 } ? result.Choices[0]?.Text ?? string.Empty : string.Empty;
         }
 
         /// <summary>

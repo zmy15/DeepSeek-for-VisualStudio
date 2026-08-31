@@ -1044,6 +1044,10 @@ namespace DeepSeek_v4_for_VisualStudio.View
                 // ── P1-A：会话结束后清除 IDE 快照，避免过期上下文泄漏到非 Agent 的聊天轮次 ──
                 try { _contextManager.SetIdeContext(null); }
                 catch { }
+
+                // ── 追踪器内部快照同步清空（含未截断的原始 SelectionText，避免跨会话常驻内存）──
+                try { _ideContextTracker?.Clear(); }
+                catch { }
             }
 
             // ── 将 Agent 响应同步到树和上下文管理器（修复上下文丢失问题）──

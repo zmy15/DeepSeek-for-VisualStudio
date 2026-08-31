@@ -331,6 +331,7 @@
                                         Cursor="Hand"
                                         Padding="4,2"
                                         ToolTip="删除此对话"
+                                        Loaded="HistoryDeleteButton_Loaded"
                                         Visibility="{Binding DeleteVisibility}"
                                         Tag="{Binding Id}"
                                         Click="DeleteHistoryItem_Click" />

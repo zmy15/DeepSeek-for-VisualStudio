@@ -994,7 +994,16 @@ namespace DeepSeek_v4_for_VisualStudio.View
                 NewChatButton.ToolTip = L["input.newChat"];
                 NewChatButton.Content = L["input.newChat"];
                 ClearButton.Content = L["input.clearChat"];
+                ClearButton.ToolTip = L["input.clearChatConfirmTip"];
                 McpConfigButton.ToolTip = L["input.mcpConfig"];
+
+                // ── 历史浮层 / 发送区（此前 XAML 硬编码中文，英文界面下泄漏）──
+                if (HistoryToggleButton != null)
+                    HistoryToggleButton.ToolTip = L["input.historyToggleTip"];
+                if (StopButton != null)
+                    StopButton.ToolTip = L["input.stopGenerationTip"];
+                if (SendButton != null)
+                    SendButton.ToolTip = L["input.sendMessageTip"];
 
                 // 添加上下文菜单项
                 AddActiveDocMenuItem.Header = L["input.attachActiveDocument"];

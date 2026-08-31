@@ -464,6 +464,16 @@ namespace DeepSeek_v4_for_VisualStudio.View
             HistoryPopup.IsOpen = !HistoryPopup.IsOpen;
         }
 
+        /// <summary>
+        /// 历史浮层 DataTemplate 内删除按钮的 Loaded 钩子：
+        /// 模板实例化时套用本地化 ToolTip（XAML 静态值仅为设计时占位）。
+        /// </summary>
+        private void HistoryDeleteButton_Loaded(object sender, RoutedEventArgs e)
+        {
+            if (sender is System.Windows.Controls.Button btn)
+                btn.ToolTip = LocalizationService.Instance["input.deleteSessionItemTip"];
+        }
+
         private void HistoryListBox_SelectionChanged(object sender, SelectionChangedEventArgs e)
         {
             if (_suppressSessionSelection) return;
