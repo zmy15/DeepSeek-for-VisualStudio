@@ -1,6 +1,7 @@
 using DeepSeek_v4_for_VisualStudio.Models;
 using DeepSeek_v4_for_VisualStudio.Services;
 using DeepSeek_v4_for_VisualStudio.Services.Agents;
+using DeepSeek_v4_for_VisualStudio.Settings;
 using DeepSeek_v4_for_VisualStudio.ToolWindows;
 using DeepSeek_v4_for_VisualStudio.Utils;
 using EnvDTE80;
@@ -1394,6 +1395,7 @@ namespace DeepSeek_v4_for_VisualStudio.View
                 {
                     _options.SelectedModel = model;
                     try { _options.SaveSettingsToStorage(); } catch { /* 非关键路径 */ }
+                    UnifiedSettingsSync.PushFromPage(_options);
                 }
                 Logger.Info($"模型切换为: {model}");
             }
@@ -1407,16 +1409,18 @@ namespace DeepSeek_v4_for_VisualStudio.View
                 _cachedApprovalMode = mode;
 
                 // 持久化到设置
-                if (_options != null)
+                string modeValue = mode switch
                 {
-                    _options.ApprovalMode = mode switch
-                    {
-                        Models.ApprovalMode.BlockAll => "BlockAll",
-                        Models.ApprovalMode.AllowAll => "AllowAll",
-                        _ => "SmartBlock",
-                    };
+                    Models.ApprovalMode.BlockAll => "BlockAll",
+                    Models.ApprovalMode.AllowAll => "AllowAll",
+                    _ => "SmartBlock",
+                };
+                if (_options != null && _options.ApprovalMode != modeValue)
+                {
+                    _options.ApprovalMode = modeValue;
                     // 立即写入存储，确保重启 VS 后仍然生效
                     try { _options.SaveSettingsToStorage(); } catch { /* 非关键路径 */ }
+                    UnifiedSettingsSync.PushFromPage(_options);
                 }
                 Logger.Info($"审批模式切换为: {mode}");
             }
@@ -1429,6 +1433,12 @@ namespace DeepSeek_v4_for_VisualStudio.View
                 bool enabled = ThinkingCheckBox.IsChecked == true;
                 string effort = EffortComboBox.SelectedItem as string ?? "high";
                 _apiService.ConfigureThinking(enabled, effort);
+                if (_options != null && _options.IsThinkingEnabled != enabled)
+                {
+                    _options.IsThinkingEnabled = enabled;
+                    try { _options.SaveSettingsToStorage(); } catch { /* 非关键路径 */ }
+                    UnifiedSettingsSync.PushFromPage(_options);
+                }
                 Logger.Info($"思考模式: {(enabled ? "启用" : "禁用")}, 强度: {effort}");
             }
         }
@@ -1451,11 +1461,12 @@ namespace DeepSeek_v4_for_VisualStudio.View
                 bool enabled = ThinkingCheckBox.IsChecked == true;
                 _apiService.ConfigureThinking(enabled, effort);
                 // 持久化到设置
-                if (_options != null)
+                if (_options != null && _options.ReasoningEffort != effort)
                 {
                     _options.ReasoningEffort = effort;
                     // 立即写入存储，确保重启 VS 后仍然生效
                     try { _options.SaveSettingsToStorage(); } catch { /* 非关键路径 */ }
+                    UnifiedSettingsSync.PushFromPage(_options);
                 }
                 Logger.Info($"推理强度切换为: {effort}");
             }
@@ -1472,7 +1483,7 @@ namespace DeepSeek_v4_for_VisualStudio.View
         {
             try
             {
-                // 切换状态
+                bool enable = _webSearchEngine == "Off";
                 if (_webSearchEngine == "Off")
                 {
                     // 使用 ComboBox 当前选择的搜索引擎，而非硬编码 DuckDuckGo
@@ -1499,13 +1510,16 @@ namespace DeepSeek_v4_for_VisualStudio.View
                     _webSearchEngine = "Off";
                 }
 
+                if (_options != null && _options.EnableWebSearch != enable)
+                {
+                    _options.EnableWebSearch = enable;
+                    try { _options.SaveSettingsToStorage(); } catch { /* 非关键路径 */ }
+                    UnifiedSettingsSync.PushFromPage(_options);
+                }
+
+                ApplyWebSearchConfig();
                 Logger.Info($"联网搜索状态切换为: {_webSearchEngine}");
                 UpdateWebSearchToggleAppearance();
-
-                if (_webSearchEngine != "Off")
-                {
-                    ApplyWebSearchConfig();
-                }
 
                 // 提示百度/Bing 未配置 Key 的情况
                 if (_webSearchEngine == "Baidu" && (_options == null || string.IsNullOrWhiteSpace(_options.BaiduApiKey)))
@@ -1634,6 +1648,13 @@ namespace DeepSeek_v4_for_VisualStudio.View
                 if (_webSearchEngine == newEngine) return; // 避免循环触发
 
                 _webSearchEngine = newEngine;
+                if (_options != null && _options.SearchProvider != newEngine)
+                {
+                    _options.SearchProvider = newEngine;
+                    try { _options.SaveSettingsToStorage(); } catch { /* 非关键路径 */ }
+                    UnifiedSettingsSync.PushFromPage(_options);
+                }
+
                 Logger.Info($"联网搜索引擎切换为: {_webSearchEngine}");
                 UpdateWebSearchToggleAppearance();
                 ApplyWebSearchConfig();

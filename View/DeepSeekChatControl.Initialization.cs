@@ -181,30 +181,8 @@ namespace DeepSeek_v4_for_VisualStudio.View
             _webSearchService?.Dispose();
             _webSearchService = new WebSearchService();
 
-            // 从选项页读取默认搜索引擎，同步到 ComboBox
-            string optionsProvider = _options?.SearchProvider ?? "DuckDuckGo";
-            string resolvedEngine = optionsProvider switch
-            {
-                "Baidu" => "Baidu",
-                "Bing" => "Bing",
-                _ => "DuckDuckGo"
-            };
-
-            // 同步 ComboBox 选中项
-            int idx = resolvedEngine switch
-            {
-                "Baidu" => 0,
-                "Bing" => 1,
-                "DuckDuckGo" => 2,
-                _ => 2
-            };
-            WebSearchEngineComboBox.SelectedIndex = idx;
-
-            // 注意：_webSearchEngine 仍为 "Off"，用户需要点击  按钮开启
-            // 但搜索引擎已预选为选项页中配置的值
-
-            ApplyWebSearchConfig();
-            Logger.Info($"联网搜索服务初始化成功 (默认引擎: {resolvedEngine})");
+            RefreshWebSearchFromSettings();
+            Logger.Info($"联网搜索服务初始化成功 (默认引擎: {ResolveWebSearchEngineFromOptions()})");
         }
 
         /// <summary>
@@ -223,8 +201,11 @@ namespace DeepSeek_v4_for_VisualStudio.View
 
                 Logger.Info($"[OCR] 开始初始化，用户选择引擎: {_options.OcrEngine}");
 
-                // 设置 OCR 引擎类型（PaddleOCR-Sharp 已移除）
-                OcrService.CurrentEngine = OcrEngineType.WindowsBuiltIn;
+                OcrService.CurrentEngine = _options.OcrEngine switch
+                {
+                    "PaddleOCR-Sharp" => OcrEngineType.PaddleOCR,
+                    _ => OcrEngineType.WindowsBuiltIn,
+                };
                 Logger.Info($"[OCR] 引擎类型已设置: {OcrService.CurrentEngine}");
 
                 // 检查引擎状态
@@ -255,12 +236,14 @@ namespace DeepSeek_v4_for_VisualStudio.View
                 if (!string.IsNullOrWhiteSpace(_options.ApiKey))
                     _apiService.UpdateApiKey(_options.ApiKey);
 
-                var model = (string?)ModelComboBox?.SelectedItem ?? _options.SelectedModel;
+                // Settings events are authoritative. Reading UI controls here caused
+                // Unified Settings changes to be overwritten with stale chat-window state.
+                var model = _options.SelectedModel;
                 if (!string.IsNullOrWhiteSpace(model))
                     _apiService.UpdateModel(model);
 
-                var thinking = ThinkingCheckBox?.IsChecked ?? _options.IsThinkingEnabled;
-                var effort = EffortComboBox?.SelectedItem as string ?? _options.ReasoningEffort ?? "high";
+                var thinking = _options.IsThinkingEnabled;
+                var effort = _options.ReasoningEffort ?? "high";
                 _apiService.ConfigureThinking(thinking, effort);
             }
             catch (Exception ex)
@@ -284,6 +267,8 @@ namespace DeepSeek_v4_for_VisualStudio.View
                 // 刷新 _options 引用（DialogPage 属性已由 VS 自动更新）
                 if (_package != null)
                     _options = _package.Options;
+
+                RefreshCoreControlsFromSettings();
 
                 // ── API Key / 模型 / 思考配置变更时，立即重建 API 服务（无需重启）──
                 // 修复：旧实现只刷新 _options 引用，却不重建 _apiService，
@@ -310,48 +295,11 @@ namespace DeepSeek_v4_for_VisualStudio.View
                 Logger.Info($"[Settings] OCR 热切换完成 → {OcrService.CurrentEngine}");
 
                 // ── Web 搜索热重载 ──
-                string optionsProvider = _options?.SearchProvider ?? "DuckDuckGo";
-                string resolvedEngine = optionsProvider switch
-                {
-                    "Baidu" => "Baidu",
-                    "Bing" => "Bing",
-                    _ => "DuckDuckGo"
-                };
-
-                int idx = resolvedEngine switch
-                {
-                    "Baidu" => 0,
-                    "Bing" => 1,
-                    "DuckDuckGo" => 2,
-                    _ => 2
-                };
-                WebSearchEngineComboBox.SelectedIndex = idx;
-
-                // 如果联网搜索当前是开启状态，同步引擎并应用配置
-                if (_webSearchEngine != "Off")
-                {
-                    if (_webSearchEngine != resolvedEngine)
-                    {
-                        _webSearchEngine = resolvedEngine;
-                        Logger.Info($"[Settings] 搜索引擎热切换为: {_webSearchEngine}");
-                    }
-
-                    ApplyWebSearchConfig();
-                    UpdateWebSearchToggleAppearance();
-
-                    if (_webSearchEngine == "Baidu" && (_options == null || string.IsNullOrWhiteSpace(_options.BaiduApiKey)))
-                    {
-                        StatusLabel.Text = LocalizationService.Instance["status.search.baiduKeyRequired"];
-                    }
-                    else
-                    {
-                        StatusLabel.Text = string.Format(LocalizationService.Instance["status.settings.updated"], _webSearchEngine);
-                    }
-                }
-                else
-                {
-                    StatusLabel.Text = string.Format(LocalizationService.Instance["status.settings.updated.default"], resolvedEngine);
-                }
+                RefreshWebSearchFromSettings();
+                string resolvedEngine = ResolveWebSearchEngineFromOptions();
+                StatusLabel.Text = _webSearchEngine == "Off"
+                    ? string.Format(LocalizationService.Instance["status.settings.updated.default"], resolvedEngine)
+                    : string.Format(LocalizationService.Instance["status.settings.updated"], _webSearchEngine);
             }
             catch (Exception ex)
             {
@@ -486,6 +434,31 @@ namespace DeepSeek_v4_for_VisualStudio.View
         /// 同时遵循用户在 ComboBox 中选择的搜索引擎偏好。
         /// 用于支持用户在 工具→选项 中修改 API Key 后无需重启即可生效。
         /// </summary>
+        private string ResolveWebSearchEngineFromOptions()
+        {
+            return (_options?.SearchProvider ?? "DuckDuckGo") switch
+            {
+                "Baidu" => "Baidu",
+                "Bing" => "Bing",
+                _ => "DuckDuckGo",
+            };
+        }
+
+        private void RefreshWebSearchFromSettings()
+        {
+            string resolvedEngine = ResolveWebSearchEngineFromOptions();
+            WebSearchEngineComboBox.SelectedIndex = resolvedEngine switch
+            {
+                "Baidu" => 0,
+                "Bing" => 1,
+                _ => 2,
+            };
+
+            _webSearchEngine = _options?.EnableWebSearch == true ? resolvedEngine : "Off";
+            ApplyWebSearchConfig();
+            UpdateWebSearchToggleAppearance();
+        }
+
         private void ApplyWebSearchConfig()
         {
             if (_webSearchService == null) return;
@@ -564,13 +537,20 @@ namespace DeepSeek_v4_for_VisualStudio.View
                 }
             }
 
-            // ── 校验 OCR 引擎状态（PaddleOCR 已移除，仅检查 Windows 内置 OCR）──
+            // ── 校验 OCR 引擎状态 ──
             {
                 bool ocrReady = OcrService.IsEngineReady();
                 string ocrStatus = OcrService.GetEngineStatus();
                 Logger.Info($"OCR 引擎状态: {ocrStatus}");
 
-                if (!ocrReady)
+                if (!ocrReady && _options?.OcrEngine == "PaddleOCR-Sharp")
+                {
+                    await Microsoft.VisualStudio.Shell.ThreadHelper.JoinableTaskFactory.SwitchToMainThreadAsync();
+                    StatusLabel.Text = string.Format(
+                        LocalizationService.Instance["status.ocrEngineUnavailable"],
+                        _options.OcrEngine);
+                }
+                else if (!ocrReady)
                 {
                     await Microsoft.VisualStudio.Shell.ThreadHelper.JoinableTaskFactory.SwitchToMainThreadAsync();
                     StatusLabel.Text = LocalizationService.Instance["status.ocrUnavailable"];

@@ -543,14 +543,8 @@ namespace DeepSeek_v4_for_VisualStudio.View
 
             ApplyBottomAreaScale();
 
-            // ── 从设置恢复审批模式 ──
-            RefreshApprovalModeFromSettings();
-
-            // ── 从设置恢复模型选择 ──
-            RefreshModelFromSettings();
-
-            // ── 从设置恢复推理强度 ──
-            RefreshReasoningEffortFromSettings();
+            // ── 从设置恢复审批模式 / 模型 / 思考模式 / 推理强度 ──
+            RefreshCoreControlsFromSettings();
 
             InitializeWebSearchService();
             InitializeApiService();
@@ -1176,6 +1170,20 @@ namespace DeepSeek_v4_for_VisualStudio.View
         }
 
         /// <summary>
+        /// Refreshes the model, thinking, and reasoning controls from the options store.
+        /// </summary>
+        private void RefreshCoreControlsFromSettings()
+        {
+            if (_options == null) return;
+
+            RefreshApprovalModeFromSettings();
+            RefreshModelFromSettings();
+            if (ThinkingCheckBox != null)
+                ThinkingCheckBox.IsChecked = _options.IsThinkingEnabled;
+            RefreshReasoningEffortFromSettings();
+        }
+
+        /// <summary>
         /// 刷新审批模式下拉框的显示文本（语言切换时调用）。
         /// </summary>
         private void RefreshApprovalModeComboBox()
@@ -1522,4 +1530,3 @@ namespace DeepSeek_v4_for_VisualStudio.View
         }
     }
 }
-

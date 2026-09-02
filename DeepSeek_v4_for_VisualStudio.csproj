@@ -224,6 +224,12 @@
       <IncludeInVSIX>true</IncludeInVSIX>
       <VSIXSubPath>Resources\Locales</VSIXSubPath>
     </Content>
+    <!-- VSEXT metadata localization resources -->
+    <Content Include=".vsextension\**\*.json">
+      <CopyToOutputDirectory>PreserveNewest</CopyToOutputDirectory>
+      <IncludeInVSIX>true</IncludeInVSIX>
+      <VSIXSubPath>.vsextension</VSIXSubPath>
+    </Content>
     <!-- Skill 定义文件（内置技能） -->
     <Content Include="BuiltInSkills\**\*.*">
       <CopyToOutputDirectory>PreserveNewest</CopyToOutputDirectory>

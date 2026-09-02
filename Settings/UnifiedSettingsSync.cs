@@ -8,13 +8,13 @@ using System.Threading.Tasks;
 namespace DeepSeek_v4_for_VisualStudio.Settings
 {
     /// <summary>
-    /// P2 Step2b：旧 DialogPage 与 VS2026 Unified Settings（新版设置 UI）之间的双向同步桥。
+    /// 旧 DialogPage 与 VS2026 Unified Settings（新版设置界面）之间的双向同步桥。
     ///
     /// 单一事实源仍是 <see cref="DeepSeekOptionsPage.Instance"/>：
     /// - 推（旧→新）：持久化装载完成后 / 旧页 OnApply 后，把非敏感子集批写到 Unified 存储，
     ///   使新 UI 显示与运行时一致的当前值；
     /// - 拉（新→旧）：订阅 Unified 存储变更，用户在新 UI 改值时回写 Instance 并触发热更新链；
-    /// - ApiKey 等敏感字段永不进入本桥（云同步/导出泄漏面，见 feasibility §四）。
+    /// - ApiKey 等敏感字段永不进入本桥（云同步/导出泄漏面）。
     ///
     /// 服务获取：Unified Settings 文档注明 ISettingsManager "available as a VS service (via
     /// service SVsUnifiedSettingsManager)"；该 SVs 类型不在 NuGet SDK 程序集内，故以携带
@@ -24,8 +24,7 @@ namespace DeepSeek_v4_for_VisualStudio.Settings
     internal static class UnifiedSettingsSync
     {
         /// <summary>SVsUnifiedSettingsManager 服务键。实测取自 Dev18
-        /// Microsoft.Internal.VisualStudio.Interop.dll（接口定义见 Utilities.UnifiedSettings 文档）。
-        /// 注意：服务 GUID ≠ ISettingsManager 接口 GUID（后者 2f26e586-…，勿混用）。</summary>
+        /// Microsoft.Internal.VisualStudio.Interop.dll。服务 GUID ≠ ISettingsManager 接口 GUID。</summary>
         private const string ManagerServiceGuidString = "E3684F31-344E-42EA-9047-B620FDC7AC25";
 
         private const string WriterCallerId = "DeepSeek_v4_for_VisualStudio";
@@ -40,13 +39,38 @@ namespace DeepSeek_v4_for_VisualStudio.Settings
         /// <summary>moniker → 属性读写器映射（与 DeepSeekUnifiedSettings.cs 声明一一对应）。</summary>
         private static readonly (string Moniker, Func<DeepSeekOptionsPage, object?> Get, Action<DeepSeekOptionsPage, object?> Set)[] Bindings =
         {
+            (CategoryPrefix + "deepseekSystemPrompt", p => p.SystemPrompt, (p, v) => p.SystemPrompt = (string?)v ?? string.Empty),
+            (CategoryPrefix + "deepseekSystemPromptEn", p => p.SystemPromptEn, (p, v) => p.SystemPromptEn = (string?)v ?? string.Empty),
+            (CategoryPrefix + "deepseekModel", p => p.SelectedModel, (p, v) => p.SelectedModel = (string?)v ?? "deepseek-v4-pro"),
             (CategoryPrefix + "deepseekThinking", p => p.IsThinkingEnabled, (p, v) => p.IsThinkingEnabled = (bool)v!),
+            (CategoryPrefix + "deepseekReasoningEffort", p => p.ReasoningEffort, (p, v) => p.ReasoningEffort = (string?)v ?? "high"),
             (CategoryPrefix + "deepseekWebSearch", p => p.EnableWebSearch, (p, v) => p.EnableWebSearch = (bool)v!),
+            (CategoryPrefix + "deepseekSearchProvider", p => p.SearchProvider, (p, v) => p.SearchProvider = (string?)v ?? "DuckDuckGo"),
+            (CategoryPrefix + "deepseekShowDiffMarkers", p => p.ShowDiffMarkersInEditor, (p, v) => p.ShowDiffMarkersInEditor = (bool)v!),
+            (CategoryPrefix + "deepseekOcrEngine", p => p.OcrEngine, (p, v) => p.OcrEngine = (string?)v ?? "Windows Built-in"),
+            (CategoryPrefix + "deepseekAutoCompleteEnabled", p => p.AutoCompleteEnabled, (p, v) => p.AutoCompleteEnabled = (bool)v!),
+            (CategoryPrefix + "deepseekAutoCompleteDelay", p => p.AutoCompleteDelay, (p, v) => p.AutoCompleteDelay = (int)v!),
+            (CategoryPrefix + "deepseekAutoCompleteContinueAfterAccept", p => p.AutoCompleteContinueAfterAccept, (p, v) => p.AutoCompleteContinueAfterAccept = (bool)v!),
             (CategoryPrefix + "deepseekContextStats", p => p.ShowContextStats, (p, v) => p.ShowContextStats = (bool)v!),
             (CategoryPrefix + "deepseekIdeContext", p => p.EnableIdeContextInjection, (p, v) => p.EnableIdeContextInjection = (bool)v!),
             (CategoryPrefix + "deepseekTelemetryExport", p => p.EnableTelemetryExport, (p, v) => p.EnableTelemetryExport = (bool)v!),
             (CategoryPrefix + "deepseekAutoCompression", p => p.EnableAutoCompression, (p, v) => p.EnableAutoCompression = (bool)v!),
             (CategoryPrefix + "deepseekTokenBudget", p => p.TokenBudget, (p, v) => p.TokenBudget = (int)v!),
+            (CategoryPrefix + "deepseekCompressionThreshold", p => p.CompressionThreshold, (p, v) => p.CompressionThreshold = (int)v!),
+            (CategoryPrefix + "deepseekPreserveRecentTurns", p => p.PreserveRecentTurns, (p, v) => p.PreserveRecentTurns = (int)v!),
+            (CategoryPrefix + "deepseekEnableRag", p => p.EnableRag, (p, v) => p.EnableRag = (bool)v!),
+            (CategoryPrefix + "deepseekRagTopK", p => p.RagTopK, (p, v) => p.RagTopK = (int)v!),
+            (CategoryPrefix + "deepseekLlmTimeoutSeconds", p => p.LlmTimeoutSeconds, (p, v) => p.LlmTimeoutSeconds = (int)v!),
+            (CategoryPrefix + "deepseekLanguage", p => p.Language, (p, v) => p.Language = (string?)v ?? "auto"),
+            (CategoryPrefix + "deepseekMaxToolCallRounds", p => p.MaxToolCallRounds, (p, v) => p.MaxToolCallRounds = (int)v!),
+            (CategoryPrefix + "deepseekMaxRepeatedSameCall", p => p.MaxRepeatedSameCall, (p, v) => p.MaxRepeatedSameCall = (int)v!),
+            (CategoryPrefix + "deepseekMaxConsecutiveErrors", p => p.MaxConsecutiveErrors, (p, v) => p.MaxConsecutiveErrors = (int)v!),
+            (CategoryPrefix + "deepseekEnableAutoBuild", p => p.EnableAutoBuild, (p, v) => p.EnableAutoBuild = (bool)v!),
+            (CategoryPrefix + "deepseekApprovalMode", p => p.ApprovalMode, (p, v) => p.ApprovalMode = (string?)v ?? "SmartBlock"),
+            (CategoryPrefix + "deepseekThemeMode", p => p.ThemeModeString, (p, v) => p.ThemeModeString = (string?)v ?? "Auto"),
+            (CategoryPrefix + "deepseekInputBoxHeight", p => p.InputBoxHeight, (p, v) => p.InputBoxHeight = (int)v!),
+            (CategoryPrefix + "deepseekBottomAreaScalePercent", p => p.BottomAreaScalePercent, (p, v) => p.BottomAreaScalePercent = (int)v!),
+            (CategoryPrefix + "deepseekWebView2ZoomPercent", p => p.WebView2ZoomPercent, (p, v) => p.WebView2ZoomPercent = (int)v!),
         };
 
         private static ISettingsReader? _reader;
@@ -92,7 +116,6 @@ namespace DeepSeek_v4_for_VisualStudio.Settings
                 _manager = svc as ISettingsManager;
                 if (_manager == null)
                 {
-                    // 服务不可用（旧版 VS / 服务键未命中）：停用桥接，记录一次即可
                     _bridgeDisabled = true;
                     Utils.DiagnosticLog.Write("[USync] ISettingsManager unavailable — bridge disabled (old page unaffected)");
                     return;
@@ -183,7 +206,6 @@ namespace DeepSeek_v4_for_VisualStudio.Settings
             _echoSuppressing = true;
             try
             {
-                // 双参重载：显式事件源（包 GUID），避免匿名源导致提交管线 InternalError
                 // 逐项 Enqueue+Commit：InternalError 时可精确定位问题设置项
                 int okCount = 0;
                 var failures = new List<string>();
@@ -196,6 +218,7 @@ namespace DeepSeek_v4_for_VisualStudio.Settings
                         SettingChangeResult r;
                         if (value is bool bv) r = writer.EnqueueChange(b.Moniker, bv);
                         else if (value is int iv) r = writer.EnqueueChange(b.Moniker, iv);
+                        else if (value is string sv) r = writer.EnqueueChange(b.Moniker, sv);
                         else continue;
 
                         var c = writer.Commit("DeepSeek sync " + b.Moniker);
@@ -240,7 +263,7 @@ namespace DeepSeek_v4_for_VisualStudio.Settings
         private static void HandleStorageChange(SettingsUpdate update, AsyncPackage package)
         {
             if (_bridgeDisabled || _reader == null) return;
-            if (_echoSuppressing) return; // 自身推送的回声
+            if (_echoSuppressing) return;
 
             try
             {
@@ -251,7 +274,8 @@ namespace DeepSeek_v4_for_VisualStudio.Settings
                     if (instance == null) return;
 
                     int applied = 0;
-                    foreach (var b in Bindings)
+                    var changedMonikers = update.ChangedSettingMonikers;
+                    foreach (var b in Bindings.Where(b => changedMonikers.Contains(b.Moniker)))
                     {
                         try
                         {
@@ -261,6 +285,7 @@ namespace DeepSeek_v4_for_VisualStudio.Settings
                             if (raw is bool bv) { b.Set(instance, bv); applied++; }
                             else if (raw is int iv) { b.Set(instance, iv); applied++; }
                             else if (raw is long lv) { b.Set(instance, (int)lv); applied++; }
+                            else if (raw is string sv) { b.Set(instance, sv); applied++; }
                         }
                         catch
                         {
@@ -270,8 +295,17 @@ namespace DeepSeek_v4_for_VisualStudio.Settings
 
                     if (applied > 0)
                     {
+                        try
+                        {
+                            instance.SaveSettingsToStorage();
+                        }
+                        catch (Exception ex)
+                        {
+                            Utils.DiagnosticLog.Write($"[USync] save pulled values failed: {ex.Message}");
+                        }
+
                         instance.ApplyRuntimeHotUpdates();
-                        Utils.DiagnosticLog.Write($"[USync] pulled {applied} value(s) from Unified Settings → Instance");
+                        Utils.DiagnosticLog.Write($"[USync] pulled {applied} value(s) from Unified Settings → Instance (saved)");
                     }
                 });
             }

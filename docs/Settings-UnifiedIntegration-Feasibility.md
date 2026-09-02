@@ -376,3 +376,88 @@ VSEXT Settings 预览特性在当前构建/航班下关闭，或该内部构建�
 
 *注意：主实例更新采用部署目录直接覆盖（当时 VS2022 编译进程阻塞 VSIXInstaller，
 exit=2004）；后续版本升级建议正常走 VSIXInstaller。*
+
+### 9.11 非敏感设置全量化（2026-08-31）
+
+在 §9.10 已验证的双向链路基础上，`DeepSeekUnifiedSettings` 从 7 项扩展到
+**32 项非敏感设置**：
+
+- `Setting.String`：SystemPrompt / SystemPromptEn
+- `Setting.Enum`：SelectedModel / ReasoningEffort / SearchProvider / OcrEngine /
+  Language / ApprovalMode / ThemeMode
+- `Setting.Boolean` / `Setting.Integer`：代码补全、编辑器差异标记、上下文压缩、
+  RAG、遥测、IDE 上下文注入、LLM 超时、Agent 防护阈值、自动编译与界面布局
+
+枚举 ID 与旧 `DeepSeekOptionsPage` 存储值保持一致，升级时不做值迁移。`OcrEngine`
+在 x64 完整版提供 `Windows Built-in` 与 `PaddleOCR-Sharp`；ARM64/No-Local-OCR 变体
+由 `tools/remove-paddleocr.py` 移除 Paddle 依赖和对应枚举项。新 UI 修改后，
+桥接层会回写 `Instance`、保存旧 DialogPage 存储，并执行语言/运行时热更新。
+ApiKey、BaiduApiKey、BingApiKey 继续排除在 Unified Settings 之外。
+因此旧选项页（DeepSeek Chat / General）必须保持可见，作为三类 API Key 的唯一安全配置入口；
+不能为消除“双入口”而设置 `IsInUnifiedSettings=true` 隐藏旧页。
+
+构建产物校验：`settingsRegistration.json` 为 33 项，其中 1 项是“API 密钥配置”只读指引，
+其余 32 项与 `UnifiedSettingsSync.Bindings` 一一对应；新增
+`UnifiedSettingsCoverageTests` 锁定该覆盖关系并防止敏感字段回流。
+
+### 9.12 API Key 迁移至 Visual Studio Credential Storage（2026-09-01）
+
+微软官方没有为 VisualStudio.Extensibility Settings 提供 Secret/Password 类型。官方扩展
+凭据路径是 `Microsoft.VisualStudio.Shell.Connected.CredentialStorage`：
+
+- 服务：`SVsCredentialStorageService` → `IVsCredentialStorageService`
+- 凭据：`IVsCredential.TokenValue` / `RefreshTokenValue()` / `SetTokenValue()`
+- 键位：`IVsCredentialKey` 的 `FeatureName / Resource / UserName / Type`
+
+本项目已新增 `Settings/VisualStudioApiKeyStore.cs`，三类密钥分别使用独立 credential：
+
+| Key | Resource | Type |
+|-----|----------|------|
+| DeepSeek | `https://api.deepseek.com` | `Bearer` |
+| Baidu | `https://qianfan.baidubce.com` | `Bearer` |
+| Bing | `https://api.bing.microsoft.com` | `SubscriptionKey` |
+
+读写行为：
+
+1. 包初始化时获取 `SVsCredentialStorageService`，再加载 DialogPage；
+2. `LoadSettingsFromStorage` 先读 VS keychain；若 keychain 为空且旧 DPAPI 值存在，
+   自动把旧值迁移到 keychain；
+3. `SaveSettingsToStorage` 写入 keychain 成功后，临时把三个 Key 属性置空再调用
+   `base.SaveSettingsToStorage()`，清掉 DialogPage/导入导出面中的旧密文；
+4. `Set` 写入后立即读回并比对原值，`Clear` 后确认条目确实不存在；只有三把 Key
+   均验证成功才清除旧 DPAPI 备份；
+5. keychain 不可用或写入失败时，回退到原有 DPAPI 私有存储，保证升级不丢 Key；
+6. Unified Settings 声明与同步桥继续排除 `ApiKey / BaiduApiKey / BingApiKey`，
+   并提供 `deepseekApiKeyGuide` 只读指引，指向旧选项页。
+
+官方 API 参考：
+
+- <https://learn.microsoft.com/en-us/dotnet/api/microsoft.visualstudio.shell.connected.credentialstorage.ivscredentialstorageservice>
+- <https://learn.microsoft.com/en-us/dotnet/api/microsoft.visualstudio.shell.connected.credentialstorage.ivscredential>
+- <https://learn.microsoft.com/en-us/dotnet/api/microsoft.visualstudio.shell.connected.credentialstorage.ivscredentialkey>
+
+### 9.13 Unified Settings 元数据本地化与 Key 双备份（2026-09-02）
+
+新版设置页的 `SettingCategory` / `Setting` 元数据已改为 VSEXT 官方
+`string-resources.json` 本地化：
+
+```text
+.vsextension/string-resources.json
+.vsextension/zh-Hans/string-resources.json
+```
+
+声明代码中的标题、描述、枚举标签使用 `%DeepSeek.Chat.<key>%` 引用。
+默认资源为英文，`zh-Hans` 目录提供中文。这样新版设置页会随 VS 语言切换，
+而不是固定中文。
+
+API Key 采用双持久化策略：
+
+1. 运行时优先读取 `SVsCredentialStorageService`；
+2. 同步保留 DPAPI 加密的 DialogPage 备份；
+3. 只有用户明确修改 Key 或首次迁移时才写 keychain；
+4. 普通设置保存不再触发 API Key 写入，避免瞬时 keychain 故障导致密钥丢失。
+
+这解决了两个问题：
+
+- 新版设置页元数据不随语言切换；
+- keychain 读回失败时误清 API Key。

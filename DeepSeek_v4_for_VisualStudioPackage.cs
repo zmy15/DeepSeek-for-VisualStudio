@@ -24,6 +24,8 @@ namespace DeepSeek_v4_for_VisualStudio
     [Guid(DeepSeek_v4_for_VisualStudioPackage.PackageGuidString)]
     [ProvideMenuResource("Menus.ctmenu", 1)]
     [ProvideToolWindow(typeof(DeepSeekChatWindowPane), Style = VsDockStyle.Tabbed)]
+    // The legacy page remains the secure editor for API keys. Keys live in Visual Studio
+    // Credential Storage and intentionally do not enter Unified Settings.
     [ProvideOptionPage(typeof(DeepSeekOptionsPage), "DeepSeek Chat", "General", 0, 0, true)]
     [ProvideProfile(typeof(DeepSeekOptionsPage), "DeepSeek Chat", "General",
         16001, 16002, isToolsOptionPage: true, DescriptionResourceID = 16003)]
@@ -240,6 +242,11 @@ namespace DeepSeek_v4_for_VisualStudio
                 var swTotal = System.Diagnostics.Stopwatch.StartNew();
                 DiagnosticLog.Write("[DeepSeek Init] Loading persisted options after package initialization...");
 
+                // Initialize the official VS keychain before DialogPage loads settings. This lets
+                // API keys move out of the ro/exportable settings store without losing legacy values.
+                Settings.VisualStudioApiKeyStore.Current =
+                    await Settings.VisualStudioApiKeyStore.CreateAsync(this);
+
                 // ── GetDialogPage：唯一必须留在 UI 线程的重步骤（VS 服务调用）──
                 var swDialogPage = System.Diagnostics.Stopwatch.StartNew();
                 var persistedOptions = (DeepSeekOptionsPage)GetDialogPage(typeof(DeepSeekOptionsPage));
@@ -297,7 +304,7 @@ namespace DeepSeek_v4_for_VisualStudio
                 ThemeService.Instance.UserThemeMode = persistedOptions.ThemeMode;
                 DiagnosticLog.Write($"[DeepSeek Init] Persisted options loaded OK in {swTotal.ElapsedMilliseconds}ms");
 
-                // ── P2 Step2b：Unified Settings 双向同步桥（新设置 UI ↔ Instance）──
+                // ── Unified Settings 双向同步桥（新版设置 UI ↔ Instance）──
                 // fire-and-forget：桥内含宿主激活与注册可见性等待（最长 120s），
                 // 不得阻塞持久化装载完成与窗口显示。
                 Settings.UnifiedSettingsSync.Host = this;
@@ -305,11 +312,11 @@ namespace DeepSeek_v4_for_VisualStudio
 
                 // ── 生效配置快照（脱敏）：用于核对"选项页所见 = 运行时所用" ──
                 {
-                    string keyTail = persistedOptions.ApiKey is { Length: > 8 } k
-                        ? "***" + k.Substring(k.Length - 4)
-                        : "(empty)";
+                    bool deepSeekKeyConfigured = !string.IsNullOrWhiteSpace(persistedOptions.ApiKey);
                     DiagnosticLog.Write($"[Settings] effective: model={persistedOptions.SelectedModel}, " +
-                        $"key={keyTail}, migrated={persistedOptions.LegacySettingsMigrated}");
+                        $"deepSeekKeyConfigured={deepSeekKeyConfigured}, " +
+                        $"credentialStore={Settings.VisualStudioApiKeyStore.IsAvailable}, " +
+                        $"migrated={persistedOptions.LegacySettingsMigrated}");
                 }
                 return persistedOptions;
             }
@@ -545,31 +552,6 @@ namespace DeepSeek_v4_for_VisualStudio
                     DiagnosticLog.Write($"[Backup] startup sweep failed: {ex.Message}");
                 }
             });
-
-#if DEBUG
-            // ── Unified Settings 注册探针（仅诊断用途）──
-            // 历史事故（2026-08-24 启动卡死分析）：全域反射扫描曾同步运行在 UI 线程上
-            // （LoadPersistedOptionsCoreAsync 内），热实例实测冻结 UI 18.7 秒，
-            // 冷/空白实例可达分钟级。现仅 Debug 构建保留，且移入后台线程延迟执行；
-            // Release 构建完全剔除，零启动成本。
-            _ = Task.Run(async () =>
-            {
-                try
-                {
-                    // 延迟执行：待 Shell 装配基本稳定，避免扫描期间程序集集合剧烈变化
-                    await Task.Delay(TimeSpan.FromSeconds(10), DisposalToken);
-                    var swProbe = System.Diagnostics.Stopwatch.StartNew();
-                    DiagnosticLog.Write("[USv2] background probe start");
-                    Settings.UnifiedSettingsRegistrationProbe.RunConsumptionScan();
-                    DiagnosticLog.Write($"[USv2] background probe done in {swProbe.ElapsedMilliseconds}ms");
-                }
-                catch (OperationCanceledException) { }
-                catch (Exception ex)
-                {
-                    DiagnosticLog.Write($"[USv2] background probe failed: {ex.GetType().Name}: {ex.Message}");
-                }
-            });
-#endif
 
             // ── 自动恢复聊天窗口（标记门控）──
             // 仅当用户此前显式打开过聊天窗口（存在标记文件）时才随启动自动弹出；

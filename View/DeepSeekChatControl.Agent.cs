@@ -624,7 +624,12 @@ namespace DeepSeek_v4_for_VisualStudio.View
                     try
                     {
                         bool isBaidu = _webSearchEngine == "Baidu";
-                        string providerName = isBaidu ? "百度搜索" : "DuckDuckGo";
+                        string providerName = _webSearchEngine switch
+                        {
+                            "Baidu" => "百度搜索",
+                            "Bing" => "Bing",
+                            _ => "DuckDuckGo",
+                        };
                         var searchCt = CancellationToken.None; // 搜索阶段不依赖外部取消令牌
                         var L = LocalizationService.Instance;
 

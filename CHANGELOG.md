@@ -3,6 +3,38 @@
 ## [Unreleased]
 
 ### 修复
+- **VS2026 新版设置界面**：
+  - 新增 `SettingCategory`（"DeepSeek Chat 设置"）并保留旧选项页；旧页是
+    DeepSeek/百度/Bing API Key 的安全配置入口，三类密钥不进入 Unified Settings 的
+    云同步/导出面
+  - API Key 存储迁移到微软官方 `SVsCredentialStorageService` / Visual Studio keychain：
+    旧 DPAPI 密文自动读取并迁移；保存成功后清空 DialogPage 设置存储中的 Key，避免继续
+    出现在导入/导出面。凭据服务不可用时自动回退 DPAPI，不丢已有 Key
+  - keychain 写入后立即读回校验，三把 Key 均确认持久化成功后才清除旧 DPAPI 备份，
+    修复首次迁移启动时偶发读到空 Key 的问题
+  - API Key 改为双持久化：优先读写 Visual Studio Credential Storage，同时保留
+    DPAPI 加密备份，避免 keychain 瞬时故障导致密钥丢失
+  - 新版设置页新增“API 密钥配置”只读指引，指向
+    `工具 → 选项 → DeepSeek Chat → General`
+  - 新版设置页元数据接入 VSEXT `string-resources.json` 本地化，随 VS 语言切换
+  - 修复旧 Options 页外观设置描述语言切换后不刷新的问题
+  - 修复 x64 完整版 OCR 引擎下拉只剩 Windows 内置的问题：恢复
+    `PaddleOCR-Sharp` 本地 OCR 选项与运行时映射；ARM64/No-Local-OCR 变体生成脚本
+    会继续移除该选项
+  - `DeepSeekUnifiedSettings`（新版 "DeepSeek Chat 设置"）与 `UnifiedSettingsSync`
+    双向同步桥恢复保留；旧页改动仍推送到新 UI，新 UI 改动仍回写 `Instance` 并热更新。
+  - 新版设置类别从 7 项扩展到 32 项非敏感设置：补充系统提示词、模型/推理强度/
+    搜索引擎/OCR/语言/审批模式等枚举，代码补全、上下文压缩、Agent 防护阈值与界面布局；
+    新 UI 修改会同时保存回旧 DialogPage 存储，重启后不丢失
+  - 恢复主题切换设置：新版设置页与旧 Options 页均可选择“跟随 Visual Studio / 深色 /
+    浅色”，修改后立即刷新 WPF 与 WebView2 主题并持久化
+  - 修复新 UI 修改模型/深度思考/推理强度后聊天窗口不跟随的问题：热更新回调改为以
+    设置存储为准，并反向刷新聊天窗口控件；聊天窗口内修改这些控件也会持久化并推回新 UI
+  - 修复联网搜索开关与新设置不同步的问题：Unified Settings 的“联网搜索”现在会实时
+    点亮/关闭聊天窗口按钮；按钮与搜索引擎下拉修改也会写回设置并推送到新 UI
+  - 修复 API Key 配置入口在 VS2026 中消失的问题：旧选项页不再被 Unified Settings 隐藏
+  - 移除已降级的 MEF 外部区域原型 `UnifiedSettingsBridge`（含注册探针 `RunConsumptionScan`），
+    避免在新版设置界面额外注册一个外部设置区域。
 - **空白实例启动卡死（根因修复）**：
   - `UnifiedSettingsRegistrationProbe` 全域反射扫描曾同步运行在 UI 线程
     （实测热实例冻结 UI 18.7 秒，冷/空白实例可达分钟级）——现仅 Debug 构建
@@ -77,7 +109,7 @@
 - **Benchmark 脚手架**：报告生成器（C#）、标注/报告脚本（PS）、24 任务规程与 schema
 
 ### 变更
-- 主题不再提供独立切换开关，始终跟随 IDE（VSColorTheme 实时订阅）
+- 主题默认跟随 IDE，并支持在设置中强制深色/浅色；Auto 模式保留 VSColorTheme 实时订阅
 - 工具行图标全部替换为 Segoe Fluent Icons 字形；聊天内容渲染层将
   Emoji 映射为 Fluent 图标或移除（发给模型的数据字节不变）
 - 会话历史交互对齐 Copilot：时钟按钮打开历史浮层（当前会话钉顶 +
