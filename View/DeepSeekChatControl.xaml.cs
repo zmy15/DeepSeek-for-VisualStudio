@@ -791,7 +791,7 @@ namespace DeepSeek_v4_for_VisualStudio.View
                 if (estimatedTokens > 0)
                 {
                     string ctxLabel = LocalizationService.Instance["agent.panel.contextLabel"];
-                    string warnIcon = usagePercent > 90 ? " " : usagePercent > 70 ? " " : "";
+                    string warnIcon = usagePercent > 90 ? " ⚠️" : usagePercent > 70 ? " ℹ️" : "";
                     ctxPart = $" {ctxLabel}: {FormatTokens(estimatedTokens)}/{FormatTokens(tokenBudget)} ({usagePercent:F0}%){warnIcon}";
                 }
             }

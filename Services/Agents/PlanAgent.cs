@@ -854,7 +854,7 @@ namespace DeepSeek_v4_for_VisualStudio.Services.Agents
             for (int i = 0; i < plan.Steps.Count; i++)
             {
                 var step = plan.Steps[i];
-                string prefix = step.RequiresApproval ? "" : "";
+                string prefix = step.RequiresApproval ? "⚠️ " : "";
                 sb.AppendLine($"{prefix} **步骤 {step.Index}**: {step.Title}");
 
                 if (!string.IsNullOrWhiteSpace(step.Description))

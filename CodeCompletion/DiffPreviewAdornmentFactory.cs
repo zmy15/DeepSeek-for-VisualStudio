@@ -32,14 +32,6 @@ namespace DeepSeek_v4_for_VisualStudio.CodeCompletion
         [Order(After = PredefinedAdornmentLayers.Text)]
         internal static AdornmentLayerDefinition DeepSeekEditorDiffOverlayLayer = null!;
 
-        /// <summary>
-        /// Inline diff 块级按钮使用独立层，避免被 DiffPreviewAdornment 的布局清理移除。
-        /// </summary>
-        [Export(typeof(AdornmentLayerDefinition))]
-        [Name(View.InlineDiffHostControl.HunkButtonsLayerName)]
-        [Order(After = PredefinedAdornmentLayers.Text)]
-        internal static AdornmentLayerDefinition DeepSeekHunkButtonsLayer = null!;
-
         #region Public Methods
 
         /// <summary>

@@ -171,17 +171,19 @@ namespace DeepSeek_v4_for_VisualStudio.View
             {
                 if (_skillDiscoveryResult == null)
                     _skillDiscoveryResult = await SkillService.Instance.DiscoverSkillsAsync(_solutionPath);
-                string skillContext = SkillService.Instance.GenerateSkillsDiscoveryContext(_skillDiscoveryResult);
-                _contextManager.SetSkillContext(string.IsNullOrWhiteSpace(skillContext) ? null : skillContext);
+
+                // 技能发现结果仅用于 /skill 解析和 UI 列表；不在系统提示中注入
+                // available_skills 清单，避免未显式调用技能时污染上下文。
+                _contextManager.SetSkillContext(null);
 
                 // 注入始终激活的技能完整指令（每次对话均加载）
                 string alwaysInjectContext = SkillService.Instance.GenerateAlwaysInjectSkillsContext(_skillDiscoveryResult);
                 _contextManager.SetAlwaysInjectSkillsContext(string.IsNullOrWhiteSpace(alwaysInjectContext) ? null : alwaysInjectContext);
 
-                if (!string.IsNullOrWhiteSpace(skillContext) && _skillDiscoveryResult != null)
+                if (_skillDiscoveryResult != null)
                 {
                     var skillNames = string.Join(", ", _skillDiscoveryResult.AutoLoadableSkills.ConvertAll(s => s.Name));
-                    Logger.Info($"[Skill] 系统提示注入: {_skillDiscoveryResult.AutoLoadableSkills.Count} 个可选 + {_skillDiscoveryResult.AlwaysInjectSkills.Count} 个始终激活 → 可选: {skillNames}");
+                    Logger.Info($"[Skill] 发现: {_skillDiscoveryResult.AutoLoadableSkills.Count} 个可选(不注入清单) + {_skillDiscoveryResult.AlwaysInjectSkills.Count} 个始终激活 → 可选: {skillNames}");
                     if (_skillDiscoveryResult.AlwaysInjectSkills.Count > 0)
                     {
                         var alwaysNames = string.Join(", ", _skillDiscoveryResult.AlwaysInjectSkills.ConvertAll(s => s.Name));
@@ -356,7 +358,8 @@ namespace DeepSeek_v4_for_VisualStudio.View
             string userText,
             string fileContext = "",
             AgentRoutingResult? routing = null,
-            List<ChatContentPart>? visionContent = null)
+            List<ChatContentPart>? visionContent = null,
+            string? currentUserContent = null)
         {
             if (_activeAgent == null || _agentFactory == null) return;
 
@@ -448,6 +451,7 @@ namespace DeepSeek_v4_for_VisualStudio.View
                     SolutionPath = _solutionPath,
                     FileContext = fileContext,
                     VisionContent = visionContent,
+                    CurrentUserContent = currentUserContent,
                     ConversationHistory = _contextManager.GetConversationHistory(),
                     ContextManager = _contextManager,
                     IsPlanningMode = routing?.NeedsPlanning == true || routing?.TargetAgent == AgentType.Plan,

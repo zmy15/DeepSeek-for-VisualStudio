@@ -442,6 +442,7 @@ namespace DeepSeek_v4_for_VisualStudio.Services
                 MultimodalContent = CloneContentParts(multimodalContent),
                 TurnIndex = TurnCount + 1, // 新轮次
             });
+
             _estimatedTokens += EstimateTokens(content);
             _estimatedTokens += EstimateMultimodalTokens(multimodalContent);
 
@@ -587,15 +588,14 @@ namespace DeepSeek_v4_for_VisualStudio.Services
         {
             var messages = new List<ChatApiMessage>();
 
-            // ── [0] 共享不可变前缀（跨 Agent 永远不变）──
+            // ── [0] 稳定系统提示词（共享前缀 + 固定提示词）──
             string sharedPrefix = AiPrompts.SharedImmutablePrefix;
-            if (!string.IsNullOrWhiteSpace(sharedPrefix))
-                messages.Add(new ChatApiMessage { Role = "system", Content = sharedPrefix });
-
-            // ── [1] Agent 专属系统提示词（固定位置）──
             string? fixedPrompt = _fixedSystemPrompt
                 ?? (string.IsNullOrWhiteSpace(_systemPrompt) && string.IsNullOrWhiteSpace(_skillContext) ? null : BuildFinalSystemPrompt());
-            messages.Add(new ChatApiMessage { Role = "system", Content = fixedPrompt ?? string.Empty });
+            // 用户/设置页身份提示词在前，共享工具规则在后，避免两段身份介绍抢占开头。
+            string stableSystemPrompt = CombineSystemParts(fixedPrompt, sharedPrefix);
+            if (!string.IsNullOrWhiteSpace(stableSystemPrompt))
+                messages.Add(new ChatApiMessage { Role = "system", Content = stableSystemPrompt });
 
             // ── 缓存窗口裁剪 ──
             //     快照冻结时跳过压缩（压缩会 MUTATE entries，破坏快照保护的前缀稳定性）。
@@ -624,9 +624,10 @@ namespace DeepSeek_v4_for_VisualStudio.Services
                 }
             }
 
-            // ── [2] 动态上下文块（固定位置）──
+            // ── [1] 动态上下文块（仅在非空时注入；独立保留以保护稳定前缀缓存）──
             string? dynamicBlock = _cachedDynamicBlock ?? BuildDynamicContextBlock();
-            messages.Add(new ChatApiMessage { Role = "system", Content = dynamicBlock ?? string.Empty });
+            if (!string.IsNullOrWhiteSpace(dynamicBlock))
+                messages.Add(new ChatApiMessage { Role = "system", Content = dynamicBlock });
 
             // ── [3..] 对话历史 ──
             int entryLimit = _cacheSnapshotEntryIndex ?? _entries.Count;
@@ -817,7 +818,7 @@ namespace DeepSeek_v4_for_VisualStudio.Services
                     parts.Add(activeFileSummary);
             }
 
-            // ── 联网搜索结果（与 RAG 一起放在 user 前，避免干扰 [0..2] 稳定前缀）──
+            // ── 联网搜索结果（与 RAG 一起放在 user 前，避免干扰 [0..1] 稳定前缀）──
             if (!string.IsNullOrWhiteSpace(_searchContext))
                 parts.Add(_searchContext!);
 
@@ -1665,6 +1666,13 @@ namespace DeepSeek_v4_for_VisualStudio.Services
                 parts.Add(_alwaysInjectSkillsContext);
 
             return string.Join("\n\n", parts);
+        }
+
+        private static string? CombineSystemParts(string? first, string? second)
+        {
+            if (string.IsNullOrWhiteSpace(first)) return second;
+            if (string.IsNullOrWhiteSpace(second)) return first;
+            return first + "\n\n" + second;
         }
 
         #endregion

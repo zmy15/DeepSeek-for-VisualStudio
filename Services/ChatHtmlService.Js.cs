@@ -15,6 +15,7 @@ namespace DeepSeek_v4_for_VisualStudio.Services
         /// <summary>
         /// 渲染层 Emoji→Fluent 字形替换（P1 收口）：数据层保持原样，仅 DOM 文本节点做视觉替换。
         /// 命中映射表的转为 Fluent 图标；未映射的装饰性 emoji 移除。
+        /// 用户消息气泡跳过清理，用户输入的 emoji 必须原样显示。
         /// MutationObserver 覆盖一切动态插入（工具行/任务面板/页脚等）。
         /// </summary>
         private static string BuildDetoxEmojisJs()
@@ -55,7 +56,7 @@ namespace DeepSeek_v4_for_VisualStudio.Services
         var targets=[];
         while(w.nextNode()){
             var p=w.currentNode.parentNode;
-            if(p&&p.closest&&p.closest('pre,code,.icf'))continue;
+            if(p&&p.closest&&p.closest('pre,code,.icf,.cache-stat-card,.msg-bubble.user'))continue;
             targets.push(w.currentNode);
         }
         for(var i=0;i<targets.length;i++)detoxText(targets[i]);
@@ -98,6 +99,7 @@ window.decorateCodeBlocks=function(container){
             var m=code.className.match(/language-(\w+)/);
             if(m)lang=m[1];
         }
+        if(lang==='mermaid')return;
         if(lang){
             var label=document.createElement('span');
             label.className='code-lang';
@@ -188,7 +190,15 @@ window.__renderMath=function(container){
         {
             return @"
 window.__renderMermaid=function(container){
-    if(!container||typeof mermaid==='undefined')return;
+    if(!container)return;
+    if(typeof mermaid==='undefined'){
+        if(!window.__mermaidRetryCount)window.__mermaidRetryCount=0;
+        if(window.__mermaidRetryCount<20){
+            window.__mermaidRetryCount++;
+            setTimeout(function(){window.__renderMermaid(container);},500);
+        }
+        return;
+    }
     try{
         var codes=container.querySelectorAll('code.language-mermaid');
         for(let i=0;i<codes.length;i++){

@@ -1,4 +1,5 @@
 using System;
+using System.IO;
 using System.Collections.Generic;
 using System.Linq;
 using DeepSeek_v4_for_VisualStudio.Models;
@@ -70,8 +71,21 @@ namespace DeepSeek_v4_for_VisualStudio.Services.IdeContext
                 if (view.TextDataModel.DocumentBuffer.Properties.TryGetProperty(
                         typeof(ITextDocument), out ITextDocument doc))
                 {
-                    s.FilePath = doc.FilePath;
+                    // VS 可能返回未保存的临时 buffer（FilePath 是“Temp.txt”但磁盘上不存在）。
+                    // fail-closed：不存在时丢弃整个编辑器快照，避免注入误导性文件名/光标。
+                    if (!string.IsNullOrWhiteSpace(doc.FilePath) && !File.Exists(doc.FilePath))
+                    {
+                        Logger.Warn($"[IdeContext] 跳过不存在的活动文件: {doc.FilePath}");
+                        view = null!;
+                    }
+                    else
+                    {
+                        s.FilePath = doc.FilePath;
+                    }
                 }
+
+                if (view == null)
+                    return CaptureDebuggerOnlySnapshot();
 
                 // ── 光标 ──
                 var caretPos = view.Caret.Position.BufferPosition;
@@ -110,6 +124,16 @@ namespace DeepSeek_v4_for_VisualStudio.Services.IdeContext
             s.CapturedAt = DateTime.Now;
 
             return s.HasContent ? s : null;
+        }
+
+        private static IdeContextSnapshot? CaptureDebuggerOnlySnapshot()
+        {
+            var snapshot = new IdeContextSnapshot
+            {
+                DebuggerFrame = TryCaptureDebuggerFrame(),
+                CapturedAt = DateTime.Now,
+            };
+            return snapshot.HasContent ? snapshot : null;
         }
 
         /// <summary>获取当前活动视图（与 CodeActions 的 IVsTextManager 方案一致）。</summary>

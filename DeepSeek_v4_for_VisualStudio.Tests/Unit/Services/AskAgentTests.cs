@@ -174,6 +174,40 @@ public class AskAgentTests
     #region BuildContextualPrompt
 
     [Fact]
+    public void BuildContextAwareMessages_DeduplicatesCurrentUser_FromContextHistory()
+    {
+        var contextManager = new ConversationContextManager();
+        contextManager.AddUserMessage("你好");
+
+        var context = new AgentContext
+        {
+            ContextManager = contextManager,
+            CurrentUserContent = "你好",
+        };
+        var agent = new AskAgent(_apiService)
+        {
+            Context = context,
+        };
+
+        var method = typeof(BaseAgent).GetMethod(
+            "BuildContextAwareMessages",
+            System.Reflection.BindingFlags.Instance | System.Reflection.BindingFlags.NonPublic,
+            binder: null,
+            new[] { typeof(string), typeof(string), typeof(int), typeof(bool) },
+            modifiers: null);
+        method.Should().NotBeNull();
+
+        var messages = (List<ChatApiMessage>)method!.Invoke(
+            agent,
+            new object[] { "AskAgent system prompt", "[用户问题]你好", int.MaxValue, true })!;
+
+        messages.Count(m => m.Role == "user").Should().Be(1);
+        messages.Last(m => m.Role == "user").Content.Should().Contain("[用户问题]你好");
+        messages.Count(m => m.Role == "system" && m.Content!.Contains("文件读取规则"))
+            .Should().Be(1);
+    }
+
+    [Fact]
     public void BuildContextualPrompt_WithSolutionPath_IncludesIt()
     {
         var context = new AgentContext

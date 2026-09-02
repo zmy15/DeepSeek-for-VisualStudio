@@ -1,3 +1,6 @@
+using DeepSeek_v4_for_VisualStudio.Models;
+using DeepSeek_v4_for_VisualStudio.Services;
+using DeepSeek_v4_for_VisualStudio.Services.Agents;
 using DeepSeek_v4_for_VisualStudio.Services.BuiltInTools;
 using System.Collections.Concurrent;
 using System.Text.Json;
@@ -53,6 +56,24 @@ public class BuiltInToolServiceTests
         defs.Should().HaveCount(21);
     }
 
+    [Theory]
+    [InlineData("deepseek-v4-pro", false)]
+    [InlineData(DeepSeekModelCatalog.FlashVisionExp, true)]
+    public void GetFilteredToolDefinitions_IncludesCaptureWindowOnlyForVisionModels(
+        string model,
+        bool expectedVisible)
+    {
+        var service = new BuiltInToolService
+        {
+            ApiService = new DeepSeekApiService("test-key", model)
+        };
+
+        var defs = service.GetFilteredToolDefinitions(AskAgent.AskTools.ToList());
+
+        defs.Any(d => d.Function.Name == "capture_window")
+            .Should().Be(expectedVisible);
+    }
+
     #endregion
 
     #region IsBuiltInTool
@@ -81,6 +102,19 @@ public class BuiltInToolServiceTests
     public void IsBuiltInTool_ReturnsCorrectResult(string toolName, bool expected)
     {
         BuiltInToolService.IsBuiltInTool(toolName).Should().Be(expected);
+    }
+
+    [Fact]
+    public async Task ExecuteBuiltInToolAsync_CaptureWindow_NonVisionModel_ReturnsModelRequirement()
+    {
+        var service = new BuiltInToolService
+        {
+            ApiService = new DeepSeekApiService("test-key", "deepseek-v4-pro")
+        };
+
+        var result = await service.ExecuteBuiltInToolAsync("capture_window", "{}");
+
+        result.Should().Contain("Error:").And.Contain("capture_window");
     }
 
     #endregion

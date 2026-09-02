@@ -222,6 +222,20 @@ namespace DeepSeek_v4_for_VisualStudio.Models
         public List<ChatApiMessage>? ForwardedMessages { get; set; }
 
         /// <summary>
+        /// UI 层已写入 ContextManager 的当前轮原始 user 内容。
+        /// Agent 构建请求时用它识别并移除历史末尾的当前轮 user，避免追加包装提示词后重复。
+        /// </summary>
+        [JsonIgnore]
+        public string? CurrentUserContent { get; set; }
+
+        /// <summary>
+        /// 当前请求中工具历史的安全插入点：位于稳定历史之后、volatile + 当前 user 之前。
+        /// BuildContextAwareMessages 写入，工具循环消费；跨轮次重建时该尾部可整体替换。
+        /// </summary>
+        [JsonIgnore]
+        public int? ToolHistoryInsertIndex { get; set; }
+
+        /// <summary>
         /// 实时推理流回调。Agent 内部每收到一个 thinking chunk 时调用，
         /// 供 UI 层实时流式更新思考面板。
         /// </summary>

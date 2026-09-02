@@ -21,14 +21,12 @@ namespace DeepSeek_v4_for_VisualStudio.View
     /// </summary>
     public partial class InlineDiffHostControl : UserControl
     {
-        public const string HunkButtonsLayerName = "DeepSeekHunkButtonsLayer";
-
         #region Fields
 
         private IWpfDifferenceViewer? _viewer;
         private IWpfTextView? _inlineView;
-        private IAdornmentLayer? _hunkButtonsLayer;
         private IWpfDifferenceViewer? _statusBarViewer;
+        private Canvas? _hunkButtonCanvas;
 
         /// <summary>用户点击「保留」时的回调</summary>
         public Action? OnAccept { get; set; }
@@ -98,6 +96,7 @@ namespace DeepSeek_v4_for_VisualStudio.View
             TryDetachFromParent(veil);
 
             DiffViewerHost.Child = veil;
+            _hunkButtonCanvas = HunkButtonCanvas;
 
             // 订阅差异变化事件以更新统计
             _viewer.DifferenceBuffer.SnapshotDifferenceChanged += OnSnapshotDifferenceChanged;
@@ -134,10 +133,10 @@ namespace DeepSeek_v4_for_VisualStudio.View
             if (_inlineView != null)
                 _inlineView.LayoutChanged -= OnViewerLayoutChanged;
 
-            _hunkButtonsLayer?.RemoveAllAdornments();
             DetachStatusBarWatcher();
             DiffViewerHost.Child = null;
-            _hunkButtonsLayer = null;
+            _hunkButtonCanvas?.Children.Clear();
+            _hunkButtonCanvas = null;
             _inlineView = null;
             _viewer = null;
         }
@@ -203,9 +202,12 @@ namespace DeepSeek_v4_for_VisualStudio.View
 
             var inlineView = _viewer.InlineView;
             if (inlineView == null) return;
+            if (_hunkButtonCanvas == null) return;
             _inlineView = inlineView;
-            _hunkButtonsLayer = inlineView.GetAdornmentLayer(HunkButtonsLayerName);
-            _hunkButtonsLayer.RemoveAllAdornments();
+            _hunkButtonCanvas.Children.Clear();
+
+            if (!TryGetInlineViewOffset(inlineView, _hunkButtonCanvas, out Point viewOrigin))
+                return;
 
             double viewportWidth = Math.Max(0, inlineView.ViewportWidth);
             if (viewportWidth <= 0) return;
@@ -233,15 +235,30 @@ namespace DeepSeek_v4_for_VisualStudio.View
                 };
                 container.Children.Add(group);
 
-                Canvas.SetLeft(container, 0);
+                Canvas.SetLeft(container, viewOrigin.X);
                 Canvas.SetTop(container, top);
 
-                _hunkButtonsLayer.AddAdornment(
-                    AdornmentPositioningBehavior.OwnerControlled,
-                    new SnapshotSpan(textLine.Start, 0),
-                    null,
-                    container,
-                    null);
+                _hunkButtonCanvas.Children.Add(container);
+            }
+        }
+
+        private static bool TryGetInlineViewOffset(
+            IWpfTextView inlineView,
+            Canvas overlayCanvas,
+            out Point viewOrigin)
+        {
+            viewOrigin = default;
+            try
+            {
+                viewOrigin = inlineView.VisualElement
+                    .TransformToVisual(overlayCanvas)
+                    .Transform(new Point(0, 0));
+                return !double.IsNaN(viewOrigin.X) && !double.IsInfinity(viewOrigin.X) &&
+                       !double.IsNaN(viewOrigin.Y) && !double.IsInfinity(viewOrigin.Y);
+            }
+            catch (InvalidOperationException)
+            {
+                return false;
             }
         }
 

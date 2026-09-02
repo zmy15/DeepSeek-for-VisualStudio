@@ -147,7 +147,8 @@ namespace DeepSeek_v4_for_VisualStudio.Services.Agents
                 string contextualPrompt = BuildContextualPrompt(userMessage, context);
                 var messages = BuildContextAwareMessages(
                     Definition.SystemPrompt,
-                    contextualPrompt);
+                    contextualPrompt,
+                    deduplicateCurrentUser: true);
 
                 // ── 使用工具调用循环（支持 runSubagent 委派探索任务 + request_handoff 移交）──
                 string workspaceRoot = GetWorkspaceRoot(context);

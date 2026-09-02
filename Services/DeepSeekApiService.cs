@@ -791,9 +791,9 @@ namespace DeepSeek_v4_for_VisualStudio.Services
             // ── 消息前缀哈希日志（v1.1.11）──
             //     计算 messages 在关键前缀边界 [0]、[0..1]、[0..2]、[0..all] 处的 SHA-256 哈希。
             //     跨调用对比哈希值可精确定位缓存断裂发生的位置：
-            //     - [0] 变化 → SharedImmutablePrefix 不一致（不应发生）
-            //     - [0..1] 变化 → Agent 切换或 fixedPrompt 更新
-            //     - [0..2] 变化 → 动态上下文（搜索/记忆/RAG）变化
+            //     - [0] 变化 → 稳定 system（共享前缀+fixedPrompt）不一致（不应发生）
+            //     - [0..1] 变化 → 动态上下文（搜索/记忆/RAG）变化
+            //     - [0..2] 变化 → 对话历史增长或压缩
             //     - [0..all] 变化 → 对话历史增长或压缩
             try
             {
@@ -919,7 +919,7 @@ namespace DeepSeek_v4_for_VisualStudio.Services
                     }
 
                     double rate = (double)hit / cacheableTotal;
-                    string level = rate >= 0.90 ? "" : rate >= 0.50 ? "" : rate >= 0.20 ? "" : "";
+                    string level = rate >= 0.90 ? "🟢" : rate >= 0.50 ? "🟡" : rate >= 0.20 ? "🟠" : "🔴";
 
                     const int bytesPerToken = 3;
                     int msg0TokenEstimate = msg0Length / bytesPerToken;

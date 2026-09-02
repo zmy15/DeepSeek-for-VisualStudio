@@ -400,6 +400,7 @@ namespace DeepSeek_v4_for_VisualStudio.View
                         var capturedVisionContent = visionContent;
                         var capturedRoute = routing;
                         var capturedMsgIdx = capturedUserMsgIndex;
+                        var capturedCurrentUserContent = fullUserContent;
 
                         // ── 创建 Agent 路径的 CancellationTokenSource（停止按钮依赖此 CTS）──
                         var agentCts = CreateNewStreamingCts();
@@ -412,7 +413,8 @@ namespace DeepSeek_v4_for_VisualStudio.View
                                     capturedUserText,
                                     capturedFileContext,
                                     capturedRoute,
-                                    capturedVisionContent);
+                                    capturedVisionContent,
+                                    capturedCurrentUserContent);
                                 RecordAgentFileChanges(capturedMsgIdx);
                             }
                             catch (Exception ex)
@@ -958,7 +960,7 @@ namespace DeepSeek_v4_for_VisualStudio.View
                 double rate = usage.CacheHitRate;
 
                 string roundInfo = round > 0 ? $"[轮次#{round}] " : "";
-                string level = rate >= 0.90 ? "" : rate >= 0.50 ? "" : rate >= 0.20 ? "" : "";
+                string level = rate >= 0.90 ? "🟢" : rate >= 0.50 ? "🟡" : rate >= 0.20 ? "🟠" : "🔴";
 
                 Logger.Info($"[Cache] {level} {roundInfo}命中率: {usage.CacheHitRatePercent} " +
                     $"(命中 {hit:N0} / 未命中 {miss:N0} / 总计 {total:N0} tokens)");
@@ -982,7 +984,7 @@ namespace DeepSeek_v4_for_VisualStudio.View
                 if (totalCacheable == 0) return;
 
                 double aggregateRate = (double)totalHit / totalCacheable;
-                string level = aggregateRate >= 0.90 ? "" : aggregateRate >= 0.50 ? "" : aggregateRate >= 0.20 ? "" : "";
+                string level = aggregateRate >= 0.90 ? "🟢" : aggregateRate >= 0.50 ? "🟡" : aggregateRate >= 0.20 ? "🟠" : "🔴";
 
                 Logger.Info($"[Cache] ═══════════════════════════════════════");
                 Logger.Info($"[Cache] {level} 累计汇总 ({finalRound} 轮)");

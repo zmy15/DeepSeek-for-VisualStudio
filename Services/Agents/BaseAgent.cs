@@ -585,17 +585,16 @@ namespace DeepSeek_v4_for_VisualStudio.Services.Agents
         /// <summary>
         /// 构建上下文感知的消息列表，将 Agent 的 system prompt 与对话历史合并。
         /// 
-        /// ── 消息结构（v1.1.11）──
-        ///   messages[0] = SharedImmutablePrefix（跨 Agent 永远不变）
-        ///   messages[1] = fixedPrompt（会话级上下文，session 内不变）
-        ///   messages[2] = dynamicBlock（压缩摘要 + 搜索 + RAG + 记忆）
-        ///   messages[3..N] = 对话历史（来自 ContextManager，起始位置固定）
+        /// ── 消息结构（v1.1.12）──
+        ///   messages[0] = 稳定 system（SharedImmutablePrefix + fixedPrompt）
+        ///   messages[1] = 可选 dynamicBlock（压缩摘要 + 搜索 + RAG + 记忆）
+        ///   messages[2..N] = 对话历史（来自 ContextManager，起始位置固定）
         ///   messages[N+1] = 当前用户消息
         ///   messages[N+2] = Agent 专属行为指令（固定在最后）
         /// 
         /// 设计决策：Agent 提示词固定在列表最后，用户消息放在它之前。这样工具循环
         /// 新增的 assistant/tool 消息都在用户消息前向上漂移，Agent 提示词位置不再
-        /// 随轮次漂移；历史 [3..] 起始位置固定的前缀缓存命中范围更大。
+        /// 随轮次漂移；历史起始位置固定的前缀缓存命中范围更大。
         /// Handoff 时同样复用旧前缀，追加新用户消息和新 Agent 提示词。
         /// </summary>
         /// <param name="systemPrompt">Agent 专属行为指令（不含共享前缀）</param>
@@ -603,7 +602,10 @@ namespace DeepSeek_v4_for_VisualStudio.Services.Agents
         /// <param name="maxRecentTurns">注入对话历史的最近轮次数（0 = 不注入，默认不限制）</param>
         /// <returns>按缓存优化顺序排列的消息列表</returns>
         protected List<ChatApiMessage> BuildContextAwareMessages(
-            string systemPrompt, string userPrompt, int maxRecentTurns = int.MaxValue)
+            string systemPrompt,
+            string userPrompt,
+            int maxRecentTurns = int.MaxValue,
+            bool deduplicateCurrentUser = false)
         {
             // ──  Handoff 消息复用（v1.1.10）：若源 Agent 传递了工具循环消息列表，
             //    直接复用作为前缀，不再从 ContextManager 重建。
@@ -626,6 +628,12 @@ namespace DeepSeek_v4_for_VisualStudio.Services.Agents
                     // 兼容旧结构：尾部 [agent] + [user] 一并移除
                     result.RemoveRange(count - 2, 2);
                 }
+
+                // Handoff 前缀保留到源 Agent 的 user 为止；目标 Agent 的工具历史
+                // 从新 user 之前开始追加，避免复用过期索引。
+                if (Context != null)
+                    Context.ToolHistoryInsertIndex = result.Count;
+
                 result.Add(CreateCurrentUserMessage(userPrompt));
                 if (!string.IsNullOrWhiteSpace(systemPrompt))
                     result.Add(new ChatApiMessage { Role = "system", Content = systemPrompt });
@@ -633,26 +641,38 @@ namespace DeepSeek_v4_for_VisualStudio.Services.Agents
             }
 
             var messages = new List<ChatApiMessage>();
-
-            // ── 第1层：共享不可变前缀（永远放在 messages[0]，跨 Agent 完全相同）──
-            messages.Add(new ChatApiMessage { Role = "system", Content = GetSharedImmutablePrefix() });
-
-            // ── 第2-3层：fixedPrompt + dynamicBlock（来自 ContextManager，固定位置 [1][2]）──
-            // BuildApiMessagesRecentTurns 返回结构：[0]=SP, [1]=FP, [2]=DB, [3..]=entries
-            // 跳过 [0]=SP（已在上面添加），保留 [1]=FP、[2]=DB 和 [3..]=entries。
             var ctxManager = Context?.ContextManager;
             if (ctxManager != null && !ctxManager.IsEmpty && maxRecentTurns > 0)
             {
                 var recentMessages = ctxManager.BuildApiMessagesRecentTurns(maxRecentTurns);
                 if (recentMessages.Count > 0)
                 {
-                    // 跳过 SP（index 0），添加 FP、DB 和所有 entries
-                    for (int i = 1; i < recentMessages.Count; i++)
-                    {
-                        messages.Add(recentMessages[i]);
-                    }
+                    // [0]=稳定 system（共享前缀+固定提示词），[1]=可选动态块，[2..]=历史
+                    messages.AddRange(recentMessages);
                 }
             }
+            else
+            {
+                messages.Add(new ChatApiMessage { Role = "system", Content = GetSharedImmutablePrefix() });
+            }
+
+            // UI 层在进入 Agent 前已把当前轮原始 user 写入 ContextManager。
+            // Ask 主流程会包装该 user（方案路径/文件上下文/用户问题标签），
+            // 这里先从稳定历史移除原始 user，再追加包装后的尾部 user，避免同轮重复。
+            if (deduplicateCurrentUser
+                && !string.IsNullOrEmpty(Context?.CurrentUserContent)
+                && messages.Count > 0
+                && messages[messages.Count - 1].Role == "user"
+                && string.Equals(messages[messages.Count - 1].Content, Context!.CurrentUserContent, StringComparison.Ordinal))
+            {
+                messages.RemoveAt(messages.Count - 1);
+            }
+
+            // 工具循环产生的 assistant/tool 历史插入到稳定历史之后、
+            // volatile + 当前 user 之前；下一轮重建时只替换尾部。
+            int toolHistoryInsertIndex = messages.Count;
+            if (Context != null)
+                Context.ToolHistoryInsertIndex = toolHistoryInsertIndex;
 
             // ── 第4层：易变上下文（Working Set + RAG，放在用户消息之前）──
             //     这些内容每轮都可能变（读不同文件、不同 query 的 RAG 结果），
@@ -703,7 +723,7 @@ namespace DeepSeek_v4_for_VisualStudio.Services.Agents
         /// 构建上下文感知的消息列表（支持注入额外的系统级上下文）。
         /// 
         /// extraSystemMessages 插入在用户消息之前，Agent 提示词仍固定在最后。
-        /// 前缀结构 [0..2] 与主重载一致，确保 DeepSeek Prefix Cache 跨路径共享。
+        /// 前缀结构 [0..1] 与主重载一致，确保 DeepSeek Prefix Cache 跨路径共享。
         /// </summary>
         protected List<ChatApiMessage> BuildContextAwareMessages(
             string systemPrompt,
@@ -783,10 +803,10 @@ namespace DeepSeek_v4_for_VisualStudio.Services.Agents
             int round = BuiltInTools?.CurrentRound ?? 0;
 
             // ──  v1.1.11：固定后缀插入点 ──
-            // 消息结构：[0..3]prefix + [4..]历史 + [volatile] + [user] + [tool_calls...] + [agent]
-            // 工具循环中新增 assistant/tool 插入到 user 之后、agent 之前，
-            // 保持 agent 固定在最后，user 留在工具结果之前。
-            int toolInsertPos = Math.Max(0, messages.Count - 1);
+            // 消息结构：[prefix][稳定历史][tool_calls...][volatile][user][agent]
+            // assistant/tool 插入到 volatile + user 之前，下一轮只替换 volatile + user 尾部。
+            int persistedToolIndex = Context?.ToolHistoryInsertIndex ?? Math.Max(0, messages.Count - 1);
+            int toolInsertPos = Math.Max(0, Math.Min(persistedToolIndex, messages.Count));
             while (!loopDetected)
             {
                 round++;
@@ -1192,7 +1212,7 @@ namespace DeepSeek_v4_for_VisualStudio.Services.Agents
                     }
 
                     // ── 添加 assistant 消息（含工具调用）──
-                    //  v1.1.11：插入到 user 之后、agent 之前
+                    // 插入到 volatile + user 之前，使工具历史进入稳定前缀区。
                     messages.Insert(toolInsertPos, new ChatApiMessage
                     {
                         Role = "assistant",
@@ -1301,13 +1321,13 @@ namespace DeepSeek_v4_for_VisualStudio.Services.Agents
                         // ── 裁剪工具结果以保护上下文（与 ContextManager.AddToolResult 保持一致）──
                         string contextResult = CompactToolResultForAgent(tc.Function.Name, resultText);
 
-                        // ──  runSubagent 结果放到 [user] 之后、[agent] 之前，
-                        //     保持前缀不被破坏，确保 DeepSeek Prefix Cache 跨轮次命中。──
+                        // ── runSubagent 结果同样进入稳定工具历史区，
+                        //     与 ContextManager 中的持久化顺序保持一致。──
                         if (tc.Function.Name == "runSubagent")
                         {
-                            messages.Insert(messages.Count - 1,
+                            messages.Insert(toolInsertPos,
                                 BuildToolResultMessage(tc.Id, tc.Function.Name, contextResult, webImageUrls));
-                            // 不递增 toolInsertPos——runSubagent 结果不属于主历史前缀
+                            toolInsertPos++;
                         }
                         else
                         {
@@ -1588,7 +1608,7 @@ namespace DeepSeek_v4_for_VisualStudio.Services.Agents
                 double rate = usage.CacheHitRate;
 
                 string roundInfo = round > 0 ? $"[轮次#{round}] " : "";
-                string level = rate >= 0.90 ? "" : rate >= 0.50 ? "" : rate >= 0.20 ? "" : "";
+                string level = rate >= 0.90 ? "🟢" : rate >= 0.50 ? "🟡" : rate >= 0.20 ? "🟠" : "🔴";
 
                 Logger.Info($"[Cache] {level} {roundInfo}命中率: {usage.CacheHitRatePercent} " +
                     $"(命中 {hit:N0} / 未命中 {miss:N0} / 总计 {total:N0} tokens)");
@@ -1614,7 +1634,7 @@ namespace DeepSeek_v4_for_VisualStudio.Services.Agents
                 if (totalCacheable == 0) return;
 
                 double aggregateRate = (double)totalHit / totalCacheable;
-                string level = aggregateRate >= 0.90 ? "" : aggregateRate >= 0.50 ? "" : aggregateRate >= 0.20 ? "" : "";
+                string level = aggregateRate >= 0.90 ? "🟢" : aggregateRate >= 0.50 ? "🟡" : aggregateRate >= 0.20 ? "🟠" : "🔴";
 
                 Logger.Info($"[Cache] ═══════════════════════════════════════");
                 Logger.Info($"[Cache] {level} 本次工作流汇总 ({finalRound} 轮)");
@@ -1645,7 +1665,7 @@ namespace DeepSeek_v4_for_VisualStudio.Services.Agents
                 if (totalCacheable == 0) return string.Empty;
 
                 double rate = (double)totalHit / totalCacheable;
-                string icon = rate >= 0.90 ? "" : rate >= 0.50 ? "" : rate >= 0.20 ? "" : "";
+                string icon = rate >= 0.90 ? "🟢" : rate >= 0.50 ? "🟡" : rate >= 0.20 ? "🟠" : "🔴";
 
                 return $"\n\n---\n\n{icon} **Cache 命中率: {rate * 100:F1}%**" +
                     $" · {totalHit:N0} 命中 / {totalMiss:N0} 未命中" +

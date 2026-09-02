@@ -323,9 +323,8 @@ namespace DeepSeek_v4_for_VisualStudio.Services
             if (cacheable == 0) return string.Empty;
 
             double rate = (double)hitTokens / cacheable;
-            string level = rate >= 0.90 ? "high" : rate >= 0.50 ? "medium" : "low";
-            // 用 CSS 圆点替代 emoji（UI 质感统一，颜色随 level 类控制）
-            string icon = string.Empty;
+            string level = rate >= 0.90 ? "high" : rate >= 0.50 ? "medium" : rate >= 0.20 ? "low" : "critical";
+            string icon = rate >= 0.90 ? "🟢" : rate >= 0.50 ? "🟡" : rate >= 0.20 ? "🟠" : "🔴";
 
             // 命中率百分比
             string rateText = $"{rate * 100:F1}%";
@@ -642,7 +641,7 @@ namespace DeepSeek_v4_for_VisualStudio.Services
                 string borderColor = isImage ? "#6b3fa0" : isPdf ? "#8b4513" : "#3a5a3a";
                 string bgColor = isImage ? "#1a1a2e" : isPdf ? "#1e150a" : "#1a2e1a";
                 string summaryColor = isImage ? "#b98eff" : isPdf ? "#d4a76a" : "#7ec87e";
-                string icon = isImage ? "" : isPdf ? "" : "";
+                string icon = isImage ? "🖼️" : isPdf ? "📄" : "📎";
                 string tag = isImage ? "OCR" : isPdf ? "PDF" : (file.Truncated ? L["chat.html.fileTruncated"] : "");
 
                 string escapedContent = System.Net.WebUtility.HtmlEncode(
@@ -651,7 +650,7 @@ namespace DeepSeek_v4_for_VisualStudio.Services
                         : file.Content) ?? string.Empty);
 
                 blocks.Append($"<details class='file-attachment' style='margin-bottom:3px;border:1px solid {borderColor};border-radius:4px;background:{bgColor};overflow:hidden'>");
-                blocks.Append($"<summary style='cursor:pointer;padding:3px 8px;color:{summaryColor};font-size:11px;font-weight:600;list-style:none'>{escapedFileName}");
+                blocks.Append($"<summary style='cursor:pointer;padding:3px 8px;color:{summaryColor};font-size:11px;font-weight:600;list-style:none'>{icon} {escapedFileName}");
                 if (!string.IsNullOrEmpty(tag))
                     blocks.Append($" <span style='color:#c8a84e;font-size:9px'>({tag})</span>");
                 blocks.Append("</summary>");
@@ -1696,7 +1695,7 @@ return "<!DOCTYPE html><html lang='" + htmlLang + "'><head><meta charset='UTF-8'
             int completed = plan.Steps.Count(s => s.Status == AgentStepStatus.Completed);
             int failed = plan.Steps.Count(s => s.Status == AgentStepStatus.Failed);
             int total = plan.Steps.Count;
-            string statusIcon = plan.IsCancelled ? "" : (failed > 0 ? "" : "");
+            string statusIcon = plan.IsCancelled ? "⚠️" : (failed > 0 ? "⚠️" : "✅");
             string statusColor = plan.IsCancelled ? "#E07878" : (failed > 0 ? "#C8A84E" : "#4EC9B0");
             string statusText = plan.IsCancelled ? L["chat.html.taskCancelled"] : (failed > 0 ? string.Format(L["chat.html.taskPartialSuccess"], completed, total, failed) : string.Format(L["chat.html.taskAllSuccess"], completed, total));
             string escapedStatusIcon = EscapeJsString(statusIcon);
@@ -1734,4 +1733,3 @@ return "<!DOCTYPE html><html lang='" + htmlLang + "'><head><meta charset='UTF-8'
         #endregion
     }
 }
-

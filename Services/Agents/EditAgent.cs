@@ -3187,10 +3187,10 @@ namespace DeepSeek_v4_for_VisualStudio.Services.Agents
                 sb.AppendLine(L["edit.summary.stepExecutionHeader"]);
                 foreach (var step in plan.Steps)
                 {
-                    string statusIcon = step.Status == AgentStepStatus.Completed ? ""
-                        : step.Status == AgentStepStatus.Failed ? "Error: "
-                        : step.Status == AgentStepStatus.Skipped ? ""
-                        : "";
+                    string statusIcon = step.Status == AgentStepStatus.Completed ? "✅"
+                        : step.Status == AgentStepStatus.Failed ? "❌"
+                        : step.Status == AgentStepStatus.Skipped ? "⏭️"
+                        : "🔄";
                     string summary = !string.IsNullOrWhiteSpace(step.ResultSummary)
                         ? step.ResultSummary!
                         : LocalizationService.Instance["agent.step.noDetail"];
