@@ -903,9 +903,6 @@ namespace DeepSeek_v4_for_VisualStudio.View
                         originalUserMsg = _messages[userMsgIndex];
                 }
 
-                // ── 判断是否为 EditAgent：是则原地替换，否则树状分叉 ──
-                bool isEditAgent = originalUserMsg?.AgentType == AgentType.Edit;
-
                 var tree = EnsureTree();
                 var editedUserMsg = new ChatMessage
                 {
@@ -917,19 +914,11 @@ namespace DeepSeek_v4_for_VisualStudio.View
                     AgentType = originalUserMsg?.AgentType, // 保留原 Agent 类型
                 };
 
-                if (isEditAgent)
-                {
-                    // ── EditAgent：原地修改，不产生分支，不显示 <> ──
-                    tree.ReplaceInPlace(userNode, editedUserMsg);
-                    Logger.Info($"[EditAgent] 编辑消息：原地替换 (nodeId={userNode.Id})，不产生分支");
-                }
-                else
-                {
-                    // ── 其他 Agent：树状分叉 ──
-                    editedUserMsg.ForkReason = "edit";
-                    tree.ForkAt(userNode, editedUserMsg, "edit");
-                    Logger.Info($"[Tree] 编辑消息：树状分叉 (nodeId={userNode.Id})");
-                }
+                // 编辑重发永远新增一个 user 轮次并建立分支，
+                // 保留原始提问，形成标准的多轮对话历史。
+                editedUserMsg.ForkReason = "edit";
+                tree.ForkAt(userNode, editedUserMsg, "edit");
+                Logger.Info($"[Tree] 编辑消息：新增用户分支 (nodeId={userNode.Id})");
 
                 // ── 同步消息列表并重建上下文 ──
                 RebuildFromTree();

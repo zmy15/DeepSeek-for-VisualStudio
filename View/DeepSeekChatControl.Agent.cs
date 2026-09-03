@@ -390,6 +390,7 @@ namespace DeepSeek_v4_for_VisualStudio.View
                 //    在 UI 线程上单次捕获；Agent 每轮只读快照，不重复扫描 VS。
                 try
                 {
+                    _contextManager.SetSolutionPath(_solutionPath);
                     if (_options?.EnableIdeContextInjection == true)
                     {
                         _ideContextTracker ??= new Services.IdeContext.IdeContextTracker();

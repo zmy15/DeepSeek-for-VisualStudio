@@ -49,6 +49,9 @@ namespace DeepSeek_v4_for_VisualStudio.Services
         /// <summary>IDE 实时态上下文（P1-A：活动文件/光标/选区/符号/诊断摘要，注入 volatile 块最前）</summary>
         private string? _ideContext;
 
+        /// <summary>当前解决方案上下文（注入 volatile 块最前）</summary>
+        private string? _solutionContext;
+
         /// <summary>Skill 发现上下文（独立存储）</summary>
         private string? _skillContext;
 
@@ -273,6 +276,25 @@ namespace DeepSeek_v4_for_VisualStudio.Services
 
             if (!string.IsNullOrEmpty(_ideContext))
                 _estimatedTokens += EstimateTokens(_ideContext);
+        }
+
+        /// <summary>
+        /// 设置当前解决方案上下文。解决方案路径是会话元数据，
+        /// 与 IDE Context 一起进入 volatile 块，不包装进当前 user 轮次。
+        /// </summary>
+        public void SetSolutionPath(string? solutionPath)
+        {
+            string? formatted = string.IsNullOrWhiteSpace(solutionPath)
+                ? null
+                : LocalizationService.Instance.Format("system.contextSolutionLabel", solutionPath);
+
+            if (!string.IsNullOrEmpty(_solutionContext))
+                _estimatedTokens -= EstimateTokens(_solutionContext);
+
+            _solutionContext = formatted;
+
+            if (!string.IsNullOrEmpty(_solutionContext))
+                _estimatedTokens += EstimateTokens(_solutionContext);
         }
 
         // ── Context Debugger 只读探针（P2，序号 20 数据面）──
@@ -803,7 +825,10 @@ namespace DeepSeek_v4_for_VisualStudio.Services
         {
             var parts = new List<string>();
 
-            // ── IDE 实时态快照（P1-A：最贴近用户当前意图，置于易变块最前）──
+            // ── 解决方案与 IDE 实时态快照（置于易变块最前，不进入 user 轮次）──
+            if (!string.IsNullOrWhiteSpace(_solutionContext))
+                parts.Add(_solutionContext!);
+
             if (!string.IsNullOrWhiteSpace(_ideContext))
                 parts.Add(_ideContext!);
 
@@ -830,6 +855,50 @@ namespace DeepSeek_v4_for_VisualStudio.Services
                 return null;
 
             return string.Join("\n\n", parts);
+        }
+
+        /// <summary>
+        /// 将当前 volatile 块固化到标准历史中当前 user 之前。
+        /// 下一轮请求会保留上一轮快照，避免 DeepSeek 前缀缓存在旧快照位置断裂。
+        /// </summary>
+        public bool PersistCurrentVolatileSnapshot()
+        {
+            string? snapshot = BuildVolatileContextBlock();
+            if (string.IsNullOrWhiteSpace(snapshot))
+                return false;
+
+            int lastUserIndex = -1;
+            for (int i = _entries.Count - 1; i >= 0; i--)
+            {
+                if (_entries[i].Role == "user")
+                {
+                    lastUserIndex = i;
+                    break;
+                }
+            }
+
+            if (lastUserIndex < 0)
+                return false;
+
+            int turnIndex = _entries[lastUserIndex].TurnIndex;
+            if (lastUserIndex > 0)
+            {
+                var previous = _entries[lastUserIndex - 1];
+                if (previous.IsVolatileSnapshot && previous.TurnIndex == turnIndex)
+                    return false;
+            }
+
+            var snapshotEntry = new ContextEntry
+            {
+                Role = "system",
+                Content = snapshot,
+                TurnIndex = turnIndex,
+                IsVolatileSnapshot = true,
+            };
+
+            _entries.Insert(lastUserIndex, snapshotEntry);
+            _estimatedTokens += EstimateTokens(snapshot);
+            return true;
         }
 
         /// <summary>
@@ -1606,6 +1675,7 @@ namespace DeepSeek_v4_for_VisualStudio.Services
             _fixedSystemPrompt = null;
             _searchContext = null;
             _ideContext = null;
+            _solutionContext = null;
             _skillContext = null;
             _alwaysInjectSkillsContext = null;
             _ragContext = null;
@@ -1695,6 +1765,8 @@ namespace DeepSeek_v4_for_VisualStudio.Services
             public string? Name { get; set; }
             /// <summary>所属轮次（1-based），-1 表示不属于任何轮次</summary>
             public int TurnIndex { get; set; } = -1;
+            /// <summary>是否为固化到历史中的 volatile 上下文快照</summary>
+            public bool IsVolatileSnapshot { get; set; }
         }
 
         #endregion

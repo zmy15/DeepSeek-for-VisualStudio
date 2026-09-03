@@ -232,10 +232,6 @@ namespace DeepSeek_v4_for_VisualStudio.View.InlineEdit
             _statusBorder.Visibility = Visibility.Visible;
         }
 
-        /// <summary>
-        /// net472/WPF 无原生 placeholder：在 TextBox 所在 Grid 单元格内叠加提示文本层。
-        /// 必须在 TextBox 已挂入父 Panel 后调用。
-        /// </summary>
         private static void AttachPlaceholder(TextBox box, string placeholder)
         {
             var holder = new TextBlock
@@ -248,6 +244,20 @@ namespace DeepSeek_v4_for_VisualStudio.View.InlineEdit
             };
 
             var host = new Grid { Background = Brushes.Transparent };
+            Panel? originalParent = null;
+            int originalIndex = -1;
+
+            // WPF 不允许同一元素有两个 logical parent。TextBox 可能已被加到 inputRow，
+            // 因此必须先断开，再挂到 placeholder host 上。
+            if (box.Parent is Panel parent)
+            {
+                originalIndex = parent.Children.IndexOf(box);
+                parent.Children.RemoveAt(originalIndex);
+                originalParent = parent;
+                if (parent is Grid g)
+                    Grid.SetColumn(host, Grid.GetColumn(box));
+            }
+
             host.Children.Add(box);
             host.Children.Add(holder);
 
@@ -260,14 +270,8 @@ namespace DeepSeek_v4_for_VisualStudio.View.InlineEdit
             box.GotKeyboardFocus += (_, _) => UpdateVisibility();
             box.LostKeyboardFocus += (_, _) => UpdateVisibility();
 
-            if (box.Parent is Panel parent)
-            {
-                int idx = parent.Children.IndexOf(box);
-                parent.Children.RemoveAt(idx);
-                if (parent is Grid g)
-                    Grid.SetColumn(host, Grid.GetColumn(box));
-                parent.Children.Insert(idx, host);
-            }
+            if (originalParent != null)
+                originalParent.Children.Insert(originalIndex, host);
         }
 
         private static SolidColorBrush Hex(string hex)

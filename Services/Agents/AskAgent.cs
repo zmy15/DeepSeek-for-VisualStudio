@@ -143,12 +143,20 @@ namespace DeepSeek_v4_for_VisualStudio.Services.Agents
             {
                 var ct = context.CancellationToken;
 
-                // ── 使用 BuildContextAwareMessages 构建消息（优先 ContextManager 实时历史）──
-                string contextualPrompt = BuildContextualPrompt(userMessage, context);
+                // ── 标准多轮对话：ContextManager 中已包含本次新增的原始 user；
+                //    不再移除/包装为尾部 [用户问题]，解决方案路径与文件上下文
+                //    由 volatile context 和原始 user 轮次承载。 ──
+                var contextManager = Context?.ContextManager;
+                bool useSessionHistory = contextManager != null && !contextManager.IsEmpty;
+                string contextualPrompt = useSessionHistory
+                    ? string.Empty
+                    : BuildContextualPrompt(userMessage, context);
                 var messages = BuildContextAwareMessages(
                     Definition.SystemPrompt,
                     contextualPrompt,
-                    deduplicateCurrentUser: true);
+                    maxRecentTurns: int.MaxValue,
+                    deduplicateCurrentUser: useSessionHistory,
+                    persistVolatileToHistory: useSessionHistory);
 
                 // ── 使用工具调用循环（支持 runSubagent 委派探索任务 + request_handoff 移交）──
                 string workspaceRoot = GetWorkspaceRoot(context);
@@ -546,12 +554,6 @@ namespace DeepSeek_v4_for_VisualStudio.Services.Agents
 
             var L = LocalizationService.Instance;
 
-            if (!string.IsNullOrEmpty(context.SolutionPath))
-            {
-                sb.AppendLine(string.Format(L["system.contextSolutionLabel"], context.SolutionPath));
-                sb.AppendLine();
-            }
-
             if (!string.IsNullOrEmpty(context.FileContext))
             {
                 sb.AppendLine(L["system.contextFileContent"]);
@@ -559,7 +561,6 @@ namespace DeepSeek_v4_for_VisualStudio.Services.Agents
                 sb.AppendLine();
             }
 
-            sb.AppendLine(L["system.contextUserQuestion"]);
             sb.AppendLine(userMessage);
 
             return sb.ToString();

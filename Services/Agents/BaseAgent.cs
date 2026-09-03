@@ -534,7 +534,22 @@ namespace DeepSeek_v4_for_VisualStudio.Services.Agents
             if (forwarded != null && forwarded.Count > 0)
                 return CloneApiMessages(forwarded);
 
-            return CaptureLastSentMessagesForCache();
+            var sentMessages = CaptureLastSentMessagesForCache();
+            return sentMessages == null ? null : TrimHandoffCachePrefix(sentMessages);
+        }
+
+        /// <summary>
+        /// Handoff 前缀只保留稳定历史和工具调用历史；
+        /// 源请求尾部的 volatile + user + agent prompt 由目标 Agent 重新生成。
+        /// </summary>
+        private List<ChatApiMessage> TrimHandoffCachePrefix(List<ChatApiMessage> messages)
+        {
+            int prefixCount = Context?.HandoffPrefixLength
+                ?? Context?.ToolHistoryInsertIndex
+                ?? messages.Count;
+            if (prefixCount < 0) prefixCount = 0;
+            if (prefixCount > messages.Count) prefixCount = messages.Count;
+            return CloneApiMessages(messages.Take(prefixCount));
         }
 
         /// <summary>
@@ -590,11 +605,11 @@ namespace DeepSeek_v4_for_VisualStudio.Services.Agents
         ///   messages[1] = 可选 dynamicBlock（压缩摘要 + 搜索 + RAG + 记忆）
         ///   messages[2..N] = 对话历史（来自 ContextManager，起始位置固定）
         ///   messages[N+1] = 当前用户消息
-        ///   messages[N+2] = Agent 专属行为指令（固定在最后）
+        ///   [插入点] = 当前用户消息后（工具循环插入 assistant/tool）
+        ///   最后一条 = Agent 专属行为指令
         /// 
-        /// 设计决策：Agent 提示词固定在列表最后，用户消息放在它之前。这样工具循环
-        /// 新增的 assistant/tool 消息都在用户消息前向上漂移，Agent 提示词位置不再
-        /// 随轮次漂移；历史起始位置固定的前缀缓存命中范围更大。
+        /// 设计决策：Agent 提示词固定在列表最后；assistant/tool 历史插入到当前
+        /// 用户消息之后、Agent 提示词之前，保持标准多轮对话语义。
         /// Handoff 时同样复用旧前缀，追加新用户消息和新 Agent 提示词。
         /// </summary>
         /// <param name="systemPrompt">Agent 专属行为指令（不含共享前缀）</param>
@@ -606,6 +621,14 @@ namespace DeepSeek_v4_for_VisualStudio.Services.Agents
             string userPrompt,
             int maxRecentTurns = int.MaxValue,
             bool deduplicateCurrentUser = false)
+            => BuildContextAwareMessages(systemPrompt, userPrompt, maxRecentTurns, deduplicateCurrentUser, false);
+
+        protected List<ChatApiMessage> BuildContextAwareMessages(
+            string systemPrompt,
+            string userPrompt,
+            int maxRecentTurns,
+            bool deduplicateCurrentUser,
+            bool persistVolatileToHistory)
         {
             // ──  Handoff 消息复用（v1.1.10）：若源 Agent 传递了工具循环消息列表，
             //    直接复用作为前缀，不再从 ContextManager 重建。
@@ -629,12 +652,26 @@ namespace DeepSeek_v4_for_VisualStudio.Services.Agents
                     result.RemoveRange(count - 2, 2);
                 }
 
-                // Handoff 前缀保留到源 Agent 的 user 为止；目标 Agent 的工具历史
-                // 从新 user 之前开始追加，避免复用过期索引。
+                // Handoff 前缀保留到源 Agent 的稳定工具历史为止；目标 Agent 的
+                // 身份边界以后的内容由目标 Agent 重新生成。
                 if (Context != null)
+                {
+                    Context.HandoffPrefixLength = result.Count;
                     Context.ToolHistoryInsertIndex = result.Count;
+                }
+
+                result.Add(new ChatApiMessage { Role = "system", Content = AiPrompts.HandoffRoleBoundaryPrompt });
+
+                string? handoffVolatileBlock = Context?.ContextManager?.BuildVolatileContextBlock();
+                if (!string.IsNullOrWhiteSpace(handoffVolatileBlock))
+                    result.Add(new ChatApiMessage { Role = "system", Content = handoffVolatileBlock });
 
                 result.Add(CreateCurrentUserMessage(userPrompt));
+
+                // 目标 Agent 的 assistant/tool 历史插入到当前 user 之后、
+                // Agent 专属提示词之前，保持标准多轮对话语义。
+                if (Context != null)
+                    Context.ToolHistoryInsertIndex = result.Count;
                 if (!string.IsNullOrWhiteSpace(systemPrompt))
                     result.Add(new ChatApiMessage { Role = "system", Content = systemPrompt });
                 return result;
@@ -642,8 +679,12 @@ namespace DeepSeek_v4_for_VisualStudio.Services.Agents
 
             var messages = new List<ChatApiMessage>();
             var ctxManager = Context?.ContextManager;
+            bool volatilePersisted = false;
             if (ctxManager != null && !ctxManager.IsEmpty && maxRecentTurns > 0)
             {
+                if (persistVolatileToHistory)
+                    volatilePersisted = ctxManager.PersistCurrentVolatileSnapshot();
+
                 var recentMessages = ctxManager.BuildApiMessagesRecentTurns(maxRecentTurns);
                 if (recentMessages.Count > 0)
                 {
@@ -656,28 +697,23 @@ namespace DeepSeek_v4_for_VisualStudio.Services.Agents
                 messages.Add(new ChatApiMessage { Role = "system", Content = GetSharedImmutablePrefix() });
             }
 
-            // UI 层在进入 Agent 前已把当前轮原始 user 写入 ContextManager。
-            // Ask 主流程会包装该 user（方案路径/文件上下文/用户问题标签），
-            // 这里先从稳定历史移除原始 user，再追加包装后的尾部 user，避免同轮重复。
+            // UI 层在进入 Agent 前已把当前轮原始 user 追加到 ContextManager。
+            // Ask 主流程使用该 user 作为标准多轮对话的当前轮次；
+            // 只有非会话历史 fallback 时才追加传入的 contextualPrompt。
             if (deduplicateCurrentUser
-                && !string.IsNullOrEmpty(Context?.CurrentUserContent)
-                && messages.Count > 0
-                && messages[messages.Count - 1].Role == "user"
-                && string.Equals(messages[messages.Count - 1].Content, Context!.CurrentUserContent, StringComparison.Ordinal))
+                && messages.All(m => m.Role != "user")
+                && !string.IsNullOrWhiteSpace(Context?.CurrentUserContent))
             {
-                messages.RemoveAt(messages.Count - 1);
+                messages.Add(CreateCurrentUserMessage(Context!.CurrentUserContent!));
             }
 
-            // 工具循环产生的 assistant/tool 历史插入到稳定历史之后、
-            // volatile + 当前 user 之前；下一轮重建时只替换尾部。
-            int toolHistoryInsertIndex = messages.Count;
+            // Handoff 缓存前缀边界：稳定历史之后，volatile/当前 user 之前。
             if (Context != null)
-                Context.ToolHistoryInsertIndex = toolHistoryInsertIndex;
+                Context.HandoffPrefixLength = messages.Count;
 
-            // ── 第4层：易变上下文（Working Set + RAG，放在用户消息之前）──
-            //     这些内容每轮都可能变（读不同文件、不同 query 的 RAG 结果），
-            //     放在消息末尾以最大化前面前缀缓存的命中范围。
-            if (ctxManager != null)
+            // ── 第4层：易变上下文。若已固化到标准历史，则不再重复注入；
+            //     否则作为当前轮临时 system 追加。 ──
+            if (ctxManager != null && !volatilePersisted)
             {
                 string? volatileBlock = ctxManager.BuildVolatileContextBlock();
                 if (!string.IsNullOrWhiteSpace(volatileBlock))
@@ -685,7 +721,15 @@ namespace DeepSeek_v4_for_VisualStudio.Services.Agents
             }
 
             // ── 第5层：当前用户消息 ──
-            messages.Add(CreateCurrentUserMessage(userPrompt));
+            // deduplicateCurrentUser=true 表示当前 user 已位于 ContextManager 历史中，
+            // 不再重新包装/更新；每次新提问都保留为新增的标准 user 轮次。
+            if (!deduplicateCurrentUser)
+                messages.Add(CreateCurrentUserMessage(userPrompt));
+
+            // 工具循环产生的 assistant/tool 历史插入到当前 user 之后、
+            // Agent 专属提示词之前，保持标准多轮对话语义。
+            if (Context != null)
+                Context.ToolHistoryInsertIndex = messages.Count;
 
             // ── 第6层：Agent 专属行为指令（固定在最后）──
             if (!string.IsNullOrWhiteSpace(systemPrompt))
@@ -1203,12 +1247,24 @@ namespace DeepSeek_v4_for_VisualStudio.Services.Agents
                     //     DeepSeek 前缀缓存在 messages[4] 断裂，命中率从 98% 暴跌至 10.9%。
                     //     提前捕获不含 assistant 的"干净前缀"确保 messages[0..3] 与已缓存
                     //     版本完全一致，前缀缓存可持续命中。──
-                    if (Context != null && toolCalls.Any(tc =>
-                        tc.Function.Name == "runSubagent" || tc.Function.Name == "request_handoff"))
+                    bool isRequestHandoff = toolCalls.Any(tc => tc.Function.Name == "request_handoff");
+                    if (Context != null && (isRequestHandoff || toolCalls.Any(tc =>
+                        tc.Function.Name == "runSubagent")))
                     {
-                        Context.ForwardedMessages =
-                            CaptureLastSentMessagesForCache()
-                            ?? new List<ChatApiMessage>(messages);
+                        if (isRequestHandoff)
+                        {
+                            // Handoff 前缀只保留到已完成的工具历史为止；源请求的
+                            // volatile + user 由目标 Agent 重新生成。
+                            var sentMessages = CaptureLastSentMessagesForCache()
+                                ?? new List<ChatApiMessage>(messages);
+                            Context.ForwardedMessages = TrimHandoffCachePrefix(sentMessages);
+                        }
+                        else
+                        {
+                            Context.ForwardedMessages =
+                                CaptureLastSentMessagesForCache()
+                                ?? new List<ChatApiMessage>(messages);
+                        }
                     }
 
                     // ── 添加 assistant 消息（含工具调用）──
@@ -1410,9 +1466,9 @@ namespace DeepSeek_v4_for_VisualStudio.Services.Agents
                         {
                             // 正常路径已在插入本轮 assistant/tool 消息前保存干净前缀；
                             // 此处仅作为异常路径兜底，避免把 request_handoff 自身消息带入前缀。
-                            Context.ForwardedMessages =
-                                CaptureLastSentMessagesForCache()
+                            var sentMessages = CaptureLastSentMessagesForCache()
                                 ?? new List<ChatApiMessage>(messages);
+                            Context.ForwardedMessages = TrimHandoffCachePrefix(sentMessages);
                         }
                         contentBuilder.Append("\n\n>  任务已移交给 " + PendingHandoffRequest.TargetAgent + " Agent...");
                         break;
