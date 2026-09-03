@@ -338,6 +338,33 @@ namespace DeepSeek_v4_for_VisualStudio.Services.Editing
             ConfirmAll();
         }
 
+        /// <summary>
+        /// 释放单个文件的撤销追踪（不修改磁盘 —— 落盘内容保持不变）。
+        /// 用于会话刷新时把该文件的撤销权移交给新 Workspace，
+        /// 避免旧 Workspace 的 RestoreToBaseline 覆盖新内容。
+        /// </summary>
+        public void DiscardFile(string filePath)
+        {
+            var normalizedPath = NormalizePath(filePath);
+            string? backupPath = null;
+
+            lock (_lock)
+            {
+                if (_trackedFiles.TryGetValue(normalizedPath, out var file))
+                {
+                    backupPath = file.DiskBackupPath;
+                    _trackedFiles.Remove(normalizedPath);
+                }
+            }
+
+            if (string.IsNullOrEmpty(backupPath)) return;
+            try { BackupService.CleanupBackup(backupPath); }
+            catch (Exception ex)
+            {
+                Logger.Warn($"[StagedWorkspace] 清理刷新前的磁盘备份失败: {backupPath} — {ex.Message}");
+            }
+        }
+
         private static string NormalizePath(string path)
             => Path.GetFullPath(path.Trim());
 

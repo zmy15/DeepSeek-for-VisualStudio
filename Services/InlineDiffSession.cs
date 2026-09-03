@@ -38,10 +38,10 @@ namespace DeepSeek_v4_for_VisualStudio.Services
         #region Properties
 
         /// <summary>唯一标识</summary>
-        public string SessionId { get; }
+        public string SessionId { get; private set; }
 
         /// <summary>关联的变更提案</summary>
-        public PreparedChangeSet Change { get; }
+        public PreparedChangeSet Change { get; private set; }
 
         /// <summary>提交目标（决定如何写入）</summary>
         public IProposalCommitTarget CommitTarget { get; }
@@ -123,6 +123,16 @@ namespace DeepSeek_v4_for_VisualStudio.Services
         public void ReplaceViewerHandle(DiffViewerHandle newHandle)
         {
             ViewerHandle = newHandle ?? throw new ArgumentNullException(nameof(newHandle));
+        }
+
+        /// <summary>
+        /// 替换变更提案（AI 在预览期间再次编辑同一文件时刷新会话内容）。
+        /// 调用方需同步移交 Workspace 并通过 Host 重建 Viewer。
+        /// </summary>
+        public void ReplaceChange(PreparedChangeSet change)
+        {
+            Change = change ?? throw new ArgumentNullException(nameof(change));
+            SessionId = change.ChangeId;
         }
 
         #endregion

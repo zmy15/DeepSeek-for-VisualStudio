@@ -119,8 +119,6 @@
         <Grid Grid.Row="1" x:Name="ViewerArea">
             <Border x:Name="DiffViewerHost"
                     Background="#1E1E1E" />
-            <Canvas x:Name="HunkButtonCanvas"
-                    ClipToBounds="True" />
         </Grid>
     </Grid>
 </UserControl>
