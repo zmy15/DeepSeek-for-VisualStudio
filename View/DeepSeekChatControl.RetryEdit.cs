@@ -775,6 +775,7 @@ namespace DeepSeek_v4_for_VisualStudio.View
                 // ── 同步消息列表并重建上下文 ──
                 RebuildFromTree();
                 RebuildContextFromTree();
+                TouchCurrentSessionLastActive();
 
                 // ── 恢复系统级上下文（Clear() 会清空 system prompt / memory / skill）──
                 await RestoreSystemContextAsync();

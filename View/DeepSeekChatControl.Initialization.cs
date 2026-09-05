@@ -34,7 +34,10 @@ namespace DeepSeek_v4_for_VisualStudio.View
 
         private void InitializeApiService()
         {
-            if (_options == null || string.IsNullOrEmpty(_options.ApiKey))
+            // DialogPage 保存流程可能留下 DPAPI 备份格式。这里是最后一道运行时防线：
+            // 禁止把 "dpapi1:..." 密文作为 Bearer Token 发给 DeepSeek API。
+            var runtimeApiKey = _options == null ? string.Empty : ApiKeyProtection.Unprotect(_options.ApiKey);
+            if (string.IsNullOrEmpty(runtimeApiKey))
             {
                 // ── 无 Key：释放旧服务，避免残留旧 Key 继续发送请求 ──
                 _apiService?.Dispose();
@@ -43,7 +46,7 @@ namespace DeepSeek_v4_for_VisualStudio.View
             }
 
             _apiService?.Dispose();
-            _apiService = new DeepSeekApiService(_options.ApiKey, _options.SelectedModel);
+            _apiService = new DeepSeekApiService(runtimeApiKey, _options.SelectedModel);
             _apiService.ConfigureThinking(_options.IsThinkingEnabled, _options.ReasoningEffort);
 
             // ── 注入前缀缓存管理器（修复：直接 new 的 ApiService 缺少 DI 注入的 PrefixCache）──
@@ -233,8 +236,9 @@ namespace DeepSeek_v4_for_VisualStudio.View
             {
                 if (_apiService == null || _options == null) return;
 
-                if (!string.IsNullOrWhiteSpace(_options.ApiKey))
-                    _apiService.UpdateApiKey(_options.ApiKey);
+                var runtimeApiKey = ApiKeyProtection.Unprotect(_options.ApiKey);
+                if (!string.IsNullOrWhiteSpace(runtimeApiKey))
+                    _apiService.UpdateApiKey(runtimeApiKey);
 
                 // Settings events are authoritative. Reading UI controls here caused
                 // Unified Settings changes to be overwritten with stale chat-window state.

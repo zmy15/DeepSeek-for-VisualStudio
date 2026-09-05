@@ -301,6 +301,7 @@ namespace DeepSeek_v4_for_VisualStudio.View
                 earlyUserMsgIndex);
             UpdateBrowser();
             ClearAttachedFiles();
+            TouchCurrentSessionLastActive();
             AutoTitleSession();
             // 注意：InputTextBox 和 UpdateButtonsState 已在上方立即执行
 

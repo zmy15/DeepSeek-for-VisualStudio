@@ -421,6 +421,7 @@
     "input.attachDebugTip": "将 Visual Studio 输出窗口中的调试信息添加到对话上下文",
     "input.uploadFileTip": "上传文件 (支持 .txt .doc .xls .py .c 等)",
  "input.searchEngineTip": "选择搜索引擎。百度搜索需在 工具选项DeepSeek Chat 中配置 API Key",
+ "input.modelTip": "选择模型",
     "input.webSearchOff": "联网搜索: 已关闭 (点击开启)",
     "input.webSearchOn": "联网搜索: 已开启 (点击关闭)",
     "input.mcpConfig": "配置 MCP 服务器",

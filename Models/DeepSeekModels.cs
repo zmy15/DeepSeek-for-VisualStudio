@@ -662,6 +662,9 @@ namespace DeepSeek_v4_for_VisualStudio.Models
         [DataMember]
         public DateTime CreatedAt { get; set; } = DateTime.Now;
 
+        /// <summary>
+        /// 最后一次用户提交消息的时间；仅切换/查看会话不会刷新该时间。
+        /// </summary>
         [DataMember]
         public DateTime LastActiveAt { get; set; } = DateTime.Now;
 

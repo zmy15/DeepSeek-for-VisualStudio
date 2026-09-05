@@ -81,7 +81,6 @@ namespace DeepSeek_v4_for_VisualStudio.View
 
             // ── ApiHistory 始终保存（含 tool/system 消息，树结构不包含）──
             _activeSession.ApiHistory = _contextManager.GetFullContext();
-            _activeSession.LastActiveAt = DateTime.Now;
 
             // ── 持久化累计 Cache 统计（重启后恢复显示）──
             if (_apiService != null)
@@ -211,6 +210,18 @@ namespace DeepSeek_v4_for_VisualStudio.View
         }
 
         /// <summary>
+        /// 仅在用户真正提交消息时刷新会话活跃时间；切换/查看会话不应改变排序。
+        /// 注意：本方法只更新内存值，持久化依赖后续 SaveCurrentSession() 序列化时
+        /// 携带该值（LastActiveAt 已不再由 SaveCurrentSession 主动刷新）。
+        /// </summary>
+        private void TouchCurrentSessionLastActive()
+        {
+            if (_activeSession == null) return;
+            _activeSession.LastActiveAt = DateTime.Now;
+            PopulateSessionComboBox();
+        }
+
+        /// <summary>
         /// 切换到指定会话。
         /// </summary>
         #pragma warning disable VSTHRD100 // async void 用于会话切换（从事件处理程序调用），异常已在方法内处理
@@ -242,6 +253,8 @@ namespace DeepSeek_v4_for_VisualStudio.View
                 {
                     // 切换到新会话
                     _activeSession = session;
+                    if (_sessionsContainer != null)
+                        _sessionsContainer.ActiveSessionId = _activeSession.Id;
                     ResetActiveAgentToAsk();
 
                     // ── 同步当前会话 ID 到内置工具服务（MemoryTool 需要）──
@@ -347,6 +360,10 @@ namespace DeepSeek_v4_for_VisualStudio.View
 
                 // 页面刷新后重建持久化任务面板
                 _ = RebuildPanelsWhenPageReadyAsync();
+
+                // ── 持久化 ActiveSessionId：异常退出后重启仍恢复到刚切换的会话 ──
+                if (_sessionsContainer != null)
+                    ChatPersistenceService.SaveSessions(_solutionPath, _sessionsContainer);
 
                 Logger.Info($"切换到会话: {_activeSession.Title}");
             }

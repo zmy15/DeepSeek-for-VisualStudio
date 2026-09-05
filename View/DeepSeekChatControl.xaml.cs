@@ -1043,6 +1043,10 @@ namespace DeepSeek_v4_for_VisualStudio.View
                 AddDebugMenuItem.Header = L["input.attachDebug"];
                 AddDebugMenuItem.ToolTip = L["input.attachDebugTip"];
 
+                // 模型选择 tooltip
+                if (ModelComboBox != null)
+                    ModelComboBox.ToolTip = L["input.modelTip"];
+
                 // 搜索引擎 tooltip
                 if (WebSearchEngineComboBox != null)
                     WebSearchEngineComboBox.ToolTip = L["input.searchEngineTip"];

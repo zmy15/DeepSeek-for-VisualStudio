@@ -233,7 +233,11 @@ namespace DeepSeek_v4_for_VisualStudio.Settings
         {
             if (store.TryGet(kind, out string value))
             {
-                return value;
+                // 旧版本曾把 DPAPI 备份密文同步进 Credential Storage。Keychain 是
+                // 运行时主来源，因此这里必须保证返回明文；解密失败时按未配置处理。
+                // 注：解密失败时直接返回空串而不回退 legacyValue —— DPAPI 备份与
+                // Keychain 内的是同一密钥加密的密文，两者解密成败一致，回退无收益。
+                return ApiKeyProtection.Unprotect(value);
             }
 
             if (string.IsNullOrWhiteSpace(legacyValue))
@@ -249,14 +253,24 @@ namespace DeepSeek_v4_for_VisualStudio.Settings
 
         private bool SaveCredential(IApiKeyStore store, ApiKeyKind kind, string value)
         {
-            if (!string.IsNullOrWhiteSpace(value))
-            {
-                return store.Set(kind, value);
-            }
+            var runtimeValue = ApiKeyProtection.Unprotect(value);
 
             // An empty in-memory value can also mean "the credential store was not readable
             // during startup". Only clear it when the user explicitly edited this page.
-            return !_apiKeysDirty || store.Clear(kind);
+            if (string.IsNullOrWhiteSpace(value))
+            {
+                return !_apiKeysDirty || store.Clear(kind);
+            }
+
+            // value 非空但解密结果为空 → DPAPI 解密失败（跨用户/凭据变更），
+            // 绝不能 Clear 删除用户的密钥，视为本次未写入，保留原凭据等待下次成功。
+            if (string.IsNullOrWhiteSpace(runtimeValue))
+            {
+                Logger.Warn($"[Settings] {kind} 解密失败，Keychain 写入中止（保留原凭据）");
+                return true;
+            }
+
+            return store.Set(kind, runtimeValue);
         }
 
         private bool HasApiKeyChanges(string apiKey, string baiduApiKey, string bingApiKey)

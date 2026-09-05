@@ -428,6 +428,7 @@
     "input.attachDebugTip": "Add debug output from the Visual Studio Output window to the conversation context",
     "input.uploadFileTip": "Upload file (supports .txt .doc .xls .py .c etc.)",
  "input.searchEngineTip": "Select search engine. Baidu requires API Key in ToolsOptionsDeepSeek Chat",
+ "input.modelTip": "Select model",
     "input.webSearchOff": "Web search: off (click to enable)",
     "input.webSearchOn": "Web search: on (click to disable)",
     "input.mcpConfig": "Configure MCP Server",

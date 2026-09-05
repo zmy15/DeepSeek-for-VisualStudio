@@ -810,7 +810,7 @@
 
                     <!-- 左侧: 模型、思考和搜索设置 -->
                     <!-- P2：独立主题切换已移除，主题始终跟随 IDE -->
-                    <StackPanel Grid.Column="0" Orientation="Horizontal">
+                    <StackPanel Grid.Column="0" Orientation="Horizontal" VerticalAlignment="Center">
                         <Button x:Name="AddContextButton" Content="&#xE710;"
                                 Click="AddContextButton_Click"
                                 Style="{StaticResource TransparentButton}"
@@ -828,6 +828,7 @@
                             Foreground="#CE9178" />
                         <ComboBox x:Name="ModelComboBox"
                                   MinWidth="130" Margin="4,0,4,0"
+                                  ToolTip="{utils:I18n input.modelTip}"
                                   SelectionChanged="ModelComboBox_SelectionChanged" />
                         <CheckBox x:Name="ThinkingCheckBox"
                                   VerticalAlignment="Center" Margin="2,0,4,0"
@@ -851,7 +852,7 @@
                                 Click="WebSearchToggleButton_Click"
                                 Style="{StaticResource TransparentButton}"
                                 ToolTip="联网搜索: 已关闭"
-                                FontSize="14" Padding="4,0" Margin="0,0,2,0"
+                                FontSize="14" Padding="4,0" Margin="0,0,8,0"
                                 Foreground="#888888">
                             <Button.Content>
                                 <TextBlock Text="&#xE774;" FontSize="13" FontFamily="Segoe Fluent Icons" />
@@ -868,9 +869,11 @@
                             </Button.Content>
                         </Button>
                         <!-- 清空按钮：置于左侧设置组末尾，与发送保持远距离防误触 -->
+                        <Rectangle Width="1" Height="14" Fill="#454545"
+                                   VerticalAlignment="Center" Margin="4,0,4,0" />
                         <Button x:Name="ClearButton" Content="清空" Click="ClearButton_Click"
                                 Style="{StaticResource TransparentButton}"
-                                Margin="6,0,0,0" Padding="8,2"
+                                Margin="2,0,0,0" Padding="8,2"
                                 FontSize="12" Foreground="#888888"
                                 BorderBrush="#555555" BorderThickness="1"
                                 ToolTip="清空当前对话（需确认）" />
@@ -908,7 +911,7 @@
                 </Grid.ColumnDefinitions>
 
                 <!-- 左侧：审批模式 -->
-                <StackPanel Grid.Column="0" Orientation="Horizontal">
+                    <StackPanel Grid.Column="0" Orientation="Horizontal" VerticalAlignment="Center">
                     <TextBlock x:Name="ApprovalModeLabel"
                                Text="{utils:I18n chat.approvalModeLabel}"
                                Foreground="#D4D4D4"
