@@ -266,7 +266,7 @@ namespace DeepSeek_v4_for_VisualStudio.View
 
                 // 刷新 _options 引用（DialogPage 属性已由 VS 自动更新）
                 if (_package != null)
-                    _options = _package.Options;
+                    _options = DeepSeekOptionsPage.Instance ?? _package.Options;
 
                 RefreshCoreControlsFromSettings();
 
@@ -774,6 +774,35 @@ namespace DeepSeek_v4_for_VisualStudio.View
             {
                 try
                 {
+                    // 启动页可能长时间停留。API 服务不能继续依赖启动早期加载的配置快照，
+                    // 打开解决方案时重新同步一次持久化设置，确保最新 API Key 生效。
+                    if (_package != null)
+                    {
+                        var persistedOptions = await _package.LoadPersistedOptionsAsync();
+                        await Microsoft.VisualStudio.Shell.ThreadHelper.JoinableTaskFactory.SwitchToMainThreadAsync();
+
+                        string? oldApiKey = _options?.ApiKey;
+                        string? oldModel = _options?.SelectedModel;
+                        bool oldThinking = _options?.IsThinkingEnabled ?? true;
+                        string? oldEffort = _options?.ReasoningEffort;
+
+                        _options = persistedOptions;
+                        RefreshCoreControlsFromSettings();
+
+                        bool apiConfigChanged =
+                            _apiService == null ||
+                            !string.Equals(oldApiKey, _options.ApiKey, StringComparison.Ordinal) ||
+                            !string.Equals(oldModel, _options.SelectedModel, StringComparison.Ordinal) ||
+                            oldThinking != _options.IsThinkingEnabled ||
+                            !string.Equals(oldEffort, _options.ReasoningEffort, StringComparison.Ordinal);
+
+                        if (apiConfigChanged)
+                        {
+                            Logger.Info("[Settings] 解决方案打开后同步 API 配置，重建 API 服务");
+                            InitializeApiService();
+                        }
+                    }
+
                     // 先保存当前对话
                     SaveCurrentSession();
 
