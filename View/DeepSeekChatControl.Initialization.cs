@@ -828,7 +828,20 @@ namespace DeepSeek_v4_for_VisualStudio.View
 
         /// <summary>
         /// 触发代码索引：在后台线程执行，不阻塞 UI。
-        private async Task LoadAndShowAsync()
+        private Task LoadAndShowAsync()
+        {
+            // 启动加载、解决方案切换和会话切换可能几乎同时触发。
+            // WebView2 环境只允许初始化一次，先串行化，避免两个调用用不同 Environment 竞争。
+            if (_loadAndShowTask?.IsCompleted == false)
+            {
+                return _loadAndShowTask;
+            }
+
+            _loadAndShowTask = LoadAndShowCoreAsync();
+            return _loadAndShowTask;
+        }
+
+        private async Task LoadAndShowCoreAsync()
         {
             _messagesHtml.Clear();
             _lastRenderedMessagesLength = 0;
@@ -1000,56 +1013,76 @@ namespace DeepSeek_v4_for_VisualStudio.View
                 return true;
             }
 
+            // 同一控件生命周期内，EnsureCoreWebView2Async 只能用一个 Environment。
+            // 启动加载和解决方案切换可能并发到达，这里把初始化收敛为单个 Task。
+            var initializationTask = _webViewInitializationTask;
+            if (initializationTask == null)
+            {
+                initializationTask = InitializeWebViewCoreAsync();
+                _webViewInitializationTask = initializationTask;
+            }
+
+            bool success = await initializationTask;
+            if (!success && ReferenceEquals(initializationTask, _webViewInitializationTask))
+            {
+                _webViewInitializationTask = null;
+            }
+
+            return success;
+        }
+
+        private async Task<bool> InitializeWebViewCoreAsync()
+        {
+            if (ChatWebView?.CoreWebView2 != null)
+            {
+                return true;
+            }
+
             string userDataFolder = System.IO.Path.Combine(
                 Environment.GetFolderPath(Environment.SpecialFolder.LocalApplicationData),
                 "DeepSeekVS", "WebView2");
 
-            // ── 尝试1：使用自定义用户数据文件夹 ──
+            Microsoft.Web.WebView2.Core.CoreWebView2Environment environment;
             try
             {
                 Logger.Info($"[Render] 开始初始化 WebView2 CoreWebView2 环境 (userDataFolder={userDataFolder})");
-                var env = await CoreWebView2Environment.CreateAsync(null, userDataFolder);
-                await ChatWebView.EnsureCoreWebView2Async(env);
-                Logger.Info("[Render] CoreWebView2 环境初始化成功");
-                return true;
+                environment = await CoreWebView2Environment.CreateAsync(null, userDataFolder);
             }
             catch (Exception ex)
             {
-                Logger.Warn($"[Render] WebView2 初始化尝试1失败: {ex.GetType().Name}: {ex.Message}");
-                Logger.Warn($"[Render] 堆栈: {ex.StackTrace}");
-
-                // 并发初始化时，EnsureCoreWebView2Async 可能已经完成但抛出环境不一致异常。
-                if (ChatWebView?.CoreWebView2 != null)
-                {
-                    Logger.Info("[Render] CoreWebView2 已在尝试1中初始化，按成功处理");
-                    return true;
-                }
-
-                // ── 尝试2：使用默认用户数据文件夹 + 默认运行时发现 ──
+                Logger.Warn($"[Render] 创建 WebView2 环境失败: {ex.GetType().Name}: {ex.Message}");
                 try
                 {
-                    Logger.Info("[Render] 重试 WebView2 初始化 (尝试2, 默认参数)...");
-                    // 传入空字符串等效于默认临时文件夹
-                    var env = await CoreWebView2Environment.CreateAsync();
-                    await ChatWebView.EnsureCoreWebView2Async(env);
-                    Logger.Info("[Render] CoreWebView2 环境初始化成功 (尝试2)");
-                    return true;
+                    Logger.Info("[Render] 回退使用默认 WebView2 环境参数...");
+                    environment = await CoreWebView2Environment.CreateAsync();
                 }
                 catch (Exception ex2)
                 {
-                    Logger.Error($"[Render] WebView2 初始化尝试2也失败: {ex2.GetType().Name}: {ex2.Message}");
-
-                    if (ChatWebView?.CoreWebView2 != null)
-                    {
-                        Logger.Info("[Render] CoreWebView2 已在尝试2中初始化，按成功处理");
-                        return true;
-                    }
-
+                    Logger.Error($"[Render] WebView2 环境创建失败: {ex2.GetType().Name}: {ex2.Message}");
                     ShowWebView2InitializationError(ex2);
+                    return false;
                 }
             }
 
-            return false;
+            try
+            {
+                _webView2Environment ??= environment;
+                await ChatWebView.EnsureCoreWebView2Async(_webView2Environment);
+                Logger.Info("[Render] CoreWebView2 环境初始化成功");
+                return ChatWebView.CoreWebView2 != null;
+            }
+            catch (Exception ex)
+            {
+                Logger.Error($"[Render] WebView2 初始化失败: {ex.GetType().Name}: {ex.Message}");
+                if (ChatWebView?.CoreWebView2 != null)
+                {
+                    Logger.Info("[Render] CoreWebView2 已在初始化过程中完成，按成功处理");
+                    return true;
+                }
+
+                ShowWebView2InitializationError(ex);
+                return false;
+            }
         }
 
         private static string? TryGetWebView2RuntimeVersion()

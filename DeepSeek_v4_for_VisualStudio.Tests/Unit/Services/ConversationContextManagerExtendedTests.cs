@@ -130,6 +130,31 @@ public class ConversationContextManagerExtendedTests
     }
 
     [Fact]
+    public void GetStats_IncludesToolCallCount()
+    {
+        _manager.AddUserMessage("Search and inspect");
+        _manager.AddAssistantMessage(null, toolCalls:
+        [
+            new ToolCall
+            {
+                Id = "call_1",
+                Type = "function",
+                Function = new ToolCallFunction { Name = "file_search", Arguments = "{}" },
+            },
+            new ToolCall
+            {
+                Id = "call_2",
+                Type = "function",
+                Function = new ToolCallFunction { Name = "read_file", Arguments = "{}" },
+            },
+        ]);
+
+        var stats = _manager.GetStats();
+
+        stats.ToolCallCount.Should().Be(2);
+    }
+
+    [Fact]
     public void AddAssistantMessage_WithBothReasoningAndToolCalls_StoresBoth()
     {
         _manager.AddUserMessage("Search");

@@ -10,6 +10,33 @@ namespace DeepSeek_v4_for_VisualStudio.Services
         #region JavaScript Builders
 
         /// <summary>
+        /// Exposes localized labels for the diagnostic Context panel without leaking
+        /// source-code literals into the WebView DOM.
+        /// </summary>
+        private static string BuildContextDebugLabelsJs()
+        {
+            return "window.__ctxDebugLabels={" +
+                "title:" + EscapeJsString(L["chat.html.context.title"]) + "," +
+                "tokens:" + EscapeJsString(L["chat.html.context.tokens"]) + "," +
+                "injected:" + EscapeJsString(L["chat.html.context.injected"]) + "," +
+                "characters:" + EscapeJsString(L["chat.html.context.characters"]) + "," +
+                "search:" + EscapeJsString(L["chat.html.context.search"]) + "," +
+                "file:" + EscapeJsString(L["chat.html.context.file"]) + "," +
+                "selection:" + EscapeJsString(L["chat.html.context.selection"]) + "," +
+                "cursor:" + EscapeJsString(L["chat.html.context.cursor"]) + "," +
+                "symbol:" + EscapeJsString(L["chat.html.context.symbol"]) + "," +
+                "diagnostics:" + EscapeJsString(L["chat.html.context.diagnostics"]) + "," +
+                "errors:" + EscapeJsString(L["chat.html.context.errors"]) + "," +
+                "warnings:" + EscapeJsString(L["chat.html.context.warnings"]) + "," +
+                "off:" + EscapeJsString(L["chat.html.context.off"]) + "," +
+                "turns:" + EscapeJsString(L["chat.html.context.turns"]) + "," +
+                "messages:" + EscapeJsString(L["chat.html.context.messages"]) +
+                "," +
+                "toolCalls:" + EscapeJsString(L["chat.html.context.toolCalls"]) +
+                "};";
+        }
+
+        /// <summary>
         /// 声明 decorateCodeBlocks 函数（语言标签 + highlight.js 语法高亮 + 复制/应用按钮）。
         /// </summary>
         /// <summary>
@@ -443,14 +470,17 @@ window.__copyMessage=function(msgIndex){
 window._showCopyFeedback=function(msgIndex){
     var btn=document.getElementById('copy-btn-'+msgIndex);
     if(!btn)return;
+    var copyLabel=btn.getAttribute('data-copy-label')||'Copy';
+    var copiedLabel=btn.getAttribute('data-copied-label')||'Copied';
     btn.classList.add('copied');
-    btn.textContent='\uE8C8';
+    btn.textContent=copiedLabel;
+    btn.style.fontFamily='';
     btn.style.position='';
     setTimeout(function(){
         btn.classList.remove('copied');
-        btn.textContent='\uE8C8';btn.style.fontFamily=""'Segoe Fluent Icons','Segoe MDL2 Assets'"";
+        btn.textContent=copyLabel;btn.style.fontFamily='';
         btn.style.position='';
-    },2000);
+    },1200);
 };
 
 // ═══════════════════════════════════════════════
@@ -476,7 +506,7 @@ window._showCopyFeedback=function(msgIndex){
             +'color:#d4d4d4;max-width:340px;display:none;box-shadow:0 4px 14px rgba(0,0,0,.4);';
         var head=document.createElement('div');
         head.id='ctx-debug-head';
-        head.textContent='Context';
+        head.textContent=(window.__ctxDebugLabels||{}).title||'Context';
         head.style.cssText='padding:4px 10px;cursor:pointer;user-select:none;color:#9CDCFE;';
         var body=document.createElement('div');
         body.id='ctx-debug-body';
@@ -484,7 +514,7 @@ window._showCopyFeedback=function(msgIndex){
         head.addEventListener('click',function(){
             var open=body.style.display!=='none';
             body.style.display=open?'none':'block';
-            head.textContent='Context';
+            head.textContent=(window.__ctxDebugLabels||{}).title||'Context';
         });
         p.appendChild(head);p.appendChild(body);
         document.body.appendChild(p);
@@ -494,23 +524,26 @@ window._showCopyFeedback=function(msgIndex){
         try{
             var panel=_ensureCtxPanel();
             panel.style.display='block';
+            var t=window.__ctxDebugLabels||{};
             var rows=[];
             var tk=d.tokens||{};
-            rows.push('Tokens   : '+(tk.estimated||0).toLocaleString()+' / '+(tk.budget||0).toLocaleString()
+            rows.push((t.tokens||'Tokens')+' : '+(tk.estimated||0).toLocaleString()+' / '+(tk.budget||0).toLocaleString()
                 +'  ('+(tk.percent!=null?tk.percent:0)+'%)');
             var inj=d.injected||{};
-            rows.push('Injected : IDE='+!!inj.ide+' ('+(inj.ideChars||0)+' ch)'
-                +'  Search='+!!inj.search+'  RAG='+!!inj.rag);
+            rows.push((t.injected||'Injected')+' : IDE='+!!inj.ide+' ('+(inj.ideChars||0)+' '+(t.characters||'ch')+')'
+                +'  '+(t.search||'Search')+'='+!!inj.search+'  RAG='+!!inj.rag);
             var ide=d.ideSnapshot;
             if(ide){
-                rows.push('File     : '+(ide.file||'-'));
-                if(ide.hasSelection)rows.push('Selection: L'+ide.selectionStartLine+'-L'+ide.selectionEndLine);
-                rows.push('Cursor   : L'+(ide.cursorLine||0)+(ide.symbol?('   Symbol: '+ide.symbol):''));
-                rows.push('Diags    : '+(ide.errors||0)+' err / '+(ide.warnings||0)+' warn');
+                rows.push((t.file||'File')+' : '+(ide.file||'-'));
+                if(ide.hasSelection)rows.push((t.selection||'Selection')+' : L'+ide.selectionStartLine+'-L'+ide.selectionEndLine);
+                rows.push((t.cursor||'Cursor')+' : L'+(ide.cursorLine||0)+(ide.symbol?('   '+(t.symbol||'Symbol')+': '+ide.symbol):''));
+                rows.push((t.diagnostics||'Diags')+' : '+(ide.errors||0)+' '+(t.errors||'err')+' / '+(ide.warnings||0)+' '+(t.warnings||'warn'));
             }else{
-                rows.push('IDE      : (off)');
+                rows.push('IDE : '+(t.off||'(off)'));
             }
-            rows.push('Turns    : '+(d.turns||0)+'    Messages: '+(d.messages||0));
+            rows.push((t.turns||'Turns')+' : '+(d.turns||0)
+                +'    '+(t.messages||'Messages')+' : '+(d.messages||0)
+                +'    '+(t.toolCalls||'Tool Calls')+' : '+(d.toolCalls||0));
             var body=document.getElementById('ctx-debug-body');
             if(body)body.textContent=rows.join('\n');
         }catch(err){ console.error('[DeepSeek] ctxDebug render:',err); }
@@ -619,6 +652,8 @@ window._showCopyFeedback=function(msgIndex){
                             copyBtn.className='msg-action-btn copy-msg-btn';
                             copyBtn.textContent=msg.copyBtn||'Copy';
                             copyBtn.title=msg.copyLabel||'Copy this response';
+                            copyBtn.setAttribute('data-copy-label',msg.copyBtn||'Copy');
+                            copyBtn.setAttribute('data-copied-label',msg.copyFeedback||'Copied');
                             copyBtn.onclick=function(){window.__copyMessage(msg.i);};
                             var row2=document.querySelector('#msg-'+msg.i+' .msg-actions-row');
                             if(row2)row2.appendChild(copyBtn);

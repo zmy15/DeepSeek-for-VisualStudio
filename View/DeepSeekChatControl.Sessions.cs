@@ -242,8 +242,6 @@ namespace DeepSeek_v4_for_VisualStudio.View
                 {
                     // 切换到新会话
                     _activeSession = session;
-                    _activeSession.LastActiveAt = DateTime.Now;
-
                     ResetActiveAgentToAsk();
 
                     // ── 同步当前会话 ID 到内置工具服务（MemoryTool 需要）──

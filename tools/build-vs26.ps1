@@ -19,10 +19,10 @@ param(
 
 $ErrorActionPreference = 'Stop'
 
-$Vs26Root   = 'C:\Program Files\Microsoft Visual Studio\18\Community'
+$Vs26Root   = 'D:\Visual Studio 2026'
 $Msbuild    = Join-Path $Vs26Root 'MSBuild\Current\Bin\MSBuild.exe'
-$Vstest     = 'C:\Program Files\Microsoft Visual Studio\2022\Professional\Common7\IDE\CommonExtensions\Microsoft\TestWindow\vstest.console.exe'
-$SdkSdksDir = 'C:\Program Files\dotnet\sdk\9.0.315\Sdks'
+$Vstest     = 'D:\Visual Studio\IDE\Common7\IDE\CommonExtensions\Microsoft\TestWindow\vstest.console.exe'
+$SdkSdksDir = 'C:\Program Files\dotnet\sdk\9.0.314\Sdks'
 $RepoRoot   = Split-Path -Parent $PSScriptRoot
 
 if (-not (Test-Path $Msbuild))   { throw "MSBuild not found: $Msbuild" }
@@ -67,7 +67,7 @@ if ($SkipTests) { Write-Host 'Done (-SkipTests).' ; return }
 
 # ── 3. Build tests (coverlet needs a non-empty NETCoreSdkVersion under VS MSBuild) ──
 & $Msbuild (Join-Path $RepoRoot 'DeepSeek_v4_for_VisualStudio.Tests\DeepSeek_v4_for_VisualStudio.Tests.csproj') `
-    @restoreArgs "-p:Configuration=$Configuration" '-p:NETCoreSdkVersion=9.0.315' -v:m -nologo -m:1
+    @restoreArgs "-p:Configuration=$Configuration" '-p:NETCoreSdkVersion=9.0.314' -v:m -nologo -m:1
 if ($LASTEXITCODE -ne 0) { throw "Tests project build failed ($LASTEXITCODE)" }
 Write-Host '[OK] Tests project built.' -ForegroundColor Green
 

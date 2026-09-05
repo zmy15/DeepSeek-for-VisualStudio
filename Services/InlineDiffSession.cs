@@ -192,7 +192,12 @@ namespace DeepSeek_v4_for_VisualStudio.Services
                 }
 
                 if (result.Success)
+                {
                     TransitionTo(InlineDiffSessionState.Committed);
+                    // Committed 是终态：立即释放 Diff Viewer，并让 SessionManager 移除索引。
+                    // 这样同一文档可以立刻创建下一次 Inline Diff。
+                    Dispose();
+                }
                 else if (result.IsConflict)
                     TransitionTo(InlineDiffSessionState.Conflicted);
                 else

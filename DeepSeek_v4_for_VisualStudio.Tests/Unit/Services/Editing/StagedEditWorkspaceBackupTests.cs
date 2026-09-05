@@ -59,6 +59,37 @@ public class StagedEditWorkspaceBackupTests : IDisposable
     }
 
     [Fact]
+    public void ReadFile_PrefersOpenDocumentContentProvider()
+    {
+        var file = WriteSourceFile("a.txt", "DISK");
+
+        var ws = new StagedEditWorkspace
+        {
+            OpenDocumentContentProvider = _ => "BUFFER",
+        };
+
+        ws.ReadFile(file).Should().Be("BUFFER", "打开文档应以编辑器 buffer 内容为读写基准");
+    }
+
+    [Fact]
+    public void WriteFile_UsesOpenBufferAsUndoBaseline()
+    {
+        var file = WriteSourceFile("a.txt", "DISK");
+
+        var ws = new StagedEditWorkspace
+        {
+            OpenDocumentContentProvider = _ => "USER UNSAVED",
+        };
+
+        ws.WriteFile(file, "AI EDIT");
+
+        var batch = ws.ToPreparedChangeBatch();
+        var change = batch.Changes.Should().ContainSingle().Subject;
+        change.BaselineText.Should().Be("USER UNSAVED", "撤销基线必须包含用户未保存修改");
+        change.ProposedText.Should().Be("AI EDIT");
+    }
+
+    [Fact]
     public void RestoreToBaseline_RestoresFromDiskBackup()
     {
         var file = WriteSourceFile("a.txt", "ORIGINAL");

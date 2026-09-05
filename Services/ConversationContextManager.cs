@@ -167,6 +167,9 @@ namespace DeepSeek_v4_for_VisualStudio.Services
         /// <summary>获取消息总条数</summary>
         public int MessageCount => _entries.Count;
 
+        /// <summary>获取当前上下文中 assistant 消息携带的工具调用总次数</summary>
+        public int ToolCallCount => _entries.Sum(e => e.ToolCalls?.Count ?? 0);
+
         /// <summary>
         /// 从指定起始索引开始，将 _entries 转换为 ChatApiMessage 列表（不含 SP/FP/DB 前缀）。
         /// 用于子代理（Explore）执行后将内部工具循环消息回注到父代理消息列表。
@@ -1527,6 +1530,7 @@ namespace DeepSeek_v4_for_VisualStudio.Services
                 TokenBudget = TokenBudget,
                 MessageCount = MessageCount,
                 TurnCount = TurnCount,
+                ToolCallCount = ToolCallCount,
                 SystemPromptTokens = EstimateTokens(_systemPrompt),
                 SearchContextTokens = EstimateTokens(_searchContext),
                 CompressedTurns = _compressor?.CompressedSummaries.Count ?? 0,

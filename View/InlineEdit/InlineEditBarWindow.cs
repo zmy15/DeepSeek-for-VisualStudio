@@ -4,6 +4,8 @@ using System.Windows.Controls;
 using System.Windows.Input;
 using System.Windows.Media;
 using System.Threading.Tasks;
+using System.Windows.Threading;
+using System.Windows.Controls.Primitives;
 using DeepSeek_v4_for_VisualStudio.Services;
 
 namespace DeepSeek_v4_for_VisualStudio.View.InlineEdit
@@ -16,12 +18,14 @@ namespace DeepSeek_v4_for_VisualStudio.View.InlineEdit
     /// - Busy  态：显示生成中状态，Esc 触发 CancelRequested（取消 LLM 调用）
     /// - Error 态：红色错误提示并回到 Ready，支持原地重试
     ///
-    /// 窗口失焦时自动关闭（Ready 态），与 Copilot 行为一致。
+    /// 使用编辑器视觉树内的 Popup 承载，避免 VS 编辑器继续抢走键盘命令。
     /// </summary>
-    internal sealed class InlineEditBarWindow : Window
+    internal sealed class InlineEditBarWindow
     {
         private const double BarWidth = 600;
         private const double EstimatedHeight = 64;
+
+        private readonly Point _anchorScreenPhysical;
 
         private static readonly Brush BgBrush = Hex("#252526");
         private static readonly Brush InputBgBrush = Hex("#1E1E1E");
@@ -30,11 +34,13 @@ namespace DeepSeek_v4_for_VisualStudio.View.InlineEdit
         private static readonly Brush HintBrush = Hex("#9A9A9A");
         private static readonly Brush ErrorBrush = Hex("#F48771");
 
-        private readonly Point _anchorScreen;          // 物理像素坐标
+        private readonly FrameworkElement _placementTarget;
         private readonly TextBox _input;
         private readonly TextBlock _hintText;
         private readonly TextBlock _statusText;
         private readonly Border _statusBorder;
+        private readonly Popup _popup;
+        private readonly Border _root;
 
         private bool _busy;
         private TaskCompletionSource<string?> _submittedTcs = NewTcs();
@@ -48,18 +54,12 @@ namespace DeepSeek_v4_for_VisualStudio.View.InlineEdit
         /// <summary>Esc 取消生成（仅 Busy 态触发）。</summary>
         public event Action? CancelRequested;
 
-        public InlineEditBarWindow(Point anchorScreenPhysical)
-        {
-            _anchorScreen = anchorScreenPhysical;
+        public bool IsActive => _popup.IsOpen;
 
-            WindowStyle = WindowStyle.None;
-            AllowsTransparency = true;
-            Background = Brushes.Transparent;
-            ShowInTaskbar = false;
-            ShowActivated = true;
-            Topmost = true;
-            Width = BarWidth;
-            SizeToContent = SizeToContent.Height;
+        public InlineEditBarWindow(Point anchorScreenPhysical, FrameworkElement placementTarget)
+        {
+            _anchorScreenPhysical = anchorScreenPhysical;
+            _placementTarget = placementTarget ?? throw new ArgumentNullException(nameof(placementTarget));
 
             var hint = LocalizationService.Instance;
             _input = new TextBox
@@ -106,7 +106,7 @@ namespace DeepSeek_v4_for_VisualStudio.View.InlineEdit
             stack.Children.Add(inputRow);
             stack.Children.Add(_statusBorder);
 
-            var root = new Border
+            _root = new Border
             {
                 Child = stack,
                 CornerRadius = new CornerRadius(8),
@@ -122,12 +122,26 @@ namespace DeepSeek_v4_for_VisualStudio.View.InlineEdit
                 },
             };
 
-            Content = root;
+            _popup = new Popup
+            {
+                Child = _root,
+                PlacementTarget = _placementTarget,
+                Placement = PlacementMode.RelativePoint,
+                AllowsTransparency = true,
+                StaysOpen = true,
+                Width = BarWidth,
+            };
+            FocusManager.SetIsFocusScope(_popup, true);
+            KeyboardNavigation.SetDirectionalNavigation(_root, KeyboardNavigationMode.Contained);
+            KeyboardNavigation.SetTabNavigation(_root, KeyboardNavigationMode.Contained);
 
-            PreviewKeyDown += OnBarPreviewKeyDown;
-            Deactivated += (_, _) => { if (!_busy) Close(); };
-            Closed += (_, _) => _closedTcs.TrySetResult(true);
-            ContentRendered += (_, _) => Reposition();
+            _root.PreviewKeyDown += OnBarPreviewKeyDown;
+            _popup.Closed += (_, _) => _closedTcs.TrySetResult(true);
+            _popup.Opened += (_, _) =>
+            {
+                Reposition();
+                FocusInput();
+            };
         }
 
         // ────────────────────────── 公开 API ──────────────────────────
@@ -135,8 +149,7 @@ namespace DeepSeek_v4_for_VisualStudio.View.InlineEdit
         public void ShowBar()
         {
             Reposition();
-            Show();
-            Activate();
+            _popup.IsOpen = true;
             FocusInput();
         }
 
@@ -159,11 +172,72 @@ namespace DeepSeek_v4_for_VisualStudio.View.InlineEdit
 
         public void CloseGracefully() => Close();
 
+        public void Close()
+        {
+            _popup.IsOpen = false;
+        }
+
         /// <summary>提交后复位 TCS，允许同一窗口再次提交（原地重试）。</summary>
         public void ResetSubmit()
         {
             if (_submittedTcs.Task.IsCompleted)
                 _submittedTcs = NewTcs();
+        }
+
+        // ────────────────────────── VS 命令过滤回调 ──────────────────────────
+
+        public void Submit()
+        {
+            if (_busy || !_popup.IsOpen) return;
+            var text = _input.Text?.Trim() ?? string.Empty;
+            if (text.Length == 0) return;
+            _submittedTcs.TrySetResult(text);
+        }
+
+        public void Cancel()
+        {
+            if (!_popup.IsOpen) return;
+            if (_busy) CancelRequested?.Invoke();
+            else Close();
+        }
+
+        public void Backspace()
+        {
+            if (!_popup.IsOpen || _busy) return;
+            var text = _input.Text ?? string.Empty;
+            var selectionStart = _input.SelectionStart;
+            var selectionLength = _input.SelectionLength;
+
+            if (selectionLength > 0)
+            {
+                _input.Text = text.Remove(selectionStart, selectionLength);
+                _input.CaretIndex = selectionStart;
+            }
+            else if (_input.CaretIndex > 0)
+            {
+                var caret = _input.CaretIndex;
+                _input.Text = text.Remove(caret - 1, 1);
+                _input.CaretIndex = caret - 1;
+            }
+        }
+
+        public void DeleteForward()
+        {
+            if (!_popup.IsOpen || _busy) return;
+            var text = _input.Text ?? string.Empty;
+            var selectionStart = _input.SelectionStart;
+            var selectionLength = _input.SelectionLength;
+
+            if (selectionLength > 0)
+            {
+                _input.Text = text.Remove(selectionStart, selectionLength);
+                _input.CaretIndex = selectionStart;
+            }
+            else if (_input.CaretIndex < text.Length)
+            {
+                _input.Text = text.Remove(_input.CaretIndex, 1);
+                _input.CaretIndex = _input.CaretIndex;
+            }
         }
 
         // ────────────────────────── 内部实现 ──────────────────────────
@@ -188,41 +262,50 @@ namespace DeepSeek_v4_for_VisualStudio.View.InlineEdit
 
         private void Reposition()
         {
-            var workArea = SystemParameters.WorkArea;
-
-            // 物理像素 → WPF 逻辑单位（DPI 缩放换算）
-            double dpiX = 1, dpiY = 1;
+            Point anchor;
             try
             {
-                var source = PresentationSource.FromVisual(this);
-                if (source?.CompositionTarget != null)
-                {
-                    dpiX = source.CompositionTarget.TransformToDevice.M11;
-                    dpiY = source.CompositionTarget.TransformToDevice.M22;
-                }
+                anchor = _placementTarget.PointFromScreen(_anchorScreenPhysical);
             }
-            catch { /* 默认 100% 缩放 */ }
+            catch
+            {
+                anchor = new Point(40, 40);
+            }
 
-            double logicalX = dpiX > 0 ? _anchorScreen.X / dpiX : _anchorScreen.X;
-            double logicalY = dpiY > 0 ? _anchorScreen.Y / dpiY : _anchorScreen.Y;
+            double left = anchor.X - 40;
+            double top = anchor.Y + 22;
+            double height = double.IsNaN(_root.ActualHeight) || _root.ActualHeight <= 0
+                ? EstimatedHeight
+                : _root.ActualHeight;
 
-            double height = ActualHeight > 0 ? ActualHeight : EstimatedHeight;
+            left = Math.Max(0, Math.Min(left, Math.Max(0, _placementTarget.ActualWidth - BarWidth - 4)));
+            if (top + height > _placementTarget.ActualHeight)
+                top = Math.Max(0, anchor.Y - height - 28);
 
-            Left = Math.Min(Math.Max(logicalX - 40, workArea.Left), workArea.Right - Width - 4);
-            Top = logicalY + 22;
-            if (Top + height > workArea.Bottom)
-                Top = Math.Max(workArea.Top, logicalY - height - 28);
+            _popup.HorizontalOffset = left;
+            _popup.VerticalOffset = top;
         }
 
         private void FocusInput(bool selectAll = false)
         {
-            Activate();
             _input.Focus();
             Keyboard.Focus(_input);
+            FocusManager.SetFocusedElement(_root, _input);
             if (selectAll && !string.IsNullOrEmpty(_input.Text))
                 _input.SelectAll();
             else
                 _input.CaretIndex = _input.Text?.Length ?? 0;
+
+            // VS 编辑器可能在浮窗初次渲染后把键盘焦点拉回去，延迟再校准一次。
+            _popup.Dispatcher.BeginInvoke(DispatcherPriority.Input, () =>
+            {
+                if (!_popup.IsOpen || _busy)
+                    return;
+
+                _input.Focus();
+                Keyboard.Focus(_input);
+                FocusManager.SetFocusedElement(_popup, _input);
+            });
         }
 
         private void ShowStatus(string message, string? hexColor)
@@ -283,5 +366,6 @@ namespace DeepSeek_v4_for_VisualStudio.View.InlineEdit
 
         private static TaskCompletionSource<string?> NewTcs()
             => new(TaskCreationOptions.RunContinuationsAsynchronously);
+
     }
 }

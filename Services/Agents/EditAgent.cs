@@ -681,7 +681,7 @@ namespace DeepSeek_v4_for_VisualStudio.Services.Agents
             // 避免 File.WriteAllText 裸写盘在 dirty buffer 场景触发 VS「文件已在磁盘上修改」弹窗；
             // 未打开的文件 writer 返回 false，自动回退裸写盘。
             _stagedWorkspace.OpenDocumentWriter = EditBufferApplier.TryWriteOpenDocument;
-            _stagedWorkspace.OpenDocumentFlusher = EditBufferApplier.TrySaveOpenDocument;
+            _stagedWorkspace.OpenDocumentContentProvider = EditBufferApplier.TryGetOpenDocumentContent;
 
             _stagedWorkspace.Discard(); // 清空上一轮残留
 

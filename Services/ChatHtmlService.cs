@@ -210,6 +210,8 @@ namespace DeepSeek_v4_for_VisualStudio.Services
             AppendJsonString(sb, L["chat.html.copyButton"]);
             sb.Append(",\"copyLabel\":");
             AppendJsonString(sb, L["chat.html.copyButtonTitle"]);
+            sb.Append(",\"copyFeedback\":");
+            AppendJsonString(sb, L["chat.html.copySuccessButton"]);
             sb.Append('}');
             return sb.ToString();
         }
@@ -579,7 +581,7 @@ namespace DeepSeek_v4_for_VisualStudio.Services
             sb.Append($"<div class='msg-content' id='msg-body-{messageIndex}'>{body}</div>");
             sb.Append(editBtnHtml);
             sb.Append("</div>");
-            sb.Append("<div class='msg-avatar user'></div>");
+            sb.Append("<div class='msg-avatar user'>U</div>");
             sb.Append("</div>");
         }
 
@@ -725,7 +727,7 @@ namespace DeepSeek_v4_for_VisualStudio.Services
                 : "";
 
             string copyBtnHtml = !isStreaming && !string.IsNullOrEmpty(msg.Content)
-                ? $"<button id='copy-btn-{idx}' class='msg-action-btn copy-msg-btn' onclick='window.__copyMessage({idx})' title='{L["chat.html.copyButtonTitle"]}'>{EscapeHtml(L["chat.html.copyButton"])}</button>"
+                ? $"<button id='copy-btn-{idx}' class='msg-action-btn copy-msg-btn' onclick='window.__copyMessage({idx})' title='{L["chat.html.copyButtonTitle"]}' data-copy-label='{EscapeHtml(L["chat.html.copyButton"])}' data-copied-label='{EscapeHtml(L["chat.html.copySuccessButton"])}'>{EscapeHtml(L["chat.html.copyButton"])}</button>"
                 : "";
 
             // ── 分支导航统一放在用户气泡下方，不在此处渲染 ──
@@ -1160,6 +1162,7 @@ return "<!DOCTYPE html><html lang='" + htmlLang + "'><head><meta charset='UTF-8'
        "  window.__renderMermaid(document.getElementById('chat-container'));" +
        "};" +
        "document.head.appendChild(mermaidScript);" +
+       BuildContextDebugLabelsJs() +
        BuildDecorateCodeBlocksJsFunction() +
        BuildShiftScrollJs() +
        autoScrollJs +

@@ -40,11 +40,11 @@ namespace DeepSeek_v4_for_VisualStudio.Services.Editing
         public Func<string, string, bool>? OpenDocumentWriter { get; set; }
 
         /// <summary>
-        /// 已打开文档冲刷器（可选注入，推荐 EditBufferApplier.TrySaveOpenDocument）。
-        /// 在首次接触某文件、登记 Baseline 之前调用：若该文件在编辑器中打开且有未保存修改，
-        /// 先通过编辑器 Save 落盘，保证 Baseline 捕获用户最新内容（撤销时不丢失用户编辑）。
+        /// 已打开文档内容读取器（可选注入，推荐 EditBufferApplier.TryGetOpenDocumentContent）。
+        /// 首次接触文件时读取当前编辑器 buffer 内容作为 Baseline；不做预保存。
+        /// 这样既能保留用户未保存修改用于撤销，又避免在工具执行关键路径中等待 VS 的保存对话框。
         /// </summary>
-        public Func<string, bool>? OpenDocumentFlusher { get; set; }
+        public Func<string, string?>? OpenDocumentContentProvider { get; set; }
 
         /// <summary>当前追踪（有改动）的文件数</summary>
         public int StagedCount
@@ -64,6 +64,20 @@ namespace DeepSeek_v4_for_VisualStudio.Services.Editing
         public string ReadFile(string filePath)
         {
             var normalizedPath = NormalizePath(filePath);
+            if (OpenDocumentContentProvider != null)
+            {
+                try
+                {
+                    var bufferContent = OpenDocumentContentProvider(normalizedPath);
+                    if (bufferContent != null)
+                        return bufferContent;
+                }
+                catch (Exception ex)
+                {
+                    Logger.Warn($"[StagedWorkspace] 读取打开文档失败，回退磁盘: {Path.GetFileName(normalizedPath)} — {ex.Message}");
+                }
+            }
+
             return File.Exists(normalizedPath) ? File.ReadAllText(normalizedPath) : string.Empty;
         }
 
@@ -84,22 +98,15 @@ namespace DeepSeek_v4_for_VisualStudio.Services.Editing
             var normalizedPath = NormalizePath(filePath);
             string content = newContent ?? string.Empty;
 
-            // ── 首次接触 + 注入冲刷器：先把已打开文档的用户未保存内容落盘 ──
-            // （在读取 Baseline 之前执行，保证 Baseline 包含用户的未保存编辑；锁外执行防死锁）
-            bool shouldFlush;
-            lock (_lock)
+            // 首次接触时直接读取当前 buffer 作为 Baseline。这里只读不保存，
+            // 避免把可能阻塞的 VS Save 调用插进工具执行关键路径。
+            string? openBufferContent = null;
+            if (OpenDocumentContentProvider != null && File.Exists(normalizedPath))
             {
-                shouldFlush = OpenDocumentFlusher != null
-                    && !_trackedFiles.ContainsKey(normalizedPath)
-                    && File.Exists(normalizedPath);
-            }
-
-            if (shouldFlush)
-            {
-                try { OpenDocumentFlusher!.Invoke(normalizedPath); }
+                try { openBufferContent = OpenDocumentContentProvider(normalizedPath); }
                 catch (Exception ex)
                 {
-                    Logger.Warn($"[StagedWorkspace] 冲刷已打开文档失败: {Path.GetFileName(normalizedPath)} — {ex.Message}");
+                    Logger.Warn($"[StagedWorkspace] 读取打开文档失败，Baseline 回退磁盘: {Path.GetFileName(normalizedPath)} — {ex.Message}");
                 }
             }
 
@@ -115,7 +122,9 @@ namespace DeepSeek_v4_for_VisualStudio.Services.Editing
                 // 首次接触 → 登记 Baseline（用于撤销恢复）
                 if (!_trackedFiles.ContainsKey(normalizedPath))
                 {
-                    string baselineContent = isNewFile ? string.Empty : File.ReadAllText(normalizedPath);
+                    string baselineContent = isNewFile
+                        ? string.Empty
+                        : (openBufferContent ?? File.ReadAllText(normalizedPath));
                     _trackedFiles[normalizedPath] = new StagedFile
                     {
                         FilePath = normalizedPath,

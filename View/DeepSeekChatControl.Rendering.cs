@@ -133,6 +133,7 @@ namespace DeepSeek_v4_for_VisualStudio.View
             if (e.IsSuccess)
             {
                 Logger.Info("[Render] CoreWebView2InitializationCompleted: 成功");
+                _webViewInitialized = true;
                 ChatWebView.CoreWebView2.WebMessageReceived += CoreWebView2_WebMessageReceived;
                 ChatWebView.CoreWebView2.NewWindowRequested += CoreWebView2_NewWindowRequested;
                 ChatWebView.CoreWebView2.NavigationStarting += CoreWebView2_NavigationStarting;

@@ -75,11 +75,6 @@ namespace DeepSeek_v4_for_VisualStudio.Settings
             base.OnApply(e);
             if (e.ApplyBehavior == ApplyKind.Apply)
             {
-                _apiKeysDirty =
-                    !string.Equals(ApiKey, _loadedApiKey, StringComparison.Ordinal) ||
-                    !string.Equals(BaiduApiKey, _loadedBaiduApiKey, StringComparison.Ordinal) ||
-                    !string.Equals(BingApiKey, _loadedBingApiKey, StringComparison.Ordinal);
-
                 // ── 同步静态 Instance 到被 VS 实际应用的规范 DialogPage 实例 ──
                 // 避免后续通过 Options/Instance 读取到包初始化阶段的过期内存实例。
                 if (!ReferenceEquals(Instance, this))
@@ -153,6 +148,9 @@ namespace DeepSeek_v4_for_VisualStudio.Settings
             string baiduApiKey = BaiduApiKey;
             string bingApiKey = BingApiKey;
             var credentialStore = VisualStudioApiKeyStore.Current;
+            // DialogPage hosts can save before OnApply, so detect changes from the loaded
+            // baseline here. OnApply is too late to influence credential writes.
+            _apiKeysDirty = HasApiKeyChanges(apiKey, baiduApiKey, bingApiKey);
             bool shouldWriteCredentialStore = _apiKeysDirty || _apiKeysMigrationPending;
             bool credentialStoreUpdated = shouldWriteCredentialStore
                 && credentialStore != null
@@ -223,9 +221,9 @@ namespace DeepSeek_v4_for_VisualStudio.Settings
             _loadedBingApiKey = BingApiKey;
             _apiKeysDirty = false;
             _apiKeysMigrationPending =
-                !string.IsNullOrWhiteSpace(legacyApiKey) ||
-                !string.IsNullOrWhiteSpace(legacyBaiduApiKey) ||
-                !string.IsNullOrWhiteSpace(legacyBingApiKey);
+                (!string.IsNullOrWhiteSpace(legacyApiKey) && !store.TryGet(ApiKeyKind.DeepSeek, out _)) ||
+                (!string.IsNullOrWhiteSpace(legacyBaiduApiKey) && !store.TryGet(ApiKeyKind.Baidu, out _)) ||
+                (!string.IsNullOrWhiteSpace(legacyBingApiKey) && !store.TryGet(ApiKeyKind.Bing, out _));
         }
 
         private static string GetCredentialOrMigrateLegacy(
@@ -259,6 +257,13 @@ namespace DeepSeek_v4_for_VisualStudio.Settings
             // An empty in-memory value can also mean "the credential store was not readable
             // during startup". Only clear it when the user explicitly edited this page.
             return !_apiKeysDirty || store.Clear(kind);
+        }
+
+        private bool HasApiKeyChanges(string apiKey, string baiduApiKey, string bingApiKey)
+        {
+            return !string.Equals(apiKey, _loadedApiKey, StringComparison.Ordinal) ||
+                !string.Equals(baiduApiKey, _loadedBaiduApiKey, StringComparison.Ordinal) ||
+                !string.Equals(bingApiKey, _loadedBingApiKey, StringComparison.Ordinal);
         }
 
         [LocalizedCategory("settings.category.api")]

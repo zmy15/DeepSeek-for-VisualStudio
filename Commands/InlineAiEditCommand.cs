@@ -7,6 +7,7 @@ using System.Windows;
 using DeepSeek_v4_for_VisualStudio.Models;
 using DeepSeek_v4_for_VisualStudio.Services;
 using DeepSeek_v4_for_VisualStudio.Utils;
+using DeepSeek_v4_for_VisualStudio.View.InlineEdit;
 using Microsoft.VisualStudio.ComponentModelHost;
 using Microsoft.VisualStudio.Editor;
 using Microsoft.VisualStudio.Shell;
@@ -106,7 +107,10 @@ namespace DeepSeek_v4_for_VisualStudio.Commands
                 CompositionRoot.GetService<IDeepSeekApiService>());
 
             // ── 指令条（序号 16/19）──
-            var bar = new View.InlineEdit.InlineEditBarWindow(anchor);
+            var bar = new View.InlineEdit.InlineEditBarWindow(anchor, view.VisualElement);
+            InlineEditCommandFilter? commandFilter = TryGetTextViewAdapter(view) is { } textViewAdapter
+                ? new InlineEditCommandFilter(bar, textViewAdapter)
+                : null;
             using var cts = CancellationTokenSource.CreateLinkedTokenSource(packageCt);
             bar.CancelRequested += () => cts.Cancel();
 
@@ -195,6 +199,7 @@ namespace DeepSeek_v4_for_VisualStudio.Commands
             }
             finally
             {
+                commandFilter?.Dispose();
                 try { bar.Close(); } catch { /* 已关闭 */ }
             }
         }
@@ -216,6 +221,16 @@ namespace DeepSeek_v4_for_VisualStudio.Commands
                 .GetExport<IVsEditorAdaptersFactoryService>()?.Value;
 
             return adapter?.GetWpfTextView(vsTextView);
+        }
+
+        private static IVsTextView? TryGetTextViewAdapter(IWpfTextView view)
+        {
+            ThreadHelper.ThrowIfNotOnUIThread();
+
+            var componentModel = (IComponentModel?)Package.GetGlobalService(typeof(SComponentModel));
+            var adapter = componentModel?.DefaultExportProvider
+                .GetExport<IVsEditorAdaptersFactoryService>()?.Value;
+            return adapter?.GetViewAdapter(view);
         }
 
         /// <summary>计算指令条锚点（选区起始行左上角，物理像素坐标；DPI 换算由窗口负责）。</summary>
