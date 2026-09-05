@@ -161,7 +161,7 @@ namespace DeepSeek_v4_for_VisualStudio.Services.Agents
                     },
                     onToolCall: (toolSummary) =>
                     {
-                        AddLog("INFO", toolSummary);
+                        AddLog("TOOL", toolSummary);
                     });
 
                 // ── 保存推理内容，供 UI 渲染思考面板 ──

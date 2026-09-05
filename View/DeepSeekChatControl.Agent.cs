@@ -1761,6 +1761,10 @@ namespace DeepSeek_v4_for_VisualStudio.View
         {
             string msg = entry.Message ?? string.Empty;
 
+            // 工具调用摘要由 BaseAgent 显式标记，始终作为用户可见的过程输出展示。
+            if (entry.Level == "TOOL")
+                return msg;
+
             // ── 过滤纯内部日志（中英文双语匹配）──
             if (msg.StartsWith("[TokenUsage]") || msg.StartsWith("[Retry") || msg.StartsWith("[AgentFlow]"))
                 return string.Empty;

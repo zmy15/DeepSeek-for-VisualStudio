@@ -237,7 +237,7 @@ namespace DeepSeek_v4_for_VisualStudio.Services.Agents
                     },
                     onToolCall: (toolSummary) =>
                     {
-                        AddLog("INFO", $"{toolSummary}");
+                        AddLog("TOOL", $"{toolSummary}");
                         internalToolCalls.Add(toolSummary);
                     });
 

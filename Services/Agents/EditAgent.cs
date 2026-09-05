@@ -749,7 +749,7 @@ namespace DeepSeek_v4_for_VisualStudio.Services.Agents
                     },
                     onToolCall: (toolSummary) =>
                     {
-                        AddLog("INFO", toolSummary);
+                        AddLog("TOOL", toolSummary);
                     });
 
                 // ── 累积推理内容（累加所有步骤和重试轮次的思考过程）──
@@ -1093,7 +1093,7 @@ namespace DeepSeek_v4_for_VisualStudio.Services.Agents
                     toolWhitelist: verifyToolWhitelist,
                     onToolCall: (toolSummary) =>
                     {
-                        AddLog("INFO", toolSummary);
+                        AddLog("TOOL", toolSummary);
                     });
 
                 if (!string.IsNullOrWhiteSpace(verifyResult))
@@ -2997,7 +2997,7 @@ namespace DeepSeek_v4_for_VisualStudio.Services.Agents
                     context.OnThinkingChunk?.Invoke(thinking);
                 },
                 onContent: content => context.OnContentChunk?.Invoke(content),
-                onToolCall: toolSummary => AddLog("INFO", toolSummary));
+                onToolCall: toolSummary => AddLog("TOOL", toolSummary));
 
             // 只读输出任务优先返回工具原始结果，避免模型把文件内容再总结一遍。
             var rawToolOutput = GetStepToolLoopMessages(messages, toolLoopStart)
