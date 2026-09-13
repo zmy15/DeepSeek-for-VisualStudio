@@ -53,6 +53,13 @@ namespace DeepSeek_v4_for_VisualStudio.Services
         public static string SkillSystemPromptFragment => L["system.skillSystemPromptFragment"];
 
         /// <summary>
+        /// 构建 Skill 系统提示词，使用占位符替换以避免模板中的字面量大括号被
+        /// <see cref="string.Format(string, object)"/> 误解析为格式项。
+        /// </summary>
+        public static string BuildSkillSystemPromptFragment(string discoveryContext)
+            => SkillSystemPromptFragment.Replace("{0}", discoveryContext ?? string.Empty);
+
+        /// <summary>
         /// 技能路由判断 — 系统提示词。
         /// 用于在用户提问时，先让 AI 判断是否应调用某个技能。
         /// </summary>

@@ -203,7 +203,7 @@ namespace DeepSeek_v4_for_VisualStudio.View
             string? skillContext = null;
             if (!string.IsNullOrWhiteSpace(discoveryContext))
             {
-                skillContext = string.Format(AiPrompts.SkillSystemPromptFragment, discoveryContext);
+                skillContext = AiPrompts.BuildSkillSystemPromptFragment(discoveryContext);
                 string toolInstructions = LocalizationService.Instance["system.skillToolInstructions"];
                 if (!string.IsNullOrWhiteSpace(toolInstructions))
                     skillContext += "\n\n" + toolInstructions;

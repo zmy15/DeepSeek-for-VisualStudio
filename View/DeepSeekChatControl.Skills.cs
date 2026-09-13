@@ -500,9 +500,9 @@ namespace DeepSeek_v4_for_VisualStudio.View
                 Logger.Info($"[SkillRoute] 开始技能路由判断 (用户输入 {fullUserContent.Length} 字符)");
 
                 string? routingResponse = null;
+                using var cts = new CancellationTokenSource(TimeSpan.FromSeconds(8));
                 try
                 {
-                    var cts = new CancellationTokenSource(TimeSpan.FromSeconds(8));
                     routingResponse = await _activeAgent.CallAiWithMessagesAsync(
                         routingMessages,
                         cts.Token,
@@ -511,8 +511,16 @@ namespace DeepSeek_v4_for_VisualStudio.View
                         includeTools: false);
                     routingResponse = routingResponse?.Trim();
                 }
-                catch (OperationCanceledException)
+                catch (OperationCanceledException) when (cts.IsCancellationRequested)
                 {
+                    Logger.Warn("[SkillRoute] 路由判断超时，跳过技能匹配");
+                    StatusLabel.Text = LocalizationService.Instance["status.thinking"];
+                    return null;
+                }
+                catch (ObjectDisposedException) when (cts.IsCancellationRequested)
+                {
+                    // 超时取消会主动释放底层 SslStream，ReadLineAsync 可能据此抛
+                    // ObjectDisposedException；这仍然属于预期超时路径。
                     Logger.Warn("[SkillRoute] 路由判断超时，跳过技能匹配");
                     StatusLabel.Text = LocalizationService.Instance["status.thinking"];
                     return null;
