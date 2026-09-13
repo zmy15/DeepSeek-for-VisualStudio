@@ -22,6 +22,17 @@ namespace DeepSeek_v4_for_VisualStudio.View
         #region Skill System
 
         /// <summary>
+        /// 使用当前解决方案路径重新确认 Skill 缓存。SkillService 内部会缓存相同路径的结果，
+        /// 因此这里可以安全地作为跨会话、跨解决方案的统一入口调用。
+        /// </summary>
+        private async Task<SkillDiscoveryResult> DiscoverSkillsForCurrentSolutionAsync(bool forceRefresh = false)
+        {
+            _skillService ??= SkillService.Instance;
+            _skillDiscoveryResult = await _skillService.DiscoverSkillsAsync(_solutionPath, forceRefresh);
+            return _skillDiscoveryResult;
+        }
+
+        /// <summary>
         /// 处理斜杠命令。如果用户输入以 / 开头，尝试匹配已注册的技能。
         /// 匹配成功时返回技能的完整指令文本，匹配失败时显示错误并返回 null。
         /// 非斜杠命令（不以 / 开头）返回 string.Empty 表示正常发送。
@@ -66,8 +77,7 @@ namespace DeepSeek_v4_for_VisualStudio.View
             // ── 查找匹配的技能 ──
             try
             {
-                if (_skillDiscoveryResult == null)
-                    _skillDiscoveryResult = await SkillService.Instance.DiscoverSkillsAsync(_solutionPath);
+                await DiscoverSkillsForCurrentSolutionAsync();
 
                 var skill = SkillService.Instance.FindSkill(commandName, _skillDiscoveryResult);
                 if (skill != null)
@@ -132,8 +142,7 @@ namespace DeepSeek_v4_for_VisualStudio.View
 
             try
             {
-                if (_skillDiscoveryResult == null)
-                    _skillDiscoveryResult = await SkillService.Instance.DiscoverSkillsAsync(_solutionPath);
+                await DiscoverSkillsForCurrentSolutionAsync();
 
                 var L = LocalizationService.Instance;
                 var sb = new StringBuilder();
@@ -205,7 +214,7 @@ namespace DeepSeek_v4_for_VisualStudio.View
         {
             try
             {
-                _skillDiscoveryResult = await SkillService.Instance.DiscoverSkillsAsync(_solutionPath, forceRefresh: true);
+                await DiscoverSkillsForCurrentSolutionAsync(forceRefresh: true);
 
                 await ThreadHelper.JoinableTaskFactory.SwitchToMainThreadAsync();
 
@@ -411,7 +420,7 @@ namespace DeepSeek_v4_for_VisualStudio.View
 
                 Logger.Info($"[Skill] 创建技能 '{skillName}' 于: {skillDir}");
 
-                _skillDiscoveryResult = await SkillService.Instance.DiscoverSkillsAsync(_solutionPath, forceRefresh: true);
+                await DiscoverSkillsForCurrentSolutionAsync(forceRefresh: true);
 
                 var alwaysInjectLine = options.AlwaysInject
                     ? L["skills.create.success.alwaysInject"] + "\n"
@@ -454,16 +463,14 @@ namespace DeepSeek_v4_for_VisualStudio.View
         {
             try
             {
-                string? skillsSummary = SkillService.Instance.GetSkillsSummary();
-                if (string.IsNullOrEmpty(skillsSummary))
-                {
-                    _skillDiscoveryResult = await SkillService.Instance.DiscoverSkillsAsync(_solutionPath);
-                    skillsSummary = SkillService.Instance.GetSkillsSummary();
-                }
-
-                if (string.IsNullOrEmpty(skillsSummary) || _activeAgent == null)
+                await DiscoverSkillsForCurrentSolutionAsync();
+                if (_skillDiscoveryResult == null || _skillDiscoveryResult.AutoLoadableSkills.Count == 0)
                     return null;
 
+                if (_activeAgent == null)
+                    return null;
+
+                string skillsSummary = SkillService.Instance.GenerateSkillsSummary(_skillDiscoveryResult);
                 string truncatedContent = fullUserContent;
 
                 string routingUserPrompt = string.Format(
@@ -484,7 +491,11 @@ namespace DeepSeek_v4_for_VisualStudio.View
                 try
                 {
                     var cts = new CancellationTokenSource(TimeSpan.FromSeconds(8));
-                    routingResponse = await _activeAgent.CallAiWithMessagesAsync(routingMessages, cts.Token, responseFormat: "json_object");
+                    routingResponse = await _activeAgent.CallAiWithMessagesAsync(
+                        routingMessages,
+                        cts.Token,
+                        toolChoice: "none",
+                        responseFormat: "json_object");
                     routingResponse = routingResponse?.Trim();
                 }
                 catch (OperationCanceledException)
@@ -541,9 +552,6 @@ namespace DeepSeek_v4_for_VisualStudio.View
                 Logger.Info($"[SkillRoute]   匹配理由: {routingResult.Reason}");
                 Logger.Info($"[SkillRoute] ══════════════════════════");
 
-                if (_skillDiscoveryResult == null)
-                    _skillDiscoveryResult = await SkillService.Instance.DiscoverSkillsAsync(_solutionPath);
-
                 var matchedSkill = SkillService.Instance.FindSkill(skillName, _skillDiscoveryResult);
                 if (matchedSkill == null)
                 {
@@ -553,9 +561,9 @@ namespace DeepSeek_v4_for_VisualStudio.View
                 }
 
                 // 始终注入的技能已在系统提示中完整加载，无需重复注入
-                if (matchedSkill.AlwaysInject)
+                if (matchedSkill.AlwaysInject || matchedSkill.DisableModelInvocation)
                 {
-                    Logger.Info($"[SkillRoute] 技能 '{skillName}' 已标记为始终注入，跳过重复加载");
+                    Logger.Info($"[SkillRoute] 技能 '{skillName}' 不允许模型自动调用，跳过加载");
                     StatusLabel.Text = LocalizationService.Instance["status.thinking"];
                     return null;
                 }

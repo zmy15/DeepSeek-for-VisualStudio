@@ -297,7 +297,6 @@ namespace DeepSeek_v4_for_VisualStudio.View
                     discardedContext = true;
                     Logger.Info("[Context] 用户继续对话：已丢弃旧的压缩上文，仅保留新问题作为新一轮起点");
                 }
-                _contextManager.AddUserMessage(fullUserContent, visionContent);
                 earlyUserMsgIndex = _messages.Count - 1;
             }
             AddMessagesHtml(
@@ -319,6 +318,27 @@ namespace DeepSeek_v4_for_VisualStudio.View
             ClearAttachedFiles();
             TouchCurrentSessionLastActive();
             AutoTitleSession();
+
+            // 普通自然语言消息先经过轻量级 Skill 路由；显式 /skill 和 @agent 路径已单独处理。
+            string? autoSkillInstructions = null;
+            if (!string.IsNullOrWhiteSpace(userText)
+                && !userText.StartsWith("/", StringComparison.Ordinal)
+                && !userText.StartsWith("@", StringComparison.Ordinal))
+            {
+                autoSkillInstructions = await RouteSkillAsync(fullUserContent);
+            }
+
+            lock (_lock)
+            {
+                if (!string.IsNullOrEmpty(autoSkillInstructions))
+                {
+                    _contextManager.AddCustomMessage("system", autoSkillInstructions);
+                    Logger.Info($"[SkillFlow] AI 自动匹配技能，指令已注入 Agent 上下文 (长度: {autoSkillInstructions.Length})");
+                }
+
+                _contextManager.AddUserMessage(fullUserContent, visionContent);
+            }
+
             // 注意：InputTextBox 和 UpdateButtonsState 已在上方立即执行
 
                 // ── URL 采用模型驱动的工具调用模式处理 ──

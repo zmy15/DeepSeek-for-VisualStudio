@@ -276,6 +276,26 @@ public class SkillDefinitionTests
         result.AutoLoadableSkills.Should().OnlyContain(s => !s.DisableModelInvocation);
     }
 
+    [Fact]
+    public void GenerateSkillsSummary_IncludesOnlyAutoLoadableSkills()
+    {
+        var result = new SkillDiscoveryResult
+        {
+            Skills = new List<SkillDefinition>
+            {
+                new() { Name = "auto-skill", Description = "Can be auto loaded." },
+                new() { Name = "manual-only", Description = "Must not be auto loaded.", DisableModelInvocation = true },
+                new() { Name = "always-active", Description = "Already injected.", AlwaysInject = true },
+            }
+        };
+
+        string summary = SkillService.Instance.GenerateSkillsSummary(result);
+
+        summary.Should().Contain("auto-skill");
+        summary.Should().NotContain("manual-only");
+        summary.Should().NotContain("always-active");
+    }
+
     #endregion
 
     #region SkillRoutingResult

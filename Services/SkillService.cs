@@ -704,23 +704,24 @@ namespace DeepSeek_v4_for_VisualStudio.Services
         public string GenerateSkillsSummary(SkillDiscoveryResult? discoveryResult = null)
         {
             var result = discoveryResult ?? _cachedResult;
-            if (result == null || result.TotalCount == 0)
+            var routableSkills = result?.AutoLoadableSkills ?? new List<SkillDefinition>();
+            if (routableSkills.Count == 0)
             {
-                Logger.Info("[SkillService]  GenerateSkillsSummary: 无可用技能");
+                Logger.Info("[SkillService]  GenerateSkillsSummary: 无允许模型调用的技能");
                 return LocalizationService.Instance["skills.noneAvailable"];
             }
 
-            Logger.Info($"[SkillService]  开始生成技能总结: 共 {result.TotalCount} 个技能 (项目: {result.ProjectSkillCount}, 用户: {result.UserSkillCount}, 内置: {result.TotalCount - result.ProjectSkillCount - result.UserSkillCount})");
+            Logger.Info($"[SkillService]  开始生成技能总结: 共 {routableSkills.Count} 个可自动加载技能");
 
             var lines = new List<string>
             {
-                $"共 {result.TotalCount} 个技能可用：",
+                $"共 {routableSkills.Count} 个技能可由模型自动加载：",
                 string.Empty,
             };
 
-            for (int i = 0; i < result.Skills.Count; i++)
+            for (int i = 0; i < routableSkills.Count; i++)
             {
-                var skill = result.Skills[i];
+                var skill = routableSkills[i];
                 var sourceLabel = skill.Source switch
                 {
                     SkillSource.BuiltIn => "[内置]",

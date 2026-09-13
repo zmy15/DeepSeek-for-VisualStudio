@@ -928,12 +928,12 @@ namespace DeepSeek_v4_for_VisualStudio.View
                 if (_skillDiscoveryResult == null)
                 {
                     // 后台异步加载技能缓存，不阻塞 UI 线程。
-                    // InitializeSkills() 已在启动时触发加载，此处为兜底路径。
+                    // InitializeSkillsAsync() 已在启动时加载当前解决方案技能，此处为兜底路径。
                     _ = Task.Run(async () =>
                     {
                         try
                         {
-                            _skillDiscoveryResult = await SkillService.Instance.DiscoverSkillsAsync(_solutionPath);
+                            await DiscoverSkillsForCurrentSolutionAsync();
                         }
                         catch (Exception ex)
                         {

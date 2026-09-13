@@ -462,13 +462,12 @@ namespace DeepSeek_v4_for_VisualStudio.View
         /// 扫描项目目录和用户目录下的 SKILL.md 文件。
         /// 失败不影响核心聊天功能。
         /// </summary>
-        #pragma warning disable VSTHRD100 // async void 用于 fire-and-forget 初始化
-        private async void InitializeSkills()
+        private async Task InitializeSkillsAsync()
         {
             try
             {
                 _skillService = SkillService.Instance;
-                _skillDiscoveryResult = await _skillService.DiscoverSkillsAsync(_solutionPath);
+                await DiscoverSkillsForCurrentSolutionAsync();
 
                 if (_skillDiscoveryResult.TotalCount > 0)
                 {
@@ -494,7 +493,6 @@ namespace DeepSeek_v4_for_VisualStudio.View
                 Logger.Error($"[Skill] Skill 初始化失败: {ex.Message}", ex);
             }
         }
-        #pragma warning restore VSTHRD100
 
         /// <summary>
         /// 同时遵循用户在 ComboBox 中选择的搜索引擎偏好。

@@ -627,7 +627,6 @@ namespace DeepSeek_v4_for_VisualStudio.View
                     InitializeApiService();
                     InitializeOcrService();
                     InitializeMcp(); // MCP 后台初始化，不阻塞 UI
-                    InitializeSkills(); // Skill 后台发现，不阻塞 UI
                     RecordRuntimeSettingsApplied();
 
                     // ── 链式初始化：先解析项目路径 → 再加载会话 ──
@@ -636,6 +635,7 @@ namespace DeepSeek_v4_for_VisualStudio.View
                     _ = Microsoft.VisualStudio.Shell.ThreadHelper.JoinableTaskFactory.RunAsync(async () =>
                     {
                         await ResolveSolutionPathAsync();
+                        await InitializeSkillsAsync();
                         LoadInputHistory();  // 加载该项目的历史输入（路径依赖 _solutionPath）
                         await LoadAndShowAsync();
                     });

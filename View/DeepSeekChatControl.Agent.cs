@@ -169,8 +169,7 @@ namespace DeepSeek_v4_for_VisualStudio.View
 
             try
             {
-                if (_skillDiscoveryResult == null)
-                    _skillDiscoveryResult = await SkillService.Instance.DiscoverSkillsAsync(_solutionPath);
+                await DiscoverSkillsForCurrentSolutionAsync();
 
                 // 技能发现结果仅用于 /skill 解析和 UI 列表；不在系统提示中注入
                 // available_skills 清单，避免未显式调用技能时污染上下文。
