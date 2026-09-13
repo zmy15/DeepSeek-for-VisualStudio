@@ -78,6 +78,7 @@ namespace DeepSeek_v4_for_VisualStudio.Services.Agents
                 {
                     "runSubagent",               // 调用 Explore 子代理进行代码库探索
                     "VisualStudio_askQuestions",  // 向用户提问澄清
+                    "fetch_webpage",              // 用户提供 URL 时获取网页内容
                     "memory",                     // 记忆管理
                     "list_dir",                   // 列出目录（对齐阶段快速查阅）
                     "read_file",                  // 读取文件（对齐阶段快速查阅）
@@ -138,7 +139,7 @@ namespace DeepSeek_v4_for_VisualStudio.Services.Agents
                 var (discoveryContext, messages) = await RunDiscoveryAsync(userMessage, context);
 
                 // ── 阶段 2: 对齐 — 延续阶段 1 的对话，与用户澄清需求
-                //     DeepSeek Prefix Cache 可命中整个阶段 1 的对话前缀（~80-90% 命中率）──
+                //     新的阶段 system prompt 会显式结束发现阶段的 DONE-only 约束。
                 AddLog("INFO", L["agent.log.planPhaseAlign"]);
                 var (alignmentSummary, alignmentMessages) = await RunAlignmentAsync(userMessage, messages, context);
 
@@ -533,7 +534,13 @@ namespace DeepSeek_v4_for_VisualStudio.Services.Agents
 
             try
             {
-                //  直接在阶段 1 的对话历史上追加对齐指令
+                //  直接在同一对话历史中追加新的阶段 system prompt 和对齐指令。
+                //  DONE-only 只适用于发现阶段，必须由后续 system prompt 显式结束。
+                existingMessages.Add(new ChatApiMessage
+                {
+                    Role = "system",
+                    Content = L["agent.plan.alignmentSystemPrompt"]
+                });
                 existingMessages.Add(new ChatApiMessage
                 {
                     Role = "user",
@@ -633,17 +640,22 @@ namespace DeepSeek_v4_for_VisualStudio.Services.Agents
             List<ChatApiMessage> messages;
             if (alignmentMessages != null && alignmentMessages.Count > 0)
             {
-                //  在对齐对话基础上追加：系统上下文 + 设计指令
+                //  在对齐对话基础上追加：系统上下文 + 设计指令 + 设计阶段 system prompt。
                 // 不调用 BuildContextAwareMessages，直接复用对齐阶段的完整消息列表
                 messages = new List<ChatApiMessage>(alignmentMessages);
                 messages.AddRange(extraSystemMessages);
                 messages.Add(new ChatApiMessage { Role = "user", Content = planPrompt });
+                messages.Add(new ChatApiMessage
+                {
+                    Role = "system",
+                    Content = L["agent.plan.designSystemPrompt"]
+                });
                 AddLog("INFO", LocalizationService.Instance["agent.log.planReuseAlignment"]);
             }
             else
             {
                 // 回退：独立构建消息（无对齐历史时）
-                messages = BuildContextAwareMessages(Definition.SystemPrompt, planPrompt, extraSystemMessages);
+                messages = BuildContextAwareMessages(L["agent.plan.designSystemPrompt"], planPrompt, extraSystemMessages);
             }
 
             AddLog("INFO", L["agent.log.planGeneratingJson"]);
@@ -1201,6 +1213,11 @@ namespace DeepSeek_v4_for_VisualStudio.Services.Agents
 
             // ── 将 plan.md 用户指令追加到对话历史末尾 ──
             mdMessages.Add(new ChatApiMessage { Role = "user", Content = prompt.ToString() });
+            mdMessages.Add(new ChatApiMessage
+            {
+                Role = "system",
+                Content = L["agent.plan.markdownSystemPrompt"]
+            });
 
             AddLog("INFO", L["agent.log.planGeneratingMd"]);
             string markdown = await CallAiWithMessagesAsync(

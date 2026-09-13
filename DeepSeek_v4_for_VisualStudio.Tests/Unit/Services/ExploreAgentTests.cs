@@ -103,6 +103,15 @@ public class ExploreAgentTests
         agent.Definition.SystemPrompt.Should().Contain("强制工具使用");
     }
 
+    [Fact]
+    public void ExploreInstructions_DoNotRequireFixedMinimumToolCalls()
+    {
+        var instructions = global::DeepSeek_v4_for_VisualStudio.Services.AiPrompts.ExploreAgentInstructions;
+
+        instructions.Should().NotContain("3-5");
+        instructions.Should().Contain("立即停止");
+    }
+
     #endregion
 
     #region DefaultReadTools

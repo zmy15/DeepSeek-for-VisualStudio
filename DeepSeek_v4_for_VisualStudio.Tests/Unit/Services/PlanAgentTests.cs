@@ -99,6 +99,14 @@ public class PlanAgentTests
     }
 
     [Fact]
+    public void Definition_AllowedTools_IncludesFetchWebpage()
+    {
+        var agent = new PlanAgent(_apiService);
+
+        agent.Definition.AllowedTools.Should().Contain("fetch_webpage");
+    }
+
+    [Fact]
     public void Definition_AllowedTools_DoesNotContainModifyTools()
     {
         var agent = new PlanAgent(_apiService);
@@ -124,6 +132,27 @@ public class PlanAgentTests
 
         agent.Definition.SystemPrompt.Should().Contain("5");
         agent.Definition.SystemPrompt.Should().Contain("8");
+    }
+
+    [Fact]
+    public void PlanPhasePrompts_DefineIndependentPhaseContracts()
+    {
+        var localization = global::DeepSeek_v4_for_VisualStudio.Services.LocalizationService.Instance;
+        var discovery = localization["agent.plan.discoverySystemPrompt"];
+        var alignment = localization["agent.plan.alignmentSystemPrompt"];
+        var design = localization["agent.plan.designSystemPrompt"];
+        var markdown = localization["agent.plan.markdownSystemPrompt"];
+
+        discovery.Should().Contain("DONE");
+        alignment.Should().Contain("Plan");
+        alignment.Should().Contain("DONE");
+        design.Should().Contain("Plan");
+        design.Should().Contain("JSON");
+        markdown.Should().Contain("Markdown");
+        markdown.Should().Contain("JSON");
+        discovery.Should().NotBe(alignment);
+        alignment.Should().NotBe(design);
+        design.Should().NotBe(markdown);
     }
 
     #endregion

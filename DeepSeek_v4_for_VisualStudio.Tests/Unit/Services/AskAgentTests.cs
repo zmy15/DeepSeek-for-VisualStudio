@@ -210,6 +210,63 @@ public class AskAgentTests
     }
 
     [Fact]
+    public void BuildContextAwareMessages_ExplicitRoute_AppendsOverrideAsLastSystemMessage()
+    {
+        var context = new AgentContext
+        {
+            IsExplicitRoute = true,
+            ExplicitRouteTarget = AgentType.Ask,
+        };
+        var agent = new AskAgent(_apiService)
+        {
+            Context = context,
+        };
+
+        var method = typeof(BaseAgent).GetMethod(
+            "BuildContextAwareMessages",
+            System.Reflection.BindingFlags.Instance | System.Reflection.BindingFlags.NonPublic,
+            binder: null,
+            new[] { typeof(string), typeof(string), typeof(int), typeof(bool) },
+            modifiers: null);
+
+        var messages = (List<ChatApiMessage>)method!.Invoke(
+            agent,
+            new object[] { "AskAgent system prompt", "user prompt", int.MaxValue, false })!;
+
+        messages.Last().Role.Should().Be("system");
+        messages.Last().Content.Should().Contain("@Ask");
+        messages.Last().Content.Should().Contain("重新分类");
+    }
+
+    [Fact]
+    public void BuildContextAwareMessages_ExplicitRouteForDifferentAgent_DoesNotAppendOverride()
+    {
+        var context = new AgentContext
+        {
+            IsExplicitRoute = true,
+            ExplicitRouteTarget = AgentType.Edit,
+        };
+        var agent = new AskAgent(_apiService)
+        {
+            Context = context,
+        };
+
+        var method = typeof(BaseAgent).GetMethod(
+            "BuildContextAwareMessages",
+            System.Reflection.BindingFlags.Instance | System.Reflection.BindingFlags.NonPublic,
+            binder: null,
+            new[] { typeof(string), typeof(string), typeof(int), typeof(bool) },
+            modifiers: null);
+
+        var messages = (List<ChatApiMessage>)method!.Invoke(
+            agent,
+            new object[] { "AskAgent system prompt", "user prompt", int.MaxValue, false })!;
+
+        messages.Last().Role.Should().Be("system");
+        messages.Last().Content.Should().Be("AskAgent system prompt");
+    }
+
+    [Fact]
     public void BuildContextAwareMessages_HandoffPrefix_PlacesBoundaryToolsAndUserCorrectly()
     {
         var contextManager = new ConversationContextManager();

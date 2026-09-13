@@ -736,6 +736,7 @@ namespace DeepSeek_v4_for_VisualStudio.Services.Agents
                     Context.ToolHistoryInsertIndex = result.Count;
                 if (!string.IsNullOrWhiteSpace(systemPrompt))
                     result.Add(new ChatApiMessage { Role = "system", Content = systemPrompt });
+                AppendExplicitRouteInstruction(result);
                 return result;
             }
 
@@ -792,8 +793,30 @@ namespace DeepSeek_v4_for_VisualStudio.Services.Agents
             // ── 第6层：Agent 专属行为指令（固定在最后）──
             if (!string.IsNullOrWhiteSpace(systemPrompt))
                 messages.Add(new ChatApiMessage { Role = "system", Content = systemPrompt });
+            AppendExplicitRouteInstruction(messages);
 
             return messages;
+        }
+
+        /// <summary>
+        /// 将显式 @Agent 的路由边界追加为最后一条 system 消息。
+        /// 该消息优先级高于角色默认的自动移交策略，但仍允许必要的权限边界移交。
+        /// </summary>
+        private void AppendExplicitRouteInstruction(List<ChatApiMessage> messages)
+        {
+            if (Context?.IsExplicitRoute != true)
+                return;
+            if (Context.ExplicitRouteTarget.HasValue
+                && Context.ExplicitRouteTarget.Value != Definition.Type)
+                return;
+
+            messages.Add(new ChatApiMessage
+            {
+                Role = "system",
+                Content = string.Format(
+                    LocalizationService.Instance["agent.explicitRoute.doNotHandoff"],
+                    Definition.Name)
+            });
         }
 
         /// <summary>
