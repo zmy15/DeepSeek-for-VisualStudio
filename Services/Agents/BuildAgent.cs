@@ -84,7 +84,8 @@ namespace DeepSeek_v4_for_VisualStudio.Services.Agents
         {
             return LocalizationService.Instance["system.agent.buildPrompt"]
                 + LocalizationService.Instance["system.agent.buildTrustRule"]
-                + AiPrompts.BuildAgentMcpFragment;
+                + AiPrompts.BuildAgentMcpFragment
+                + AiPrompts.AgentConclusionStopRule;
         }
 
         #endregion

@@ -98,6 +98,8 @@ public class PlanAgentTests
 
         agent.Definition.SystemPrompt.Should().NotBeNullOrEmpty();
         agent.Definition.SystemPrompt.Should().Contain("Plan");
+        agent.Definition.SystemPrompt.Should().Contain(
+            global::DeepSeek_v4_for_VisualStudio.Services.AiPrompts.AgentConclusionStopRule);
     }
 
     [Fact]

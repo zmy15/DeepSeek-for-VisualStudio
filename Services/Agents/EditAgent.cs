@@ -199,7 +199,8 @@ namespace DeepSeek_v4_for_VisualStudio.Services.Agents
             return LocalizationService.Instance["system.agent.editPromptFragment"]
                 + LocalizationService.Instance["agent.edit.mcpSystemPrompt"]
                 + LocalizationService.Instance["system.agent.editBuildTrustRule"]
-                + LocalizationService.Instance["system.agent.editPhaseToolOverride"];
+                + LocalizationService.Instance["system.agent.editPhaseToolOverride"]
+                + AiPrompts.AgentConclusionStopRule;
         }
 
         #endregion
@@ -1034,7 +1035,8 @@ namespace DeepSeek_v4_for_VisualStudio.Services.Agents
                 string verifySystemPrompt = LocalizationService.Instance.Format(
                     "system.agent.verifyPromptFragment",
                     workspaceRoot,
-                    string.Join("\n", changes.Select(c => $"- `{c.FilePath}`")));
+                    string.Join("\n", changes.Select(c => $"- `{c.FilePath}`")))
+                    + AiPrompts.AgentConclusionStopRule;
 
                 // ── 验证阶段专用工具白名单：build + 只读 + 编辑工具（不含探索工具）──
                 var verifyToolWhitelist = new List<string>(VerifyPhaseTools);

@@ -89,7 +89,8 @@ namespace DeepSeek_v4_for_VisualStudio.Services.Agents
         {
             return LocalizationService.Instance["agent.plan.systemPromptFragment"]
                 + "\n\n" + LocalizationService.Instance["agent.plan.stepLimitRule"]
-                + AiPrompts.PlanAgentMcpFragment;
+                + AiPrompts.PlanAgentMcpFragment
+                + AiPrompts.AgentConclusionStopRule;
         }
 
         #endregion

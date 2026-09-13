@@ -76,6 +76,8 @@ public class ExploreAgentTests
 
         agent.Definition.SystemPrompt.Should().Contain("Explore");
         agent.Definition.SystemPrompt.Should().Contain("强制工具使用");
+        agent.Definition.SystemPrompt.Should().Contain(
+            global::DeepSeek_v4_for_VisualStudio.Services.AiPrompts.AgentConclusionStopRule);
     }
 
     [Fact]

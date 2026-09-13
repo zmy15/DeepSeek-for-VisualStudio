@@ -311,6 +311,9 @@ namespace DeepSeek_v4_for_VisualStudio.Services
 
         #region Agent-Specific System Prompt Fragments
 
+        /// <summary>所有 Agent 专属提示词共用的结论停止规则</summary>
+        public static string AgentConclusionStopRule => L["system.agent.conclusionStopRule"];
+
         /// <summary>Ask Agent — 代码库探索策略 + 记忆系统 + 移交规则</summary>
         public static string AskAgentPromptFragment => L["system.agent.askPromptFragment"];
 
@@ -322,7 +325,7 @@ namespace DeepSeek_v4_for_VisualStudio.Services
 
         /// <summary>Explore Agent — 深度检索模式完整系统提示</summary>
         public static string ExploreAgentSystemPrompt =>
-            L["system.agent.explorePrompt"] + "\n\n" + ExploreMemoryInstructions;
+            L["system.agent.explorePrompt"] + "\n\n" + ExploreMemoryInstructions + AgentConclusionStopRule;
 
         /// <summary>Explore Agent — 定义描述</summary>
         public static string ExploreAgentDescription => L["system.agent.exploreDescription"];

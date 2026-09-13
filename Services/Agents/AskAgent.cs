@@ -75,7 +75,8 @@ namespace DeepSeek_v4_for_VisualStudio.Services.Agents
             return LocalizationService.Instance["agent.ask.systemPromptFragment"]
                 + AiPrompts.AskAgentPromptFragment
                 + "\n\n" + AiPrompts.AskGitInstructions
-                + "\n\n" + AiPrompts.AskTerminalInstructions;
+                + "\n\n" + AiPrompts.AskTerminalInstructions
+                + AiPrompts.AgentConclusionStopRule;
         }
 
         #endregion

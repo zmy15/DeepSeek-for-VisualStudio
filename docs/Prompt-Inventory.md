@@ -3105,6 +3105,30 @@ Respond in English. Write code comments in English.
 You may need access to MCP external tools (e.g. database queries, API documentation lookups). Plan Agent does not directly hold these tools — use `runSubagent` to delegate Explore sub-agent for accessing MCP read-only tools.
 `````
 
+### `system.agent.conclusionStopRule`
+
+**zh-CN**
+
+`````text
+
+
+## 结论停止规则（高优先级）
+- 一旦已有足够证据形成明确结论，立即输出结果并结束当前阶段。
+- 不要为了“再次确认”重复执行相同的搜索、读取、构建、测试或检查。
+- 仅当出现新证据、代码/环境发生变化、用户提出新要求，或结论仍存在具体未解决的不确定性时，才进行一次必要的重新验证。
+`````
+
+**en**
+
+`````text
+
+
+## Conclusive Stop Rule (High Priority)
+- Once the available evidence is sufficient to form a clear conclusion, report it and end the current phase immediately.
+- Do not repeat the same search, read, build, test, or verification merely to "confirm again".
+- Repeat verification only when new evidence appears, the code/environment changes, the user asks for it, or a specific unresolved uncertainty remains.
+`````
+
 ### `system.agent.verifyPromptFragment`
 
 **zh-CN**
