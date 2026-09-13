@@ -3113,6 +3113,8 @@ You may need access to MCP external tools (e.g. database queries, API documentat
 
 
 ## 行动与去重规则（高优先级）
+- 只完成当前用户请求的内容；不要扩展到未被要求的任务或自行改变目标。
+- 上文历史仅作参考，不得把之前轮次的请求、计划或结论当成本轮目标；发生冲突时，以当前用户输入为准。
 - 一旦确定下一步要做什么，立即执行，不要只复述计划或重新分析。
 - 不要在结论或步骤已经明确后反复验证；同一验证只执行一次。
 - 开始行动前先检查上文，已经完成的读取、搜索、构建、测试或修改不得重复，直接复用已有结果并继续下一步。
@@ -3126,6 +3128,8 @@ You may need access to MCP external tools (e.g. database queries, API documentat
 
 
 ## Action and Deduplication Rule (High Priority)
+- Complete only the current user request; do not expand into unrequested work or change the goal.
+- Treat prior conversation only as context. Never treat a previous turn's request, plan, or conclusion as the current goal; if they conflict, the current user input wins.
 - Once the next action is clear, execute it immediately; do not merely restate the plan or re-analyze.
 - Do not repeatedly verify after the conclusion or step is already clear; perform each verification only once.
 - Before acting, check the conversation above. Never repeat a read, search, build, test, or modification that has already been completed; reuse the existing result and continue to the next action.
