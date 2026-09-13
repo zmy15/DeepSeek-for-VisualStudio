@@ -67,7 +67,7 @@ namespace DeepSeek_v4_for_VisualStudio.Services
             });
 
             // ── Skill 服务 ──
-            services.AddSingleton<ISkillService, SkillService>();
+            services.AddSingleton<ISkillService>(_ => SkillService.Instance);
 
             // ── 搜索与 RAG ──
             services.AddSingleton<IWebSearchService, WebSearchService>();

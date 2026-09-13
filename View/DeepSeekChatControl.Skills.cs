@@ -21,6 +21,8 @@ namespace DeepSeek_v4_for_VisualStudio.View
     {
         #region Skill System
 
+        private sealed record ResolvedSkillCommand(string Instructions, string UserContent);
+
         /// <summary>
         /// 使用当前解决方案路径重新确认 Skill 缓存。SkillService 内部会缓存相同路径的结果，
         /// 因此这里可以安全地作为跨会话、跨解决方案的统一入口调用。
@@ -37,10 +39,10 @@ namespace DeepSeek_v4_for_VisualStudio.View
         /// 匹配成功时返回技能的完整指令文本，匹配失败时显示错误并返回 null。
         /// 非斜杠命令（不以 / 开头）返回 string.Empty 表示正常发送。
         /// </summary>
-        private async Task<string?> ResolveSlashCommandAsync(string userText)
+        private async Task<ResolvedSkillCommand?> ResolveSlashCommandAsync(string userText)
         {
             if (string.IsNullOrEmpty(userText) || !userText.StartsWith("/"))
-                return string.Empty;
+                return null;
 
             var parts = userText.Substring(1).Split(new[] { ' ' }, 2, StringSplitOptions.RemoveEmptyEntries);
             if (parts.Length == 0)
@@ -96,7 +98,9 @@ namespace DeepSeek_v4_for_VisualStudio.View
                     await ThreadHelper.JoinableTaskFactory.SwitchToMainThreadAsync();
                     StatusLabel.Text = string.Format(LocalizationService.Instance["skills.loaded"], skill.Name);
 
-                    return skill.GetInvocationPrompt(commandName, argumentText);
+                    return new ResolvedSkillCommand(
+                        Instructions: skill.GetInvocationPrompt(commandName, argumentText),
+                        UserContent: string.IsNullOrWhiteSpace(argumentText) ? userText : argumentText);
                 }
                 else
                 {

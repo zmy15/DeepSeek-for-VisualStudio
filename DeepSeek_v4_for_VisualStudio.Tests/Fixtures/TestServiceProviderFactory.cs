@@ -85,10 +85,10 @@ namespace DeepSeek_v4_for_VisualStudio.Tests.Fixtures
             public string GenerateSkillsSummary(SkillDiscoveryResult? discoveryResult = null)
                 => string.Empty;
 
-            public string? GetSkillsSummary()
+            public string? GetSkillsSummary(string? solutionPath = null)
                 => null;
 
-            public string? LoadSkillsSummaryFromDisk()
+            public string? LoadSkillsSummaryFromDisk(string? solutionPath = null)
                 => null;
         }
     }

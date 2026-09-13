@@ -96,11 +96,11 @@ namespace DeepSeek_v4_for_VisualStudio.View
             UpdateButtonsState();
 
             // 斜杠命令处理
-            string? skillInstructions = null;
+            ResolvedSkillCommand? directSkillCommand = null;
             if (!string.IsNullOrEmpty(userText) && userText.StartsWith("/"))
             {
-                skillInstructions = await ResolveSlashCommandAsync(userText);
-                if (skillInstructions == null)
+                directSkillCommand = await ResolveSlashCommandAsync(userText);
+                if (directSkillCommand == null)
                 {
                     lock (_lock) { _isGenerating = false; }
                     UpdateButtonsState();
@@ -108,12 +108,11 @@ namespace DeepSeek_v4_for_VisualStudio.View
                 }
             }
 
-            // ── 技能指令注入：将解析后的技能指令替换为用户实际发送内容 ──
-            // userText 保持原始命令用于气泡显示，skillInstructions 作为 AI 实际接收内容
-            string effectiveUserText = !string.IsNullOrEmpty(skillInstructions) ? skillInstructions : userText;
-            if (!string.IsNullOrEmpty(skillInstructions))
+            // 显式技能调用只把用户参数作为本轮 user 内容，完整技能指令稍后以 system 消息注入。
+            string effectiveUserText = directSkillCommand?.UserContent ?? userText;
+            if (directSkillCommand != null)
             {
-                Logger.Info($"[SkillFlow] 技能指令已注入 (长度: {skillInstructions.Length})，原始命令: \"{userText}\"");
+                Logger.Info($"[SkillFlow] 技能指令已解析 (长度: {directSkillCommand.Instructions.Length})，原始命令: \"{userText}\"");
             }
 
             if (string.IsNullOrEmpty(userText) && !hasAttachments)
@@ -330,10 +329,11 @@ namespace DeepSeek_v4_for_VisualStudio.View
 
             lock (_lock)
             {
-                if (!string.IsNullOrEmpty(autoSkillInstructions))
+                string? skillInstructionsToInject = directSkillCommand?.Instructions ?? autoSkillInstructions;
+                if (!string.IsNullOrEmpty(skillInstructionsToInject))
                 {
-                    _contextManager.AddCustomMessage("system", autoSkillInstructions);
-                    Logger.Info($"[SkillFlow] AI 自动匹配技能，指令已注入 Agent 上下文 (长度: {autoSkillInstructions.Length})");
+                    _contextManager.AddCustomMessage("system", skillInstructionsToInject);
+                    Logger.Info($"[SkillFlow] 技能指令已注入 Agent 上下文 (长度: {skillInstructionsToInject.Length})");
                 }
 
                 _contextManager.AddUserMessage(fullUserContent, visionContent);
@@ -362,17 +362,18 @@ namespace DeepSeek_v4_for_VisualStudio.View
                     // ── @agent /skill 组合：先解析技能指令，注入到 Agent 工作流 ──
                     if (!string.IsNullOrWhiteSpace(agentRoutedUserText) && agentRoutedUserText.StartsWith("/"))
                     {
-                        string? skillResult = await ResolveSlashCommandAsync(agentRoutedUserText);
+                        ResolvedSkillCommand? skillResult = await ResolveSlashCommandAsync(agentRoutedUserText);
                         if (skillResult == null)
                         {
                             lock (_lock) { _isGenerating = false; }
                             UpdateButtonsState();
                             return;
                         }
-                        if (!string.IsNullOrEmpty(skillResult))
+                        if (!string.IsNullOrEmpty(skillResult.Instructions))
                         {
-                            agentSkillInstructions = skillResult;
-                            Logger.Info($"[Agent] @agent /skill 组合: Agent={explicitRoute.TargetAgent}, Skill 指令已解析 ({skillResult.Length} 字符)");
+                            agentSkillInstructions = skillResult.Instructions;
+                            agentRoutedUserText = skillResult.UserContent;
+                            Logger.Info($"[Agent] @agent /skill 组合: Agent={explicitRoute.TargetAgent}, Skill 指令已解析 ({skillResult.Instructions.Length} 字符)");
                         }
                     }
 
@@ -390,7 +391,8 @@ namespace DeepSeek_v4_for_VisualStudio.View
                 // 所有非斜杠命令消息统一走 Agent 工作流（从 AskAgent 起始）。
                 // 仅粘贴图片/文件、不输入文字时也要进入 Agent，否则 _isGenerating 不会复位，界面会卡死。
                 bool hasAgentInput = !string.IsNullOrEmpty(effectiveUserText) || hasAttachments;
-                if (_activeAgent != null && _agentFactory != null && hasAgentInput && !effectiveUserText.StartsWith("/"))
+                bool canEnterAgent = directSkillCommand != null || !effectiveUserText.StartsWith("/");
+                if (_activeAgent != null && _agentFactory != null && hasAgentInput && canEnterAgent)
                 {
                     // ── 确保系统提示词已初始化（新会话时 _fixedSystemPrompt 为 null）──
                     await EnsureSystemPromptInitializedAsync();
