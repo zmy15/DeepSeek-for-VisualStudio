@@ -693,7 +693,7 @@ namespace DeepSeek_v4_for_VisualStudio.View
         /// 自定义端点即使用指向官方域名，也使用独立的 Key 与模型来源，不做该请求。
         /// </summary>
         private bool CanQueryBalance
-            => IsOfficialSource;
+            => _apiService != null && IsOfficialSource;
 
         /// <summary>
         /// 启动余额查询定时器，每 60 秒自动刷新一次。
@@ -1570,7 +1570,7 @@ namespace DeepSeek_v4_for_VisualStudio.View
                 return;
             }
 
-            RefreshBalanceDisplay();
+            StartBalanceTimer();
         }
 
         /// <summary>
