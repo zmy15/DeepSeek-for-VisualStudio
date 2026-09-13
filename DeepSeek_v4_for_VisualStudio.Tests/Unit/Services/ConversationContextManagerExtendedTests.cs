@@ -477,6 +477,8 @@ public class ConversationContextManagerExtendedTests
         var compressor = new ContextCompressorService((messages, ct) =>
             Task.FromResult("summary"));
 
+        _manager.TokenBudget = 1;
+        _manager.SetSystemPrompt("system");
         _manager.CacheWindowMaxTokens = 1;
         _manager.SetCompressor(compressor);
         _manager.AddUserMessage("Q1");
@@ -495,6 +497,50 @@ public class ConversationContextManagerExtendedTests
 
         _manager.ConsumeConversationResetNotice().Should().BeTrue();
         _manager.ConsumeConversationResetNotice().Should().BeFalse();
+    }
+
+    [Fact]
+    public void TryCompressForToolLoop_CacheWindowOnlyWithoutBudgetPressure_DoesNotSignalReset()
+    {
+        var compressor = new ContextCompressorService((messages, ct) =>
+            Task.FromResult("summary"));
+
+        _manager.CacheWindowMaxTokens = 1;
+        _manager.SetCompressor(compressor);
+        _manager.AddCustomMessage("system", "custom-1");
+        _manager.AddCustomMessage("system", "custom-2");
+
+        _manager.TryCompressForToolLoop(out _, out _, out _).Should().BeFalse();
+
+        _manager.ConsumeConversationResetNotice().Should().BeFalse();
+    }
+
+    [Fact]
+    public void TryCompressForToolLoop_CompressedSummaryFillsBudget_SignalsReset()
+    {
+        var compressor = new ContextCompressorService((messages, ct) =>
+            Task.FromResult("summary"));
+
+        _manager.TokenBudget = 1;
+        _manager.SetCompressor(compressor);
+        _manager.RestoreCompressedSummaries(new[]
+        {
+            new CompressedTurnSummary
+            {
+                FromTurn = 1,
+                ToTurn = 2,
+                Summary = "compressed-content",
+                OriginalTokens = 100,
+                CompressedTokens = 20,
+            },
+        });
+        _manager.CacheWindowMaxTokens = 1;
+        _manager.AddCustomMessage("system", "custom-1");
+        _manager.AddCustomMessage("system", "custom-2");
+
+        _manager.TryCompressForToolLoop(out _, out _, out _).Should().BeFalse();
+
+        _manager.ConsumeConversationResetNotice().Should().BeTrue();
     }
 
     [Fact]

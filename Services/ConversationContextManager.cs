@@ -524,6 +524,22 @@ namespace DeepSeek_v4_for_VisualStudio.Services
         }
 
         /// <summary>
+        /// 判断不可再压缩的固定 system[0] 与已生成压缩摘要是否已经占满 Token 预算。
+        /// 只有这部分本身达到上限时，才真正需要用户切换新对话。
+        /// </summary>
+        private bool IsSystemAndCompressedContextAtBudget()
+        {
+            if (_compressor == null || TokenBudget <= 0)
+                return false;
+
+            string? systemPrompt = _fixedSystemPrompt ?? BuildFinalSystemPrompt();
+            int systemTokens = EstimateTokens(systemPrompt);
+            int compressedTokens = EstimateTokens(_compressor.GetCompressedContextText());
+            int irreducibleTokens = (int)((systemTokens + compressedTokens) * _calibrationFactor);
+            return irreducibleTokens >= TokenBudget;
+        }
+
+        /// <summary>
         /// 标记需要在当前 Agent 工作流结束后提示用户切换新对话。
         /// </summary>
         private void MarkConversationResetNeeded(string reason)
@@ -792,7 +808,8 @@ namespace DeepSeek_v4_for_VisualStudio.Services
                 {
                     if (!HasNewCompressibleEntries(compressionStart))
                     {
-                        MarkConversationResetNeeded(compressionReason);
+                        if (IsSystemAndCompressedContextAtBudget())
+                            MarkConversationResetNeeded(compressionReason);
                     }
                     else
                     {
@@ -909,7 +926,8 @@ namespace DeepSeek_v4_for_VisualStudio.Services
 
             if (!HasNewCompressibleEntries(compressionStart))
             {
-                MarkConversationResetNeeded(compressionReason);
+                if (IsSystemAndCompressedContextAtBudget())
+                    MarkConversationResetNeeded(compressionReason);
                 return false;
             }
 
