@@ -149,7 +149,7 @@ public class ContextModelsTests
         config.CompressionTargetRatio.Should().Be(0.10);
         config.AggressiveCompressionTargetRatio.Should().Be(0.10);
         config.CompressionPrompt.Should().NotBeNullOrEmpty();
-        config.CompressionPrompt.Should().NotContain("{0}");
+        config.CompressionPrompt.Should().Contain("{0}");
     }
 
     [Fact]

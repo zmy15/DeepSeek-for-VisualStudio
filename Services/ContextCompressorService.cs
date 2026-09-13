@@ -2,6 +2,7 @@ using DeepSeek_v4_for_VisualStudio.Models;
 using DeepSeek_v4_for_VisualStudio.Utils;
 using System;
 using System.Collections.Generic;
+using System.Globalization;
 using System.Linq;
 using System.Text;
 using System.Threading;
@@ -109,7 +110,8 @@ namespace DeepSeek_v4_for_VisualStudio.Services
             int fromTurn,
             int toTurn,
             IReadOnlyList<ChatApiMessage>? prefixMessages = null,
-            CancellationToken cancellationToken = default)
+            CancellationToken cancellationToken = default,
+            int targetSummaryTokens = 0)
         {
             if (turnsToCompress == null || turnsToCompress.Count == 0)
                 return new CompressedTurnSummary
@@ -127,7 +129,8 @@ namespace DeepSeek_v4_for_VisualStudio.Services
             string summary;
             if (_summarizer != null)
             {
-                string prompt = _config.CompressionPrompt;
+                int effectiveTargetTokens = ResolveTargetSummaryTokens(originalTokens, targetSummaryTokens);
+                string prompt = BuildCompressionPrompt(_config.CompressionPrompt, effectiveTargetTokens);
                 if (_compressedSummaries.Count > 0)
                 {
                     prompt += "\n\n" + LocalizationService.Instance["system.compressionIncrementalPrompt"];
@@ -215,6 +218,28 @@ namespace DeepSeek_v4_for_VisualStudio.Services
         }
 
         #region Private Methods
+
+        private static int ResolveTargetSummaryTokens(int originalTokens, int targetSummaryTokens)
+        {
+            int target = targetSummaryTokens > 0
+                ? targetSummaryTokens
+                : Math.Max(1, originalTokens / 10);
+
+            return Math.Max(1, target);
+        }
+
+        private static string BuildCompressionPrompt(string? template, int targetTokens)
+        {
+            string targetText = targetTokens.ToString("N0", CultureInfo.InvariantCulture);
+            string prompt = template ?? string.Empty;
+            if (prompt.Contains("{0}"))
+                return prompt.Replace("{0}", targetText);
+
+            return prompt.TrimEnd()
+                + string.Format(
+                    LocalizationService.Instance["compress.targetTokensInstruction"],
+                    targetText);
+        }
 
         /// <summary>
         /// 将上下文条目格式化为适合压缩的文本。

@@ -593,6 +593,10 @@ public class ConversationContextManagerExtendedTests
             m.Role == "system"
             && m.Content != null
             && m.Content.Contains("previous-summary", StringComparison.Ordinal));
+        capturedCompressionMessages.Should().Contain(m =>
+            m.Role == "system"
+            && m.Content != null
+            && m.Content.Contains("90,000", StringComparison.Ordinal));
     }
 
     [Fact]

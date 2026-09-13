@@ -1,5 +1,6 @@
 using DeepSeek_v4_for_VisualStudio.Models;
 using DeepSeek_v4_for_VisualStudio.Services;
+using System.Globalization;
 
 namespace DeepSeek_v4_for_VisualStudio.Tests.Unit.Services;
 
@@ -360,6 +361,31 @@ public class ContextCompressorServiceTests
         captured[3].Role.Should().Be("system");
         captured[3].Content.Should().NotContain("compress-me");
         captured[3].Content.Should().Contain("请将上方");
+    }
+
+    [Fact]
+    public void CompressTurnsAsync_InjectsExplicitTargetTokensIntoCompressionPrompt()
+    {
+        IReadOnlyList<ChatApiMessage>? captured = null;
+        var service = new ContextCompressorService((messages, ct) =>
+        {
+            captured = messages;
+            return Task.FromResult("summary");
+        });
+        var entries = new List<ConversationContextManager.ContextEntry>
+        {
+            new() { Role = "user", Content = "compress-me" },
+        };
+
+        service.CompressTurnsAsync(
+            entries,
+            fromTurn: 1,
+            toTurn: 1,
+            targetSummaryTokens: 90_000).Wait();
+
+        captured.Should().NotBeNull();
+        captured![captured.Count - 1].Content.Should()
+            .Contain(90_000.ToString("N0", CultureInfo.InvariantCulture));
     }
 
     [Fact]

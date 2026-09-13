@@ -3698,7 +3698,7 @@ Note: If the content above contains a previously generated [Conversation History
 **zh-CN**
 
 `````text
-请将上方对话历史压缩为高密度摘要，目标长度约为最大上下文 Token 预算的 10%；若原文信息较少则更短。优先保留用户目标与约束、关键决策、文件路径、代码符号/接口、错误与修复结论、命令/测试结果、未完成任务和重要代码片段。可省略寒暄、重复内容和低价值细节，不要丢失后续执行所需的关键信息。
+请将上方对话历史压缩为高密度摘要，目标长度约为 {0} tokens（最大上下文 Token 预算的 10%）；若原文信息较少则更短。优先保留用户目标与约束、关键决策、文件路径、代码符号/接口、错误与修复结论、命令/测试结果、未完成任务和重要代码片段。可省略寒暄、重复内容和低价值细节，不要丢失后续执行所需的关键信息。
 
 摘要：
 `````
@@ -3706,9 +3706,25 @@ Note: If the content above contains a previously generated [Conversation History
 **en**
 
 `````text
-Please compress the conversation history above into a high-density summary targeting about 10% of the maximum context token budget; use less when the source contains little information. Prioritize the user goal and constraints, key decisions, file paths, code symbols/interfaces, errors and fixes, commands/test results, pending tasks, and important code snippets. Omit greetings, repetition, and low-value details without losing information needed to continue the task.
+Please compress the conversation history above into a high-density summary targeting about {0} tokens (10% of the maximum context token budget); use less when the source contains little information. Prioritize the user goal and constraints, key decisions, file paths, code symbols/interfaces, errors and fixes, commands/test results, pending tasks, and important code snippets. Omit greetings, repetition, and low-value details without losing information needed to continue the task.
 
 Summary:
+`````
+
+### `compress.targetTokensInstruction`
+
+**zh-CN**
+
+`````text
+
+目标长度约 {0} tokens。
+`````
+
+**en**
+
+`````text
+
+Target length: approximately {0} tokens.
 `````
 
 ### `system.contextFileContent`

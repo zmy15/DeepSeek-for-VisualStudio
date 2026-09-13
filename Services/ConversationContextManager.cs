@@ -783,7 +783,10 @@ namespace DeepSeek_v4_for_VisualStudio.Services
             //     保证待压缩内容既完整出现，又不会破坏这段缓存前缀。
             if (!_cacheSnapshotEntryIndex.HasValue)
             {
-                int compressionStart = ResolveCompressionStartIndex(startEntryIdx, out string compressionReason);
+                int compressionStart = ResolveCompressionStartIndex(
+                    startEntryIdx,
+                    out string compressionReason,
+                    out int targetSummaryTokens);
 
                 if (compressionStart > startEntryIdx)
                 {
@@ -801,7 +804,10 @@ namespace DeepSeek_v4_for_VisualStudio.Services
                             compressionDynamicBlock,
                             entryLimitOverride: compressionStart);
                         Logger.Info($"[CacheWindow] 触发压缩: {compressionReason}, 压缩前保留 {TurnCount} 轮");
-                        CompressEntriesBeforeWindow(compressionStart, compressionPrefix);
+                        CompressEntriesBeforeWindow(
+                            compressionStart,
+                            compressionPrefix,
+                            targetSummaryTokens);
 
                         // 压缩摘要已生成，立即刷新动态块，确保本轮正常请求就能注入结果。
                         dynamicBlock = _cachedDynamicBlock ?? BuildDynamicContextBlock();
@@ -821,13 +827,21 @@ namespace DeepSeek_v4_for_VisualStudio.Services
         /// 解析当前应当压缩到哪个条目边界。
         /// 供正常请求构建和同一用户请求内的工具循环共用，确保触发条件一致。
         /// </summary>
-        private int ResolveCompressionStartIndex(int startEntryIdx, out string compressionReason)
+        private int ResolveCompressionStartIndex(
+            int startEntryIdx,
+            out string compressionReason,
+            out int targetSummaryTokens)
         {
             int compressionStart = startEntryIdx;
             compressionReason = "none";
+            targetSummaryTokens = 0;
 
             if (_compressor != null && _compressor.Config.AutoCompressEnabled)
             {
+                var config = _compressor.Config;
+                double defaultTargetRatio = Math.Max(0.05, Math.Min(0.95, config.CompressionTargetRatio));
+                targetSummaryTokens = (int)(TokenBudget * defaultTargetRatio);
+
                 int tokenWindowStart = FindCacheWindowStart(out string triggerReason);
                 if (tokenWindowStart > compressionStart)
                 {
@@ -837,7 +851,6 @@ namespace DeepSeek_v4_for_VisualStudio.Services
                     compressionReason = triggerReason;
                 }
 
-                var config = _compressor.Config;
                 if (EstimatedTokens > TokenBudget * config.CompressionThreshold)
                 {
                     bool severe = EstimatedTokens > TokenBudget * config.AggressiveThreshold;
@@ -846,6 +859,7 @@ namespace DeepSeek_v4_for_VisualStudio.Services
                         : config.CompressionTargetRatio;
                     targetRatio = Math.Max(0.05, Math.Min(0.95, targetRatio));
                     int targetTokens = (int)(TokenBudget * targetRatio);
+                    targetSummaryTokens = targetTokens;
                     int budgetStart = FindTokenTargetStartIndex(targetTokens);
                     if (budgetStart > compressionStart)
                     {
@@ -886,7 +900,10 @@ namespace DeepSeek_v4_for_VisualStudio.Services
             if (_cacheSnapshotEntryIndex.HasValue)
                 return false;
 
-            int compressionStart = ResolveCompressionStartIndex(0, out string compressionReason);
+            int compressionStart = ResolveCompressionStartIndex(
+                0,
+                out string compressionReason,
+                out int targetSummaryTokens);
             if (compressionStart <= 0)
                 return false;
 
@@ -914,7 +931,10 @@ namespace DeepSeek_v4_for_VisualStudio.Services
             Logger.Info($"[ToolLoopCompression] 触发压缩: {compressionReason}, " +
                 $"待压缩消息={removedMessageCount}, 当前={EstimatedTokens:N0}/{TokenBudget:N0}");
 
-            CompressEntriesBeforeWindow(compressionStart, compressionPrefix);
+            CompressEntriesBeforeWindow(
+                compressionStart,
+                compressionPrefix,
+                targetSummaryTokens);
             dynamicBlock = _cachedDynamicBlock ?? BuildDynamicContextBlock();
             return true;
         }
@@ -1370,7 +1390,8 @@ namespace DeepSeek_v4_for_VisualStudio.Services
         /// </summary>
         private void CompressEntriesBeforeWindow(
             int windowStartIdx,
-            IReadOnlyList<ChatApiMessage>? compressionPrefix)
+            IReadOnlyList<ChatApiMessage>? compressionPrefix,
+            int targetSummaryTokens)
         {
             if (windowStartIdx <= 0)
                 return;
@@ -1415,7 +1436,8 @@ namespace DeepSeek_v4_for_VisualStudio.Services
                             fromTurn,
                             toTurn,
                             compressionPrefix,
-                            CancellationToken.None)).GetAwaiter().GetResult();
+                            CancellationToken.None,
+                            targetSummaryTokens)).GetAwaiter().GetResult();
 
                     _cachedDynamicBlock = BuildDynamicContextBlock();
                     Logger.Info($"[CacheWindow] 压缩第 {fromTurn}-{toTurn} 轮: " +
