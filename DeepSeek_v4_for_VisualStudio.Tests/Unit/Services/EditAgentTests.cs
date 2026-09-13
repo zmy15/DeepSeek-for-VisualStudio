@@ -85,6 +85,14 @@ public class EditAgentTests
         agent.Definition.SystemPrompt.Should().Contain("Edit");
         agent.Definition.SystemPrompt.Should().Contain(
             global::DeepSeek_v4_for_VisualStudio.Services.AiPrompts.AgentConclusionStopRule);
+        agent.Definition.SystemPrompt.Should().Contain(
+            global::DeepSeek_v4_for_VisualStudio.Services.AiPrompts.EditToolCallRule);
+        global::DeepSeek_v4_for_VisualStudio.Services.AiPrompts.EditSystemPromptFragment
+            .Should().NotContain("不要作为工具调用")
+            .And.NotContain("not a tool call");
+        global::DeepSeek_v4_for_VisualStudio.Services.AiPrompts.EditFormatRecoveryPrompt
+            .Should().Contain("apply_patch")
+            .And.Contain("replace_string_in_file");
     }
 
     #endregion

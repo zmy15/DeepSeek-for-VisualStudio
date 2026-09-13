@@ -196,11 +196,12 @@ namespace DeepSeek_v4_for_VisualStudio.Services.Agents
 
         private static string BuildSystemPrompt()
         {
-            return LocalizationService.Instance["system.agent.editPromptFragment"]
+            return AiPrompts.EditSystemPromptFragment
                 + LocalizationService.Instance["agent.edit.mcpSystemPrompt"]
                 + LocalizationService.Instance["system.agent.editBuildTrustRule"]
                 + LocalizationService.Instance["system.agent.editPhaseToolOverride"]
-                + AiPrompts.AgentConclusionStopRule;
+                + AiPrompts.AgentConclusionStopRule
+                + AiPrompts.EditToolCallRule;
         }
 
         #endregion

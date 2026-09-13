@@ -3137,6 +3137,48 @@ You may need access to MCP external tools (e.g. database queries, API documentat
 - Repeat verification only when new evidence appears, the code/environment changes, the user asks for it, or a specific unresolved uncertainty remains.
 `````
 
+### `system.agent.editToolCallRule`
+
+**zh-CN**
+
+`````text
+
+
+## 编辑工具调用规则（最高优先级，覆盖上方旧文本格式说明）
+- 所有代码文件修改必须通过真实工具调用完成，禁止只在回复中输出 apply_patch、insert_edit_into_file、```file: 或 delete: 等文本块。
+- 局部修改优先调用 apply_patch 或 replace_string_in_file；多处字符串替换调用 multi_replace_string_in_file；新建或完整重写文件调用 create_file；删除文件调用 delete_file。
+- 工具调用必须使用原生 function/tool call；不要用 Markdown 代码块模拟工具调用。
+- 如果当前上下文已经包含所需文件内容，直接调用编辑工具，不要重复读取；编辑完成后按系统流程结束当前步骤。
+- 上方关于“文本格式/直接在回复中输出”的旧说明仅用于兼容历史响应；与本规则冲突时，一律以本规则为准。
+`````
+
+**en**
+
+`````text
+
+
+## Edit Tool Call Rule (Highest Priority, overrides legacy text-format instructions above)
+- All code-file changes must be performed through real tool calls. Do not merely output apply_patch, insert_edit_into_file, ```file:, or delete: text blocks in the response.
+- Prefer apply_patch or replace_string_in_file for local edits; use multi_replace_string_in_file for multiple replacements; use create_file for new files or complete rewrites; use delete_file for deletion.
+- Tool calls must use the native function/tool-call protocol. Do not simulate tool calls with Markdown code blocks.
+- If the current context already contains the required file content, call the edit tool directly and do not read the same content again. End the step according to the system workflow after editing.
+- The legacy instructions above about text formats or outputting edits directly are compatibility-only. If they conflict with this rule, this rule always wins.
+`````
+
+### `system.agent.editToolFormatRecoveryPrompt`
+
+**zh-CN**
+
+`````text
+上次输出未检测到有效的编辑工具调用。若仍需修改，请直接调用真实编辑工具：apply_patch、replace_string_in_file、multi_replace_string_in_file、create_file 或 delete_file。不要输出 apply_patch、insert_edit_into_file、```file: 等旧文本块，也不要只描述将要做的修改。如果已经无需修改，请直接返回空内容。
+`````
+
+**en**
+
+`````text
+The previous response did not contain a valid edit tool call. If changes are still required, call the real edit tools directly: apply_patch, replace_string_in_file, multi_replace_string_in_file, create_file, or delete_file. Do not output legacy apply_patch, insert_edit_into_file, ```file:, or delete: text blocks, and do not merely describe intended changes. If no further changes are needed, return an empty response.
+`````
+
 ### `system.agent.verifyPromptFragment`
 
 **zh-CN**
@@ -3776,6 +3818,8 @@ You are DeepSeek Chat, an AI programming assistant deeply integrated into Visual
 `````
 
 ### `system.editFormatRecoveryPrompt`
+
+> **Deprecated as the active recovery prompt.** Runtime now uses `system.agent.editToolFormatRecoveryPrompt`.
 
 **zh-CN**
 
