@@ -19,54 +19,6 @@ namespace DeepSeek_v4_for_VisualStudio.View
         #region Web Search Optimization
 
         /// <summary>
-        /// 从已解析的附件内容中提取关键信息，用于优化联网搜索查询。
-        /// 当用户上传文件并开启联网搜索时调用，在搜索优化之前执行。
-        /// 使用 AI（非流式）从文件内容中提取核心主题、技术关键词、专有名词等，
-        /// 返回简洁的摘要供搜索优化阶段使用。
-        /// </summary>
-        [RagSource("file-read", "搜索优化：读取附件内容用于提取关键信息")]
-        private async Task<string?> ExtractKeyInfoForSearchAsync(string fileContent, string userQuestion, CancellationToken ct)
-        {
-            if (_activeAgent == null || string.IsNullOrWhiteSpace(fileContent))
-                return null;
-
-            var extractionPrompt = AiPrompts.BuildFileExtractionPrompt(userQuestion, fileContent);
-
-            try
-            {
-                var extractionMessages = new List<ChatApiMessage>
-                {
-                    new ChatApiMessage { Role = "system", Content = AiPrompts.FileExtractionSystem },
-                    new ChatApiMessage { Role = "user", Content = extractionPrompt },
-                };
-
-                Logger.Info("开始从附件提取关键信息用于搜索优化");
-                var rawResponse = await _activeAgent.CallAiWithMessagesAsync(extractionMessages, ct);
-                Logger.Info($"附件关键信息提取原始响应: {rawResponse}");
-
-                string result = rawResponse?.Trim() ?? string.Empty;
-                if (string.IsNullOrWhiteSpace(result) ||
-                    result.Equals("NO_INFO", StringComparison.OrdinalIgnoreCase))
-                {
-                    return null;
-                }
-
-                // RAG-MARK: no-truncate — 不再截断 AI 提取的关键信息结果
-                return result;
-            }
-            catch (OperationCanceledException)
-            {
-                Logger.Info("附件关键信息提取已取消");
-                return null;
-            }
-            catch (Exception ex)
-            {
-                Logger.Error($"附件关键信息提取异常: {ex.Message}", ex);
-                return null;
-            }
-        }
-
-        /// <summary>
         /// 调用 AI 分析用户问题和上下文，生成优化的搜索关键词。
         /// 百度引擎：返回严格 JSON（含 search_recency 时效过滤）。
         /// DuckDuckGo：仅返回优化后的纯文本关键词。

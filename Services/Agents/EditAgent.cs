@@ -189,38 +189,7 @@ namespace DeepSeek_v4_for_VisualStudio.Services.Agents
             {
                 Type = AgentType.Edit,
                 Name = "Edit",
-                Description = LocalizationService.Instance["agent.edit.description"],
-                ArgumentHint = LocalizationService.Instance["agent.edit.argumentHint"],
-                UserInvocable = true,
                 AllowedTools = new List<string>(EditTools),
-                SubAgents = new List<AgentType>(),
-                Handoffs = new List<AgentHandoff>
-                {
-                    new AgentHandoff
-                    {
-                        Label = LocalizationService.Instance["agent.edit.handoffAskLabel"],
-                        TargetAgent = AgentType.Ask,
-                        Prompt = LocalizationService.Instance["agent.edit.handoffAskPrompt"],
-                        AutoSend = true,
-                        ShowContinueOn = false,
-                    },
-                    new AgentHandoff
-                    {
-                        Label = LocalizationService.Instance["agent.edit.handoffBuildLabel"],
-                        TargetAgent = AgentType.Build,
-                        Prompt = LocalizationService.Instance["agent.edit.handoffBuildPrompt"],
-                        AutoSend = true,
-                        ShowContinueOn = false,
-                    },
-                    new AgentHandoff
-                    {
-                        Label = LocalizationService.Instance["agent.edit.handoffPlanLabel"],
-                        TargetAgent = AgentType.Plan,
-                        Prompt = LocalizationService.Instance["agent.edit.handoffPlanPrompt"],
-                        AutoSend = true,
-                        ShowContinueOn = false,
-                    },
-                },
                 SystemPrompt = BuildSystemPrompt(),
             };
         }
@@ -251,7 +220,6 @@ namespace DeepSeek_v4_for_VisualStudio.Services.Agents
 
             var result = new AgentResult
             {
-                AgentType = AgentType.Edit,
                 Success = true,
             };
 
@@ -534,7 +502,6 @@ namespace DeepSeek_v4_for_VisualStudio.Services.Agents
                             {
                                 int reconciled = PlanBuildOutcomeReconciler.ReconcileAfterBuildSuccess(
                                     plan,
-                                    finalBuildResult,
                                     LocalizationService.Instance["agent.log.buildReconciledStepResult"]);
                                 if (reconciled > 0)
                                 {
@@ -2843,19 +2810,6 @@ namespace DeepSeek_v4_for_VisualStudio.Services.Agents
         }
 
         /// <summary>
-        /// 将文件路径列表排序，确保项目配置文件（.csproj/.slnx等）优先写入，
-        /// 构建定义文件（CMakeLists.txt/Makefile）最后写入（必须在源文件创建后才能处理）。
-        /// 避免 VS 在外部修改源文件后才检测到项目文件变更而弹出"检测到冲突文件修改"对话框。
-        /// </summary>
-        private static List<string> SortPathsWithProjectFilesFirst(IEnumerable<string> paths)
-        {
-            return paths
-                .OrderBy(p => GetEditPriority(p))
-                .ThenBy(p => p, StringComparer.OrdinalIgnoreCase)
-                .ToList();
-        }
-
-        /// <summary>
         /// 在写入项目文件前请求用户确认。
         /// 非项目文件直接返回 true（放行）。
         /// </summary>
@@ -3196,12 +3150,27 @@ namespace DeepSeek_v4_for_VisualStudio.Services.Agents
                     AddLog("INFO", LocalizationService.Instance["agent.edit.autoBuildDisabledByUser"]);
                     return BuildSummaryHandoff(plan);
                 }
-                return Definition.Handoffs.FirstOrDefault(h => h.TargetAgent == AgentType.Build)
-                    ?? BuildSummaryHandoff(plan);
+                return BuildBuildHandoff();
             }
 
             // ── 默认 → Ask Agent 生成总结 ──
             return BuildSummaryHandoff(plan);
+        }
+
+        /// <summary>
+        /// 构建移交 Build Agent 执行编译验证的 Handoff。
+        /// </summary>
+        private AgentHandoff BuildBuildHandoff()
+        {
+            var L = LocalizationService.Instance;
+            return new AgentHandoff
+            {
+                Label = L["agent.edit.handoffBuildLabel"],
+                TargetAgent = AgentType.Build,
+                Prompt = L["agent.edit.handoffBuildPrompt"],
+                AutoSend = true,
+                ShowContinueOn = false,
+            };
         }
 
         /// <summary>
@@ -3374,208 +3343,6 @@ namespace DeepSeek_v4_for_VisualStudio.Services.Agents
         #region Project Integration Helpers
 
         /// <summary>
-        /// 收集项目文件上下文 — 委托 ExploreAgent 智能发现与当前步骤相关的文件，
-        /// 而非盲目读取所有文件。提供完整的项目结构和代码风格参考给 AI。
-        /// 限制总大小防止超出 token 限制。
-        /// </summary>
-        private async Task<string> GatherProjectFilesContextAsync(
-            string? solutionPath, string userQuery)
-        {
-            if (string.IsNullOrEmpty(solutionPath))
-                return string.Empty;
-
-            const int maxTotalChars = 60000;
-            var sb = new StringBuilder();
-            int totalChars = 0;
-
-            try
-            {
-                List<string> relevantFiles;
-
-                // ═══════════════════════════════════════════════════════════
-                // 缓存策略（三层优先，以后会被 RAG 替代）：
-                // 第1层：ActivePlan.DiscoveredFiles（PlanAgent 已发现，最高优先级）
-                // 第2层：ExploreAgent 文件列表缓存（同一次会话内已扫描）
-                // 第3层：实时 DiscoverRelevantFilesAsync / DiscoverSolutionFilesAsync
-                // ═══════════════════════════════════════════════════════════
-
-                // ── 第1层：PlanAgent 传递的已发现文件列表 ──
-                var discoveredFromPlan = Context?.ActivePlan?.DiscoveredFiles;
-                if (discoveredFromPlan != null && discoveredFromPlan.Count > 0)
-                {
-                    relevantFiles = discoveredFromPlan;
-                    AddLog("INFO", LocalizationService.Instance.Format("agent.log.editReusePlanFiles", relevantFiles.Count));
-                }
-                // ── 第2层：ExploreAgent 文件列表缓存 ──
-                else if (ExploreAgent != null)
-                {
-                    var cached = ExploreAgent.GetCachedDiscoveredFiles(solutionPath!);
-                    if (cached != null && cached.Count > 0)
-                    {
-                        relevantFiles = cached;
-                        AddLog("INFO", LocalizationService.Instance.Format("agent.log.editCacheHit", relevantFiles.Count));
-                    }
-                    else if (!string.IsNullOrWhiteSpace(userQuery))
-                    {
-                        // ── 第2.5层：智能发现相关文件（结果会自动缓存）──
-                        string additionalCtx = "";
-                        if (CurrentPlan != null)
-                        {
-                            additionalCtx = $"{LocalizationService.Instance["edit.plan.currentTask"]}: {CurrentPlan.Title}";
-                            var completedSteps = CurrentPlan.Steps
-                                .Where(s => s.Status == AgentStepStatus.Completed)
-                                .ToList();
-                            if (completedSteps.Count > 0)
-                            {
-                                additionalCtx += "\n" + LocalizationService.Instance["agent.log.completedStepsPrefix"] + string.Join("; ",
-                                    completedSteps.Select(s => s.Title));
-                            }
-                        }
-
-                        AddLog("INFO", LocalizationService.Instance.Format("agent.log.editDelegateExplore", userQuery.Truncate(80)));
-                        relevantFiles = await ExploreAgent.DiscoverRelevantFilesAsync(
-                            solutionPath!, userQuery, maxFiles: 30,
-                            additionalContext: additionalCtx);
-                        AddLog("INFO", LocalizationService.Instance.Format("agent.log.editExploreDone", relevantFiles.Count));
-                    }
-                    else
-                    {
-                        // ── 第3层：回退到全量发现（结果会自动缓存）──
-                        relevantFiles = await ExploreAgent.DiscoverSolutionFilesAsync(
-                            solutionPath!, maxFiles: 50);
-                        AddLog("INFO", LocalizationService.Instance.Format("agent.log.editFullDiscovery", relevantFiles.Count));
-                    }
-                }
-                else
-                {
-                    // ── 最终回退：简单的目录扫描 ──
-                    relevantFiles = await FallbackFileScanAsync(solutionPath!);
-                }
-
-                // ── 向 AgentContext 共享已发现文件列表（供后续 Agent 复用）──
-                if (Context != null && relevantFiles.Count > 0)
-                {
-                    Context.DiscoveredFiles = relevantFiles;
-                }
-
-                // ── 读取发现的文件内容（优先从缓存读取）──
-                foreach (var file in relevantFiles)
-                {
-                    if (totalChars >= maxTotalChars) break;
-
-                    try
-                    {
-                        string relativePath = GetRelativePath(solutionPath ?? "", file);
-
-                        // ═══════════════════════════════════════════════
-                        // 内容缓存策略（以后会被 RAG 替代）：
-                        // 第1层：AgentContext.FileReadCache
-                        // 第2层：ExploreAgent._fileContentCache
-                        // 第3层：磁盘读取
-                        // ═══════════════════════════════════════════════
-                        string content;
-                        bool fromCache = false;
-
-                        // 第1层：AgentContext 全局缓存
-                        if (Context?.FileReadCache != null &&
-                            Context.FileReadCache.TryGetValue(file, out var cachedContent))
-                        {
-                            content = cachedContent;
-                            fromCache = true;
-                        }
-                        // 第2层：ExploreAgent 本地文件内容缓存
-                        else if (ExploreAgent != null &&
-                            ExploreAgent.TryGetCachedFileContent(file, out var exploreCached) &&
-                            exploreCached != null)
-                        {
-                            content = exploreCached;
-                            fromCache = true;
-                        }
-                        else
-                        {
-                            // 第3层：磁盘读取
-                            // RAG-SOURCE: file-read 项目文件内容（EditAgent 项目上下文收集）
-                            content = await Task.Run(() => File.ReadAllText(file));
-
-                            // 写入缓存（以后会被 RAG 替代）
-                            ExploreAgent?.CacheFileContent(file, content);
-                            if (Context?.FileReadCache != null)
-                            {
-                                lock (Context.FileReadCache)
-                                {
-                                    Context.FileReadCache[file] = content;
-                                }
-                            }
-                        }
-
-                        // RAG-MARK: no-truncate — 不再截断项目文件内容，完整提供给 AI
-
-                        sb.AppendLine($"### {relativePath}{(fromCache ? " (cached)" : "")}");
-                        sb.AppendLine("```");
-                        sb.AppendLine(content);
-                        sb.AppendLine("```");
-                        sb.AppendLine();
-
-                        totalChars += content.Length + relativePath.Length + 20;
-                    }
-                    catch
-                    {
-                        // 跳过无法读取的文件
-                    }
-                }
-
-                AddLog("INFO", $"[EditAgent] 项目文件上下文: {relevantFiles.Count} 个文件, {totalChars} 字符（以后会被 RAG 替代）");
-            }
-            catch (Exception ex)
-            {
-                AddLog("WARN", $"[EditAgent] 收集项目文件上下文失败: {ex.Message}");
-            }
-
-            return sb.ToString();
-        }
-
-        /// <summary>
-        /// 最终回退方案：简单的目录文件扫描（当 ExploreAgent 不可用时）。
-        /// </summary>
-        private static async Task<List<string>> FallbackFileScanAsync(string solutionPath)
-        {
-            var files = new List<string>();
-
-            try
-            {
-                var codeExtensions = new HashSet<string>(StringComparer.OrdinalIgnoreCase)
-                {
-                    ".cs", ".vb", ".cpp", ".h", ".hpp", ".c",
-                    ".xaml", ".xml", ".config", ".csproj", ".vbproj",
-                    ".json", ".ts", ".js", ".py", ".java", ".fs", ".fsx",
-                    ".sln", ".md",
-                };
-
-                var excludeDirs = SharedConstants.ExcludedDirectories;
-
-                files = await Task.Run(() =>
-                    Directory.GetFiles(solutionPath, "*.*", SearchOption.AllDirectories)
-                        .Where(f =>
-                        {
-                            string dir = Path.GetDirectoryName(f) ?? "";
-                            string ext = Path.GetExtension(f);
-                            foreach (var excludeDir in excludeDirs)
-                                if (dir.IndexOf(excludeDir, StringComparison.OrdinalIgnoreCase) >= 0)
-                                    return false;
-                            return codeExtensions.Contains(ext);
-                        })
-                        .Take(50)
-                        .ToList());
-            }
-            catch
-            {
-                // 忽略扫描失败
-            }
-
-            return files;
-        }
-
-        /// <summary>
         /// 将新建文件添加到 Visual Studio 解决方案的项目中。
         /// 如果文件已存在于项目中，则跳过。
         /// </summary>
@@ -3648,112 +3415,9 @@ namespace DeepSeek_v4_for_VisualStudio.Services.Agents
             }
         }
 
-        /// <summary>
-        /// 获取相对路径。
-        /// </summary>
-        private static string GetRelativePath(string basePath, string fullPath)
-        {
-            if (string.IsNullOrEmpty(basePath)) return fullPath;
-            if (fullPath.StartsWith(basePath, StringComparison.OrdinalIgnoreCase))
-            {
-                string relative = fullPath.Substring(basePath.Length).TrimStart('\\', '/');
-                return relative;
-            }
-            return fullPath;
-        }
-
         #endregion
 
-        #region Missing File Detection
-
-        /// <summary>
-        /// 检测 AI 回复是否表示缺少某些文件。
-        /// 匹配中英文常见表达模式。
-        /// </summary>
-        private static bool DetectMissingFilesInResponse(string aiResponse)
-        {
-            if (string.IsNullOrWhiteSpace(aiResponse)) return false;
-
-            // ── 中文模式 ──
-            var cnPatterns = new[]
-            {
-                "需要查看", "需要读取", "需要看到", "缺少文件",
-                "看不到", "无法访问", "请提供", "没有提供",
-                "没有看到", "未提供", "无法确定", "需要更多信息",
-                "需要了解", "需要确认", "需要参考", "需要查阅",
-                "找不到", "不清楚", "不确定文件", "无法定位",
-                "还需要", "缺少上下文", "需要完整代码",
-            };
-
-            // ── 英文模式 ──
-            var enPatterns = new[]
-            {
-                "need to see", "need to read", "need to look at",
-                "missing file", "missing context", "don't have access",
-                "cannot see", "can't see", "please provide",
-                "not provided", "not available", "unable to determine",
-                "need more information", "need more context",
-                "don't know", "not sure about", "would need",
-                "I need the", "I would need to see",
-            };
-
-            foreach (var pattern in cnPatterns)
-                if (aiResponse.Contains(pattern, StringComparison.OrdinalIgnoreCase))
-                    return true;
-
-            foreach (var pattern in enPatterns)
-                if (aiResponse.Contains(pattern, StringComparison.OrdinalIgnoreCase))
-                    return true;
-
-            return false;
-        }
-
-        /// <summary>
-        /// 从 AI 回复中提取请求的文件名/路径。
-        /// 匹配反引号包裹的文件引用、常见路径模式等。
-        /// </summary>
-        private static List<string> ExtractRequestedFileNames(string aiResponse)
-        {
-            var files = new List<string>();
-
-            if (string.IsNullOrWhiteSpace(aiResponse)) return files;
-
-            // 模式 1: 反引号包裹的文件名（如 `UserService.cs`、`src/Models/User.cs`）
-            var backtickMatches = System.Text.RegularExpressions.Regex.Matches(
-                aiResponse, @"`([^`]+\.(cs|vb|cpp|c|h|hpp|fs|py|js|ts|jsx|tsx|java|go|rs|swift|kt|php|rb|lua|sql|xml|json|yaml|yml|md|css|html|xaml|csproj|vbproj|sln|config|razor|cshtml|ps1|psm1|proto))`");
-            foreach (System.Text.RegularExpressions.Match m in backtickMatches)
-            {
-                string name = m.Groups[1].Value.Trim();
-                if (!string.IsNullOrWhiteSpace(name) && name.Length > 2)
-                    files.Add(name);
-            }
-
-            // 模式 2: 引号包裹的文件名
-            var quoteMatches = System.Text.RegularExpressions.Regex.Matches(
-                aiResponse, @"[""']([^""']+\.(cs|vb|cpp|c|h|hpp|fs|py|js|ts|jsx|tsx|java|go|rs|swift|kt|php|rb|lua|sql|xml|json|yaml|yml|md|css|html|xaml|csproj|vbproj|sln))[""']");
-            foreach (System.Text.RegularExpressions.Match m in quoteMatches)
-            {
-                string name = m.Groups[1].Value.Trim();
-                if (!string.IsNullOrWhiteSpace(name) && name.Length > 2)
-                    files.Add(name);
-            }
-
-            // 模式 3: 斜体/粗体标记包裹（如 *UserService.cs*、**src/Models/User.cs**）
-            var markdownMatches = System.Text.RegularExpressions.Regex.Matches(
-                aiResponse, @"\*{1,2}([^*]+\.(cs|vb|cpp|c|h|hpp|fs|py|js|ts|jsx|tsx|java|go|rs|swift|kt|php|rb|lua|sql|xml|json|yaml|yml|md|css|html|xaml|csproj|vbproj|sln))\*{1,2}");
-            foreach (System.Text.RegularExpressions.Match m in markdownMatches)
-            {
-                string name = m.Groups[1].Value.Trim();
-                if (!string.IsNullOrWhiteSpace(name) && name.Length > 2)
-                    files.Add(name);
-            }
-
-            // 去重，最多返回 10 个
-            return files
-                .Distinct(StringComparer.OrdinalIgnoreCase)
-                .Take(10)
-                .ToList();
-        }
+        #region Verify Phase Tracking
 
         /// <summary>
         /// 追踪验证阶段产生的文件变更，合并到 plan.ChangedFiles。

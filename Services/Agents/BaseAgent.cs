@@ -371,7 +371,6 @@ namespace DeepSeek_v4_for_VisualStudio.Services.Agents
 
         /// <summary>
         /// 调用 AI 进行简短回答（用于分类、路由判断等）。
-        /// 公开给 AgentDispatcher 使用。
         /// </summary>
         public async Task<string> CallAiShortAsync(string systemPrompt, string userPrompt, CancellationToken ct, int maxTokens = 512)
         {
@@ -435,22 +434,6 @@ namespace DeepSeek_v4_for_VisualStudio.Services.Agents
                 if (chunk.StartsWith("[THINKING]"))
                     onThinking?.Invoke(chunk.Substring(10));
                 else if (IsContentChunk(chunk))
-                    sb.Append(chunk);
-            }
-            LogCacheHitRate();
-            return sb.ToString().Trim();
-        }
-
-        /// <summary>
-        /// 带对话历史的 AI 调用。
-        /// </summary>
-        protected async Task<string> CallAiWithHistoryAsync(List<ChatApiMessage> history, CancellationToken ct, int maxTokens = 4096, string? responseFormat = null)
-        {
-            var sb = new StringBuilder();
-            //  传入完整工具集 + toolChoice:"none" 以保持 Prefix Cache 稳定
-            await foreach (var chunk in _apiService.ChatStreamAsync(history, TryGetFullToolSet(), ct, maxTokens, responseFormat: responseFormat, toolChoice: "none"))
-            {
-                if (IsContentChunk(chunk))
                     sb.Append(chunk);
             }
             LogCacheHitRate();
@@ -641,24 +624,6 @@ namespace DeepSeek_v4_for_VisualStudio.Services.Agents
                 ToolCallId = m.ToolCallId,
                 Name = m.Name,
             }).ToList();
-        }
-
-        /// <summary>
-        /// 使用 ConversationContextManager 构建的消息列表调用 AI。
-        /// 正确处理 reasoning_content 回传规则。
-        /// </summary>
-        protected async Task<string> CallAiWithContextAsync(ConversationContextManager ctxManager, CancellationToken ct, int maxTokens = 4096, string? responseFormat = null)
-        {
-            var messages = ctxManager.BuildApiMessages();
-            var sb = new StringBuilder();
-            //  传入完整工具集 + toolChoice:"none" 以保持 Prefix Cache 稳定
-            await foreach (var chunk in _apiService.ChatStreamAsync(messages, TryGetFullToolSet(), ct, maxTokens, responseFormat: responseFormat, toolChoice: "none"))
-            {
-                if (IsContentChunk(chunk))
-                    sb.Append(chunk);
-            }
-            LogCacheHitRate();
-            return sb.ToString().Trim();
         }
 
         /// <summary>
@@ -1958,33 +1923,6 @@ namespace DeepSeek_v4_for_VisualStudio.Services.Agents
         }
 
         /// <summary>
-        /// 生成本次工作流 Cache 命中率摘要文本（用于附加到 AI 响应末尾，与 UI 一致）。
-        /// </summary>
-        private string GetTotalCacheHitSummary(int finalRound)
-        {
-            try
-            {
-                var delta = _apiService?.GetCacheDelta() ?? (0, 0, 0, 0);
-                long totalHit = delta.Hit;
-                long totalMiss = delta.Miss;
-                long totalCacheable = totalHit + totalMiss;
-                if (totalCacheable == 0) return string.Empty;
-
-                double rate = (double)totalHit / totalCacheable;
-                string icon = rate >= 0.90 ? "🟢" : rate >= 0.50 ? "🟡" : rate >= 0.20 ? "🟠" : "🔴";
-
-                return $"\n\n---\n\n{icon} **Cache 命中率: {rate * 100:F1}%**" +
-                    $" · {totalHit:N0} 命中 / {totalMiss:N0} 未命中" +
-                    $" · Prompt {delta.Prompt:N0} · Completion {delta.Completion:N0}" +
-                    (finalRound > 1 ? $" · {finalRound} 轮" : "");
-            }
-            catch
-            {
-                return string.Empty;
-            }
-        }
-
-        /// <summary>
         /// 带超时保护的工具执行包装。
         /// 每个工具调用单独计时，超时则返回错误信息而非阻塞整个循环。
         /// 对于需要用户交互的命令（run_in_terminal、delete_file、VisualStudio_askQuestions），不设超时。
@@ -2600,7 +2538,6 @@ namespace DeepSeek_v4_for_VisualStudio.Services.Agents
         /// 执行 Handoff：从当前 Agent 移交到目标 Agent。
         /// 构建 Handoff prompt（含计划上下文 + plan.md），调用目标 Agent 的 ExecuteAsync。
         /// 
-        /// 从 AgentDispatcher.ExecuteHandoffAsync 搬过来，由 BaseAgent 统一提供。
         /// </summary>
         /// <param name="handoff">移交定义</param>
         /// <param name="context">执行上下文</param>
@@ -4422,8 +4359,6 @@ namespace DeepSeek_v4_for_VisualStudio.Services.Agents
             else if (level == "WARN") Logger.Warn($"[{Definition.Name}] {message}");
             else Logger.Info($"[{Definition.Name}] {message}");
         }
-
-        public IReadOnlyList<AgentLogEntry> GetLogs() => _logs.AsReadOnly();
 
         #endregion
 

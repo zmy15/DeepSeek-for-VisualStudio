@@ -428,7 +428,6 @@ namespace DeepSeek_v4_for_VisualStudio.View
                     {
                         TargetAgent = AgentType.Ask,
                         Confidence = "high",
-                        Reason = "统一入口 AskAgent",
                         NeedsPlanning = taskSize == TaskSize.Large,
                         TaskSize = taskSize,
                     };
@@ -500,71 +499,6 @@ namespace DeepSeek_v4_for_VisualStudio.View
                 StatusLabel.Text = LocalizationService.Instance["status.ready"];
         }
 #pragma warning restore VSTHRD100
-        private string? BuildRoutingContext(string userText, string? fileContext, List<FileParseResult>? parseResults)
-        {
-            // 如果用户消息已经很长（≥50字），不需要附加上下文
-            if (!string.IsNullOrEmpty(userText) && userText.Length >= 50)
-                return null;
-
-            var sb = new StringBuilder();
-
-            // ── 1. 最近对话历史摘要（最多最近 5 轮）──
-            try
-            {
-                var history = _contextManager?.GetConversationHistory();
-                if (history != null && history.Count > 0)
-                {
-                    // 只取最近的角色交替消息（user/assistant），最多 5 对
-                    var recentMessages = history
-                        .Where(m => m.Role == "user" || m.Role == "assistant")
-                        .Reverse()
-                        .Take(10)
-                        .Reverse()
-                        .ToList();
-
-                    if (recentMessages.Count > 0)
-                    {
-                        sb.AppendLine(LocalizationService.Instance["messaging.recentConversation"]);
-                        foreach (var msg in recentMessages)
-                        {
-                            string role = msg.Role == "user"
-                                ? LocalizationService.Instance["chat.role.user"]
-                                : LocalizationService.Instance["chat.role.ai"];
-                            string content = (msg.Content ?? "").Truncate(120);
-                            if (!string.IsNullOrWhiteSpace(content))
-                                sb.AppendLine($"- {role}: {content}");
-                        }
-                    }
-                }
-            }
-            catch { }
-
-            // ── 2. 附加文件信息 ──
-            if (parseResults != null && parseResults.Count > 0)
-            {
-                sb.AppendLine();
-                sb.AppendLine(LocalizationService.Instance["messaging.attachedFilesHeader"]);
-                foreach (var pr in parseResults)
-                {
-                    if (pr.FileName != null)
-                    {
-                        string snippet = (pr.Content ?? "").Truncate(200);
-                        sb.AppendLine($"- {pr.FileName}");
-                        if (!string.IsNullOrWhiteSpace(snippet))
-                            sb.AppendLine(LocalizationService.Instance.Format("messaging.contentSnippet", snippet));
-                    }
-                }
-            }
-            else if (!string.IsNullOrWhiteSpace(fileContext))
-            {
-                sb.AppendLine();
-                sb.AppendLine(LocalizationService.Instance.Format("messaging.fileContextHeader", fileContext.Truncate(300)));
-            }
-
-            string result = sb.ToString().Trim();
-            return result.Length > 0 ? result : null;
-        }
-
         #region Vision Model Helpers
 
         private static readonly string[] VisionImageExtensions =
@@ -1067,7 +1001,7 @@ namespace DeepSeek_v4_for_VisualStudio.View
 
         /// <summary>
         /// 解析用户显式指定的 Agent（如 "@edit" → AgentType.Edit）。
-        /// 从 AgentDispatcher.ParseExplicitAgentRoute 搬过来，保留在 UI 层。
+        /// 解析用户输入的显式 @agent 路由。
         /// </summary>
         private static AgentRoutingResult ParseExplicitAgentRoute(string agentName)
         {
@@ -1085,7 +1019,6 @@ namespace DeepSeek_v4_for_VisualStudio.View
             {
                 TargetAgent = target,
                 Confidence = "high",
-                Reason = $"用户显式指定 @{agentName}",
                 NeedsPlanning = target == AgentType.Plan,
                 IsExplicit = true,
             };

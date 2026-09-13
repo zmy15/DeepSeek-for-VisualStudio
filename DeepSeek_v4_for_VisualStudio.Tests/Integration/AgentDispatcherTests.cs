@@ -87,26 +87,6 @@ public class AgentFactoryTests
     }
 
     [Fact]
-    public void ActivePlan_CanBeSetAndRead()
-    {
-        var apiService = new DeepSeekApiService("test-key");
-        var factory = new AgentFactory(apiService);
-        var plan = new AgentTaskPlan
-        {
-            Title = "Test Plan",
-            Steps = new List<AgentStep>
-            {
-                new() { Title = "Step 1", Description = "Do something", Status = AgentStepStatus.Pending }
-            }
-        };
-
-        factory.ActivePlan = plan;
-
-        factory.ActivePlan.Should().Be(plan);
-        factory.ActivePlan!.Title.Should().Be("Test Plan");
-    }
-
-    [Fact]
     public async Task ExecuteAsync_AskAgent_ReturnsResult()
     {
         var sseLines = new[]

@@ -14,27 +14,6 @@ public class AgentModelsTests
 
     #endregion
 
-    #region AgentIntentMapper
-
-    [Theory]
-    [InlineData(AgentType.Ask, AgentIntent.QandA)]
-    [InlineData(AgentType.Explore, AgentIntent.QandA)]
-    [InlineData(AgentType.Plan, AgentIntent.CodeChange)]
-    [InlineData(AgentType.Edit, AgentIntent.CodeChange)]
-    public void ToIntent_MapsCorrectly(AgentType agentType, AgentIntent expected)
-    {
-        agentType.ToIntent().Should().Be(expected);
-    }
-
-    [Fact]
-    public void ToIntent_DefaultMapsToQandA()
-    {
-        // Cast an invalid value to AgentType
-        ((AgentType)99).ToIntent().Should().Be(AgentIntent.QandA);
-    }
-
-    #endregion
-
     #region AgentStep
 
     [Fact]
@@ -50,8 +29,6 @@ public class AgentModelsTests
         step.RequiresApproval.Should().BeFalse();
         step.PendingCommand.Should().BeNull();
         step.AiResponse.Should().BeNull();
-        step.FilesModified.Should().Be(0);
-        step.LinesChanged.Should().Be(0);
     }
 
     [Fact]
@@ -113,7 +90,6 @@ public class AgentModelsTests
         plan.CurrentStepIndex.Should().Be(0);
         plan.IsCompleted.Should().BeFalse();
         plan.FinalBuildSucceeded.Should().BeFalse();
-        plan.FinalBuildResult.Should().BeNull();
         plan.IsCancelled.Should().BeFalse();
         plan.PlanFilePath.Should().BeNull();
         plan.Source.Should().Be(PlanSource.None);

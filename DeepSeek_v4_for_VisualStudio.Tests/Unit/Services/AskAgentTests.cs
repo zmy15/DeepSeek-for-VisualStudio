@@ -48,34 +48,6 @@ public class AskAgentTests
     }
 
     [Fact]
-    public void Definition_IsUserInvocable()
-    {
-        var agent = new AskAgent(_apiService);
-
-        agent.Definition.UserInvocable.Should().BeTrue();
-    }
-
-    [Fact]
-    public void Definition_HasNoSubAgents()
-    {
-        var agent = new AskAgent(_apiService);
-
-        agent.Definition.SubAgents.Should().BeEmpty();
-    }
-
-    [Fact]
-    public void Definition_HasHandoffs_ToEditPlanAndBuild()
-    {
-        var agent = new AskAgent(_apiService);
-
-        // AskAgent 有 3 个 Handoff 目标
-        agent.Definition.Handoffs.Should().HaveCount(3);
-        agent.Definition.Handoffs.Should().Contain(h => h.TargetAgent == AgentType.Edit);
-        agent.Definition.Handoffs.Should().Contain(h => h.TargetAgent == AgentType.Plan);
-        agent.Definition.Handoffs.Should().Contain(h => h.TargetAgent == AgentType.Build);
-    }
-
-    [Fact]
     public void Definition_SystemPrompt_IsNotEmpty()
     {
         var agent = new AskAgent(_apiService);

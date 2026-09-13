@@ -58,31 +58,6 @@ public class PlanAgentTests
     }
 
     [Fact]
-    public void Definition_IsUserInvocable()
-    {
-        var agent = new PlanAgent(_apiService);
-
-        agent.Definition.UserInvocable.Should().BeTrue();
-    }
-
-    [Fact]
-    public void Definition_HasExploreAsSubAgent()
-    {
-        var agent = new PlanAgent(_apiService);
-
-        agent.Definition.SubAgents.Should().Contain(AgentType.Explore);
-    }
-
-    [Fact]
-    public void Definition_HasHandoffToEdit()
-    {
-        var agent = new PlanAgent(_apiService);
-
-        agent.Definition.Handoffs.Should().HaveCount(1);
-        agent.Definition.Handoffs[0].TargetAgent.Should().Be(AgentType.Edit);
-    }
-
-    [Fact]
     public void Definition_AllowedTools_IncludesAskQuestions()
     {
         var agent = new PlanAgent(_apiService);

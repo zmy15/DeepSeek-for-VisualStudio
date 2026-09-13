@@ -49,31 +49,6 @@ public class ExploreAgentTests
     }
 
     [Fact]
-    public void Definition_IsUserInvocable()
-    {
-        var agent = new ExploreAgent(_apiService);
-
-        // ExploreAgent 现在是用户可调用的（可直接通过 @explore 使用）
-        agent.Definition.UserInvocable.Should().BeTrue();
-    }
-
-    [Fact]
-    public void Definition_HasNoSubAgents()
-    {
-        var agent = new ExploreAgent(_apiService);
-
-        agent.Definition.SubAgents.Should().BeEmpty();
-    }
-
-    [Fact]
-    public void Definition_HasNoHandoffs()
-    {
-        var agent = new ExploreAgent(_apiService);
-
-        agent.Definition.Handoffs.Should().BeEmpty();
-    }
-
-    [Fact]
     public void Definition_AllowedTools_AreReadOnly()
     {
         var agent = new ExploreAgent(_apiService);

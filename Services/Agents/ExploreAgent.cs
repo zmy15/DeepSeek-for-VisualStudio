@@ -104,22 +104,6 @@ namespace DeepSeek_v4_for_VisualStudio.Services.Agents
             }
         }
 
-        /// <summary>
-        /// 清除所有发现缓存（解决方案重新加载时调用）。
-        /// 以后会被 RAG 替代。
-        /// </summary>
-        public void ClearDiscoveredFilesCache()
-        {
-            lock (_discoveredFilesCache)
-            {
-                _discoveredFilesCache.Clear();
-            }
-            lock (_fileContentCache)
-            {
-                _fileContentCache.Clear();
-            }
-        }
-
         #region Agent Definition
 
         /// <summary>
@@ -146,12 +130,7 @@ namespace DeepSeek_v4_for_VisualStudio.Services.Agents
             {
                 Type = AgentType.Explore,
                 Name = "Explore",
-                Description = AiPrompts.ExploreAgentDescription,
-                ArgumentHint = AiPrompts.ExploreAgentArgumentHint,
-                UserInvocable = true,
                 AllowedTools = new List<string>(DefaultReadTools),
-                SubAgents = new List<AgentType>(),
-                Handoffs = new List<AgentHandoff>(),
                 SystemPrompt = BuildSystemPrompt(),
             };
         }
@@ -184,7 +163,6 @@ namespace DeepSeek_v4_for_VisualStudio.Services.Agents
 
             var result = new AgentResult
             {
-                AgentType = AgentType.Explore,
                 Success = true,
             };
 
@@ -866,43 +844,6 @@ namespace DeepSeek_v4_for_VisualStudio.Services.Agents
             }
 
             return score;
-        }
-
-        /// <summary>
-        /// 检测用户消息中是否引用了具体文件。
-        /// 如果用户消息中包含文件路径或文件名+扩展名模式，
-        /// 则认为用户已指明文件，无需自动附加解决方案全部代码。
-        /// </summary>
-        /// <param name="userText">用户输入的原始文本。</param>
-        /// <returns>true 表示用户已指明文件。</returns>
-        public static bool UserMessageReferencesFiles(string? userText)
-        {
-            if (string.IsNullOrWhiteSpace(userText))
-                return false;
-
-            // 模式 1: 包含常见源代码文件扩展名（如 .cs、.py 等）
-            var codeFilePattern = new Regex(
-                @"\.(cs|vb|cpp|c|h|hpp|fs|py|js|ts|jsx|tsx|java|go|rs|swift|kt|php|rb|lua|sql|xml|json|yaml|yml|md|css|html|xaml|csproj|vbproj|sln|config|razor|cshtml)\b",
-                RegexOptions.IgnoreCase);
-            if (codeFilePattern.IsMatch(userText))
-                return true;
-
-            // 模式 2: 包含 Windows 绝对路径（盘符 + 反斜杠）
-            if (Regex.IsMatch(userText, @"[A-Za-z]:\\"))
-                return true;
-
-            // 模式 3: 包含 Unix 绝对路径或相对路径模式
-            if (Regex.IsMatch(userText, @"(?:^|\s)[./~].*[/\\]"))
-                return true;
-
-            // 模式 4: 包含文件名+扩展名组合（如 "Program.cs"、"app.py"）
-            var fileNamePattern = new Regex(
-                @"\b\w+\.(cs|vb|cpp|c|h|hpp|fs|py|js|ts|jsx|tsx|java|go|rs|swift|kt|php|rb|lua|sql|xml|json|yaml|yml|md|css|html|xaml)\b",
-                RegexOptions.IgnoreCase);
-            if (fileNamePattern.IsMatch(userText))
-                return true;
-
-            return false;
         }
 
         #endregion

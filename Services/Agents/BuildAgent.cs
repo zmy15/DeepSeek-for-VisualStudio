@@ -75,23 +75,7 @@ namespace DeepSeek_v4_for_VisualStudio.Services.Agents
             {
                 Type = AgentType.Build,
                 Name = "Build",
-                Description = LocalizationService.Instance["agent.build.description"],
-                ArgumentHint = LocalizationService.Instance["agent.build.argumentHint"],
-                UserInvocable = true,
-                DisableModelInvocation = false,
                 AllowedTools = new List<string>(BuildTools),
-                SubAgents = new List<AgentType>(),
-                Handoffs = new List<AgentHandoff>
-                {
-                    new AgentHandoff
-                    {
-                        Label = LocalizationService.Instance["agent.build.handoffEditLabel"],
-                        TargetAgent = AgentType.Edit,
-                        Prompt = LocalizationService.Instance["agent.build.handoffEditPrompt"],
-                        AutoSend = false,
-                        ShowContinueOn = true,
-                    },
-                },
                 SystemPrompt = BuildSystemPrompt(),
             };
         }
@@ -124,7 +108,6 @@ namespace DeepSeek_v4_for_VisualStudio.Services.Agents
 
             var result = new AgentResult
             {
-                AgentType = AgentType.Build,
                 Success = true,
             };
 
@@ -174,7 +157,7 @@ namespace DeepSeek_v4_for_VisualStudio.Services.Agents
                 if (HasBuildFailure(aiResponse))
                 {
                     AddLog("WARN", L["agent.log.buildStillHasErrors"]);
-                    PlanBuildOutcomeReconciler.MarkBuildFailed(context.ActivePlan, aiResponse);
+                    PlanBuildOutcomeReconciler.MarkBuildFailed(context.ActivePlan);
                     result.Content += "\n\n " + L["agent.log.buildStillHasErrors"];
                 }
                 else
@@ -184,7 +167,6 @@ namespace DeepSeek_v4_for_VisualStudio.Services.Agents
                     {
                         int reconciled = PlanBuildOutcomeReconciler.ReconcileAfterBuildSuccess(
                             context.ActivePlan,
-                            aiResponse,
                             L["agent.log.buildReconciledStepResult"]);
                         if (reconciled > 0)
                         {

@@ -167,7 +167,6 @@ namespace DeepSeek_v4_for_VisualStudio.Services.Agents
 
             return new AgentResult
             {
-                AgentType = AgentType.Edit,
                 Success = true,
                 Content = $"此任务规模较大（\"{userMessage.Truncate(80)}\"），需要先制定详细计划。正在转交 Plan Agent...",
                 Plan = null,
@@ -185,15 +184,6 @@ namespace DeepSeek_v4_for_VisualStudio.Services.Agents
         #endregion
 
         #region Task Auto-Splitting
-
-        /// <summary>
-        /// 启发式判断：用户请求是否需要拆分为多个步骤（Medium 任务）。
-        /// 大任务应由 Plan Agent 处理，此处仅判断 Medium。
-        /// </summary>
-        private static bool ShouldAutoSplitTask(string userMessage)
-        {
-            return ClassifyTaskSize(userMessage) == TaskSize.Medium;
-        }
 
         /// <summary>
         /// 让 AI 将中型任务拆分为多个步骤，构建 EditAgent 自拆分计划。

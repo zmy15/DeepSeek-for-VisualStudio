@@ -153,7 +153,7 @@ public class BaseAgentWhitelistRecoveryTests
         }
 
         public override Task<AgentResult> ExecuteAsync(string userMessage, AgentContext context)
-            => Task.FromResult(new AgentResult { AgentType = AgentType.Ask, Content = userMessage });
+            => Task.FromResult(new AgentResult { Content = userMessage });
     }
 
     private sealed class SequenceHttpMessageHandler : HttpMessageHandler

@@ -77,44 +77,6 @@ public class EditAgentTests
     }
 
     [Fact]
-    public void Definition_IsUserInvocable()
-    {
-        var agent = new EditAgent(_apiService);
-
-        agent.Definition.UserInvocable.Should().BeTrue();
-    }
-
-    [Fact]
-    public void Definition_HasNoSubAgents()
-    {
-        var agent = new EditAgent(_apiService);
-
-        agent.Definition.SubAgents.Should().BeEmpty();
-    }
-
-    [Fact]
-    public void Definition_HasAskBuildAndPlanHandoffs()
-    {
-        var agent = new EditAgent(_apiService);
-
-        agent.Definition.Handoffs.Should().HaveCount(3);
-        agent.Definition.Handoffs.Should().Contain(h => h.TargetAgent == AgentType.Ask);
-        agent.Definition.Handoffs.Should().Contain(h => h.TargetAgent == AgentType.Build);
-        agent.Definition.Handoffs.Should().Contain(h => h.TargetAgent == AgentType.Plan);
-        // Ask handoff is auto-send (for summary generation)
-        var askHandoff = agent.Definition.Handoffs.First(h => h.TargetAgent == AgentType.Ask);
-        askHandoff.AutoSend.Should().BeTrue();
-        // Build handoff: AutoSend chains Edit→Build without user button
-        var buildHandoff = agent.Definition.Handoffs.First(h => h.TargetAgent == AgentType.Build);
-        buildHandoff.AutoSend.Should().BeTrue();
-        buildHandoff.ShowContinueOn.Should().BeFalse();
-        // Plan handoff: AutoSend for large tasks
-        var planHandoff = agent.Definition.Handoffs.First(h => h.TargetAgent == AgentType.Plan);
-        planHandoff.AutoSend.Should().BeTrue();
-        planHandoff.ShowContinueOn.Should().BeFalse();
-    }
-
-    [Fact]
     public void Definition_SystemPrompt_IsNotEmpty()
     {
         var agent = new EditAgent(_apiService);

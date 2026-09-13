@@ -68,10 +68,6 @@ namespace DeepSeek_v4_for_VisualStudio.Services.Agents
             {
                 Type = AgentType.Plan,
                 Name = "Plan",
-                Description = LocalizationService.Instance["agent.plan.description"],
-                ArgumentHint = LocalizationService.Instance["agent.plan.argumentHint"],
-                UserInvocable = true,
-                DisableModelInvocation = false,
                 //  Prefix Cache 优化：全会话统一工具集。所有阶段使用相同工具白名单。
                 // 深度探索通过 runSubagent 委派给 ExploreAgent；快速查阅允许直接使用只读工具。
                 AllowedTools = new List<string>
@@ -84,18 +80,6 @@ namespace DeepSeek_v4_for_VisualStudio.Services.Agents
                     "read_file",                  // 读取文件（对齐阶段快速查阅）
                     "grep_search",                // 文本搜索（对齐阶段快速查阅）
                     "file_search",                // 文件搜索（对齐阶段快速查阅）
-                },
-                SubAgents = new List<AgentType> { AgentType.Explore },
-                Handoffs = new List<AgentHandoff>
-                {
-                    new AgentHandoff
-                    {
-                        Label = LocalizationService.Instance["plan.handoff.label"],
-                        TargetAgent = AgentType.Edit,
-                        Prompt = LocalizationService.Instance["plan.handoff.prompt"],
-                        AutoSend = false,
-                        ShowContinueOn = true,
-                    }
                 },
                 SystemPrompt = BuildSystemPrompt(),
             };
@@ -126,7 +110,6 @@ namespace DeepSeek_v4_for_VisualStudio.Services.Agents
 
             var result = new AgentResult
             {
-                AgentType = AgentType.Plan,
                 Success = true,
             };
 

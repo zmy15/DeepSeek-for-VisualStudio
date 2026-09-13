@@ -695,10 +695,8 @@ namespace DeepSeek_v4_for_VisualStudio.View
         /// </summary>
         private void StartBalanceTimer()
         {
-            // 停止并释放旧定时器
             StopBalanceTimer();
 
-            // /user/balance 是 DeepSeek 官方专有能力，非官方端点保持 UI 与请求同时关闭。
             if (!CanQueryBalance)
             {
                 HideBalanceDisplay();
@@ -712,7 +710,6 @@ namespace DeepSeek_v4_for_VisualStudio.View
             _balanceTimer.Tick += async (s, e) => await RefreshBalanceAsync();
             _balanceTimer.Start();
 
-            // 立即查询一次
             _ = RefreshBalanceAsync();
         }
 
@@ -1824,7 +1821,6 @@ namespace DeepSeek_v4_for_VisualStudio.View
 
         /// <summary>
         /// 强制刷新指定消息的批处理缓冲区。
-        /// 在流式完成、最终渲染等关键时刻调用，确保累积内容不会丢失。
         /// </summary>
         private void FlushBatchStream(int messageIndex)
         {
@@ -1833,15 +1829,13 @@ namespace DeepSeek_v4_for_VisualStudio.View
             {
                 if (!_streamBatchStates.TryGetValue(messageIndex, out state))
                     return;
-                // 将 LastFlushTicks 置零，使下次检查一定超时
                 state.LastFlushTicks = 0;
             }
-            // 用当前内容重新调用批处理方法，将强制推送（因为 LastFlushTicks=0 确保 elapsed 超时）
             BatchStreamingUpdate(messageIndex);
         }
 
         /// <summary>
-        /// 清除指定消息的批处理状态（用于中断/取消时清理）。
+        /// 清除指定消息的批处理状态。
         /// </summary>
         private void ClearBatchStream(int messageIndex)
         {

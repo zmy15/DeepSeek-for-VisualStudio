@@ -65,39 +65,7 @@ namespace DeepSeek_v4_for_VisualStudio.Services.Agents
             {
                 Type = AgentType.Ask,
                 Name = "Ask",
-                Description = LocalizationService.Instance["agent.ask.description"],
-                ArgumentHint = LocalizationService.Instance["agent.ask.argumentHint"],
-                UserInvocable = true,
-                DisableModelInvocation = false,
                 AllowedTools = new List<string>(AskTools),
-                SubAgents = new List<AgentType>(),
-                Handoffs = new List<AgentHandoff>
-                {
-                    new AgentHandoff
-                    {
-                        Label = LocalizationService.Instance["agent.ask.handoffEditLabel"],
-                        TargetAgent = AgentType.Edit,
-                        Prompt = LocalizationService.Instance["agent.ask.handoffEditPrompt"],
-                        AutoSend = true,
-                        ShowContinueOn = false,
-                    },
-                    new AgentHandoff
-                    {
-                        Label = LocalizationService.Instance["agent.ask.handoffPlanLabel"],
-                        TargetAgent = AgentType.Plan,
-                        Prompt = LocalizationService.Instance["agent.ask.handoffPlanPrompt"],
-                        AutoSend = false,
-                        ShowContinueOn = true,
-                    },
-                    new AgentHandoff
-                    {
-                        Label = LocalizationService.Instance["agent.ask.handoffBuildLabel"],
-                        TargetAgent = AgentType.Build,
-                        Prompt = LocalizationService.Instance["agent.ask.handoffBuildPrompt"],
-                        AutoSend = true,
-                        ShowContinueOn = true,
-                    },
-                },
                 SystemPrompt = BuildSystemPrompt(),
             };
         }
@@ -135,7 +103,6 @@ namespace DeepSeek_v4_for_VisualStudio.Services.Agents
 
             var result = new AgentResult
             {
-                AgentType = AgentType.Ask,
                 Success = true,
             };
 
@@ -244,7 +211,6 @@ namespace DeepSeek_v4_for_VisualStudio.Services.Agents
 
             var result = new AgentResult
             {
-                AgentType = AgentType.Ask,
                 Success = true,
             };
 
@@ -693,96 +659,6 @@ namespace DeepSeek_v4_for_VisualStudio.Services.Agents
             }
 
             return sb.ToString();
-        }
-
-        /// <summary>
-        /// 生成 AI 文字总结，概括本次代码变更的内容和目的。
-        /// 包含变更统计、受影响文件、每步操作概述，提供给 AI 生成更详细的摘要。
-        /// </summary>
-        private async Task<string> GenerateChangeSummaryAsync(AgentTaskPlan plan, AgentContext context)
-        {
-            if (plan.ChangedFiles.Count == 0) return string.Empty;
-            var ct = context.CancellationToken;
-
-            try
-            {
-                var L = LocalizationService.Instance;
-                var summaryPrompt = new StringBuilder();
-                summaryPrompt.AppendLine(L["edit.summary.genPrompt"]);
-                summaryPrompt.AppendLine();
-                summaryPrompt.AppendLine(L.Format("edit.summary.taskHeader", plan.Title));
-                summaryPrompt.AppendLine(L.Format("edit.summary.stepCount", plan.Steps.Count, plan.Steps.Count(s => s.Status == AgentStepStatus.Completed)));
-                if (plan.FinalBuildSucceeded)
-                    summaryPrompt.AppendLine(L["edit.summary.finalBuildPassed"]);
-                summaryPrompt.AppendLine();
-
-                // ── 合并相同文件 ──
-                var mergedFiles = plan.ChangedFiles
-                    .GroupBy(c => c.FilePath, StringComparer.OrdinalIgnoreCase)
-                    .Select(g => new { Path = g.Key, Added = g.Sum(c => c.LinesAdded), Removed = g.Sum(c => c.LinesRemoved), Names = g.Select(c => Path.GetFileName(c.FilePath)).First() })
-                    .ToList();
-                int totalAdded = mergedFiles.Sum(f => f.Added);
-                int totalRemoved = mergedFiles.Sum(f => f.Removed);
-
-                summaryPrompt.AppendLine(L.Format("edit.summary.changeStats", totalAdded, totalRemoved, mergedFiles.Count));
-                summaryPrompt.AppendLine();
-                summaryPrompt.AppendLine(L["edit.summary.modifiedFiles"]);
-                foreach (var file in mergedFiles)
-                {
-                    summaryPrompt.AppendLine($"- **{file.Names}** (+{file.Added} -{file.Removed})");
-                }
-                summaryPrompt.AppendLine();
-
-                summaryPrompt.AppendLine("## 步骤执行情况");
-                foreach (var step in plan.Steps)
-                {
-                    string status = step.Status switch
-                    {
-                        AgentStepStatus.Completed => "",
-                        AgentStepStatus.Failed => "Error: ",
-                        AgentStepStatus.Skipped => "",
-                        _ => "",
-                    };
-                    string summary = !string.IsNullOrWhiteSpace(step.ResultSummary)
-                        ? step.ResultSummary!
-                        : "(无)";
-                    summaryPrompt.AppendLine($"- {status} {step.Title}: {summary}");
-                }
-                summaryPrompt.AppendLine();
-
-                // 语言跟随：根据当前语言选择摘要输出语言
-                string langInstruction = AiPrompts.ChangeSummaryUserInstruction;
-                summaryPrompt.AppendLine(langInstruction);
-
-                // ── 构建消息（带工具循环）──
-                // v1.1.11: 前置 SharedImmutablePrefix 以命中 Prompt Cache
-                string shortSystemPrompt = AiPrompts.ChangeSummarySystemPrompt;
-
-                var messages = new List<ChatApiMessage>
-                {
-                    new ChatApiMessage { Role = "system", Content = AiPrompts.SharedImmutablePrefix },
-                    new ChatApiMessage { Role = "system", Content = shortSystemPrompt },
-                    new ChatApiMessage { Role = "user", Content = summaryPrompt.ToString() }
-                };
-
-                string workspaceRoot = GetWorkspaceRoot(context);
-
-                string result = await CallAiWithToolLoopAsync(
-                    messages,
-                    workspaceRoot,
-                    ct,
-                    maxTokens: 4096,
-                    toolWhitelist: new List<string>(AskTools));
-
-                // ── 安全剥离：防止 AI 意外输出工具调用标记或思考过程 ──
-                result = StripToolCallMarkers(result);
-                return result?.Trim() ?? string.Empty;
-            }
-            catch (Exception ex)
-            {
-                Logger.Warn($"[AskAgent] 生成变更摘要失败: {ex.Message}");
-                return string.Empty;
-            }
         }
 
         /// <summary>

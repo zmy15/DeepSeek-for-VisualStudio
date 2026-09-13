@@ -1113,7 +1113,6 @@ namespace DeepSeek_v4_for_VisualStudio.View
                         {
                             TargetAgent = userMsg.AgentType.Value,
                             Confidence = "high",
-                            Reason = "重试保留原始 @agent 路由",
                             NeedsPlanning = userMsg.AgentType == AgentType.Plan,
                             IsExplicit = true,
                         };
@@ -1121,7 +1120,7 @@ namespace DeepSeek_v4_for_VisualStudio.View
                     }
                     else
                     {
-                        routing = new AgentRoutingResult { TargetAgent = AgentType.Ask, Confidence = "high", Reason = "重试默认 AskAgent", NeedsPlanning = false };
+                        routing = new AgentRoutingResult { TargetAgent = AgentType.Ask, Confidence = "high", NeedsPlanning = false };
                     }
 
                     // ── 统一通过 Agent 路径重试（移除旧的 needsAgent 分支）──
