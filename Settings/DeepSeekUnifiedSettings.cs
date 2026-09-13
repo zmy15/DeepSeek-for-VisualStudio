@@ -1,4 +1,3 @@
-using DeepSeek_v4_for_VisualStudio.Models;
 using Microsoft.VisualStudio.Extensibility;
 using Microsoft.VisualStudio.Extensibility.Settings;
 #pragma warning disable VSEXTPREVIEW_SETTINGS // Settings API is experimental
@@ -133,20 +132,15 @@ namespace DeepSeek_v4_for_VisualStudio
             };
 
         [VisualStudioContribution]
-        internal static Setting.Enum SelectedModel { get; } =
+        internal static Setting.String SelectedModel { get; } =
             new(
                 "deepseekModel",
                 "%DeepSeek.Chat.settings.selectedModel.displayName%",
                 GeneralCategory,
-                new[]
-                {
-                    new EnumSettingEntry(DeepSeekModelCatalog.Pro, DeepSeekModelCatalog.Pro),
-                    new EnumSettingEntry(DeepSeekModelCatalog.Flash, DeepSeekModelCatalog.Flash),
-                    new EnumSettingEntry(DeepSeekModelCatalog.FlashVisionExp, DeepSeekModelCatalog.FlashVisionExp),
-                },
-                defaultValue: DeepSeekModelCatalog.Pro)
+                defaultValue: string.Empty)
             {
                 Description = "%DeepSeek.Chat.settings.selectedModel.description%",
+                SearchKeywords = new[] { "model", "models", "模型" },
             };
 
         [VisualStudioContribution]

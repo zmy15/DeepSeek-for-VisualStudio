@@ -147,11 +147,14 @@ namespace DeepSeek_v4_for_VisualStudio.View
                 Logger.Info("[AI标题] 正在调用 API 生成标题…");
                 using var cts = new CancellationTokenSource(TimeSpan.FromSeconds(15));
                 // ── toolChoice:"none" 防止 AI 调用工具；thinkingEnabled:false 防止思考模型只输出推理而 content 为空 ──
-                // 官方端点用轻量 flash 模型生成标题（便宜快速）；
-                // 自定义端点该模型不一定存在 → 使用当前生效的模型。
-                string titleModel = _apiService != null && !_apiService.IsDeepSeekEndpoint
-                    ? GetEffectiveModel()
-                    : "deepseek-v4-flash";
+                // 标题生成使用当前生效模型，避免依赖任何硬编码模型名。
+                string titleModel = GetEffectiveModel();
+                if (string.IsNullOrWhiteSpace(titleModel))
+                {
+                    Logger.Warn("[AI标题] 当前未选择模型，回退到截取模式");
+                    FallbackAutoTitle(firstUserMessage);
+                    return;
+                }
                 string rawTitle = await _activeAgent.CallAiWithMessagesAsync(messages, cts.Token, maxTokens: 128, temperature: 0.3, toolChoice: "none", model: titleModel, thinkingEnabled: false);
 
                 if (string.IsNullOrWhiteSpace(rawTitle))

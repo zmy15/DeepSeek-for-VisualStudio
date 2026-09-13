@@ -15,12 +15,12 @@ public class DeepSeekEndpointResolverTests
 
         config.IsCustom.Should().BeFalse();
         config.ApiKey.Should().BeEmpty();
-        config.Model.Should().Be("deepseek-v4-pro");
+        config.Model.Should().BeEmpty();
         config.BaseUrl.Should().BeNull();
     }
 
     [Fact]
-    public void Resolve_NoBaseUrl_UsesOfficialKeyAndCatalogModel()
+    public void Resolve_NoBaseUrl_UsesOfficialKeyAndSelectedModel()
     {
         // 自定义配置已填但端点为空 → 不生效
         var config = DeepSeekEndpointResolver.Resolve(
@@ -53,7 +53,7 @@ public class DeepSeekEndpointResolverTests
     }
 
     [Fact]
-    public void Resolve_CustomWithEmptyList_UsesDefaultModel()
+    public void Resolve_CustomWithEmptyModelList_ReturnsEmptyModel()
     {
         var config = DeepSeekEndpointResolver.Resolve(
             apiBaseUrl: "https://relay.example.com/v1",
@@ -63,7 +63,7 @@ public class DeepSeekEndpointResolverTests
             customModels: "");
 
         config.IsCustom.Should().BeTrue();
-        config.Model.Should().Be("deepseek-v4-pro");
+        config.Model.Should().BeEmpty();
     }
 
     [Fact]
@@ -74,11 +74,12 @@ public class DeepSeekEndpointResolverTests
             officialApiKey: "sk-official",
             customApiKey: "sk-custom",
             selectedModel: "",
-            customModels: "kimi-k3");
+            customModels: "kimi-k3",
+            officialModels: Array.Empty<string>());
 
         config.IsCustom.Should().BeFalse();
         config.ApiKey.Should().Be("sk-official");
-        config.Model.Should().Be("deepseek-v4-pro");
+        config.Model.Should().BeEmpty();
     }
 
     [Fact]

@@ -58,7 +58,7 @@ public class BuiltInToolServiceTests
 
     [Theory]
     [InlineData("deepseek-v4-pro", false)]
-    [InlineData(DeepSeekModelCatalog.FlashVisionExp, true)]
+    [InlineData("deepseek-v4-flash-vision-exp", true)]
     public void GetFilteredToolDefinitions_IncludesCaptureWindowOnlyForVisionModels(
         string model,
         bool expectedVisible)

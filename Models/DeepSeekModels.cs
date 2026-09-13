@@ -9,29 +9,11 @@ using System.Text.Json.Serialization;
 
 namespace DeepSeek_v4_for_VisualStudio.Models
 {
-    /// <summary>
-    /// DeepSeek V4 系列模型标识，避免模型名散落在 UI 和 API 层。
-    /// </summary>
-    public static class DeepSeekModelCatalog
-    {
-        public const string Pro = "deepseek-v4-pro";
-        public const string Flash = "deepseek-v4-flash";
-        public const string FlashVisionExp = "deepseek-v4-flash-vision-exp";
-
-        public static readonly string[] All =
-        {
-            Pro,
-            Flash,
-            FlashVisionExp,
-        };
-
-    }
-
     // ======== API 请求模型 ========
     public class DeepSeekChatRequest
     {
         [JsonPropertyName("model")]
-        public string Model { get; set; } = "deepseek-v4-pro";
+        public string Model { get; set; } = string.Empty;
 
         [JsonPropertyName("messages")]
         public List<ChatApiMessage> Messages { get; set; } = new();
@@ -396,7 +378,7 @@ namespace DeepSeek_v4_for_VisualStudio.Models
     public class DeepSeekFimRequest
     {
         [JsonPropertyName("model")]
-        public string Model { get; set; } = "deepseek-v4-pro";
+        public string Model { get; set; } = string.Empty;
 
         /// <summary>光标前的代码（prefix）</summary>
         [JsonPropertyName("prompt")]

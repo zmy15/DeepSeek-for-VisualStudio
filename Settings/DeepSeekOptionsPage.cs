@@ -539,7 +539,7 @@ namespace DeepSeek_v4_for_VisualStudio.Settings
 
         [Browsable(false)]
         [DesignerSerializationVisibility(DesignerSerializationVisibility.Visible)] // Fix for WFO1000
-        public string SelectedModel { get; set; } = "deepseek-v4-pro";
+        public string SelectedModel { get; set; } = string.Empty;
 
         /// <summary>
         /// 设置页使用的统一模型选择器；官方与自定义条目共用，

@@ -89,7 +89,7 @@ namespace DeepSeek_v4_for_VisualStudio.View
 
         /// <summary>
         /// 获取当前生效的模型名称。
-        /// 自定义端点模式下优先自定义模型名（空则回退 DeepSeek 模型目录），
+        /// 自定义端点模式下优先自定义模型名（空则回退接口模型列表），
         /// 官方模式使用下拉框选择。
         /// </summary>
         internal string GetEffectiveModel() => DeepSeekEndpointResolver.Resolve(_options).Model;
@@ -335,7 +335,7 @@ namespace DeepSeek_v4_for_VisualStudio.View
             }
         }
 
-        /// <summary>用当前官方 Key 刷新 /models 目录；失败由目录服务降级处理。</summary>
+        /// <summary>用当前官方 Key 刷新 /models 列表；失败时保留上次成功结果。</summary>
         private async Task RefreshOfficialModelsAsync()
         {
             try
@@ -350,7 +350,7 @@ namespace DeepSeek_v4_for_VisualStudio.View
             }
             catch (Exception ex)
             {
-                Logger.Warn($"[Models] 刷新官方模型目录失败: {ex.Message}");
+                Logger.Warn($"[Models] 刷新官方模型列表失败: {ex.Message}");
             }
         }
 

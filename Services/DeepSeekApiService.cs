@@ -10,14 +10,14 @@ namespace DeepSeek_v4_for_VisualStudio.Services
     /// </summary>
     public class DeepSeekApiService : DeepSeekProvider
     {
-        public DeepSeekApiService(string apiKey, string model = DeepSeekModelCatalog.Pro,
+        public DeepSeekApiService(string apiKey, string model = "",
             int? requestTimeoutSeconds = null, string? baseUrl = null,
             bool isVision = false, bool isCustom = false)
             : base(apiKey, model, requestTimeoutSeconds, baseUrl, isVision, isCustom)
         {
         }
 
-        public DeepSeekApiService(HttpClient httpClient, string model = DeepSeekModelCatalog.Pro,
+        public DeepSeekApiService(HttpClient httpClient, string model = "",
             string? baseUrl = null, bool isVision = false, bool isCustom = false)
             : base(httpClient, model, baseUrl, isVision, isCustom)
         {

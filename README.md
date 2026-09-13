@@ -82,10 +82,10 @@ Recommended starting settings:
 
 | Setting | Value |
 |---|---|
-| Model | `deepseek-v4-pro` |
+| Model | Choose from the list returned by `/models` |
 | Deep Reasoning | Enabled, effort `max` |
 | Token budget | `900000` |
-| Vision model | `deepseek-v4-flash-vision-exp` for image/PDF understanding |
+| Vision models | Mark multimodal models in the Vision Models picker |
 
 | Shortcut | Action |
 |---|---|
