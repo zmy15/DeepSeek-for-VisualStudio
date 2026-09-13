@@ -47,6 +47,7 @@ namespace DeepSeek_v4_for_VisualStudio.View
                 return null;
 
             var commandName = parts[0].ToLowerInvariant();
+            string argumentText = parts.Length > 1 ? parts[1].Trim() : string.Empty;
 
             // ── 内置命令：/help — 列出所有可用技能 ──
             if (commandName == "help")
@@ -80,7 +81,7 @@ namespace DeepSeek_v4_for_VisualStudio.View
                 await DiscoverSkillsForCurrentSolutionAsync();
 
                 var skill = SkillService.Instance.FindSkill(commandName, _skillDiscoveryResult);
-                if (skill != null)
+                if (skill != null && skill.UserInvocable)
                 {
                     Logger.Info($"[Skill] ═══ 用户显式调用技能 ═══");
                     Logger.Info($"[Skill]   技能名称: {skill.Name}");
@@ -95,12 +96,14 @@ namespace DeepSeek_v4_for_VisualStudio.View
                     await ThreadHelper.JoinableTaskFactory.SwitchToMainThreadAsync();
                     StatusLabel.Text = string.Format(LocalizationService.Instance["skills.loaded"], skill.Name);
 
-                    var instructions = skill.GetFullInstructions();
-                    return $"用户通过 /{commandName} 调用了技能 \"{skill.Name}\"。请按以下技能指令执行：\n\n{instructions}";
+                    return skill.GetInvocationPrompt(commandName, argumentText);
                 }
                 else
                 {
-                    Logger.Warn($"[Skill] 未知斜杠命令: /{commandName}");
+                    if (skill != null)
+                        Logger.Warn($"[Skill] 技能 /{commandName} 不允许用户显式调用");
+                    else
+                        Logger.Warn($"[Skill] 未知斜杠命令: /{commandName}");
 
                     await ThreadHelper.JoinableTaskFactory.SwitchToMainThreadAsync();
 
@@ -156,7 +159,7 @@ namespace DeepSeek_v4_for_VisualStudio.View
                 sb.AppendLine($"| `/refresh-skills` | {L["skills.help.cmdRefresh"]} |");
                 sb.AppendLine();
 
-                var allSkills = _skillDiscoveryResult?.Skills ?? new List<SkillDefinition>();
+                var allSkills = _skillDiscoveryResult?.UserInvocableSkills ?? new List<SkillDefinition>();
                 if (allSkills.Count == 0)
                 {
                     sb.AppendLine(L["skills.help.customSkills"]);

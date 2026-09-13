@@ -946,7 +946,7 @@ namespace DeepSeek_v4_for_VisualStudio.View
                     return;
                 }
 
-                var allSkills = _skillDiscoveryResult?.Skills ?? new List<SkillDefinition>();
+                var allSkills = _skillDiscoveryResult?.UserInvocableSkills ?? new List<SkillDefinition>();
 
                 // 添加内置元命令
                 var L = LocalizationService.Instance;

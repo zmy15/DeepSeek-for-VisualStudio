@@ -75,6 +75,24 @@ public class SkillDefinitionTests
     }
 
     [Fact]
+    public void SkillDefinition_GetInvocationPrompt_PreservesCommandArguments()
+    {
+        var skill = new SkillDefinition
+        {
+            Name = "code-review",
+            Description = "Review code.",
+            Body = "Review the provided code.",
+        };
+
+        string prompt = skill.GetInvocationPrompt("code-review", "src/Foo.cs");
+
+        prompt.Should().Contain("用户通过 /code-review 调用了技能 \"code-review\"");
+        prompt.Should().Contain("用户提供的参数/任务：");
+        prompt.Should().Contain("src/Foo.cs");
+        prompt.Should().Contain("<skill name=\"code-review\">");
+    }
+
+    [Fact]
     public void SkillDefinition_GetCompactInstructions_ShortBody_ReturnsFullBody()
     {
         var skill = new SkillDefinition

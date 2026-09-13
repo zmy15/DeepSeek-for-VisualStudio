@@ -100,6 +100,32 @@ namespace DeepSeek_v4_for_VisualStudio.Models
         }
 
         /// <summary>
+        /// 构建用户显式调用技能时的注入文本，并保留斜杠命令后的参数。
+        /// </summary>
+        public string GetInvocationPrompt(string commandName, string? argumentText)
+        {
+            var builder = new System.Text.StringBuilder();
+            builder.Append("用户通过 /");
+            builder.Append(commandName);
+            builder.Append(" 调用了技能 \"");
+            builder.Append(Name);
+            builder.AppendLine("\"。");
+
+            if (!string.IsNullOrWhiteSpace(argumentText))
+            {
+                builder.AppendLine();
+                builder.AppendLine("用户提供的参数/任务：");
+                builder.AppendLine(argumentText!.Trim());
+            }
+
+            builder.AppendLine();
+            builder.AppendLine("请按以下技能指令执行：");
+            builder.AppendLine();
+            builder.Append(GetFullInstructions());
+            return builder.ToString();
+        }
+
+        /// <summary>
         /// 获取精简指令（仅 name + description + body 前 2000 字符）。
         /// 安全截断，不会在 Unicode 代理对（如 emoji）中间切断。
         /// </summary>
