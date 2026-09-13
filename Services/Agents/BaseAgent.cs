@@ -2088,18 +2088,6 @@ namespace DeepSeek_v4_for_VisualStudio.Services.Agents
                 {
                     request.SourceAgent = Definition.Type;
 
-                    // ── 显式路由拦截：@agent 时 AI 不应主动移交控制权 ──
-                    // 例外：PlanAgent → EditAgent 是 Plan 的核心职责，允许
-                    if (Context?.IsExplicitRoute == true
-                        && !(Definition.Type == AgentType.Plan && request.TargetAgent == AgentType.Edit))
-                    {
-                        request.Rejected = true;
-                        request.RejectReason = $"用户通过 @{Definition.Type.ToString().ToLowerInvariant()} 显式指定了你，请直接处理任务，不要移交控制权。";
-                        AddLog("WARN", $"[{Definition.Name}]  显式路由拦截移交 → {request.TargetAgent}");
-                        await Task.CompletedTask;
-                        return;
-                    }
-
                     PendingHandoffRequest = request;
                     AddLog("INFO", $"[{Definition.Name}]  移交请求: → {request.TargetAgent} (原因: {request.Reason})");
                     await Task.CompletedTask;

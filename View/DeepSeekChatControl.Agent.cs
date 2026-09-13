@@ -649,14 +649,14 @@ namespace DeepSeek_v4_for_VisualStudio.View
                 if (_agentFactory.EditAgent is EditAgent editAgent)
                     editAgent.PlanUpdated += OnAgentPlanUpdated;
 
-                // ── 显式路由时注入系统消息：告知 AI 用户已显式指定 Agent，不要移交 ──
+                // ── 显式路由时注入系统消息：从当前节点开始，但保留正常下游流程 ──
                 if (routing?.IsExplicit == true)
                 {
-                    string doNotHandoffMsg = string.Format(
+                    string explicitRouteStartMsg = string.Format(
                         LocalizationService.Instance["agent.explicitRoute.doNotHandoff"],
                         routing.TargetAgent);
-                    _contextManager.AddCustomMessage("system", doNotHandoffMsg);
-                    Logger.Info($"[Agent] 显式路由 @{routing.TargetAgent}: 已注入禁止移交指令");
+                    _contextManager.AddCustomMessage("system", explicitRouteStartMsg);
+                    Logger.Info($"[Agent] 显式路由 @{routing.TargetAgent}: 已注入当前节点启动指令（保留下游流程）");
                 }
 
                 // ── 联网搜索：在 Agent 执行前进行搜索，注入上下文和结果卡片 ──

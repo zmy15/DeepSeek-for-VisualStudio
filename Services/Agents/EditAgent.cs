@@ -321,6 +321,26 @@ namespace DeepSeek_v4_for_VisualStudio.Services.Agents
 
         #endregion
 
+        /// <summary>
+        /// Runs final build verification after a completed edit flow. Explicit
+        /// @edit routing starts at Edit but must still continue through the
+        /// normal build and summary stages.
+        /// </summary>
+        internal static bool ShouldRunFinalBuild(
+            bool isPlanningMode,
+            bool isExplicitRoute,
+            bool planCompleted,
+            bool hasFileChanges,
+            bool planCancelled,
+            bool cancellationRequested)
+        {
+            return (isPlanningMode || isExplicitRoute)
+                && planCompleted
+                && hasFileChanges
+                && !planCancelled
+                && !cancellationRequested;
+        }
+
         #region Plan Execution
 
         /// <summary>
@@ -483,9 +503,15 @@ namespace DeepSeek_v4_for_VisualStudio.Services.Agents
                 // ── Planning 模式：所有步骤完成后统一编译验证一次 ──
                 // 必须 plan.IsCompleted 才触发最终构建（防止 JSON 回退单步计划误触发）
                 // v1.1.12: 检查 ShouldSkipAutoBuild() 以尊重用户设置和提示中的意图
-                if (context.IsPlanningMode && plan.IsCompleted
-                    && plan.ChangedFiles.Count > 0
-                    && !plan.IsCancelled && !_agentCts!.IsCancellationRequested)
+                bool cancellationRequested = _agentCts?.IsCancellationRequested == true
+                    || context.CancellationToken.IsCancellationRequested;
+                if (ShouldRunFinalBuild(
+                    context.IsPlanningMode,
+                    context.IsExplicitRoute,
+                    plan.IsCompleted,
+                    plan.ChangedFiles.Count > 0,
+                    plan.IsCancelled,
+                    cancellationRequested))
                 {
                     if (ShouldSkipAutoBuild())
                     {

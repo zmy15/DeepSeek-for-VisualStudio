@@ -38,6 +38,34 @@ public class EditAgentTests
 
     #endregion
 
+    [Theory]
+    [InlineData(false, true, true, true, false, false, true)]
+    [InlineData(true, false, true, true, false, false, true)]
+    [InlineData(false, false, true, true, false, false, false)]
+    [InlineData(true, false, false, true, false, false, false)]
+    [InlineData(true, false, true, false, false, false, false)]
+    [InlineData(true, false, true, true, true, false, false)]
+    [InlineData(true, false, true, true, false, true, false)]
+    public void ShouldRunFinalBuild_RespectsNormalFlowAndExplicitRoute(
+        bool isPlanningMode,
+        bool isExplicitRoute,
+        bool planCompleted,
+        bool hasFileChanges,
+        bool planCancelled,
+        bool cancellationRequested,
+        bool expected)
+    {
+        bool result = EditAgent.ShouldRunFinalBuild(
+            isPlanningMode,
+            isExplicitRoute,
+            planCompleted,
+            hasFileChanges,
+            planCancelled,
+            cancellationRequested);
+
+        result.Should().Be(expected);
+    }
+
     #region Agent Definition
 
     [Fact]

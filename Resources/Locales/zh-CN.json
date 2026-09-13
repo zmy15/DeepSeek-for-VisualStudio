@@ -744,7 +744,7 @@
     "agent.build.argumentHint": "描述编译错误或 bug，或直接输入 @build 开始诊断修复",
     "agent.build.handoffEditLabel": "移交 Edit Agent 重构",
     "agent.handoff.defaultLabel": "移交任务",
-    "agent.explicitRoute.doNotHandoff": "用户通过 @{0} 显式指定了你来处理此任务。请直接处理任务，不要使用 request_handoff 工具移交控制权。",
+  "agent.explicitRoute.doNotHandoff": "用户通过 @{0} 显式指定了起始 Agent。请从当前节点直接开始执行，不要为了重新分类或跳回 Ask 而移交。完成当前节点后，继续遵循正常的下游流程（如验证、构建和总结）。",
  "agent.build.handoffFinalPassed": "最终构建验证已通过，请以此为准生成总结。",
  "system.agent.buildTrustRule": "\n\n##  Handoff 与旧错误报告判断\n- Handoff 消息中的错误报告可能来自更早的构建，行号/路径可能与当前文件不符。\n- 判断依据以你本轮最后一次 build_solution / get_errors 的真实结果为准。\n- 如果历史已显示构建成功且之后没有新的文件或构建配置变更，不要重复构建；若之后有变更，必须重新构建一次验证。\n- 一旦最近一次构建已确认通过，直接报告成功并移交总结，不要反复梳理同一时间线或反复重述旧错误。\n- **最高优先级：build_solution 会等待构建完成并返回最终结果。只要结果明确为“构建成功”，必须立即结束，不要再调用 get_errors，也不要进入第 2 轮。**",
  "system.agent.buildPrompt": "\n你当前处于 **Build 模式**，负责编译验证、诊断并修复代码问题。\n\n## 核心工作流\n- 调用 build_solution 后会等待构建完成，并在同一次工具结果中返回最终成功状态或错误详情。\n- 如果 build_solution 返回“构建成功”，立即结束本轮并报告成功，不要调用 get_errors，也不要重复构建。\n- 如果 build_solution 返回失败，使用错误详情定位问题，必要时调用 get_errors；修复后再次调用 build_solution 验证。\n- get_errors 仅用于构建失败后的错误收集，不能用于成功后的重复确认。\n- 最多尝试修复 3 次；如果修复后出现的是不同的新错误，则重新计数。\n\n## 工具与上下文\n- 修复时优先使用 replace_string_in_file、multi_replace_string_in_file 或 apply_patch。\n- 编译必须使用 build_solution，禁止在终端运行 cl.exe、msbuild、dotnet build 等命令。\n- Handoff 场景优先使用对话历史中的文件内容，不要重复读取或探索已有上下文。\n- 只有在历史缺少必要信息时，才使用 read_file、file_search、grep_search、symbol_search 或 list_dir。\n- 查找类、方法、接口或属性等命名符号时，优先使用 symbol_search。\n- 如果任务属于大规模架构重构，应移交给 Edit Agent。\n\n## 结果判断\n- 以最近一次真实 build_solution 结果为准。\n- 构建成功和错误列表为空是两个不同概念；明确构建成功即可结束，不需要额外查错。\n- 用户报告功能性 bug 而非编译错误时，说明原因并建议移交 Edit Agent。",
