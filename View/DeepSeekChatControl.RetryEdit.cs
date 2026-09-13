@@ -184,15 +184,7 @@ namespace DeepSeek_v4_for_VisualStudio.View
                         if (ChatWebView.CoreWebView2 == null || capturedRetryMsgIdx < 0) return;
                         try
                         {
-                            string reasoning;
-                            string content;
-                            lock (_lock)
-                            {
-                                reasoning = _streamingReasoning.ToString();
-                                var msg = capturedRetryMsgIdx < _messages.Count ? _messages[capturedRetryMsgIdx] : null;
-                                content = msg?.Content ?? string.Empty;
-                            }
-                            BatchStreamingUpdate(capturedRetryMsgIdx, content, reasoning);
+                            BatchStreamingUpdate(capturedRetryMsgIdx, reasoningDelta: chunk);
                         }
                         catch { }
                     });
@@ -296,7 +288,8 @@ namespace DeepSeek_v4_for_VisualStudio.View
                     Logger.Info($"[AgentHandoff] AutoSend 链式跟进: → {nextHandoff.TargetAgent} ({nextHandoff.Label})");
 
                     // ── 保存当前推理内容，防止链式 Handoff 覆盖 ──
-                    string chainPreReasoning = agentResult.ReasoningContent ?? string.Empty;
+                    string chainPreReasoning = ReasoningTextPolicy.ClampStored(agentResult.ReasoningContent)
+                        ?? string.Empty;
 
                     await ThreadHelper.JoinableTaskFactory.SwitchToMainThreadAsync();
                     StatusLabel.Text = string.Format(LocalizationService.Instance["status.agentSwitched"], nextHandoff.TargetAgent);
@@ -321,6 +314,8 @@ namespace DeepSeek_v4_for_VisualStudio.View
                         agentResult.ReasoningContent = string.IsNullOrEmpty(agentResult.ReasoningContent)
                             ? chainPreReasoning
                             : chainPreReasoning + "\n\n" + agentResult.ReasoningContent;
+                        agentResult.ReasoningContent =
+                            ReasoningTextPolicy.ClampStored(agentResult.ReasoningContent) ?? string.Empty;
                     }
                 }
 
@@ -397,7 +392,11 @@ namespace DeepSeek_v4_for_VisualStudio.View
 
                     // ── 将 Edit 阶段的思考过程追加到最终输出 ──
                     string thinkingText;
-                    lock (_lock) { thinkingText = _agentThinkingContent.ToString(); }
+                    lock (_lock)
+                    {
+                        thinkingText = ReasoningTextPolicy.ClampStored(_agentThinkingContent.ToString())
+                            ?? string.Empty;
+                    }
                     string thinkingDetailsHtml = string.Empty;
                     if (!string.IsNullOrWhiteSpace(thinkingText))
                     {
@@ -434,13 +433,15 @@ namespace DeepSeek_v4_for_VisualStudio.View
                     string persistedContent = finalContent;
 
                     // ── 更新现有的流式思考气泡为最终内容 ──
+                    string boundedReasoning = ReasoningTextPolicy.ClampStored(_streamingReasoning.ToString())
+                        ?? string.Empty;
                     lock (_lock)
                     {
                         if (_agentStreamingMsgIndex >= 0 && _agentStreamingMsgIndex < _messages.Count)
                         {
                             var msg = _messages[_agentStreamingMsgIndex];
                             msg.Content = persistedContent;
-                            msg.ReasoningContent = _streamingReasoning.ToString();
+                            msg.ReasoningContent = boundedReasoning;
                             msg.IsStreaming = false;
                             msg.IsRendered = true;
                             // ── 持久化任务计划 JSON，重启后可重建任务面板 ──
@@ -457,8 +458,7 @@ namespace DeepSeek_v4_for_VisualStudio.View
                     }
 
                     // ── 强制刷新 DOM 显示最终结果 ──
-                    string reasoningForRender;
-                    lock (_lock) { reasoningForRender = _streamingReasoning.ToString(); }
+                    string reasoningForRender = boundedReasoning;
                     BatchStreamingUpdate(_agentStreamingMsgIndex, persistedContent, reasoningForRender, isComplete: true);
 
                     // ── 发送最终渲染：extraFooter 中注入执行过程 HTML + 缓存统计（纯 HTML，不经过 Markdown 转义）──

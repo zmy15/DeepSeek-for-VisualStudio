@@ -236,7 +236,7 @@ namespace DeepSeek_v4_for_VisualStudio.Services
                 //     不使用 ?? string.Empty 兜底。JsonIgnoreCondition.WhenWritingNull
                 //     会省略 null 但序列化 "" → JSON 字节不同 → 前缀缓存断裂。
                 if (entry.Role == "assistant" && entry.HasToolCalls)
-                    apiMsg.ReasoningContent = entry.ReasoningContent;
+                    apiMsg.ReasoningContent = ReasoningTextPolicy.ClampStored(entry.ReasoningContent);
 
                 if (entry.Role == "assistant" && entry.ToolCalls != null && entry.ToolCalls.Count > 0)
                     apiMsg.ToolCalls = entry.ToolCalls;
@@ -659,6 +659,8 @@ namespace DeepSeek_v4_for_VisualStudio.Services
         /// <param name="toolCalls">工具调用列表（可为 null）</param>
         public void AddAssistantMessage(string? content, string? reasoningContent = null, List<ToolCall>? toolCalls = null)
         {
+            reasoningContent = ReasoningTextPolicy.ClampStored(reasoningContent);
+
             // ──  前缀缓存优化：写时合并连续 assistant 消息 ──
             //     如果上一条也是 assistant，合并内容而非新增条目，
             //     避免 BuildApiMessages 产生连续 assistant 消息，进而触发 ChatStreamAsync
@@ -973,7 +975,11 @@ namespace DeepSeek_v4_for_VisualStudio.Services
                 if (entry.Role == "assistant")
                 {
                     if (entry.HasToolCalls)
-                        apiMsg.ReasoningContent = entry.ReasoningContent;
+                    {
+                        apiMsg.ReasoningContent = entry.TurnIndex == TurnCount
+                            ? ReasoningTextPolicy.ClampStored(entry.ReasoningContent)
+                            : ReasoningTextPolicy.ClampHistoricalToolCall(entry.ReasoningContent);
+                    }
                 }
 
                 if (entry.Role == "assistant" && entry.ToolCalls != null && entry.ToolCalls.Count > 0)
@@ -1906,7 +1912,7 @@ namespace DeepSeek_v4_for_VisualStudio.Services
                     Role = e.Role,
                     Content = e.Content,
                     MultimodalContent = CloneContentParts(e.MultimodalContent),
-                    ReasoningContent = e.ReasoningContent,
+                    ReasoningContent = ReasoningTextPolicy.ClampStored(e.ReasoningContent),
                 })
                 .ToList();
         }
@@ -1923,7 +1929,7 @@ namespace DeepSeek_v4_for_VisualStudio.Services
                     Role = e.Role,
                     Content = e.Content,
                     MultimodalContent = CloneContentParts(e.MultimodalContent),
-                    ReasoningContent = e.ReasoningContent,
+                    ReasoningContent = ReasoningTextPolicy.ClampStored(e.ReasoningContent),
                     ToolCalls = e.ToolCalls?.Select(tc => new ToolCall
                     {
                         Id = tc.Id,

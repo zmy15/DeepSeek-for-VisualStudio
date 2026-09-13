@@ -242,8 +242,12 @@ namespace DeepSeek_v4_for_VisualStudio.Services
                 }
                 if (!string.IsNullOrEmpty(entry.ReasoningContent))
                 {
-                    // RAG-MARK: no-truncate — 不再截断推理内容
-                    sb.AppendLine(string.Format(LocalizationService.Instance["compress.thinkingLabel"], entry.ReasoningContent));
+                    // Reasoning can be much larger than the useful conclusion. Keep a
+                    // bounded head/tail excerpt so compaction does not create a second
+                    // memory spike from the original thinking stream.
+                    string boundedReasoning = ReasoningTextPolicy.ClampForCompression(entry.ReasoningContent)
+                        ?? string.Empty;
+                    sb.AppendLine(string.Format(LocalizationService.Instance["compress.thinkingLabel"], boundedReasoning));
                 }
                 sb.AppendLine();
             }

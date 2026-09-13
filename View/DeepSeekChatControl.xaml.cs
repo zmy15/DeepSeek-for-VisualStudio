@@ -372,6 +372,12 @@ namespace DeepSeek_v4_for_VisualStudio.View
             {
                 _messages.Clear();
                 var msgs = _tree.GetActiveMessages();
+                foreach (var msg in msgs)
+                {
+                    if (!string.IsNullOrEmpty(msg.ReasoningContent))
+                        msg.ReasoningContent = ReasoningTextPolicy.ClampStored(msg.ReasoningContent)
+                            ?? string.Empty;
+                }
                 _messages.AddRange(msgs);
             }
         }
@@ -1675,10 +1681,11 @@ namespace DeepSeek_v4_for_VisualStudio.View
             public int MessageIndex;
             public StringBuilder Content = new(256);
             public StringBuilder Reasoning = new(64);
+            public StringBuilder ReasoningDelta = new(256);
             public string? PendingStatus;
             public bool IsComplete;
             public long LastFlushTicks;
-            /// <summary>上次刷新时的 Reason 长度，用于判断思考内容是否显著增长</summary>
+            /// <summary>上次刷新时的完整 Reason 长度，用于兼容全量更新调用点</summary>
             public int LastFlushedReasoningLength;
         }
 
@@ -1726,8 +1733,13 @@ namespace DeepSeek_v4_for_VisualStudio.View
         /// <summary>
         /// 批处理流式更新：累积内容变化，仅在间隔达标或显著变化时推送。
         /// </summary>
-        private void BatchStreamingUpdate(int messageIndex, string? content = null,
-            string? reasoning = null, string? status = null, bool isComplete = false)
+        private void BatchStreamingUpdate(
+            int messageIndex,
+            string? content = null,
+            string? reasoning = null,
+            string? status = null,
+            bool isComplete = false,
+            string? reasoningDelta = null)
         {
             lock (_streamBatchLock)
             {
@@ -1747,6 +1759,8 @@ namespace DeepSeek_v4_for_VisualStudio.View
                     state.Reasoning.Clear();
                     state.Reasoning.Append(reasoning);
                 }
+                if (reasoningDelta != null)
+                    state.ReasoningDelta.Append(reasoningDelta);
                 if (status != null)
                     state.PendingStatus = status;
                 if (isComplete)
@@ -1757,8 +1771,10 @@ namespace DeepSeek_v4_for_VisualStudio.View
 
                 // 仅当满足条件时实际推送：已完成 / 内容显著变化 / 思考显著变化 / 间隔达标且有任意内容
                 bool contentChanged = state.Content.Length > StreamRenderInterval;
-                bool reasoningChanged = state.Reasoning.Length > 0
-                    && state.Reasoning.Length - state.LastFlushedReasoningLength >= 50;
+                bool reasoningChanged =
+                    (state.Reasoning.Length > 0
+                        && state.Reasoning.Length - state.LastFlushedReasoningLength >= 50)
+                    || state.ReasoningDelta.Length >= 50;
                 bool timeElapsed = elapsed >= StreamBatchMinIntervalTicks;
 
                 if (state.IsComplete || contentChanged || reasoningChanged
@@ -1766,11 +1782,19 @@ namespace DeepSeek_v4_for_VisualStudio.View
                 {
                     state.LastFlushTicks = now;
                     state.LastFlushedReasoningLength = state.Reasoning.Length;
+                    string reasoningSnapshot = state.Reasoning.Length > 0
+                        ? state.Reasoning.ToString()
+                        : string.Empty;
+                    string? reasoningDeltaSnapshot = state.ReasoningDelta.Length > 0
+                        ? state.ReasoningDelta.ToString()
+                        : null;
                     PostStreamingUpdate(state.MessageIndex,
                         state.Content.ToString(),
-                        state.Reasoning.ToString(),
+                        reasoningSnapshot,
                         state.IsComplete,
-                        state.PendingStatus);
+                        state.PendingStatus,
+                        reasoningDeltaSnapshot);
+                    state.ReasoningDelta.Clear();
                     state.PendingStatus = null;
                     if (state.IsComplete)
                         _streamBatchStates.Remove(messageIndex);

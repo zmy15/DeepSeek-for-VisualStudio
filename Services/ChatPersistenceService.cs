@@ -102,6 +102,7 @@ namespace DeepSeek_v4_for_VisualStudio.Services
                             Logger.Info($"[清理] 已移除 {removed} 个冗余空会话 ← {Path.GetFileName(filePath)}");
                     }
 
+                    NormalizeReasoningHistory(container);
                     Logger.Info($"已加载 {container.Sessions.Count} 个会话 ← {Path.GetFileName(filePath)}");
                     return container;
                 }
@@ -177,6 +178,32 @@ namespace DeepSeek_v4_for_VisualStudio.Services
 
             // 无 TreeData、无 ApiHistory、标题为默认 → 未使用
             return true;
+        }
+
+        /// <summary>
+        /// Applies current reasoning bounds to sessions written by older versions.
+        /// </summary>
+        private static void NormalizeReasoningHistory(SessionsContainer container)
+        {
+            if (container.Sessions == null)
+            {
+                container.Sessions = new List<ChatSession>();
+                return;
+            }
+
+            foreach (var session in container.Sessions)
+            {
+                if (session?.ApiHistory == null)
+                    continue;
+
+                foreach (var message in session.ApiHistory)
+                {
+                    if (message.Role != "assistant" || string.IsNullOrEmpty(message.ReasoningContent))
+                        continue;
+
+                    message.ReasoningContent = ReasoningTextPolicy.ClampStored(message.ReasoningContent);
+                }
+            }
         }
 
         #endregion

@@ -292,13 +292,25 @@ namespace DeepSeek_v4_for_VisualStudio.View
         /// PostWebMessageAsString 不等待 JS 执行完成，不阻塞 UI 线程。
         /// JS 侧通过 requestAnimationFrame 批量处理 DOM 更新。
         /// </summary>
-        private void PostStreamingUpdate(int messageIndex, string content, string reasoningContent, bool isComplete, string? statusText = null)
+        private void PostStreamingUpdate(
+            int messageIndex,
+            string content,
+            string reasoningContent,
+            bool isComplete,
+            string? statusText = null,
+            string? reasoningDelta = null)
         {
             if (ChatWebView.CoreWebView2 == null || !_pageReady) return;
 
             try
             {
-                string json = ChatHtmlService.BuildStreamUpdateJson(messageIndex, content, reasoningContent, isComplete, statusText);
+                string json = ChatHtmlService.BuildStreamUpdateJson(
+                    messageIndex,
+                    content,
+                    reasoningContent,
+                    isComplete,
+                    statusText,
+                    reasoningDelta);
                 ChatWebView.CoreWebView2.PostWebMessageAsString(json);
             }
             catch (Exception ex)

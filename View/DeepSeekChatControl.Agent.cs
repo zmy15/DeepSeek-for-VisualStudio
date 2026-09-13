@@ -558,28 +558,24 @@ namespace DeepSeek_v4_for_VisualStudio.View
                 long lastContentFlushTicks = DateTime.UtcNow.Ticks;
                 long lastThinkingFlushTicks = DateTime.UtcNow.Ticks;
                 var streamingContentSb = new StringBuilder();
+                var streamingReasoningDeltaSb = new StringBuilder();
 
                 context.OnThinkingChunk = (chunk) =>
                 {
-                    // 锁内增量累积（StringBuilder.Append 均摊 O(1)）；按 60ms 节流后才全量读取推送，
-                    // 避免长思考输出时每个 chunk 都执行 O(n) ToString 与跨线程切换
+                    // 锁内增量累积（StringBuilder.Append 均摊 O(1)）；按 60ms 节流后
+                    // 只推送本窗口的 reasoning delta，避免反复序列化完整 thinking。
                     bool syncDue = false;
+                    string delta = string.Empty;
                     lock (_lock)
                     {
                         _streamingReasoning.Append(chunk);
+                        streamingReasoningDeltaSb.Append(chunk);
                         long nowTicks = DateTime.UtcNow.Ticks;
                         syncDue = nowTicks - lastThinkingFlushTicks >= StreamFlushSyncIntervalTicks;
                         if (!syncDue) return;
                         lastThinkingFlushTicks = nowTicks;
-                    }
-
-                    string reasoning;
-                    string content;
-                    lock (_lock)
-                    {
-                        reasoning = _streamingReasoning.ToString();
-                        var msg = capturedMsgIdx < _messages.Count ? _messages[capturedMsgIdx] : null;
-                        content = msg?.Content ?? string.Empty;
+                        delta = streamingReasoningDeltaSb.ToString();
+                        streamingReasoningDeltaSb.Clear();
                     }
                     _ = ThreadHelper.JoinableTaskFactory.RunAsync(async () =>
                     {
@@ -587,7 +583,7 @@ namespace DeepSeek_v4_for_VisualStudio.View
                         if (ChatWebView.CoreWebView2 == null || capturedMsgIdx < 0) return;
                         try
                         {
-                            BatchStreamingUpdate(capturedMsgIdx, content, reasoning);
+                            BatchStreamingUpdate(capturedMsgIdx, reasoningDelta: delta);
                         }
                         catch (Exception ex)
                         {
@@ -620,15 +616,13 @@ namespace DeepSeek_v4_for_VisualStudio.View
                         if (ChatWebView.CoreWebView2 == null || capturedMsgIdx < 0) return;
                         try
                         {
-                            string reasoning;
                             string content;
                             lock (_lock)
                             {
-                                reasoning = _streamingReasoning.ToString();
                                 content = capturedMsgIdx >= 0 && capturedMsgIdx < _messages.Count
                                     ? (_messages[capturedMsgIdx]?.Content ?? "") : "";
                             }
-                            BatchStreamingUpdate(capturedMsgIdx, content, reasoning);
+                            BatchStreamingUpdate(capturedMsgIdx, content);
                         }
                         catch (Exception ex)
                         {
@@ -891,7 +885,11 @@ namespace DeepSeek_v4_for_VisualStudio.View
 
                     // 追加思考过程到摘要后面 —— 作为独立 HTML 注入，默认展开显示
                     string thinkingText;
-                    lock (_lock) { thinkingText = _agentThinkingContent.ToString(); }
+                    lock (_lock)
+                    {
+                        thinkingText = ReasoningTextPolicy.ClampStored(_agentThinkingContent.ToString())
+                            ?? string.Empty;
+                    }
                     string thinkingDetailsHtml = string.Empty;
                     if (!string.IsNullOrWhiteSpace(thinkingText))
                     {
@@ -923,7 +921,11 @@ namespace DeepSeek_v4_for_VisualStudio.View
 
                     // ── 收尾（共用 helper）：Cache footer + 最终化消息推送（含执行过程 HTML）──
                     string reasoningForRender;
-                    lock (_lock) { reasoningForRender = _streamingReasoning.ToString(); }
+                    lock (_lock)
+                    {
+                        reasoningForRender = ReasoningTextPolicy.ClampStored(_streamingReasoning.ToString())
+                            ?? string.Empty;
+                    }
                     string cacheFooter = BuildCacheFooterAndPersist(_agentStreamingMsgIndex);
                     FinalizeAgentMessage(_agentStreamingMsgIndex, finalContent, reasoningForRender, cacheFooter, thinkingDetailsHtml);
 
@@ -963,7 +965,11 @@ namespace DeepSeek_v4_for_VisualStudio.View
 
                     // ── 收尾（共用 helper）：Cache footer + 最终化消息推送 ──
                     string reasoningForRender;
-                    lock (_lock) { reasoningForRender = _streamingReasoning.ToString(); }
+                    lock (_lock)
+                    {
+                        reasoningForRender = ReasoningTextPolicy.ClampStored(_streamingReasoning.ToString())
+                            ?? string.Empty;
+                    }
                     string cacheFooter = BuildCacheFooterAndPersist(_agentStreamingMsgIndex);
                     FinalizeAgentMessage(_agentStreamingMsgIndex, agentResult.Content, reasoningForRender, cacheFooter);
                     StatusLabel.Text = LocalizationService.Instance["status.ready"];
@@ -1155,6 +1161,8 @@ namespace DeepSeek_v4_for_VisualStudio.View
         private void FinalizeAgentMessage(int msgIndex, string content, string reasoning,
             string footerHtml, string? extraFooterHtml = null)
         {
+            reasoning = ReasoningTextPolicy.ClampStored(reasoning) ?? string.Empty;
+
             // ── 更新消息状态为最终完成态（下标无效时跳过更新，与旧分支行为一致）──
             lock (_lock)
             {

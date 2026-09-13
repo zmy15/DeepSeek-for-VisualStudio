@@ -996,15 +996,19 @@ namespace DeepSeek_v4_for_VisualStudio.Services.Agents
                 bool streamSuccess = false;
                 int streamAttempt = 0;
                 const int maxStreamAttempts = 4; // 1 initial + 3 retries
+                const int maxReasoningLoopRetries = 1;
+                int reasoningLoopRetryCount = 0;
+                bool reasoningLoopRetryPending = false;
                 string savedPartialContent = "";
                 string savedPartialReasoning = "";
+                var reasoningGuard = new ReasoningLoopGuard();
 
                 while (!streamSuccess && streamAttempt < maxStreamAttempts)
                 {
                     try
                     {
                         // 如果是重试，将已接收的部分内容注入对话上下文
-                        if (streamAttempt > 0)
+                        if (streamAttempt > 0 || reasoningLoopRetryPending)
                         {
                             // 在消息列表中追加部分 AI 回复 + 继续指令
                             var resumeMessages = new List<ChatApiMessage>(messages);
@@ -1018,11 +1022,15 @@ namespace DeepSeek_v4_for_VisualStudio.Services.Agents
                             string tailContent = savedPartialContent.Length > 300
                                 ? "…(截断)…" + savedPartialContent.Substring(savedPartialContent.Length - 300)
                                 : savedPartialContent;
+                            string resumeInstruction = reasoningLoopRetryPending
+                                ? "[系统指令] 检测到你刚才的思考在原地打转。不要重复已经分析过的内容。只总结已经确认的事实、当前最重要的下一步，然后直接继续完成用户任务。"
+                                : $"[系统指令] 你之前的回复因网络中断被截断。以下是已发送的末尾内容：\n```\n{tailContent}\n```\n请从截断处**精确**继续，不要重复任何已发送的内容，不要道歉或解释中断。直接继续未完成的句子或代码块。";
                             resumeMessages.Add(new ChatApiMessage
                             {
                                 Role = "user",
-                                Content = $"[系统指令] 你之前的回复因网络中断被截断。以下是已发送的末尾内容：\n```\n{tailContent}\n```\n请从截断处**精确**继续，不要重复任何已发送的内容，不要道歉或解释中断。直接继续未完成的句子或代码块。"
+                                Content = resumeInstruction
                             });
+                            reasoningLoopRetryPending = false;
 
                             // 将部分内容预置到缓冲区
                             contentBuilder.Append(savedPartialContent);
@@ -1030,15 +1038,19 @@ namespace DeepSeek_v4_for_VisualStudio.Services.Agents
                             Logger.Info($"[Agent:{Definition.Name}] 流断点续传：第 {streamAttempt + 1}/{maxStreamAttempts} 次，已注入 {savedPartialContent.Length} 字符部分内容");
 
                             // 使用 resume 消息而不是原始消息
+                            reasoningGuard.Reset();
                             await foreach (var chunk in _apiService.ChatStreamAsync(resumeMessages, toolDefs, ct, toolChoice: toolChoice))
                             {
+                                ThrowIfReasoningLoopDetected(chunk, reasoningGuard);
                                 ProcessStreamChunk(chunk, reasoningBuilder, contentBuilder, toolCallAccumulator, onThinking, onContent);
                             }
                         }
                         else
                         {
+                            reasoningGuard.Reset();
                             await foreach (var chunk in _apiService.ChatStreamAsync(messages, toolDefs, ct, toolChoice: toolChoice))
                             {
+                                ThrowIfReasoningLoopDetected(chunk, reasoningGuard);
                                 ProcessStreamChunk(chunk, reasoningBuilder, contentBuilder, toolCallAccumulator, onThinking, onContent);
                             }
                         }
@@ -1060,7 +1072,7 @@ namespace DeepSeek_v4_for_VisualStudio.Services.Agents
 
                         streamAttempt++;
                         savedPartialContent = contentBuilder.ToString();
-                        savedPartialReasoning = reasoningBuilder.ToString();
+                        savedPartialReasoning = ReasoningTextPolicy.ClampForRetry(reasoningBuilder.ToString()) ?? string.Empty;
                         double backoffSec = Math.Pow(2, streamAttempt);
                         Logger.Warn($"[Agent:{Definition.Name}] 流中断 (尝试 {streamAttempt}/{maxStreamAttempts})，已收到 {savedPartialContent.Length} 字符，{backoffSec}s 后恢复…");
                         metrics?.RecordStreamRetry();
@@ -1074,7 +1086,7 @@ namespace DeepSeek_v4_for_VisualStudio.Services.Agents
                         // 超时（非用户取消）
                         streamAttempt++;
                         savedPartialContent = contentBuilder.ToString();
-                        savedPartialReasoning = reasoningBuilder.ToString();
+                        savedPartialReasoning = ReasoningTextPolicy.ClampForRetry(reasoningBuilder.ToString()) ?? string.Empty;
                         double backoffSec = Math.Pow(2, streamAttempt);
                         Logger.Warn($"[Agent:{Definition.Name}] 流超时 (尝试 {streamAttempt}/{maxStreamAttempts})，{backoffSec}s 后恢复…");
                         metrics?.RecordStreamRetry();
@@ -1096,7 +1108,7 @@ namespace DeepSeek_v4_for_VisualStudio.Services.Agents
                         // SSE 读取超时（v1.1.10）：120s 无数据 → 流被 Dispose → ReadLineAsync 抛 ObjectDisposedException
                         streamAttempt++;
                         savedPartialContent = contentBuilder.ToString();
-                        savedPartialReasoning = reasoningBuilder.ToString();
+                        savedPartialReasoning = ReasoningTextPolicy.ClampForRetry(reasoningBuilder.ToString()) ?? string.Empty;
                         double backoffSec = Math.Pow(2, streamAttempt);
                         Logger.Warn($"[Agent:{Definition.Name}] SSE 流读取超时 (尝试 {streamAttempt}/{maxStreamAttempts})，已收到 {savedPartialContent.Length} 字符，{backoffSec}s 后恢复…");
                         metrics?.RecordStreamRetry();
@@ -1118,13 +1130,40 @@ namespace DeepSeek_v4_for_VisualStudio.Services.Agents
                         // 网络错误导致的 IO 异常（非用户取消），尝试重试
                         streamAttempt++;
                         savedPartialContent = contentBuilder.ToString();
-                        savedPartialReasoning = reasoningBuilder.ToString();
+                        savedPartialReasoning = ReasoningTextPolicy.ClampForRetry(reasoningBuilder.ToString()) ?? string.Empty;
                         double backoffSec = Math.Pow(2, streamAttempt);
                         Logger.Warn($"[Agent:{Definition.Name}] 流网络错误 (尝试 {streamAttempt}/{maxStreamAttempts})，已收到 {savedPartialContent.Length} 字符，{backoffSec}s 后恢复…");
                         contentBuilder.Clear();
                         reasoningBuilder.Clear();
                         toolCallAccumulator.Clear();
                         await Task.Delay(TimeSpan.FromSeconds(backoffSec), ct);
+                    }
+                    catch (ReasoningLoopDetectedException ex) when (reasoningLoopRetryCount < maxReasoningLoopRetries)
+                    {
+                        reasoningLoopRetryCount++;
+                        savedPartialContent = contentBuilder.ToString();
+                        savedPartialReasoning = ReasoningTextPolicy.ClampForRetry(reasoningBuilder.ToString()) ?? string.Empty;
+                        contentBuilder.Clear();
+                        reasoningBuilder.Clear();
+                        toolCallAccumulator.Clear();
+                        reasoningGuard.Reset();
+                        reasoningLoopRetryPending = true;
+                        metrics?.RecordStreamRetry();
+                        Logger.Warn($"[Agent:{Definition.Name}] 检测到思考循环，已中断并准备重试: " +
+                            $"reason={ex.Result.Action}, chars={ex.Result.CharacterCount}, repeats={ex.Result.RepetitionCount}");
+                        await Task.Delay(200, ct);
+                    }
+                    catch (ReasoningLoopDetectedException ex)
+                    {
+                        Logger.Error($"[Agent:{Definition.Name}] 思考循环在重试后仍然存在，已停止当前回复: " +
+                            $"reason={ex.Result.Action}, chars={ex.Result.CharacterCount}, repeats={ex.Result.RepetitionCount}");
+                        reasoningBuilder.Clear();
+                        toolCallAccumulator.Clear();
+                        if (contentBuilder.Length > 0)
+                            contentBuilder.AppendLine();
+                        contentBuilder.Append("> 检测到思考过程持续重复，已自动停止本轮生成。请重新提问或缩小任务范围。");
+                        streamSuccess = true;
+                        metrics?.MarkTerminated("reasoning_loop");
                     }
                     catch (OperationCanceledException)
                     {
@@ -3375,6 +3414,19 @@ namespace DeepSeek_v4_for_VisualStudio.Services.Agents
             }
             catch { }
             return null;
+        }
+
+        /// <summary>
+        /// 在将 reasoning 写入缓冲区之前检查循环和长度上限。
+        /// </summary>
+        private static void ThrowIfReasoningLoopDetected(string chunk, ReasoningLoopGuard guard)
+        {
+            if (!chunk.StartsWith("[THINKING]", StringComparison.Ordinal))
+                return;
+
+            var result = guard.Inspect(chunk.Substring(10));
+            if (result.ShouldBreak)
+                throw new ReasoningLoopDetectedException(result);
         }
 
         /// <summary>

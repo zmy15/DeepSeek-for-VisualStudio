@@ -598,6 +598,11 @@ window._showCopyFeedback=function(msgIndex){
                         containerEl._textNode = null;
                         containerEl.style.whiteSpace = '';
                     }
+                    var finalizedReasoningBody = document.getElementById('reasoning-body-' + msg.i);
+                    if (finalizedReasoningBody) {
+                        finalizedReasoningBody._streamComplete = true;
+                        finalizedReasoningBody._textNode = null;
+                    }
 
                     // 渲染 Markdown（独立于 _flushStreamBuf，不受其异常影响）
                     if (msg.html) {
@@ -740,13 +745,26 @@ window._showCopyFeedback=function(msgIndex){
                 textNode.textContent=msg.c;
             }
 
-            // 更新推理面板
-            if(reasoningPanel&&reasoningBody&&msg.r!==undefined){
-                if(msg.r.length>0){
+            // 更新推理面板。rd 是增量追加路径，避免长 thinking 反复替换整段 DOM。
+            if(reasoningPanel&&reasoningBody&&(msg.r!==undefined||msg.rd!==undefined)){
+                if(msg.r!==undefined&&msg.r.length>0){
                     reasoningPanel.style.display='block';
                     var reasoningAtBottom=window.__isReasoningAtBottom(reasoningBody);
+                    reasoningBody._textNode=null;
                     reasoningBody.textContent=msg.r;
                     if(reasoningAtBottom)window.__scrollReasoningToBottom(reasoningBody);
+                }else if(msg.rd!==undefined&&msg.rd.length>0&&!reasoningBody._streamComplete){
+                    reasoningPanel.style.display='block';
+                    var deltaAtBottom=window.__isReasoningAtBottom(reasoningBody);
+                    var reasoningTextNode=reasoningBody._textNode;
+                    if(!reasoningTextNode){
+                        reasoningTextNode=document.createTextNode('');
+                        reasoningBody._textNode=reasoningTextNode;
+                        reasoningBody.textContent='';
+                        reasoningBody.appendChild(reasoningTextNode);
+                    }
+                    reasoningTextNode.appendData(msg.rd);
+                    if(deltaAtBottom)window.__scrollReasoningToBottom(reasoningBody);
                 }else{
                     reasoningPanel.style.display='none';
                 }
