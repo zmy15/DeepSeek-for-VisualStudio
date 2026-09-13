@@ -935,7 +935,45 @@ namespace DeepSeek_v4_for_VisualStudio.Services.Agents
             int effectiveRoundLimit = ResolveEffectiveToolRoundLimit(
                 configuredSafetyLimit,
                 maxToolRounds);
-            int safetyLimit = effectiveRoundLimit;
+            int contextBudget = Context?.ContextManager?.TokenBudget ?? 900_000;
+            var options = Settings.DeepSeekOptionsPage.Instance;
+            int maxWallTimeSeconds = NormalizeExecutionSetting(
+                options?.AgentMaxWallTimeSeconds ?? 900,
+                900,
+                30,
+                7200);
+            int maxTotalTokens = NormalizeExecutionSetting(
+                options?.AgentMaxTotalTokens ?? 400_000,
+                Math.Min(500_000, Math.Max(200_000, contextBudget / 2)),
+                10_000,
+                2_000_000);
+            int maxToolCalls = NormalizeExecutionSetting(
+                options?.AgentMaxToolCalls ?? Math.Max(100, effectiveRoundLimit * 2),
+                Math.Max(100, effectiveRoundLimit * 2),
+                1,
+                10_000);
+            int maxExecutionDepth = NormalizeExecutionSetting(
+                options?.AgentMaxDepth ?? 3,
+                3,
+                1,
+                10);
+            int maxNoProgressRounds = NormalizeExecutionSetting(
+                options?.AgentNoProgressRounds ?? Math.Max(3, maxRepeatedSameCall),
+                Math.Max(3, maxRepeatedSameCall),
+                1,
+                50);
+            var executionPolicy = new AgentExecutionPolicy
+            {
+                MaxSteps = effectiveRoundLimit,
+                MaxWallTime = TimeSpan.FromSeconds(maxWallTimeSeconds),
+                MaxTotalTokens = maxTotalTokens,
+                MaxToolCalls = maxToolCalls,
+                MaxExecutionDepth = maxExecutionDepth,
+                MaxNoProgressRounds = maxNoProgressRounds
+            };
+            var executionGuard = new AgentExecutionGuard(
+                executionPolicy,
+                Context?.ExecutionDepth ?? 0);
 
             // ──  v1.1.11：固定后缀插入点 ──
             // 消息结构：[prefix][稳定历史][tool_calls...][volatile][user][agent]
@@ -945,14 +983,18 @@ namespace DeepSeek_v4_for_VisualStudio.Services.Agents
             while (!loopDetected)
             {
                 round++;
-                if (round > safetyLimit)
+                var executionDecision = executionGuard.CheckBeforeStep(round);
+                if (executionDecision.ShouldStop)
                 {
-                    var L = LocalizationService.Instance;
-                    Logger.Warn($"[Agent:{Definition.Name}] {string.Format(L["agent.log.safetyLimit"], effectiveRoundLimit)}");
-                    contentBuilder.Append($"\n\n>  {string.Format(L["agent.log.safetyLimit"], effectiveRoundLimit)}");
-                    metrics?.MarkTerminated("safety_limit");
+                    Logger.Warn($"[Agent:{Definition.Name}] {executionDecision.Message}");
+                    AppendExecutionStop(contentBuilder, executionDecision);
+                    metrics?.MarkTerminated(executionDecision.Reason.ToString());
                     break;
                 }
+
+                string? budgetWarning = executionGuard.GetBudgetWarning(round);
+                if (budgetWarning != null)
+                    Logger.Warn($"[Agent:{Definition.Name}] {budgetWarning}");
 
                 // ── P0 Telemetry：本轮 LLM 请求计时开始（TTFT/耗时基准）──
                 metrics?.BeginTurn(round);
@@ -1240,6 +1282,17 @@ namespace DeepSeek_v4_for_VisualStudio.Services.Agents
                         turnUsage?.PromptCacheMissTokens ?? 0);
                 }
 
+                var usageDecision = executionGuard.RecordUsage(
+                    turnUsage?.PromptTokens ?? 0,
+                    turnUsage?.CompletionTokens ?? 0);
+                if (usageDecision.ShouldStop)
+                {
+                    Logger.Warn($"[Agent:{Definition.Name}] {usageDecision.Message}");
+                    AppendExecutionStop(contentBuilder, usageDecision);
+                    metrics?.MarkTerminated(usageDecision.Reason.ToString());
+                    break;
+                }
+
                 // ── 处理工具调用 ──
                 var toolCalls = new List<ToolCall>();
                 if (toolCallAccumulator.Count > 0)
@@ -1256,6 +1309,15 @@ namespace DeepSeek_v4_for_VisualStudio.Services.Agents
                                 Arguments = a.ArgumentsBuilder.ToString()
                             }
                         }).ToList();
+                }
+
+                var toolCallDecision = executionGuard.RecordToolCalls(toolCalls.Count);
+                if (toolCallDecision.ShouldStop)
+                {
+                    Logger.Warn($"[Agent:{Definition.Name}] {toolCallDecision.Message}");
+                    AppendExecutionStop(contentBuilder, toolCallDecision);
+                    metrics?.MarkTerminated(toolCallDecision.Reason.ToString());
+                    break;
                 }
 
                 if (toolCalls.Count == 0 && contentBuilder.Length > 0)
@@ -1654,6 +1716,19 @@ namespace DeepSeek_v4_for_VisualStudio.Services.Agents
                         roundSignatures.Add(sig);
                     }
 
+                    var stateParts = new List<string>(roundSignatures);
+                    for (int i = 0; i < toolResults.Length; i++)
+                        stateParts.Add(toolResults[i] ?? string.Empty);
+                    var progressDecision = executionGuard.RecordState(stateParts);
+                    if (progressDecision.ShouldStop)
+                    {
+                        loopDetected = true;
+                        Logger.Warn($"[Agent:{Definition.Name}] {progressDecision.Message}");
+                        AppendExecutionStop(contentBuilder, progressDecision);
+                        metrics?.MarkTerminated(progressDecision.Reason.ToString());
+                        break;
+                    }
+
                     // 检测同一调用重复（带同结果判断：只有每次返回相同结果才终止）
                     foreach (var sig in roundSignatures)
                     {
@@ -2000,8 +2075,7 @@ namespace DeepSeek_v4_for_VisualStudio.Services.Agents
                         if (Context != null)
                             Context.ForwardedMessages = null; // 消费后清空
 
-                        // ── 同步上下文到 ExploreAgent ──
-                        ExploreAgent.Context = this.Context;
+                        // ── 同步上下文与执行深度到 ExploreAgent ──
                         if (ExploreAgent.BuiltInTools == null)
                             ExploreAgent.BuiltInTools = this.BuiltInTools;
                         if (ExploreAgent.McpManager == null)
@@ -2019,12 +2093,14 @@ namespace DeepSeek_v4_for_VisualStudio.Services.Agents
                             SolutionPath = ctx.WorkspaceRoot ?? Context?.SolutionPath,
                             CancellationToken = ct,
                             ContextManager = Context?.ContextManager,
+                            ExecutionDepth = (Context?.ExecutionDepth ?? 0) + 1,
                             FileReadCache = exploreFileCache,
                             DiscoveredFiles = Context?.DiscoveredFiles,
                             //  子Agent缓存优化：继承父Agent当前消息列表作为前缀，
                             //    使ExploreAgent的首轮API调用可复用父Agent的缓存前缀。
                             ForwardedMessages = ctx.ForwardedMessages,
                         };
+                        ExploreAgent.Context = exploreCtx;
 
                         AddLog("INFO", $"[{Definition.Name}] → ExploreAgent: {ctx.Description}");
 
@@ -3447,6 +3523,38 @@ namespace DeepSeek_v4_for_VisualStudio.Services.Agents
             return maxToolRounds is > 0
                 ? Math.Min(configuredSafetyLimit, maxToolRounds.Value)
                 : configuredSafetyLimit;
+        }
+
+        /// <summary>
+        /// Applies a configured execution budget with a deterministic fallback
+        /// and bounds. Invalid persisted values cannot disable the guard.
+        /// </summary>
+        internal static int NormalizeExecutionSetting(
+            int configuredValue,
+            int fallbackValue,
+            int minimum,
+            int maximum)
+        {
+            if (minimum > maximum)
+                throw new ArgumentOutOfRangeException(nameof(minimum));
+
+            int value = configuredValue <= 0 ? fallbackValue : configuredValue;
+            return Math.Max(minimum, Math.Min(maximum, value));
+        }
+
+        /// <summary>
+        /// Appends a deterministic execution-guard stop message to the current
+        /// response without throwing away already produced content.
+        /// </summary>
+        private static void AppendExecutionStop(
+            StringBuilder contentBuilder,
+            AgentExecutionDecision decision)
+        {
+            if (contentBuilder.Length > 0)
+                contentBuilder.AppendLine();
+
+            contentBuilder.Append("> ");
+            contentBuilder.Append(decision.Message);
         }
 
         /// <summary>

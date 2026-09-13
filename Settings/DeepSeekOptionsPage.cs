@@ -749,6 +749,36 @@ namespace DeepSeek_v4_for_VisualStudio.Settings
         public int MaxConsecutiveErrors { get; set; } = 5;
 
         [LocalizedCategory("settings.category.agent")]
+        [LocalizedDisplayName("settings.agentMaxWallTimeSeconds.displayName")]
+        [LocalizedDescription("settings.agentMaxWallTimeSeconds.description")]
+        [DesignerSerializationVisibility(DesignerSerializationVisibility.Visible)]
+        public int AgentMaxWallTimeSeconds { get; set; } = 900;
+
+        [LocalizedCategory("settings.category.agent")]
+        [LocalizedDisplayName("settings.agentMaxTotalTokens.displayName")]
+        [LocalizedDescription("settings.agentMaxTotalTokens.description")]
+        [DesignerSerializationVisibility(DesignerSerializationVisibility.Visible)]
+        public int AgentMaxTotalTokens { get; set; } = 400_000;
+
+        [LocalizedCategory("settings.category.agent")]
+        [LocalizedDisplayName("settings.agentMaxToolCalls.displayName")]
+        [LocalizedDescription("settings.agentMaxToolCalls.description")]
+        [DesignerSerializationVisibility(DesignerSerializationVisibility.Visible)]
+        public int AgentMaxToolCalls { get; set; } = 400;
+
+        [LocalizedCategory("settings.category.agent")]
+        [LocalizedDisplayName("settings.agentMaxDepth.displayName")]
+        [LocalizedDescription("settings.agentMaxDepth.description")]
+        [DesignerSerializationVisibility(DesignerSerializationVisibility.Visible)]
+        public int AgentMaxDepth { get; set; } = 3;
+
+        [LocalizedCategory("settings.category.agent")]
+        [LocalizedDisplayName("settings.agentNoProgressRounds.displayName")]
+        [LocalizedDescription("settings.agentNoProgressRounds.description")]
+        [DesignerSerializationVisibility(DesignerSerializationVisibility.Visible)]
+        public int AgentNoProgressRounds { get; set; } = 5;
+
+        [LocalizedCategory("settings.category.agent")]
         [LocalizedDisplayName("settings.enableAutoBuild.displayName")]
         [LocalizedDescription("settings.enableAutoBuild.description")]
         [DesignerSerializationVisibility(DesignerSerializationVisibility.Visible)]

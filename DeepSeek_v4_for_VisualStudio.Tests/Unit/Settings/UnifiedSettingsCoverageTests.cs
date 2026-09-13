@@ -52,6 +52,11 @@ public class UnifiedSettingsCoverageTests
         (nameof(DeepSeekOptionsPage.MaxToolCallRounds), "deepseekMaxToolCallRounds"),
         (nameof(DeepSeekOptionsPage.MaxRepeatedSameCall), "deepseekMaxRepeatedSameCall"),
         (nameof(DeepSeekOptionsPage.MaxConsecutiveErrors), "deepseekMaxConsecutiveErrors"),
+        (nameof(DeepSeekOptionsPage.AgentMaxWallTimeSeconds), "deepseekAgentMaxWallTimeSeconds"),
+        (nameof(DeepSeekOptionsPage.AgentMaxTotalTokens), "deepseekAgentMaxTotalTokens"),
+        (nameof(DeepSeekOptionsPage.AgentMaxToolCalls), "deepseekAgentMaxToolCalls"),
+        (nameof(DeepSeekOptionsPage.AgentMaxDepth), "deepseekAgentMaxDepth"),
+        (nameof(DeepSeekOptionsPage.AgentNoProgressRounds), "deepseekAgentNoProgressRounds"),
         (nameof(DeepSeekOptionsPage.EnableAutoBuild), "deepseekEnableAutoBuild"),
         (nameof(DeepSeekOptionsPage.ApprovalMode), "deepseekApprovalMode"),
         (nameof(DeepSeekOptionsPage.ThemeModeString), "deepseekThemeMode"),
@@ -66,7 +71,7 @@ public class UnifiedSettingsCoverageTests
         var declaredIds = GetDeclaredSettingIds();
         var boundMonikers = GetBoundMonikers();
 
-        declaredIds.Should().HaveCount(40);
+        declaredIds.Should().HaveCount(45);
         foreach (var guideSettingId in GuideSettingIds)
             declaredIds.Should().Contain(guideSettingId);
 
@@ -74,8 +79,8 @@ public class UnifiedSettingsCoverageTests
             .Where(id => !GuideSettingIds.Contains(id, StringComparer.Ordinal))
             .ToList();
 
-        synchronizedIds.Should().HaveCount(36);
-        boundMonikers.Should().HaveCount(36);
+        synchronizedIds.Should().HaveCount(41);
+        boundMonikers.Should().HaveCount(41);
         declaredIds.GroupBy(id => id, StringComparer.Ordinal).Should().OnlyContain(group => group.Count() == 1);
         boundMonikers.GroupBy(id => id, StringComparer.Ordinal).Should().OnlyContain(group => group.Count() == 1);
 
@@ -89,7 +94,7 @@ public class UnifiedSettingsCoverageTests
     [Fact]
     public void UnifiedSettings_CoverLegacyNonSensitiveOptions()
     {
-        ExpectedCoverage.Should().HaveCount(36);
+        ExpectedCoverage.Should().HaveCount(41);
 
         var optionProperties = typeof(DeepSeekOptionsPage)
             .GetProperties(BindingFlags.Public | BindingFlags.Instance)

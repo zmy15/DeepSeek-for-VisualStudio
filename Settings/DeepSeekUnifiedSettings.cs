@@ -376,6 +376,51 @@ namespace DeepSeek_v4_for_VisualStudio
             };
 
         [VisualStudioContribution]
+        internal static Setting.Integer AgentMaxWallTimeSeconds { get; } =
+            new("deepseekAgentMaxWallTimeSeconds", "%DeepSeek.Chat.settings.agentMaxWallTimeSeconds.displayName%", GeneralCategory, defaultValue: 900)
+            {
+                Description = "%DeepSeek.Chat.settings.agentMaxWallTimeSeconds.description%",
+                Minimum = 30,
+                Maximum = 7200,
+            };
+
+        [VisualStudioContribution]
+        internal static Setting.Integer AgentMaxTotalTokens { get; } =
+            new("deepseekAgentMaxTotalTokens", "%DeepSeek.Chat.settings.agentMaxTotalTokens.displayName%", GeneralCategory, defaultValue: 400_000)
+            {
+                Description = "%DeepSeek.Chat.settings.agentMaxTotalTokens.description%",
+                Minimum = 10_000,
+                Maximum = 2_000_000,
+            };
+
+        [VisualStudioContribution]
+        internal static Setting.Integer AgentMaxToolCalls { get; } =
+            new("deepseekAgentMaxToolCalls", "%DeepSeek.Chat.settings.agentMaxToolCalls.displayName%", GeneralCategory, defaultValue: 400)
+            {
+                Description = "%DeepSeek.Chat.settings.agentMaxToolCalls.description%",
+                Minimum = 1,
+                Maximum = 10_000,
+            };
+
+        [VisualStudioContribution]
+        internal static Setting.Integer AgentMaxDepth { get; } =
+            new("deepseekAgentMaxDepth", "%DeepSeek.Chat.settings.agentMaxDepth.displayName%", GeneralCategory, defaultValue: 3)
+            {
+                Description = "%DeepSeek.Chat.settings.agentMaxDepth.description%",
+                Minimum = 1,
+                Maximum = 10,
+            };
+
+        [VisualStudioContribution]
+        internal static Setting.Integer AgentNoProgressRounds { get; } =
+            new("deepseekAgentNoProgressRounds", "%DeepSeek.Chat.settings.agentNoProgressRounds.displayName%", GeneralCategory, defaultValue: 5)
+            {
+                Description = "%DeepSeek.Chat.settings.agentNoProgressRounds.description%",
+                Minimum = 1,
+                Maximum = 50,
+            };
+
+        [VisualStudioContribution]
         internal static Setting.Boolean EnableAutoBuild { get; } =
             new("deepseekEnableAutoBuild", "%DeepSeek.Chat.settings.enableAutoBuild.displayName%", GeneralCategory, defaultValue: true)
             {

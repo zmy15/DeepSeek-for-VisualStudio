@@ -171,12 +171,15 @@ namespace DeepSeek_v4_for_VisualStudio.Models
         [JsonIgnore]
         public TaskSize PreClassifiedTaskSize { get; set; } = TaskSize.Small;
 
-        /// <summary>是否由用户 @agent 显式路由。为 true 时 Agent 不应主动移交控制权（除非必要的链式移交如 Plan→Edit）。</summary>
+        /// <summary>是否由用户 @agent 显式路由。为 true 时从指定 Agent 开始，但后续正常流程仍可继续。</summary>
         public bool IsExplicitRoute { get; set; }
 
         /// <summary>用户显式选择的目标 Agent。下游 Handoff Agent 不继承该节点的显式路由优先级。</summary>
         [JsonIgnore]
         public AgentType? ExplicitRouteTarget { get; set; }
+
+        /// <summary>子 Agent 调用深度。根 Agent 为 0，runSubagent 子 Agent 每次递增。</summary>
+        public int ExecutionDepth { get; set; }
 
         /// <summary>Planning 模式下累积的上下文（前面步骤的结果和文件变更信息，供后续步骤继承）。</summary>
         public string? AccumulatedContext { get; set; }

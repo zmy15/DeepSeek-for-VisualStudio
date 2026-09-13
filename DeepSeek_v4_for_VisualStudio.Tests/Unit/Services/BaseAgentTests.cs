@@ -26,6 +26,27 @@ public class BaseAgentTests
         result.Should().Be(expected);
     }
 
+    [Theory]
+    [InlineData(0, 100, 10, 1000, 100)]
+    [InlineData(1, 100, 10, 1000, 10)]
+    [InlineData(2000, 100, 10, 1000, 1000)]
+    [InlineData(500, 100, 10, 1000, 500)]
+    public void NormalizeExecutionSetting_ClampsInvalidAndOutOfRangeValues(
+        int configured,
+        int fallback,
+        int minimum,
+        int maximum,
+        int expected)
+    {
+        int result = BaseAgent.NormalizeExecutionSetting(
+            configured,
+            fallback,
+            minimum,
+            maximum);
+
+        result.Should().Be(expected);
+    }
+
     #region IsContentChunk
 
     [Theory]
