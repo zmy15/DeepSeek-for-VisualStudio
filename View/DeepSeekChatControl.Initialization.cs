@@ -74,7 +74,9 @@ namespace DeepSeek_v4_for_VisualStudio.View
             _agentFactory = new AgentFactory(_apiService, _builtInToolService, _mcpManager, _memoryService);
             // 默认活跃 Agent 为 AskAgent
             _activeAgent = _agentFactory.AskAgent;
+            _activeAgent.PermissionRequested -= OnAgentPermissionRequested;
             _activeAgent.PermissionRequested += OnAgentPermissionRequested;
+            _activeAgent.QuestionsRequested -= OnAgentQuestionsRequested;
             _activeAgent.QuestionsRequested += OnAgentQuestionsRequested;
             Logger.Info("Agent 工厂初始化成功（多 Agent 模式：Ask / Plan / Explore / Edit / Build）");
 

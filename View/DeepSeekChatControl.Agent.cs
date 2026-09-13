@@ -266,7 +266,9 @@ namespace DeepSeek_v4_for_VisualStudio.View
                 UnbindAgentEvents(_activeAgent);
 
             _activeAgent = _agentFactory.AskAgent;
+            _activeAgent.PermissionRequested -= OnAgentPermissionRequested;
             _activeAgent.PermissionRequested += OnAgentPermissionRequested;
+            _activeAgent.QuestionsRequested -= OnAgentQuestionsRequested;
             _activeAgent.QuestionsRequested += OnAgentQuestionsRequested;
             UpdateAgentModeBadge();
             Logger.Info("[Session] active agent reset to AskAgent");
@@ -278,9 +280,13 @@ namespace DeepSeek_v4_for_VisualStudio.View
         private void BindAgentEvents(BaseAgent agent)
         {
             if (agent == null) return;
+            agent.LogEntryAdded -= OnAgentLogEntryAdded;
             agent.LogEntryAdded += OnAgentLogEntryAdded;
+            agent.FileChangeNotified -= OnAgentFileChangeNotified;
             agent.FileChangeNotified += OnAgentFileChangeNotified;
+            agent.PermissionRequested -= OnAgentPermissionRequested;
             agent.PermissionRequested += OnAgentPermissionRequested;
+            agent.QuestionsRequested -= OnAgentQuestionsRequested;
             agent.QuestionsRequested += OnAgentQuestionsRequested;
             Logger.Info($"[Agent] 事件已绑定 → {agent.Definition.Type} (QuestionsRequested 订阅数: {agent.QuestionsRequestedHandlerCount})");
         }
@@ -470,6 +476,7 @@ namespace DeepSeek_v4_for_VisualStudio.View
                 lock (_lock)
                 {
                     _createdPlanIds.Clear();
+                    _presentedQuestionRequests.Clear();
                     _pendingLogEntries.Clear();
                     _agentThinkingContent.Clear();
                     _streamingReasoning.Clear();
@@ -1924,6 +1931,9 @@ namespace DeepSeek_v4_for_VisualStudio.View
         {
             try
             {
+                if (IsCurrentProcessForeground())
+                    return;
+
                 var toastService = CompositionRoot.GetServiceOrDefault<ToastNotificationService>();
                 if (toastService == null) return;
 
@@ -1935,6 +1945,30 @@ namespace DeepSeek_v4_for_VisualStudio.View
                 Logger.Warn($"[Agent] 发送操作提醒 Toast 失败: {ex.Message}");
             }
         }
+
+        private static bool IsCurrentProcessForeground()
+        {
+            try
+            {
+                IntPtr foregroundWindow = GetForegroundWindow();
+                if (foregroundWindow == IntPtr.Zero)
+                    return false;
+
+                GetWindowThreadProcessId(foregroundWindow, out uint foregroundProcessId);
+                using var process = System.Diagnostics.Process.GetCurrentProcess();
+                return foregroundProcessId == (uint)process.Id;
+            }
+            catch
+            {
+                return false;
+            }
+        }
+
+        [DllImport("user32.dll")]
+        private static extern IntPtr GetForegroundWindow();
+
+        [DllImport("user32.dll")]
+        private static extern uint GetWindowThreadProcessId(IntPtr hWnd, out uint processId);
 
         private void OnAgentPermissionRequested(AgentPermissionRequest request)
         {
@@ -2021,6 +2055,15 @@ namespace DeepSeek_v4_for_VisualStudio.View
         /// </summary>
         private void OnAgentQuestionsRequested(AgentQuestionRequest request)
         {
+            lock (_lock)
+            {
+                if (!_presentedQuestionRequests.Add(request.RequestId))
+                {
+                    Logger.Warn($"[Agent] 忽略重复的提问请求: RequestId={request.RequestId}");
+                    return;
+                }
+            }
+
             _ = ThreadHelper.JoinableTaskFactory.RunAsync(async () =>
             {
                 await ThreadHelper.JoinableTaskFactory.SwitchToMainThreadAsync();
@@ -2030,6 +2073,7 @@ namespace DeepSeek_v4_for_VisualStudio.View
                     if (ChatWebView.CoreWebView2 == null)
                     {
                         Logger.Warn($"[Agent] CoreWebView2 未就绪，无法注入问题 UI (共 {request.Questions.Count} 个问题)，自动跳过");
+                        lock (_lock) { _presentedQuestionRequests.Remove(request.RequestId); }
                         var questionAgent = _agentFactory?.FindAgentWithPendingQuestion(request.RequestId) ?? _activeAgent;
                         questionAgent?.RespondToQuestions(request.RequestId, "[]");
                         return;
@@ -2078,6 +2122,7 @@ namespace DeepSeek_v4_for_VisualStudio.View
                 catch (Exception ex)
                 {
                     Logger.Warn($"[Agent] 问题 UI 注入失败: {ex.Message}\n{ex.StackTrace}");
+                    lock (_lock) { _presentedQuestionRequests.Remove(request.RequestId); }
                     var questionAgent = _agentFactory?.FindAgentWithPendingQuestion(request.RequestId) ?? _activeAgent;
                     questionAgent?.RespondToQuestions(request.RequestId, "{}");
                 }

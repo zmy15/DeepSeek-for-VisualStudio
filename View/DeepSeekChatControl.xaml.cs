@@ -431,6 +431,7 @@ namespace DeepSeek_v4_for_VisualStudio.View
 
         // ── 已创建的计划 ID 集合（防止重复创建计划消息）──
         private readonly HashSet<string> _createdPlanIds = new();
+        private readonly HashSet<string> _presentedQuestionRequests = new();
 
         // ── 待回放的 Agent 日志条目（面板因全量刷新被销毁时用于恢复）──
         private readonly List<AgentLogEntry> _pendingLogEntries = new();

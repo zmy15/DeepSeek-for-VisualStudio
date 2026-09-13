@@ -2358,6 +2358,7 @@ namespace DeepSeek_v4_for_VisualStudio.View
                             ? ansProp.GetString() ?? "{}" : "{}";
                         var questionAgent = _agentFactory?.FindAgentWithPendingQuestion(requestId) ?? _activeAgent;
                         questionAgent?.RespondToQuestions(requestId, answers);
+                        lock (_lock) { _presentedQuestionRequests.Remove(requestId); }
 
                         // 移除问题 UI
                         _ = ThreadHelper.JoinableTaskFactory.RunAsync(async () =>
