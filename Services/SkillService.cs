@@ -4,6 +4,8 @@ using System;
 using System.Collections.Generic;
 using System.IO;
 using System.Linq;
+using System.Security.Cryptography;
+using System.Text;
 using System.Text.RegularExpressions;
 using System.Threading.Tasks;
 
@@ -73,6 +75,7 @@ namespace DeepSeek_v4_for_VisualStudio.Services
         private SkillDiscoveryResult? _cachedResult;
         private string? _lastSolutionPath;
         private int _lastSkillCount = -1;
+        private string? _lastSkillSignature;
         private string? _cachedSkillSummary;
         private readonly object _lock = new();
 
@@ -136,8 +139,9 @@ namespace DeepSeek_v4_for_VisualStudio.Services
                 Logger.Error($"[SkillService] 技能发现失败: {ex.Message}");
             }
 
-            // ── 技能变更检测：数量变化时生成总结、持久化、触发事件 ──
+            // ── 技能变更检测：数量或内容变化时生成总结、持久化、触发事件 ──
             int newCount = result.TotalCount;
+            string newSignature = BuildSkillsSignature(result.Skills);
             int oldCount;
             bool skillsChanged = false;
             lock (_lock)
@@ -149,22 +153,29 @@ namespace DeepSeek_v4_for_VisualStudio.Services
                     Logger.Info($"[SkillService]  检测到技能数量变化: {_lastSkillCount} → {newCount}");
                     Logger.Info($"[SkillService]   项目级: {result.ProjectSkillCount}, 用户级: {result.UserSkillCount}, 内置: {result.TotalCount - result.ProjectSkillCount - result.UserSkillCount}");
                 }
+                else if (_lastSkillCount >= 0 &&
+                    !string.Equals(_lastSkillSignature, newSignature, StringComparison.Ordinal))
+                {
+                    skillsChanged = true;
+                    Logger.Info("[SkillService]  检测到技能内容变化");
+                }
                 else if (_lastSkillCount < 0)
                 {
                     Logger.Info($"[SkillService]  首次技能发现: 共 {newCount} 个技能 (项目: {result.ProjectSkillCount}, 用户: {result.UserSkillCount})");
                 }
                 _lastSkillCount = newCount;
+                _lastSkillSignature = newSignature;
                 _cachedResult = result;
                 _lastSolutionPath = solutionPath;
             }
 
             // ── 技能总结：仅在数量变化或本地文件不存在时重新生成 ──
             bool fileExists = File.Exists(SkillsSummaryFilePath);
-            bool needsRegeneration = skillsChanged || !fileExists;
+            bool needsRegeneration = skillsChanged || !fileExists || _cachedSkillSummary == null;
 
             if (needsRegeneration)
             {
-                Logger.Info($"[SkillService]  需要生成技能总结 (数量变化={skillsChanged}, 文件存在={fileExists})");
+                Logger.Info($"[SkillService]  需要生成技能总结 (技能变化={skillsChanged}, 文件存在={fileExists})");
 
                 // ── 生成技能总结 ──
                 _cachedSkillSummary = GenerateSkillsSummary(result);
@@ -181,7 +192,7 @@ namespace DeepSeek_v4_for_VisualStudio.Services
             }
             else
             {
-                Logger.Info($"[SkillService]  技能数量未变化 ({newCount}) 且持久化文件已存在，跳过总结生成");
+                Logger.Info($"[SkillService]  技能内容未变化 ({newCount}) 且持久化文件已存在，跳过总结生成");
             }
 
             return result;
@@ -428,6 +439,31 @@ namespace DeepSeek_v4_for_VisualStudio.Services
             return defaultValue;
         }
 
+        internal static bool IsAutoLoadConfidenceAllowed(string? confidence)
+            => string.Equals(confidence, "high", StringComparison.OrdinalIgnoreCase)
+                || string.Equals(confidence, "medium", StringComparison.OrdinalIgnoreCase);
+
+        internal static string BuildSkillsSignature(IEnumerable<SkillDefinition> skills)
+        {
+            var builder = new StringBuilder();
+            foreach (var skill in skills.OrderBy(s => s.Name, StringComparer.OrdinalIgnoreCase))
+            {
+                builder.Append(skill.Name).Append('\n');
+                builder.Append(skill.Description).Append('\n');
+                builder.Append(skill.Body).Append('\n');
+                builder.Append(skill.FilePath).Append('\n');
+                builder.Append(skill.Source).Append('\n');
+                builder.Append(skill.UserInvocable).Append('\n');
+                builder.Append(skill.DisableModelInvocation).Append('\n');
+                builder.Append(skill.AlwaysInject).Append('\n');
+                foreach (var resource in skill.ResourceFiles.OrderBy(path => path, StringComparer.OrdinalIgnoreCase))
+                    builder.Append(resource).Append('\n');
+            }
+
+            using var sha = SHA256.Create();
+            return Convert.ToBase64String(sha.ComputeHash(Encoding.UTF8.GetBytes(builder.ToString())));
+        }
+
         #endregion
 
         #region Resources
@@ -459,7 +495,9 @@ namespace DeepSeek_v4_for_VisualStudio.Services
                 Logger.Warn($"[SkillService] 扫描资源文件失败 '{skillDirectory}': {ex.Message}");
             }
 
-            return resources;
+            return resources
+                .OrderBy(path => path, StringComparer.OrdinalIgnoreCase)
+                .ToList();
         }
 
         /// <summary>
@@ -472,9 +510,12 @@ namespace DeepSeek_v4_for_VisualStudio.Services
                 if (skill.RootDirectory == null) return null;
 
                 // 安全检查：防止路径遍历攻击
-                var fullPath = Path.GetFullPath(
-                    Path.Combine(skill.RootDirectory, relativePath));
-                if (!fullPath.StartsWith(skill.RootDirectory, StringComparison.OrdinalIgnoreCase))
+                string rootDirectory = Path.GetFullPath(skill.RootDirectory);
+                string rootPrefix = rootDirectory.TrimEnd(
+                    Path.DirectorySeparatorChar,
+                    Path.AltDirectorySeparatorChar) + Path.DirectorySeparatorChar;
+                var fullPath = Path.GetFullPath(Path.Combine(rootDirectory, relativePath));
+                if (!fullPath.StartsWith(rootPrefix, StringComparison.OrdinalIgnoreCase))
                 {
                     Logger.Warn($"[SkillService] 拒绝路径遍历: {relativePath}");
                     return null;
@@ -597,6 +638,8 @@ namespace DeepSeek_v4_for_VisualStudio.Services
             return skills
                 .GroupBy(s => s.Name.ToLowerInvariant())
                 .Select(g => g.OrderBy(s => priorityMap.TryGetValue(s.Source, out var priority) ? priority : 99).First())
+                .OrderBy(s => s.Name, StringComparer.OrdinalIgnoreCase)
+                .ThenBy(s => s.Source)
                 .ToList();
         }
 
@@ -633,7 +676,9 @@ namespace DeepSeek_v4_for_VisualStudio.Services
                 string.Empty,
             };
 
-            foreach (var skill in result.AutoLoadableSkills)
+            foreach (var skill in result.AutoLoadableSkills
+                .OrderBy(s => s.Name, StringComparer.OrdinalIgnoreCase)
+                .ThenBy(s => s.Source))
             {
                 // 始终注入的技能不在此列出（它们已在系统提示中完整加载）
                 if (skill.AlwaysInject)
@@ -665,7 +710,9 @@ namespace DeepSeek_v4_for_VisualStudio.Services
                 string.Empty,
             };
 
-            foreach (var skill in result.AlwaysInjectSkills)
+            foreach (var skill in result.AlwaysInjectSkills
+                .OrderBy(s => s.Name, StringComparer.OrdinalIgnoreCase)
+                .ThenBy(s => s.Source))
             {
                 lines.Add(skill.GetFullInstructions());
                 lines.Add(string.Empty);
@@ -688,7 +735,9 @@ namespace DeepSeek_v4_for_VisualStudio.Services
             var L = LocalizationService.Instance;
             var lines = new List<string> { string.Format(L["skills.availableHeader"], "/") };
 
-            foreach (var skill in result.UserInvocableSkills)
+            foreach (var skill in result.UserInvocableSkills
+                .OrderBy(s => s.Name, StringComparer.OrdinalIgnoreCase)
+                .ThenBy(s => s.Source))
             {
                 var hint = skill.ArgumentHint != null ? $" [{skill.ArgumentHint}]" : "";
                 lines.Add($"- `/{skill.Name}{hint}` — {skill.Description}");
@@ -704,23 +753,27 @@ namespace DeepSeek_v4_for_VisualStudio.Services
         public string GenerateSkillsSummary(SkillDiscoveryResult? discoveryResult = null)
         {
             var result = discoveryResult ?? _cachedResult;
-            if (result == null || result.TotalCount == 0)
+            var routableSkills = result?.AutoLoadableSkills
+                .OrderBy(s => s.Name, StringComparer.OrdinalIgnoreCase)
+                .ThenBy(s => s.Source)
+                .ToList() ?? new List<SkillDefinition>();
+            if (routableSkills.Count == 0)
             {
-                Logger.Info("[SkillService]  GenerateSkillsSummary: 无可用技能");
+                Logger.Info("[SkillService]  GenerateSkillsSummary: 无允许模型调用的技能");
                 return LocalizationService.Instance["skills.noneAvailable"];
             }
 
-            Logger.Info($"[SkillService]  开始生成技能总结: 共 {result.TotalCount} 个技能 (项目: {result.ProjectSkillCount}, 用户: {result.UserSkillCount}, 内置: {result.TotalCount - result.ProjectSkillCount - result.UserSkillCount})");
+            Logger.Info($"[SkillService]  开始生成技能总结: 共 {routableSkills.Count} 个可自动加载技能");
 
             var lines = new List<string>
             {
-                $"共 {result.TotalCount} 个技能可用：",
+                $"共 {routableSkills.Count} 个技能可由模型自动加载：",
                 string.Empty,
             };
 
-            for (int i = 0; i < result.Skills.Count; i++)
+            for (int i = 0; i < routableSkills.Count; i++)
             {
-                var skill = result.Skills[i];
+                var skill = routableSkills[i];
                 var sourceLabel = skill.Source switch
                 {
                     SkillSource.BuiltIn => "[内置]",
@@ -748,16 +801,18 @@ namespace DeepSeek_v4_for_VisualStudio.Services
         /// 获取缓存的技能总结（用于路由决策）。
         /// 优先从内存缓存读取，若为空则尝试从本地磁盘加载。
         /// </summary>
-        public string? GetSkillsSummary()
+        public string? GetSkillsSummary(string? solutionPath = null)
         {
             lock (_lock)
             {
-                if (_cachedSkillSummary != null)
+                if (_cachedSkillSummary != null &&
+                    (solutionPath == null ||
+                     string.Equals(_lastSolutionPath, solutionPath, StringComparison.OrdinalIgnoreCase)))
                     return _cachedSkillSummary;
             }
 
             // ── 冷启动：尝试从磁盘恢复 ──
-            string? diskSummary = LoadSkillsSummaryFromDisk();
+            string? diskSummary = LoadSkillsSummaryFromDisk(solutionPath);
             if (diskSummary != null)
                 return diskSummary;
 
@@ -768,7 +823,7 @@ namespace DeepSeek_v4_for_VisualStudio.Services
         /// 从本地磁盘加载缓存的技能总结（用于 VS 重启后恢复）。
         /// </summary>
         /// <returns>成功加载返回总结文本，否则返回 null</returns>
-        public string? LoadSkillsSummaryFromDisk()
+        public string? LoadSkillsSummaryFromDisk(string? solutionPath = null)
         {
             try
             {
@@ -787,9 +842,18 @@ namespace DeepSeek_v4_for_VisualStudio.Services
                     return null;
                 }
 
+                if (!string.IsNullOrEmpty(solutionPath) &&
+                    !string.Equals(record.SolutionPath, solutionPath, StringComparison.OrdinalIgnoreCase))
+                {
+                    Logger.Info("[SkillService]  磁盘技能总结属于其他解决方案，已忽略");
+                    return null;
+                }
+
                 lock (_lock)
                 {
                     _lastSkillCount = record.SkillCount;
+                    _lastSkillSignature = record.SkillSignature;
+                    _lastSolutionPath = record.SolutionPath;
                     _cachedSkillSummary = record.Summary;
                 }
 
@@ -823,6 +887,8 @@ namespace DeepSeek_v4_for_VisualStudio.Services
                     Summary = summary,
                     ProjectSkillCount = _cachedResult?.ProjectSkillCount ?? 0,
                     UserSkillCount = _cachedResult?.UserSkillCount ?? 0,
+                    SkillSignature = _lastSkillSignature ?? string.Empty,
+                    SolutionPath = _lastSolutionPath ?? string.Empty,
                 };
 
                 string json = System.Text.Json.JsonSerializer.Serialize(record, SummaryJsonOptions);
@@ -861,6 +927,12 @@ namespace DeepSeek_v4_for_VisualStudio.Services
 
             [System.Text.Json.Serialization.JsonPropertyName("userSkillCount")]
             public int UserSkillCount { get; set; }
+
+            [System.Text.Json.Serialization.JsonPropertyName("skillSignature")]
+            public string SkillSignature { get; set; } = string.Empty;
+
+            [System.Text.Json.Serialization.JsonPropertyName("solutionPath")]
+            public string SolutionPath { get; set; } = string.Empty;
         }
 
         #endregion

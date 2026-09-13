@@ -11,19 +11,16 @@ namespace DeepSeek_v4_for_VisualStudio.Services.Agents
     /// </summary>
     internal static class PlanBuildOutcomeReconciler
     {
-        private const int MaxResultChars = 400;
-
         /// <summary>
         /// 将计划标记为最终构建通过，并把因编译/构建问题失败的步骤回写为成功。
         /// 返回被回写的步骤数量；非构建类失败保持原样。
         /// </summary>
         internal static int ReconcileAfterBuildSuccess(
-            AgentTaskPlan? plan, string? finalBuildResult, string successSummary)
+            AgentTaskPlan? plan, string successSummary)
         {
             if (plan == null) return 0;
 
             plan.FinalBuildSucceeded = true;
-            plan.FinalBuildResult = Truncate(finalBuildResult, MaxResultChars);
 
             int reconciled = 0;
             foreach (var step in plan.Steps)
@@ -52,11 +49,10 @@ namespace DeepSeek_v4_for_VisualStudio.Services.Agents
         /// <summary>
         /// 最终构建失败时清空成功标记，避免旧的“构建通过”状态污染后续总结。
         /// </summary>
-        internal static void MarkBuildFailed(AgentTaskPlan? plan, string? finalBuildResult)
+        internal static void MarkBuildFailed(AgentTaskPlan? plan)
         {
             if (plan == null) return;
             plan.FinalBuildSucceeded = false;
-            plan.FinalBuildResult = Truncate(finalBuildResult, MaxResultChars);
         }
 
         /// <summary>
@@ -123,10 +119,5 @@ namespace DeepSeek_v4_for_VisualStudio.Services.Agents
                 || title.Contains("run", StringComparison.OrdinalIgnoreCase);
         }
 
-        private static string? Truncate(string? value, int maxLength)
-        {
-            if (string.IsNullOrWhiteSpace(value) || value!.Length <= maxLength) return value;
-            return value!.Substring(0, maxLength);
-        }
     }
 }

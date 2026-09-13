@@ -109,7 +109,8 @@ namespace DeepSeek_v4_for_VisualStudio.Services.Agents
 
         /// <summary>
         /// 构建完整工具集（不过滤白名单），用于 DeepSeek Prefix Cache 稳定。
-        /// 所有 API 调用统一发送此完整工具集，保持 tools JSON 不变。
+        /// 常规工具调用统一发送此完整工具集，保持 tools JSON 不变。
+        /// 明确不需要工具的辅助调用可通过 includeTools=false 完全省略工具字段。
         /// 工具调用由客户端按 Agent 白名单拦截。
         /// 
         ///  双重合并：优先通过 BuiltInToolService 获取（已合并内置+MCP），
@@ -371,7 +372,6 @@ namespace DeepSeek_v4_for_VisualStudio.Services.Agents
 
         /// <summary>
         /// 调用 AI 进行简短回答（用于分类、路由判断等）。
-        /// 公开给 AgentDispatcher 使用。
         /// </summary>
         public async Task<string> CallAiShortAsync(string systemPrompt, string userPrompt, CancellationToken ct, int maxTokens = 512)
         {
@@ -442,25 +442,9 @@ namespace DeepSeek_v4_for_VisualStudio.Services.Agents
         }
 
         /// <summary>
-        /// 带对话历史的 AI 调用。
-        /// </summary>
-        protected async Task<string> CallAiWithHistoryAsync(List<ChatApiMessage> history, CancellationToken ct, int maxTokens = 4096, string? responseFormat = null)
-        {
-            var sb = new StringBuilder();
-            //  传入完整工具集 + toolChoice:"none" 以保持 Prefix Cache 稳定
-            await foreach (var chunk in _apiService.ChatStreamAsync(history, TryGetFullToolSet(), ct, maxTokens, responseFormat: responseFormat, toolChoice: "none"))
-            {
-                if (IsContentChunk(chunk))
-                    sb.Append(chunk);
-            }
-            LogCacheHitRate();
-            return sb.ToString().Trim();
-        }
-
-        /// <summary>
         /// 使用预构建消息列表调用 AI（支持 toolChoice 和 temperature 参数）。
-        /// 
-        ///  缓存关键：与 CallAiLongAsync 不同，此方法直接使用传入的 messages，
+        ///
+        /// 缓存关键：与 CallAiLongAsync 不同，此方法直接使用传入的 messages，
         /// 不通过 BuildContextAwareMessages 重建。这使得跨阶段的对话延续成为可能——
         /// 对齐阶段的 tool call 历史可以直接传递给设计阶段，DeepSeek Prefix Cache
         /// 可以匹配整个对齐对话前缀，而非仅匹配 system prompt。
@@ -468,13 +452,13 @@ namespace DeepSeek_v4_for_VisualStudio.Services.Agents
         /// <param name="messages">预构建的完整消息列表（含 system + 历史 + user）</param>
         /// <param name="ct">取消令牌</param>
         /// <param name="maxTokens">最大输出 token 数</param>
-        /// <param name="toolChoice">工具调用策略（"none" 禁用工具）</param>
+        /// <param name="toolChoice">工具调用策略（"none" 禁用工具调用）</param>
         /// <param name="temperature">采样温度（0.0 = 确定性输出）</param>
         /// <param name="responseFormat">JSON Output 模式: "json_object" 启用，null 不启用</param>
-        /// <summary>
-        /// 使用预构建消息列表调用 AI（支持 toolChoice 和 temperature 参数）。
-        ///  始终传入完整工具集 + toolChoice="none" 以保持 Prefix Cache 稳定。
-        /// </summary>
+        /// <param name="model">临时覆盖模型；null 使用当前端点模型</param>
+        /// <param name="thinkingEnabled">临时覆盖思考模式；null 使用默认设置</param>
+        /// <param name="onThinking">思考内容流式回调；null 时使用当前 Agent 回调</param>
+        /// <param name="includeTools">是否随请求发送工具定义；路由等纯文本调用应设为 false</param>
         public async Task<string> CallAiWithMessagesAsync(
             List<ChatApiMessage> messages,
             CancellationToken ct,
@@ -484,13 +468,16 @@ namespace DeepSeek_v4_for_VisualStudio.Services.Agents
             string? responseFormat = null,
             string? model = null,
             bool? thinkingEnabled = null,
-            Action<string>? onThinking = null)
+            Action<string>? onThinking = null,
+            bool includeTools = true)
         {
-            //  传入完整工具集以保持 Prefix Cache 稳定
-            var fullTools = TryGetFullToolSet();
+            // 常规调用传入完整工具集以保持 Prefix Cache 稳定；
+            // 路由等明确不需要工具的调用必须完全省略 tools 和 tool_choice。
+            var fullTools = includeTools ? TryGetFullToolSet() : null;
+            var effectiveToolChoice = includeTools ? toolChoice : null;
             var sb = new StringBuilder();
             var effectiveOnThinking = onThinking ?? Context?.OnThinkingChunk;
-            await foreach (var chunk in _apiService.ChatStreamAsync(messages, fullTools, ct, maxTokens, toolChoice, temperature, responseFormat, model, thinkingEnabled))
+            await foreach (var chunk in _apiService.ChatStreamAsync(messages, fullTools, ct, maxTokens, effectiveToolChoice, temperature, responseFormat, model, thinkingEnabled))
             {
                 if (chunk.StartsWith("[THINKING]"))
                     effectiveOnThinking?.Invoke(chunk.Substring(10));
@@ -644,24 +631,6 @@ namespace DeepSeek_v4_for_VisualStudio.Services.Agents
         }
 
         /// <summary>
-        /// 使用 ConversationContextManager 构建的消息列表调用 AI。
-        /// 正确处理 reasoning_content 回传规则。
-        /// </summary>
-        protected async Task<string> CallAiWithContextAsync(ConversationContextManager ctxManager, CancellationToken ct, int maxTokens = 4096, string? responseFormat = null)
-        {
-            var messages = ctxManager.BuildApiMessages();
-            var sb = new StringBuilder();
-            //  传入完整工具集 + toolChoice:"none" 以保持 Prefix Cache 稳定
-            await foreach (var chunk in _apiService.ChatStreamAsync(messages, TryGetFullToolSet(), ct, maxTokens, responseFormat: responseFormat, toolChoice: "none"))
-            {
-                if (IsContentChunk(chunk))
-                    sb.Append(chunk);
-            }
-            LogCacheHitRate();
-            return sb.ToString().Trim();
-        }
-
-        /// <summary>
         /// 构建上下文感知的消息列表，将 Agent 的 system prompt 与对话历史合并。
         /// 
         /// ── 消息结构（v1.1.12）──
@@ -736,6 +705,7 @@ namespace DeepSeek_v4_for_VisualStudio.Services.Agents
                     Context.ToolHistoryInsertIndex = result.Count;
                 if (!string.IsNullOrWhiteSpace(systemPrompt))
                     result.Add(new ChatApiMessage { Role = "system", Content = systemPrompt });
+                AppendExplicitRouteInstruction(result);
                 return result;
             }
 
@@ -792,8 +762,30 @@ namespace DeepSeek_v4_for_VisualStudio.Services.Agents
             // ── 第6层：Agent 专属行为指令（固定在最后）──
             if (!string.IsNullOrWhiteSpace(systemPrompt))
                 messages.Add(new ChatApiMessage { Role = "system", Content = systemPrompt });
+            AppendExplicitRouteInstruction(messages);
 
             return messages;
+        }
+
+        /// <summary>
+        /// 将显式 @Agent 的路由边界追加为最后一条 system 消息。
+        /// 该消息优先级高于角色默认的自动移交策略，但仍允许必要的权限边界移交。
+        /// </summary>
+        private void AppendExplicitRouteInstruction(List<ChatApiMessage> messages)
+        {
+            if (Context?.IsExplicitRoute != true)
+                return;
+            if (Context.ExplicitRouteTarget.HasValue
+                && Context.ExplicitRouteTarget.Value != Definition.Type)
+                return;
+
+            messages.Add(new ChatApiMessage
+            {
+                Role = "system",
+                Content = string.Format(
+                    LocalizationService.Instance["agent.explicitRoute.doNotHandoff"],
+                    Definition.Name)
+            });
         }
 
         /// <summary>
@@ -904,14 +896,53 @@ namespace DeepSeek_v4_for_VisualStudio.Services.Agents
             if (configuredSafetyLimit < 1) configuredSafetyLimit = 200;
             bool loopDetected = false;
 
-            int round = BuiltInTools?.CurrentRound ?? 0;
-            int initialRound = round;
-            int effectiveRoundLimit = maxToolRounds is > 0
-                ? Math.Min(configuredSafetyLimit, maxToolRounds.Value)
-                : configuredSafetyLimit;
-            int safetyLimit = initialRound > int.MaxValue - effectiveRoundLimit
-                ? int.MaxValue
-                : initialRound + effectiveRoundLimit;
+            // MaxToolCallRounds is a per-Agent-invocation limit. The global
+            // CurrentRound is only a cache-age offset and must not consume the
+            // next request's safety budget.
+            int round = 0;
+            int cacheRoundOffset = BuiltInTools?.CurrentRound ?? 0;
+            int effectiveRoundLimit = ResolveEffectiveToolRoundLimit(
+                configuredSafetyLimit,
+                maxToolRounds);
+            int contextBudget = Context?.ContextManager?.TokenBudget ?? 900_000;
+            var options = Settings.DeepSeekOptionsPage.Instance;
+            int maxWallTimeSeconds = NormalizeExecutionSetting(
+                options?.AgentMaxWallTimeSeconds ?? 0,
+                0,
+                0,
+                7200);
+            int maxTotalTokens = NormalizeExecutionSetting(
+                options?.AgentMaxTotalTokens ?? 0,
+                0,
+                0,
+                2_000_000);
+            int maxToolCalls = NormalizeExecutionSetting(
+                options?.AgentMaxToolCalls ?? Math.Max(100, effectiveRoundLimit * 2),
+                Math.Max(100, effectiveRoundLimit * 2),
+                1,
+                10_000);
+            int maxExecutionDepth = NormalizeExecutionSetting(
+                options?.AgentMaxDepth ?? 3,
+                3,
+                1,
+                10);
+            int maxNoProgressRounds = NormalizeExecutionSetting(
+                options?.AgentNoProgressRounds ?? Math.Max(3, maxRepeatedSameCall),
+                Math.Max(3, maxRepeatedSameCall),
+                1,
+                50);
+            var executionPolicy = new AgentExecutionPolicy
+            {
+                MaxSteps = effectiveRoundLimit,
+                MaxWallTime = TimeSpan.FromSeconds(maxWallTimeSeconds),
+                MaxTotalTokens = maxTotalTokens,
+                MaxToolCalls = maxToolCalls,
+                MaxExecutionDepth = maxExecutionDepth,
+                MaxNoProgressRounds = maxNoProgressRounds
+            };
+            var executionGuard = new AgentExecutionGuard(
+                executionPolicy,
+                Context?.ExecutionDepth ?? 0);
 
             // ──  v1.1.11：固定后缀插入点 ──
             // 消息结构：[prefix][稳定历史][tool_calls...][volatile][user][agent]
@@ -921,21 +952,30 @@ namespace DeepSeek_v4_for_VisualStudio.Services.Agents
             while (!loopDetected)
             {
                 round++;
-                if (round > safetyLimit)
+                var executionDecision = executionGuard.CheckBeforeStep(round);
+                if (executionDecision.ShouldStop)
                 {
-                    var L = LocalizationService.Instance;
-                    Logger.Warn($"[Agent:{Definition.Name}] {string.Format(L["agent.log.safetyLimit"], effectiveRoundLimit)}");
-                    contentBuilder.Append($"\n\n>  {string.Format(L["agent.log.safetyLimit"], effectiveRoundLimit)}");
-                    metrics?.MarkTerminated("safety_limit");
+                    Logger.Warn($"[Agent:{Definition.Name}] {executionDecision.Message}");
+                    AppendExecutionStop(contentBuilder, executionDecision);
+                    metrics?.MarkTerminated(executionDecision.Reason.ToString());
                     break;
                 }
+
+                string? budgetWarning = executionGuard.GetBudgetWarning(round);
+                if (budgetWarning != null)
+                    Logger.Warn($"[Agent:{Definition.Name}] {budgetWarning}");
 
                 // ── P0 Telemetry：本轮 LLM 请求计时开始（TTFT/耗时基准）──
                 metrics?.BeginTurn(round);
 
                 // ── 同步当前轮次到文件读取缓存，用于轮数过期策略 ──
                 if (BuiltInTools != null)
-                    BuiltInTools.CurrentRound = round;
+                {
+                    int cacheRound = cacheRoundOffset > int.MaxValue - round
+                        ? int.MaxValue
+                        : cacheRoundOffset + round;
+                    BuiltInTools.CurrentRound = cacheRound;
+                }
 
                 toolCallAccumulator.Clear();
                 reasoningBuilder.Clear();
@@ -957,6 +997,14 @@ namespace DeepSeek_v4_for_VisualStudio.Services.Agents
 
                     // ── 构建白名单（仅用于客户端拦截，不影响 tools JSON）──
                     effectiveWhitelist = toolWhitelist ?? Definition.AllowedTools;
+                    if (effectiveWhitelist != null && effectiveWhitelist.Count > 0)
+                    {
+                        // Skill loading is a read-only capability shared by every Agent.
+                        effectiveWhitelist = effectiveWhitelist
+                            .Concat(new[] { "load_skill", "read_skill_resource" })
+                            .Distinct(StringComparer.OrdinalIgnoreCase)
+                            .ToList();
+                    }
 
                     if (Definition.Type != AgentType.Edit && Definition.Type != AgentType.Build && effectiveWhitelist != null)
                     {
@@ -996,15 +1044,19 @@ namespace DeepSeek_v4_for_VisualStudio.Services.Agents
                 bool streamSuccess = false;
                 int streamAttempt = 0;
                 const int maxStreamAttempts = 4; // 1 initial + 3 retries
+                const int maxReasoningLoopRetries = 1;
+                int reasoningLoopRetryCount = 0;
+                bool reasoningLoopRetryPending = false;
                 string savedPartialContent = "";
                 string savedPartialReasoning = "";
+                var reasoningGuard = new ReasoningLoopGuard();
 
                 while (!streamSuccess && streamAttempt < maxStreamAttempts)
                 {
                     try
                     {
                         // 如果是重试，将已接收的部分内容注入对话上下文
-                        if (streamAttempt > 0)
+                        if (streamAttempt > 0 || reasoningLoopRetryPending)
                         {
                             // 在消息列表中追加部分 AI 回复 + 继续指令
                             var resumeMessages = new List<ChatApiMessage>(messages);
@@ -1018,11 +1070,15 @@ namespace DeepSeek_v4_for_VisualStudio.Services.Agents
                             string tailContent = savedPartialContent.Length > 300
                                 ? "…(截断)…" + savedPartialContent.Substring(savedPartialContent.Length - 300)
                                 : savedPartialContent;
+                            string resumeInstruction = reasoningLoopRetryPending
+                                ? "[系统指令] 检测到你刚才的思考在原地打转。不要重复已经分析过的内容。只总结已经确认的事实、当前最重要的下一步，然后直接继续完成用户任务。"
+                                : $"[系统指令] 你之前的回复因网络中断被截断。以下是已发送的末尾内容：\n```\n{tailContent}\n```\n请从截断处**精确**继续，不要重复任何已发送的内容，不要道歉或解释中断。直接继续未完成的句子或代码块。";
                             resumeMessages.Add(new ChatApiMessage
                             {
                                 Role = "user",
-                                Content = $"[系统指令] 你之前的回复因网络中断被截断。以下是已发送的末尾内容：\n```\n{tailContent}\n```\n请从截断处**精确**继续，不要重复任何已发送的内容，不要道歉或解释中断。直接继续未完成的句子或代码块。"
+                                Content = resumeInstruction
                             });
+                            reasoningLoopRetryPending = false;
 
                             // 将部分内容预置到缓冲区
                             contentBuilder.Append(savedPartialContent);
@@ -1030,15 +1086,19 @@ namespace DeepSeek_v4_for_VisualStudio.Services.Agents
                             Logger.Info($"[Agent:{Definition.Name}] 流断点续传：第 {streamAttempt + 1}/{maxStreamAttempts} 次，已注入 {savedPartialContent.Length} 字符部分内容");
 
                             // 使用 resume 消息而不是原始消息
+                            reasoningGuard.Reset();
                             await foreach (var chunk in _apiService.ChatStreamAsync(resumeMessages, toolDefs, ct, toolChoice: toolChoice))
                             {
+                                ThrowIfReasoningLoopDetected(chunk, reasoningGuard);
                                 ProcessStreamChunk(chunk, reasoningBuilder, contentBuilder, toolCallAccumulator, onThinking, onContent);
                             }
                         }
                         else
                         {
+                            reasoningGuard.Reset();
                             await foreach (var chunk in _apiService.ChatStreamAsync(messages, toolDefs, ct, toolChoice: toolChoice))
                             {
+                                ThrowIfReasoningLoopDetected(chunk, reasoningGuard);
                                 ProcessStreamChunk(chunk, reasoningBuilder, contentBuilder, toolCallAccumulator, onThinking, onContent);
                             }
                         }
@@ -1060,7 +1120,7 @@ namespace DeepSeek_v4_for_VisualStudio.Services.Agents
 
                         streamAttempt++;
                         savedPartialContent = contentBuilder.ToString();
-                        savedPartialReasoning = reasoningBuilder.ToString();
+                        savedPartialReasoning = ReasoningTextPolicy.ClampForRetry(reasoningBuilder.ToString()) ?? string.Empty;
                         double backoffSec = Math.Pow(2, streamAttempt);
                         Logger.Warn($"[Agent:{Definition.Name}] 流中断 (尝试 {streamAttempt}/{maxStreamAttempts})，已收到 {savedPartialContent.Length} 字符，{backoffSec}s 后恢复…");
                         metrics?.RecordStreamRetry();
@@ -1074,7 +1134,7 @@ namespace DeepSeek_v4_for_VisualStudio.Services.Agents
                         // 超时（非用户取消）
                         streamAttempt++;
                         savedPartialContent = contentBuilder.ToString();
-                        savedPartialReasoning = reasoningBuilder.ToString();
+                        savedPartialReasoning = ReasoningTextPolicy.ClampForRetry(reasoningBuilder.ToString()) ?? string.Empty;
                         double backoffSec = Math.Pow(2, streamAttempt);
                         Logger.Warn($"[Agent:{Definition.Name}] 流超时 (尝试 {streamAttempt}/{maxStreamAttempts})，{backoffSec}s 后恢复…");
                         metrics?.RecordStreamRetry();
@@ -1096,7 +1156,7 @@ namespace DeepSeek_v4_for_VisualStudio.Services.Agents
                         // SSE 读取超时（v1.1.10）：120s 无数据 → 流被 Dispose → ReadLineAsync 抛 ObjectDisposedException
                         streamAttempt++;
                         savedPartialContent = contentBuilder.ToString();
-                        savedPartialReasoning = reasoningBuilder.ToString();
+                        savedPartialReasoning = ReasoningTextPolicy.ClampForRetry(reasoningBuilder.ToString()) ?? string.Empty;
                         double backoffSec = Math.Pow(2, streamAttempt);
                         Logger.Warn($"[Agent:{Definition.Name}] SSE 流读取超时 (尝试 {streamAttempt}/{maxStreamAttempts})，已收到 {savedPartialContent.Length} 字符，{backoffSec}s 后恢复…");
                         metrics?.RecordStreamRetry();
@@ -1118,13 +1178,40 @@ namespace DeepSeek_v4_for_VisualStudio.Services.Agents
                         // 网络错误导致的 IO 异常（非用户取消），尝试重试
                         streamAttempt++;
                         savedPartialContent = contentBuilder.ToString();
-                        savedPartialReasoning = reasoningBuilder.ToString();
+                        savedPartialReasoning = ReasoningTextPolicy.ClampForRetry(reasoningBuilder.ToString()) ?? string.Empty;
                         double backoffSec = Math.Pow(2, streamAttempt);
                         Logger.Warn($"[Agent:{Definition.Name}] 流网络错误 (尝试 {streamAttempt}/{maxStreamAttempts})，已收到 {savedPartialContent.Length} 字符，{backoffSec}s 后恢复…");
                         contentBuilder.Clear();
                         reasoningBuilder.Clear();
                         toolCallAccumulator.Clear();
                         await Task.Delay(TimeSpan.FromSeconds(backoffSec), ct);
+                    }
+                    catch (ReasoningLoopDetectedException ex) when (reasoningLoopRetryCount < maxReasoningLoopRetries)
+                    {
+                        reasoningLoopRetryCount++;
+                        savedPartialContent = contentBuilder.ToString();
+                        savedPartialReasoning = ReasoningTextPolicy.ClampForRetry(reasoningBuilder.ToString()) ?? string.Empty;
+                        contentBuilder.Clear();
+                        reasoningBuilder.Clear();
+                        toolCallAccumulator.Clear();
+                        reasoningGuard.Reset();
+                        reasoningLoopRetryPending = true;
+                        metrics?.RecordStreamRetry();
+                        Logger.Warn($"[Agent:{Definition.Name}] 检测到思考循环，已中断并准备重试: " +
+                            $"reason={ex.Result.Action}, chars={ex.Result.CharacterCount}, repeats={ex.Result.RepetitionCount}");
+                        await Task.Delay(200, ct);
+                    }
+                    catch (ReasoningLoopDetectedException ex)
+                    {
+                        Logger.Error($"[Agent:{Definition.Name}] 思考循环在重试后仍然存在，已停止当前回复: " +
+                            $"reason={ex.Result.Action}, chars={ex.Result.CharacterCount}, repeats={ex.Result.RepetitionCount}");
+                        reasoningBuilder.Clear();
+                        toolCallAccumulator.Clear();
+                        if (contentBuilder.Length > 0)
+                            contentBuilder.AppendLine();
+                        contentBuilder.Append("> 检测到思考过程持续重复，已自动停止本轮生成。请重新提问或缩小任务范围。");
+                        streamSuccess = true;
+                        metrics?.MarkTerminated("reasoning_loop");
                     }
                     catch (OperationCanceledException)
                     {
@@ -1172,6 +1259,17 @@ namespace DeepSeek_v4_for_VisualStudio.Services.Agents
                         turnUsage?.PromptCacheMissTokens ?? 0);
                 }
 
+                var usageDecision = executionGuard.RecordUsage(
+                    turnUsage?.PromptTokens ?? 0,
+                    turnUsage?.CompletionTokens ?? 0);
+                if (usageDecision.ShouldStop)
+                {
+                    Logger.Warn($"[Agent:{Definition.Name}] {usageDecision.Message}");
+                    AppendExecutionStop(contentBuilder, usageDecision);
+                    metrics?.MarkTerminated(usageDecision.Reason.ToString());
+                    break;
+                }
+
                 // ── 处理工具调用 ──
                 var toolCalls = new List<ToolCall>();
                 if (toolCallAccumulator.Count > 0)
@@ -1188,6 +1286,15 @@ namespace DeepSeek_v4_for_VisualStudio.Services.Agents
                                 Arguments = a.ArgumentsBuilder.ToString()
                             }
                         }).ToList();
+                }
+
+                var toolCallDecision = executionGuard.RecordToolCalls(toolCalls.Count);
+                if (toolCallDecision.ShouldStop)
+                {
+                    Logger.Warn($"[Agent:{Definition.Name}] {toolCallDecision.Message}");
+                    AppendExecutionStop(contentBuilder, toolCallDecision);
+                    metrics?.MarkTerminated(toolCallDecision.Reason.ToString());
+                    break;
                 }
 
                 if (toolCalls.Count == 0 && contentBuilder.Length > 0)
@@ -1586,6 +1693,19 @@ namespace DeepSeek_v4_for_VisualStudio.Services.Agents
                         roundSignatures.Add(sig);
                     }
 
+                    var stateParts = new List<string>(roundSignatures);
+                    for (int i = 0; i < toolResults.Length; i++)
+                        stateParts.Add(toolResults[i] ?? string.Empty);
+                    var progressDecision = executionGuard.RecordState(stateParts);
+                    if (progressDecision.ShouldStop)
+                    {
+                        loopDetected = true;
+                        Logger.Warn($"[Agent:{Definition.Name}] {progressDecision.Message}");
+                        AppendExecutionStop(contentBuilder, progressDecision);
+                        metrics?.MarkTerminated(progressDecision.Reason.ToString());
+                        break;
+                    }
+
                     // 检测同一调用重复（带同结果判断：只有每次返回相同结果才终止）
                     foreach (var sig in roundSignatures)
                     {
@@ -1807,33 +1927,6 @@ namespace DeepSeek_v4_for_VisualStudio.Services.Agents
         }
 
         /// <summary>
-        /// 生成本次工作流 Cache 命中率摘要文本（用于附加到 AI 响应末尾，与 UI 一致）。
-        /// </summary>
-        private string GetTotalCacheHitSummary(int finalRound)
-        {
-            try
-            {
-                var delta = _apiService?.GetCacheDelta() ?? (0, 0, 0, 0);
-                long totalHit = delta.Hit;
-                long totalMiss = delta.Miss;
-                long totalCacheable = totalHit + totalMiss;
-                if (totalCacheable == 0) return string.Empty;
-
-                double rate = (double)totalHit / totalCacheable;
-                string icon = rate >= 0.90 ? "🟢" : rate >= 0.50 ? "🟡" : rate >= 0.20 ? "🟠" : "🔴";
-
-                return $"\n\n---\n\n{icon} **Cache 命中率: {rate * 100:F1}%**" +
-                    $" · {totalHit:N0} 命中 / {totalMiss:N0} 未命中" +
-                    $" · Prompt {delta.Prompt:N0} · Completion {delta.Completion:N0}" +
-                    (finalRound > 1 ? $" · {finalRound} 轮" : "");
-            }
-            catch
-            {
-                return string.Empty;
-            }
-        }
-
-        /// <summary>
         /// 带超时保护的工具执行包装。
         /// 每个工具调用单独计时，超时则返回错误信息而非阻塞整个循环。
         /// 对于需要用户交互的命令（run_in_terminal、delete_file、VisualStudio_askQuestions），不设超时。
@@ -1932,8 +2025,7 @@ namespace DeepSeek_v4_for_VisualStudio.Services.Agents
                         if (Context != null)
                             Context.ForwardedMessages = null; // 消费后清空
 
-                        // ── 同步上下文到 ExploreAgent ──
-                        ExploreAgent.Context = this.Context;
+                        // ── 同步上下文与执行深度到 ExploreAgent ──
                         if (ExploreAgent.BuiltInTools == null)
                             ExploreAgent.BuiltInTools = this.BuiltInTools;
                         if (ExploreAgent.McpManager == null)
@@ -1951,12 +2043,14 @@ namespace DeepSeek_v4_for_VisualStudio.Services.Agents
                             SolutionPath = ctx.WorkspaceRoot ?? Context?.SolutionPath,
                             CancellationToken = ct,
                             ContextManager = Context?.ContextManager,
+                            ExecutionDepth = (Context?.ExecutionDepth ?? 0) + 1,
                             FileReadCache = exploreFileCache,
                             DiscoveredFiles = Context?.DiscoveredFiles,
                             //  子Agent缓存优化：继承父Agent当前消息列表作为前缀，
                             //    使ExploreAgent的首轮API调用可复用父Agent的缓存前缀。
                             ForwardedMessages = ctx.ForwardedMessages,
                         };
+                        ExploreAgent.Context = exploreCtx;
 
                         AddLog("INFO", $"[{Definition.Name}] → ExploreAgent: {ctx.Description}");
 
@@ -2042,18 +2136,6 @@ namespace DeepSeek_v4_for_VisualStudio.Services.Agents
                 BuiltInTools.HandoffHandler = async (request) =>
                 {
                     request.SourceAgent = Definition.Type;
-
-                    // ── 显式路由拦截：@agent 时 AI 不应主动移交控制权 ──
-                    // 例外：PlanAgent → EditAgent 是 Plan 的核心职责，允许
-                    if (Context?.IsExplicitRoute == true
-                        && !(Definition.Type == AgentType.Plan && request.TargetAgent == AgentType.Edit))
-                    {
-                        request.Rejected = true;
-                        request.RejectReason = $"用户通过 @{Definition.Type.ToString().ToLowerInvariant()} 显式指定了你，请直接处理任务，不要移交控制权。";
-                        AddLog("WARN", $"[{Definition.Name}]  显式路由拦截移交 → {request.TargetAgent}");
-                        await Task.CompletedTask;
-                        return;
-                    }
 
                     PendingHandoffRequest = request;
                     AddLog("INFO", $"[{Definition.Name}]  移交请求: → {request.TargetAgent} (原因: {request.Reason})");
@@ -2460,7 +2542,6 @@ namespace DeepSeek_v4_for_VisualStudio.Services.Agents
         /// 执行 Handoff：从当前 Agent 移交到目标 Agent。
         /// 构建 Handoff prompt（含计划上下文 + plan.md），调用目标 Agent 的 ExecuteAsync。
         /// 
-        /// 从 AgentDispatcher.ExecuteHandoffAsync 搬过来，由 BaseAgent 统一提供。
         /// </summary>
         /// <param name="handoff">移交定义</param>
         /// <param name="context">执行上下文</param>
@@ -3378,6 +3459,67 @@ namespace DeepSeek_v4_for_VisualStudio.Services.Agents
         }
 
         /// <summary>
+        /// Resolves the per-invocation tool-loop limit. This value intentionally
+        /// does not include the global cache round counter.
+        /// </summary>
+        internal static int ResolveEffectiveToolRoundLimit(
+            int configuredSafetyLimit,
+            int? maxToolRounds)
+        {
+            if (configuredSafetyLimit < 1)
+                configuredSafetyLimit = 200;
+
+            return maxToolRounds is > 0
+                ? Math.Min(configuredSafetyLimit, maxToolRounds.Value)
+                : configuredSafetyLimit;
+        }
+
+        /// <summary>
+        /// Applies a configured execution budget with a deterministic fallback
+        /// and bounds. A minimum of zero allows nullable or unlimited budgets.
+        /// </summary>
+        internal static int NormalizeExecutionSetting(
+            int configuredValue,
+            int fallbackValue,
+            int minimum,
+            int maximum)
+        {
+            if (minimum > maximum)
+                throw new ArgumentOutOfRangeException(nameof(minimum));
+
+            int value = configuredValue <= 0 ? fallbackValue : configuredValue;
+            return Math.Max(minimum, Math.Min(maximum, value));
+        }
+
+        /// <summary>
+        /// Appends a deterministic execution-guard stop message to the current
+        /// response without throwing away already produced content.
+        /// </summary>
+        private static void AppendExecutionStop(
+            StringBuilder contentBuilder,
+            AgentExecutionDecision decision)
+        {
+            if (contentBuilder.Length > 0)
+                contentBuilder.AppendLine();
+
+            contentBuilder.Append("> ");
+            contentBuilder.Append(decision.Message);
+        }
+
+        /// <summary>
+        /// 在将 reasoning 写入缓冲区之前检查循环和长度上限。
+        /// </summary>
+        private static void ThrowIfReasoningLoopDetected(string chunk, ReasoningLoopGuard guard)
+        {
+            if (!chunk.StartsWith("[THINKING]", StringComparison.Ordinal))
+                return;
+
+            var result = guard.Inspect(chunk.Substring(10));
+            if (result.ShouldBreak)
+                throw new ReasoningLoopDetectedException(result);
+        }
+
+        /// <summary>
         /// 处理流式响应的单个 chunk，分派到 reasoning/content/tool_call 缓冲区。
         /// 与 DeepSeekChatControl.Messaging.cs 中的逻辑一致。
         /// </summary>
@@ -4221,8 +4363,6 @@ namespace DeepSeek_v4_for_VisualStudio.Services.Agents
             else if (level == "WARN") Logger.Warn($"[{Definition.Name}] {message}");
             else Logger.Info($"[{Definition.Name}] {message}");
         }
-
-        public IReadOnlyList<AgentLogEntry> GetLogs() => _logs.AsReadOnly();
 
         #endregion
 

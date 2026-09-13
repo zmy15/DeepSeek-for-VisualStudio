@@ -17,7 +17,7 @@ namespace DeepSeek_v4_for_VisualStudio.Services
     /// 端点来源解析器 — DeepSeek 官方与自定义端点配置分离：
     /// 填写了自定义端点（ApiBaseUrl 非空）即启用自定义模式，使用独立的
     /// 自定义密钥（CustomApiKey）与自定义模型列表（CustomModelName）；
-    /// 否则回退 DeepSeek 官方密钥与模型目录。
+    /// 否则回退 DeepSeek 官方密钥与当前选中的接口模型。
     /// 解析结果同时携带 IsVision（视觉能力权威判定）：官方与自定义模型
     /// 都由用户在 VisionModelPickerEditor 中手动勾选。
     /// </summary>
@@ -25,7 +25,7 @@ namespace DeepSeek_v4_for_VisualStudio.Services
     {
         public static DeepSeekEndpointConfig Resolve(DeepSeekOptionsPage? options)
             => options == null
-                ? new DeepSeekEndpointConfig(string.Empty, DefaultModel, null, false)
+                ? new DeepSeekEndpointConfig(string.Empty, string.Empty, null, false)
                 : Resolve(
                     options.ApiBaseUrl,
                     ApiKeyProtection.Unprotect(options.ApiKey),
@@ -89,7 +89,7 @@ namespace DeepSeek_v4_for_VisualStudio.Services
         {
             var models = DeepSeekOptionsPage.ParseCustomModels(customModels);
             if (models.Count == 0)
-                return DefaultModel;
+                return (activeCustomModel ?? string.Empty).Trim();
 
             var active = (activeCustomModel ?? string.Empty).Trim();
             if (active.Length > 0)
@@ -110,12 +110,11 @@ namespace DeepSeek_v4_for_VisualStudio.Services
         {
             var model = (selectedModel ?? string.Empty).Trim();
             if (model.Length > 0 &&
-                officialModels.Any(item => string.Equals(item, model, StringComparison.OrdinalIgnoreCase)))
+                (officialModels.Count == 0 ||
+                 officialModels.Any(item => string.Equals(item, model, StringComparison.OrdinalIgnoreCase))))
                 return model;
 
-            return officialModels.FirstOrDefault() ?? DefaultModel;
+            return officialModels.FirstOrDefault() ?? string.Empty;
         }
-
-        private const string DefaultModel = "deepseek-v4-pro";
     }
 }

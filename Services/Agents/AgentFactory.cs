@@ -10,7 +10,6 @@ namespace DeepSeek_v4_for_VisualStudio.Services.Agents
 {
     /// <summary>
     /// Agent 工厂 — 负责 Agent 实例的创建、缓存和依赖注入。
-    /// 替代原 AgentDispatcher 的创建/注入职责，不负责路由和 Handoff 编排。
     /// 
     /// 所有 Agent 以 AskAgent 为统一入口，
     /// Agent 在执行过程中通过 request_handoff 工具自行决定是否移交。
@@ -102,12 +101,6 @@ namespace DeepSeek_v4_for_VisualStudio.Services.Agents
                 return _buildAgent;
             }
         }
-
-        /// <summary>当前活跃计划（由 UI 层管理）</summary>
-        public AgentTaskPlan? ActivePlan { get; set; }
-
-        /// <summary>会话上下文管理器引用</summary>
-        public ConversationContextManager? ContextManager { get; set; }
 
         public AgentFactory(DeepSeekApiService apiService,
             BuiltInToolService? builtInToolService = null,
@@ -236,7 +229,6 @@ namespace DeepSeek_v4_for_VisualStudio.Services.Agents
 
         /// <summary>
         /// 通过 EnvDTE 项目系统删除文件。
-        /// 从 AgentDispatcher 搬过来，保持为静态工具方法。
         /// </summary>
         public static async System.Threading.Tasks.Task DeleteFilesViaEnvDTEAsync(List<string> filePaths)
         {

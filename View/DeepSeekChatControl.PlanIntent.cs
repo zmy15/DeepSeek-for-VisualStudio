@@ -51,7 +51,6 @@ namespace DeepSeek_v4_for_VisualStudio.View
                 {
                     TargetAgent = AgentType.Edit,
                     Confidence = "high",
-                    Reason = "检测到执行意图，且存在待处理计划",
                     NeedsPlanning = false,
                     IsExplicit = true,
                 };
@@ -65,7 +64,6 @@ namespace DeepSeek_v4_for_VisualStudio.View
                 {
                     TargetAgent = AgentType.Plan,
                     Confidence = "high",
-                    Reason = "检测到修改计划意图，重新规划",
                     NeedsPlanning = true,
                     IsExplicit = true,
                 };
@@ -79,7 +77,6 @@ namespace DeepSeek_v4_for_VisualStudio.View
                 {
                     TargetAgent = AgentType.Ask,
                     Confidence = "high",
-                    Reason = "存在待处理计划，用户消息为计划相关提问",
                     NeedsPlanning = false,
                     IsExplicit = true,
                 };
@@ -97,7 +94,6 @@ namespace DeepSeek_v4_for_VisualStudio.View
                 {
                     TargetAgent = AgentType.Ask,
                     Confidence = "medium",
-                    Reason = "存在待处理计划，低置信度 Edit 路由保守回退到 Ask",
                     NeedsPlanning = false,
                     IsExplicit = true,
                 };
@@ -121,7 +117,6 @@ namespace DeepSeek_v4_for_VisualStudio.View
                     {
                         TargetAgent = AgentType.Plan,
                         Confidence = "medium",
-                        Reason = "存在待处理计划，用户消息涉及计划讨论",
                         NeedsPlanning = true,
                         IsExplicit = true,
                     };
@@ -299,7 +294,7 @@ namespace DeepSeek_v4_for_VisualStudio.View
         }
 
         /// <summary>
-        /// 从消息列表的 PlanJson 中恢复 ActivePlan 到 AgentDispatcher。
+        /// 从消息列表的 PlanJson 中恢复 ActivePlan 到当前 AgentContext。
         /// 用于"开始执行"文本输入直接路由到 Edit 时，确保 EditAgent 按步骤执行而非单步回退。
         /// </summary>
         private void RestoreActivePlanIfNeeded(AgentContext context)

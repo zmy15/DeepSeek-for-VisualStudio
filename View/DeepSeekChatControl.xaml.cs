@@ -88,6 +88,7 @@ namespace DeepSeek_v4_for_VisualStudio.View
 
         private DeepSeek_v4_for_VisualStudioPackage? _package;
         private DeepSeekOptionsPage? _options;
+        private RuntimeSettingsSnapshot? _lastAppliedSettings;
         private DeepSeekApiService? _apiService;
         private WebSearchService? _webSearchService;
         private McpManagerService? _mcpManager;
@@ -167,6 +168,7 @@ namespace DeepSeek_v4_for_VisualStudio.View
 
         /// <summary>程序化填充会话下拉时抑制 SelectionChanged（P2 交互修复）。</summary>
         private bool _suppressSessionSelection;
+        private bool _isRefreshingCoreControls;
         private string _webSearchEngine = "Off"; // "Off" | "Baidu" | "DuckDuckGo"
 
         // ── 文件上传 ──
@@ -311,6 +313,10 @@ namespace DeepSeek_v4_for_VisualStudio.View
         private System.Windows.Threading.DispatcherTimer? _balanceTimer;
         private BalanceResponse? _lastBalance;
 
+        // ── 单次对话耗时 ──
+        private readonly Stopwatch _conversationStopwatch = Stopwatch.StartNew();
+        private System.Windows.Threading.DispatcherTimer? _conversationElapsedTimer;
+
         // ── Token 估算校准 ──
         private long _lastCalibratedPromptTokens; // 上次校准时的 prompt_tokens，避免重复校准
 
@@ -372,6 +378,12 @@ namespace DeepSeek_v4_for_VisualStudio.View
             {
                 _messages.Clear();
                 var msgs = _tree.GetActiveMessages();
+                foreach (var msg in msgs)
+                {
+                    if (!string.IsNullOrEmpty(msg.ReasoningContent))
+                        msg.ReasoningContent = ReasoningTextPolicy.ClampStored(msg.ReasoningContent)
+                            ?? string.Empty;
+                }
                 _messages.AddRange(msgs);
             }
         }
@@ -419,6 +431,7 @@ namespace DeepSeek_v4_for_VisualStudio.View
 
         // ── 已创建的计划 ID 集合（防止重复创建计划消息）──
         private readonly HashSet<string> _createdPlanIds = new();
+        private readonly HashSet<string> _presentedQuestionRequests = new();
 
         // ── 待回放的 Agent 日志条目（面板因全量刷新被销毁时用于恢复）──
         private readonly List<AgentLogEntry> _pendingLogEntries = new();
@@ -592,8 +605,7 @@ namespace DeepSeek_v4_for_VisualStudio.View
             _isControlStarted = true;
 
             // Subscribe first so user edits are not lost while persisted options are loading.
-            DeepSeekOptionsPage.SettingsChanged += OnOcrSettingsChanged;
-            DeepSeekOptionsPage.SettingsChanged += OnCoreSettingsChanged;
+            DeepSeekOptionsPage.SettingsChanged += OnSettingsChanged;
 
             // ── 订阅 diff 预览状态事件，刷新全局控制栏 ──
             EditorDiffMarkerService.Instance.PendingDiffCountChanged += RefreshDiffGlobalBar;
@@ -620,7 +632,7 @@ namespace DeepSeek_v4_for_VisualStudio.View
                     InitializeApiService();
                     InitializeOcrService();
                     InitializeMcp(); // MCP 后台初始化，不阻塞 UI
-                    InitializeSkills(); // Skill 后台发现，不阻塞 UI
+                    RecordRuntimeSettingsApplied();
 
                     // ── 链式初始化：先解析项目路径 → 再加载会话 ──
                     // 之前两者各自 fire-and-forget，导致首条消息发送时 _solutionPath 可能仍为 null。
@@ -628,6 +640,7 @@ namespace DeepSeek_v4_for_VisualStudio.View
                     _ = Microsoft.VisualStudio.Shell.ThreadHelper.JoinableTaskFactory.RunAsync(async () =>
                     {
                         await ResolveSolutionPathAsync();
+                        await InitializeSkillsAsync();
                         LoadInputHistory();  // 加载该项目的历史输入（路径依赖 _solutionPath）
                         await LoadAndShowAsync();
                     });
@@ -687,10 +700,8 @@ namespace DeepSeek_v4_for_VisualStudio.View
         /// </summary>
         private void StartBalanceTimer()
         {
-            // 停止并释放旧定时器
             StopBalanceTimer();
 
-            // /user/balance 是 DeepSeek 官方专有能力，非官方端点保持 UI 与请求同时关闭。
             if (!CanQueryBalance)
             {
                 HideBalanceDisplay();
@@ -704,7 +715,6 @@ namespace DeepSeek_v4_for_VisualStudio.View
             _balanceTimer.Tick += async (s, e) => await RefreshBalanceAsync();
             _balanceTimer.Start();
 
-            // 立即查询一次
             _ = RefreshBalanceAsync();
         }
 
@@ -715,6 +725,86 @@ namespace DeepSeek_v4_for_VisualStudio.View
         {
             _balanceTimer?.Stop();
             _balanceTimer = null;
+        }
+
+        /// <summary>开始单次对话耗时计时，并启动 UI 实时刷新。</summary>
+        private void StartConversationElapsedTimer()
+        {
+            _conversationStopwatch.Restart();
+            RunConversationTimerOnUiThread(() =>
+            {
+                if (_conversationElapsedTimer == null)
+                {
+                    _conversationElapsedTimer = new System.Windows.Threading.DispatcherTimer
+                    {
+                        Interval = TimeSpan.FromSeconds(1)
+                    };
+                    _conversationElapsedTimer.Tick += (_, _) => UpdateConversationElapsedLabel();
+                }
+
+                ConversationElapsedLabel.Visibility = Visibility.Visible;
+                UpdateConversationElapsedLabel();
+                _conversationElapsedTimer.Start();
+            });
+        }
+
+        /// <summary>停止单次对话耗时计时，并保留最终耗时。</summary>
+        private void StopConversationElapsedTimer()
+        {
+            if (!_conversationStopwatch.IsRunning)
+                return;
+
+            _conversationStopwatch.Stop();
+            TimeSpan elapsed = _conversationStopwatch.Elapsed;
+            RunConversationTimerOnUiThread(() =>
+            {
+                _conversationElapsedTimer?.Stop();
+                UpdateConversationElapsedLabel(elapsed);
+            });
+        }
+
+        /// <summary>清空单次对话耗时显示。</summary>
+        private void ResetConversationElapsedTimer()
+        {
+            _conversationStopwatch.Reset();
+            RunConversationTimerOnUiThread(() =>
+            {
+                _conversationElapsedTimer?.Stop();
+                if (ConversationElapsedLabel != null)
+                {
+                    ConversationElapsedLabel.Text = string.Empty;
+                    ConversationElapsedLabel.Visibility = Visibility.Collapsed;
+                }
+            });
+        }
+
+        private void RunConversationTimerOnUiThread(Action action)
+        {
+            if (Dispatcher.CheckAccess())
+                action();
+            else
+                _ = Dispatcher.BeginInvoke(action);
+        }
+
+        private void UpdateConversationElapsedLabel(TimeSpan? elapsedOverride = null)
+        {
+            if (ConversationElapsedLabel == null)
+                return;
+
+            TimeSpan elapsed = elapsedOverride ?? _conversationStopwatch.Elapsed;
+            ConversationElapsedLabel.Text = LocalizationService.Instance.Format(
+                "status.conversationElapsed",
+                FormatConversationElapsed(elapsed));
+        }
+
+        private static string FormatConversationElapsed(TimeSpan elapsed)
+        {
+            if (elapsed < TimeSpan.Zero)
+                elapsed = TimeSpan.Zero;
+
+            return elapsed.TotalHours >= 1
+                ? $"{(long)elapsed.TotalHours:00}:{elapsed.Minutes:00}:{elapsed.Seconds:00}"
+                : $"{elapsed.Minutes:00}:{elapsed.Seconds:00}";
         }
 
         /// <summary>
@@ -1060,8 +1150,7 @@ namespace DeepSeek_v4_for_VisualStudio.View
             if (_disposed) return;
             _disposed = true;
 
-            DeepSeekOptionsPage.SettingsChanged -= OnOcrSettingsChanged;
-            DeepSeekOptionsPage.SettingsChanged -= OnCoreSettingsChanged;
+            DeepSeekOptionsPage.SettingsChanged -= OnSettingsChanged;
             OfficialModelCatalogService.ModelsChanged -= OnOfficialModelsChanged;
 
             // ── 取消主题事件订阅 ──
@@ -1085,6 +1174,8 @@ namespace DeepSeek_v4_for_VisualStudio.View
             CancelStreaming();
             DisposeStreamingCts();
             StopBalanceTimer();
+            StopConversationElapsedTimer();
+            _conversationElapsedTimer = null;
             SubscribeApiRequestCompletion(null);
             _apiService?.Dispose();
             _webSearchService?.Dispose();
@@ -1380,22 +1471,17 @@ namespace DeepSeek_v4_for_VisualStudio.View
                     break;
                 }
             }
-
-            // 同步更新 API 服务端点配置（含自定义模型覆盖；Key/BaseUrl/视觉标记顺带与 Resolver 保持一致）
-            if (_apiService != null)
-            {
-                _apiService.UpdateEndpoint(config);
-
-                // 模型/来源刷新影响 capture_window 等工具可见性 → 使 Agent 完整工具集缓存失效
-                _agentFactory?.InvalidateFullToolSetCache();
-            }
         }
 
         /// <summary>官方模型列表从 /models 接口刷新完成后，回到 UI 线程重建下拉框。</summary>
         private void OnOfficialModelsChanged()
         {
             if (_disposed) return;
-            _ = Dispatcher.InvokeAsync(RefreshModelFromSettings);
+            _ = Dispatcher.InvokeAsync(() =>
+            {
+                RefreshModelFromSettings();
+                SyncApiEndpointFromSettings();
+            });
         }
 
         /// <summary>
@@ -1406,13 +1492,6 @@ namespace DeepSeek_v4_for_VisualStudio.View
             if (EffortComboBox == null || _options == null) return;
             string savedEffort = _options.ReasoningEffort ?? "high";
             EffortComboBox.SelectedItem = savedEffort == "max" ? "max" : "high";
-
-            // 同步更新 API 服务的推理强度
-            if (_apiService != null)
-            {
-                bool enabled = ThinkingCheckBox.IsChecked == true;
-                _apiService.ConfigureThinking(enabled, savedEffort);
-            }
         }
 
         /// <summary>
@@ -1422,12 +1501,32 @@ namespace DeepSeek_v4_for_VisualStudio.View
         {
             if (_options == null) return;
 
-            RefreshApprovalModeFromSettings();
-            RefreshModelFromSettings();
-            if (ThinkingCheckBox != null)
-                ThinkingCheckBox.IsChecked = _options.IsThinkingEnabled;
-            RefreshReasoningEffortFromSettings();
-            UpdateEndpointCapabilityControls();
+            ExecuteWithoutCoreControlEvents(() =>
+            {
+                RefreshApprovalModeFromSettings();
+                RefreshModelFromSettings();
+                if (ThinkingCheckBox != null)
+                    ThinkingCheckBox.IsChecked = _options.IsThinkingEnabled;
+                RefreshReasoningEffortFromSettings();
+                UpdateEndpointCapabilityControls();
+            });
+
+            SyncApiEndpointFromSettings();
+            SyncThinkingToApiService();
+        }
+
+        private void ExecuteWithoutCoreControlEvents(Action action)
+        {
+            bool wasRefreshing = _isRefreshingCoreControls;
+            _isRefreshingCoreControls = true;
+            try
+            {
+                action();
+            }
+            finally
+            {
+                _isRefreshingCoreControls = wasRefreshing;
+            }
         }
 
         /// <summary>
@@ -1481,27 +1580,30 @@ namespace DeepSeek_v4_for_VisualStudio.View
         {
             if (ApprovalModeComboBox?.ItemsSource is ApprovalModeOption[] options)
             {
-                var L = LocalizationService.Instance;
-                foreach (var opt in options)
+                ExecuteWithoutCoreControlEvents(() =>
                 {
-                    opt.DisplayText = opt.Mode switch
+                    var L = LocalizationService.Instance;
+                    foreach (var opt in options)
                     {
-                        Models.ApprovalMode.BlockAll => L["approval.blockAll"],
-                        Models.ApprovalMode.AllowAll => L["approval.allowAll"],
-                        Models.ApprovalMode.SmartBlock => L["approval.smartBlock"],
-                        _ => opt.DisplayText,
-                    };
-                }
-                // 强制刷新 ItemsSource 绑定
-                var selectedValue = ApprovalModeComboBox.SelectedValue;
-                ApprovalModeComboBox.ItemsSource = null;
-                ApprovalModeComboBox.ItemsSource = options;
-                ApprovalModeComboBox.SelectedValue = selectedValue;
+                        opt.DisplayText = opt.Mode switch
+                        {
+                            Models.ApprovalMode.BlockAll => L["approval.blockAll"],
+                            Models.ApprovalMode.AllowAll => L["approval.allowAll"],
+                            Models.ApprovalMode.SmartBlock => L["approval.smartBlock"],
+                            _ => opt.DisplayText,
+                        };
+                    }
+                    // 强制刷新 ItemsSource 绑定
+                    var selectedValue = ApprovalModeComboBox.SelectedValue;
+                    ApprovalModeComboBox.ItemsSource = null;
+                    ApprovalModeComboBox.ItemsSource = options;
+                    ApprovalModeComboBox.SelectedValue = selectedValue;
 
-                // 同步缓存，供后台线程快速判断审批模式
-                _cachedApprovalMode = ApprovalModeComboBox.SelectedValue is Models.ApprovalMode refreshedMode
-                    ? refreshedMode
-                    : Models.ApprovalMode.SmartBlock;
+                    // 同步缓存，供后台线程快速判断审批模式
+                    _cachedApprovalMode = ApprovalModeComboBox.SelectedValue is Models.ApprovalMode refreshedMode
+                        ? refreshedMode
+                        : Models.ApprovalMode.SmartBlock;
+                });
             }
         }
 
@@ -1675,10 +1777,11 @@ namespace DeepSeek_v4_for_VisualStudio.View
             public int MessageIndex;
             public StringBuilder Content = new(256);
             public StringBuilder Reasoning = new(64);
+            public StringBuilder ReasoningDelta = new(256);
             public string? PendingStatus;
             public bool IsComplete;
             public long LastFlushTicks;
-            /// <summary>上次刷新时的 Reason 长度，用于判断思考内容是否显著增长</summary>
+            /// <summary>上次刷新时的完整 Reason 长度，用于兼容全量更新调用点</summary>
             public int LastFlushedReasoningLength;
         }
 
@@ -1726,8 +1829,13 @@ namespace DeepSeek_v4_for_VisualStudio.View
         /// <summary>
         /// 批处理流式更新：累积内容变化，仅在间隔达标或显著变化时推送。
         /// </summary>
-        private void BatchStreamingUpdate(int messageIndex, string? content = null,
-            string? reasoning = null, string? status = null, bool isComplete = false)
+        private void BatchStreamingUpdate(
+            int messageIndex,
+            string? content = null,
+            string? reasoning = null,
+            string? status = null,
+            bool isComplete = false,
+            string? reasoningDelta = null)
         {
             lock (_streamBatchLock)
             {
@@ -1747,6 +1855,8 @@ namespace DeepSeek_v4_for_VisualStudio.View
                     state.Reasoning.Clear();
                     state.Reasoning.Append(reasoning);
                 }
+                if (reasoningDelta != null)
+                    state.ReasoningDelta.Append(reasoningDelta);
                 if (status != null)
                     state.PendingStatus = status;
                 if (isComplete)
@@ -1757,8 +1867,10 @@ namespace DeepSeek_v4_for_VisualStudio.View
 
                 // 仅当满足条件时实际推送：已完成 / 内容显著变化 / 思考显著变化 / 间隔达标且有任意内容
                 bool contentChanged = state.Content.Length > StreamRenderInterval;
-                bool reasoningChanged = state.Reasoning.Length > 0
-                    && state.Reasoning.Length - state.LastFlushedReasoningLength >= 50;
+                bool reasoningChanged =
+                    (state.Reasoning.Length > 0
+                        && state.Reasoning.Length - state.LastFlushedReasoningLength >= 50)
+                    || state.ReasoningDelta.Length >= 50;
                 bool timeElapsed = elapsed >= StreamBatchMinIntervalTicks;
 
                 if (state.IsComplete || contentChanged || reasoningChanged
@@ -1766,11 +1878,19 @@ namespace DeepSeek_v4_for_VisualStudio.View
                 {
                     state.LastFlushTicks = now;
                     state.LastFlushedReasoningLength = state.Reasoning.Length;
+                    string reasoningSnapshot = state.Reasoning.Length > 0
+                        ? state.Reasoning.ToString()
+                        : string.Empty;
+                    string? reasoningDeltaSnapshot = state.ReasoningDelta.Length > 0
+                        ? state.ReasoningDelta.ToString()
+                        : null;
                     PostStreamingUpdate(state.MessageIndex,
                         state.Content.ToString(),
-                        state.Reasoning.ToString(),
+                        reasoningSnapshot,
                         state.IsComplete,
-                        state.PendingStatus);
+                        state.PendingStatus,
+                        reasoningDeltaSnapshot);
+                    state.ReasoningDelta.Clear();
                     state.PendingStatus = null;
                     if (state.IsComplete)
                         _streamBatchStates.Remove(messageIndex);
@@ -1788,7 +1908,6 @@ namespace DeepSeek_v4_for_VisualStudio.View
 
         /// <summary>
         /// 强制刷新指定消息的批处理缓冲区。
-        /// 在流式完成、最终渲染等关键时刻调用，确保累积内容不会丢失。
         /// </summary>
         private void FlushBatchStream(int messageIndex)
         {
@@ -1797,15 +1916,13 @@ namespace DeepSeek_v4_for_VisualStudio.View
             {
                 if (!_streamBatchStates.TryGetValue(messageIndex, out state))
                     return;
-                // 将 LastFlushTicks 置零，使下次检查一定超时
                 state.LastFlushTicks = 0;
             }
-            // 用当前内容重新调用批处理方法，将强制推送（因为 LastFlushTicks=0 确保 elapsed 超时）
             BatchStreamingUpdate(messageIndex);
         }
 
         /// <summary>
-        /// 清除指定消息的批处理状态（用于中断/取消时清理）。
+        /// 清除指定消息的批处理状态。
         /// </summary>
         private void ClearBatchStream(int messageIndex)
         {

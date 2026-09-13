@@ -18,8 +18,7 @@ namespace DeepSeek_v4_for_VisualStudio.Services.BuiltInTools
     /// {
     ///   "targetAgent": "Edit|Ask|Plan|Build|Explore",
     ///   "reason": "简短说明为什么移交",
-    ///   "taskDescription": "给目标 Agent 的完整任务描述",
-    ///   "chainBack": false
+    ///   "taskDescription": "给目标 Agent 的完整任务描述"
     /// }
     /// </summary>
     public class RequestHandoffTool : BuiltInToolBase
@@ -69,11 +68,6 @@ namespace DeepSeek_v4_for_VisualStudio.Services.BuiltInTools
                             {
                                 type = "string",
                                 description = LocalizationService.Instance["tool.requestHandoff.param.taskDescription"]
-                            },
-                            chainBack = new
-                            {
-                                type = "boolean",
-                                description = LocalizationService.Instance["tool.requestHandoff.param.chainBack"]
                             }
                         },
                         required = new[] { "targetAgent", "reason", "taskDescription" }
@@ -87,8 +81,6 @@ namespace DeepSeek_v4_for_VisualStudio.Services.BuiltInTools
             string targetAgentStr = GetStringArg(args, "targetAgent");
             string reason = GetStringArg(args, "reason");
             string taskDescription = GetStringArg(args, "taskDescription");
-            bool chainBack = GetBoolArg(args, "chainBack", false);
-
             if (string.IsNullOrWhiteSpace(targetAgentStr))
                 return "Error: request_handoff: 缺少 targetAgent 参数。可选值: Edit, Ask, Plan, Build, Explore";
 
@@ -112,19 +104,12 @@ namespace DeepSeek_v4_for_VisualStudio.Services.BuiltInTools
                 TargetAgent = targetAgent,
                 Reason = reason,
                 TaskDescription = taskDescription,
-                ChainBack = chainBack,
                 AutoSend = true
             };
 
             Logger.Info($"[RequestHandoff] {targetAgentStr} ← {reason.Truncate(80)}");
 
             await _handoffHandler(request);
-
-            // ── 如果 HandoffHandler 拒绝了移交（如显式路由模式），返回拒绝原因给 AI ──
-            if (request.Rejected)
-            {
-                return $"移交被拒绝: {request.RejectReason}";
-            }
 
             return LocalizationService.Instance.Format("tool.requestHandoff.handoffRequested", targetAgentStr, reason);
         }

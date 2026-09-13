@@ -928,12 +928,12 @@ namespace DeepSeek_v4_for_VisualStudio.View
                 if (_skillDiscoveryResult == null)
                 {
                     // 后台异步加载技能缓存，不阻塞 UI 线程。
-                    // InitializeSkills() 已在启动时触发加载，此处为兜底路径。
+                    // InitializeSkillsAsync() 已在启动时加载当前解决方案技能，此处为兜底路径。
                     _ = Task.Run(async () =>
                     {
                         try
                         {
-                            _skillDiscoveryResult = await SkillService.Instance.DiscoverSkillsAsync(_solutionPath);
+                            await DiscoverSkillsForCurrentSolutionAsync();
                         }
                         catch (Exception ex)
                         {
@@ -946,7 +946,7 @@ namespace DeepSeek_v4_for_VisualStudio.View
                     return;
                 }
 
-                var allSkills = _skillDiscoveryResult?.Skills ?? new List<SkillDefinition>();
+                var allSkills = _skillDiscoveryResult?.UserInvocableSkills ?? new List<SkillDefinition>();
 
                 // 添加内置元命令
                 var L = LocalizationService.Instance;
@@ -1387,6 +1387,8 @@ namespace DeepSeek_v4_for_VisualStudio.View
 
         private void ModelComboBox_SelectionChanged(object sender, SelectionChangedEventArgs e)
         {
+            if (_isRefreshingCoreControls) return;
+
             if (_apiService != null && ModelComboBox.SelectedItem is ModelListItem item)
             {
                 // ── 回写到选项页并持久化，确保 Tools→Options 和重启后生效 ──
@@ -1421,11 +1423,14 @@ namespace DeepSeek_v4_for_VisualStudio.View
                     Logger.Info($"模型端点切换为: source={targetSource}, baseUrl={_apiService.BaseUrl}, model={config.Model}");
                 }
                 Logger.Info($"模型切换为: {item.Display}");
+                RecordRuntimeSettingsApplied();
             }
         }
 
         private void ApprovalModeComboBox_SelectionChanged(object sender, SelectionChangedEventArgs e)
         {
+            if (_isRefreshingCoreControls) return;
+
             if (ApprovalModeComboBox.SelectedValue is Models.ApprovalMode mode)
             {
                 // 同步缓存，供后台线程快速判断审批模式
@@ -1446,11 +1451,14 @@ namespace DeepSeek_v4_for_VisualStudio.View
                     UnifiedSettingsSync.PushFromPage(_options);
                 }
                 Logger.Info($"审批模式切换为: {mode}");
+                RecordRuntimeSettingsApplied();
             }
         }
 
         private void ThinkingCheckBox_Changed(object sender, RoutedEventArgs e)
         {
+            if (_isRefreshingCoreControls) return;
+
             if (_apiService != null)
             {
                 bool enabled = ThinkingCheckBox.IsChecked == true;
@@ -1463,6 +1471,7 @@ namespace DeepSeek_v4_for_VisualStudio.View
                     UnifiedSettingsSync.PushFromPage(_options);
                 }
                 Logger.Info($"思考模式: {(enabled ? "启用" : "禁用")}, 强度: {effort}");
+                RecordRuntimeSettingsApplied();
             }
         }
 
@@ -1479,6 +1488,8 @@ namespace DeepSeek_v4_for_VisualStudio.View
 
         private void EffortComboBox_SelectionChanged(object sender, SelectionChangedEventArgs e)
         {
+            if (_isRefreshingCoreControls) return;
+
             if (_apiService != null && EffortComboBox.SelectedItem is string effort)
             {
                 bool enabled = ThinkingCheckBox.IsChecked == true;
@@ -1492,6 +1503,7 @@ namespace DeepSeek_v4_for_VisualStudio.View
                     UnifiedSettingsSync.PushFromPage(_options);
                 }
                 Logger.Info($"推理强度切换为: {effort}");
+                RecordRuntimeSettingsApplied();
             }
         }
 
@@ -1557,6 +1569,8 @@ namespace DeepSeek_v4_for_VisualStudio.View
                 {
                     StatusLabel.Text = string.Empty;
                 }
+
+                RecordRuntimeSettingsApplied();
             }
             catch (Exception ex)
             {
@@ -1655,6 +1669,7 @@ namespace DeepSeek_v4_for_VisualStudio.View
         {
             try
             {
+                if (_isRefreshingCoreControls) return;
                 if (WebSearchEngineComboBox.SelectedIndex < 0) return;
 
                 // 搜索关闭时，ComboBox 仅作为偏好存储，不切换引擎
@@ -1690,6 +1705,8 @@ namespace DeepSeek_v4_for_VisualStudio.View
                 {
                     StatusLabel.Text = LocalizationService.Instance["status.search.bingKeyRequired"];
                 }
+
+                RecordRuntimeSettingsApplied();
             }
             catch (Exception ex)
             {
@@ -2341,6 +2358,7 @@ namespace DeepSeek_v4_for_VisualStudio.View
                             ? ansProp.GetString() ?? "{}" : "{}";
                         var questionAgent = _agentFactory?.FindAgentWithPendingQuestion(requestId) ?? _activeAgent;
                         questionAgent?.RespondToQuestions(requestId, answers);
+                        lock (_lock) { _presentedQuestionRequests.Remove(requestId); }
 
                         // 移除问题 UI
                         _ = ThreadHelper.JoinableTaskFactory.RunAsync(async () =>

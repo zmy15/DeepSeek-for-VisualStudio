@@ -539,7 +539,7 @@ namespace DeepSeek_v4_for_VisualStudio.Settings
 
         [Browsable(false)]
         [DesignerSerializationVisibility(DesignerSerializationVisibility.Visible)] // Fix for WFO1000
-        public string SelectedModel { get; set; } = "deepseek-v4-pro";
+        public string SelectedModel { get; set; } = string.Empty;
 
         /// <summary>
         /// 设置页使用的统一模型选择器；官方与自定义条目共用，
@@ -747,6 +747,36 @@ namespace DeepSeek_v4_for_VisualStudio.Settings
         [LocalizedDescription("settings.maxConsecutiveErrors.description")]
         [DesignerSerializationVisibility(DesignerSerializationVisibility.Visible)]
         public int MaxConsecutiveErrors { get; set; } = 5;
+
+        [LocalizedCategory("settings.category.agent")]
+        [LocalizedDisplayName("settings.agentMaxWallTimeSeconds.displayName")]
+        [LocalizedDescription("settings.agentMaxWallTimeSeconds.description")]
+        [DesignerSerializationVisibility(DesignerSerializationVisibility.Visible)]
+        public int AgentMaxWallTimeSeconds { get; set; } = 0;
+
+        [LocalizedCategory("settings.category.agent")]
+        [LocalizedDisplayName("settings.agentMaxTotalTokens.displayName")]
+        [LocalizedDescription("settings.agentMaxTotalTokens.description")]
+        [DesignerSerializationVisibility(DesignerSerializationVisibility.Visible)]
+        public int AgentMaxTotalTokens { get; set; } = 0;
+
+        [LocalizedCategory("settings.category.agent")]
+        [LocalizedDisplayName("settings.agentMaxToolCalls.displayName")]
+        [LocalizedDescription("settings.agentMaxToolCalls.description")]
+        [DesignerSerializationVisibility(DesignerSerializationVisibility.Visible)]
+        public int AgentMaxToolCalls { get; set; } = 400;
+
+        [LocalizedCategory("settings.category.agent")]
+        [LocalizedDisplayName("settings.agentMaxDepth.displayName")]
+        [LocalizedDescription("settings.agentMaxDepth.description")]
+        [DesignerSerializationVisibility(DesignerSerializationVisibility.Visible)]
+        public int AgentMaxDepth { get; set; } = 3;
+
+        [LocalizedCategory("settings.category.agent")]
+        [LocalizedDisplayName("settings.agentNoProgressRounds.displayName")]
+        [LocalizedDescription("settings.agentNoProgressRounds.description")]
+        [DesignerSerializationVisibility(DesignerSerializationVisibility.Visible)]
+        public int AgentNoProgressRounds { get; set; } = 5;
 
         [LocalizedCategory("settings.category.agent")]
         [LocalizedDisplayName("settings.enableAutoBuild.displayName")]

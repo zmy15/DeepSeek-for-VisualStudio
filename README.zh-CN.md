@@ -82,10 +82,10 @@ git clone https://github.com/zmy15/DeepSeek-v4-for-VisualStudio.git
 
 | 设置 | 值 |
 |---|---|
-| 模型 | `deepseek-v4-pro` |
+| 模型 | 从 `/models` 返回的模型列表中选择 |
 | Deep Reasoning | 开启，Effort 为 `max` |
 | Token 预算 | `900000` |
-| 视觉模型 | 需要理解图片或 PDF 时使用 `deepseek-v4-flash-vision-exp` |
+| 视觉模型 | 需要理解图片或 PDF 时，在多模态模型列表中勾选对应模型 |
 
 | 快捷键 | 作用 |
 |---|---|

@@ -75,6 +75,24 @@ public class SkillDefinitionTests
     }
 
     [Fact]
+    public void SkillDefinition_GetInvocationPrompt_PreservesCommandArguments()
+    {
+        var skill = new SkillDefinition
+        {
+            Name = "code-review",
+            Description = "Review code.",
+            Body = "Review the provided code.",
+        };
+
+        string prompt = skill.GetInvocationPrompt("code-review", "src/Foo.cs");
+
+        prompt.Should().Contain("用户通过 /code-review 调用了技能 \"code-review\"");
+        prompt.Should().Contain("用户提供的参数/任务：");
+        prompt.Should().Contain("src/Foo.cs");
+        prompt.Should().Contain("<skill name=\"code-review\">");
+    }
+
+    [Fact]
     public void SkillDefinition_GetCompactInstructions_ShortBody_ReturnsFullBody()
     {
         var skill = new SkillDefinition
@@ -274,6 +292,26 @@ public class SkillDefinitionTests
 
         result.AutoLoadableSkills.Should().HaveCount(2);
         result.AutoLoadableSkills.Should().OnlyContain(s => !s.DisableModelInvocation);
+    }
+
+    [Fact]
+    public void GenerateSkillsSummary_IncludesOnlyAutoLoadableSkills()
+    {
+        var result = new SkillDiscoveryResult
+        {
+            Skills = new List<SkillDefinition>
+            {
+                new() { Name = "auto-skill", Description = "Can be auto loaded." },
+                new() { Name = "manual-only", Description = "Must not be auto loaded.", DisableModelInvocation = true },
+                new() { Name = "always-active", Description = "Already injected.", AlwaysInject = true },
+            }
+        };
+
+        string summary = SkillService.Instance.GenerateSkillsSummary(result);
+
+        summary.Should().Contain("auto-skill");
+        summary.Should().NotContain("manual-only");
+        summary.Should().NotContain("always-active");
     }
 
     #endregion

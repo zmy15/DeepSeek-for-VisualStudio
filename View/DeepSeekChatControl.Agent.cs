@@ -169,27 +169,8 @@ namespace DeepSeek_v4_for_VisualStudio.View
 
             try
             {
-                if (_skillDiscoveryResult == null)
-                    _skillDiscoveryResult = await SkillService.Instance.DiscoverSkillsAsync(_solutionPath);
-
-                // 技能发现结果仅用于 /skill 解析和 UI 列表；不在系统提示中注入
-                // available_skills 清单，避免未显式调用技能时污染上下文。
-                _contextManager.SetSkillContext(null);
-
-                // 注入始终激活的技能完整指令（每次对话均加载）
-                string alwaysInjectContext = SkillService.Instance.GenerateAlwaysInjectSkillsContext(_skillDiscoveryResult);
-                _contextManager.SetAlwaysInjectSkillsContext(string.IsNullOrWhiteSpace(alwaysInjectContext) ? null : alwaysInjectContext);
-
-                if (_skillDiscoveryResult != null)
-                {
-                    var skillNames = string.Join(", ", _skillDiscoveryResult.AutoLoadableSkills.ConvertAll(s => s.Name));
-                    Logger.Info($"[Skill] 发现: {_skillDiscoveryResult.AutoLoadableSkills.Count} 个可选(不注入清单) + {_skillDiscoveryResult.AlwaysInjectSkills.Count} 个始终激活 → 可选: {skillNames}");
-                    if (_skillDiscoveryResult.AlwaysInjectSkills.Count > 0)
-                    {
-                        var alwaysNames = string.Join(", ", _skillDiscoveryResult.AlwaysInjectSkills.ConvertAll(s => s.Name));
-                        Logger.Info($"[Skill] 始终激活技能: {alwaysNames}");
-                    }
-                }
+                await DiscoverSkillsForCurrentSolutionAsync();
+                ApplySkillContextFromDiscovery();
             }
             catch (Exception ex) { Logger.Warn($"[Skill] 上下文初始化失败: {ex.Message}"); }
 
@@ -211,6 +192,44 @@ namespace DeepSeek_v4_for_VisualStudio.View
                 }
             }
             catch (Exception ex) { Logger.Warn($"[Memory] 上下文初始化失败: {ex.Message}"); }
+        }
+
+        /// <summary>应用当前 Skill 发现结果到主 Agent 的固定系统上下文。</summary>
+        private void ApplySkillContextFromDiscovery()
+        {
+            if (_contextManager == null || _skillDiscoveryResult == null) return;
+
+            string discoveryContext = SkillService.Instance.GenerateSkillsDiscoveryContext(_skillDiscoveryResult);
+            string? skillContext = null;
+            if (!string.IsNullOrWhiteSpace(discoveryContext))
+            {
+                skillContext = AiPrompts.BuildSkillSystemPromptFragment(discoveryContext);
+                string toolInstructions = LocalizationService.Instance["system.skillToolInstructions"];
+                if (!string.IsNullOrWhiteSpace(toolInstructions))
+                    skillContext += "\n\n" + toolInstructions;
+            }
+
+            _contextManager.SetSkillContext(skillContext);
+
+            string alwaysInjectContext = SkillService.Instance.GenerateAlwaysInjectSkillsContext(_skillDiscoveryResult);
+            _contextManager.SetAlwaysInjectSkillsContext(
+                string.IsNullOrWhiteSpace(alwaysInjectContext) ? null : alwaysInjectContext);
+
+            var skillNames = string.Join(", ", _skillDiscoveryResult.AutoLoadableSkills.ConvertAll(s => s.Name));
+            Logger.Info($"[Skill] 上下文已刷新: {_skillDiscoveryResult.AutoLoadableSkills.Count} 个可选 + " +
+                $"{_skillDiscoveryResult.AlwaysInjectSkills.Count} 个始终激活 → 可选: {skillNames}");
+        }
+
+        /// <summary>技能刷新后，若系统提示已经冻结，则同步重建固定前缀。</summary>
+        private void RefreshSkillContextIfInitialized()
+        {
+            if (_contextManager == null ||
+                string.IsNullOrEmpty(_contextManager.GetFixedSystemPrompt()))
+                return;
+
+            ApplySkillContextFromDiscovery();
+            _contextManager.FreezeSystemPrompt();
+            Logger.Info("[Skill] 当前会话的 Skill 系统上下文已热刷新");
         }
 
         /// <summary>
@@ -247,7 +266,9 @@ namespace DeepSeek_v4_for_VisualStudio.View
                 UnbindAgentEvents(_activeAgent);
 
             _activeAgent = _agentFactory.AskAgent;
+            _activeAgent.PermissionRequested -= OnAgentPermissionRequested;
             _activeAgent.PermissionRequested += OnAgentPermissionRequested;
+            _activeAgent.QuestionsRequested -= OnAgentQuestionsRequested;
             _activeAgent.QuestionsRequested += OnAgentQuestionsRequested;
             UpdateAgentModeBadge();
             Logger.Info("[Session] active agent reset to AskAgent");
@@ -259,9 +280,13 @@ namespace DeepSeek_v4_for_VisualStudio.View
         private void BindAgentEvents(BaseAgent agent)
         {
             if (agent == null) return;
+            agent.LogEntryAdded -= OnAgentLogEntryAdded;
             agent.LogEntryAdded += OnAgentLogEntryAdded;
+            agent.FileChangeNotified -= OnAgentFileChangeNotified;
             agent.FileChangeNotified += OnAgentFileChangeNotified;
+            agent.PermissionRequested -= OnAgentPermissionRequested;
             agent.PermissionRequested += OnAgentPermissionRequested;
+            agent.QuestionsRequested -= OnAgentQuestionsRequested;
             agent.QuestionsRequested += OnAgentQuestionsRequested;
             Logger.Info($"[Agent] 事件已绑定 → {agent.Definition.Type} (QuestionsRequested 订阅数: {agent.QuestionsRequestedHandlerCount})");
         }
@@ -388,6 +413,7 @@ namespace DeepSeek_v4_for_VisualStudio.View
 
             try
             {
+                StartConversationElapsedTimer();
                 await ThreadHelper.JoinableTaskFactory.SwitchToMainThreadAsync();
                 // Start each ordinary user turn back at Ask instead of keeping the
                 // Plan/Edit agent left over from the previous turn's workflow.
@@ -450,6 +476,7 @@ namespace DeepSeek_v4_for_VisualStudio.View
                 lock (_lock)
                 {
                     _createdPlanIds.Clear();
+                    _presentedQuestionRequests.Clear();
                     _pendingLogEntries.Clear();
                     _agentThinkingContent.Clear();
                     _streamingReasoning.Clear();
@@ -470,6 +497,7 @@ namespace DeepSeek_v4_for_VisualStudio.View
                     IsPlanningMode = routing?.NeedsPlanning == true || routing?.TargetAgent == AgentType.Plan,
                     PreClassifiedTaskSize = routing?.TaskSize ?? TaskSize.Small,
                     IsExplicitRoute = routing?.IsExplicit == true,
+                    ExplicitRouteTarget = routing?.IsExplicit == true ? routing.TargetAgent : null,
                     CancellationToken = GetStreamingToken(),
                     ReadFileAsync = async (path) =>
                     {
@@ -558,28 +586,24 @@ namespace DeepSeek_v4_for_VisualStudio.View
                 long lastContentFlushTicks = DateTime.UtcNow.Ticks;
                 long lastThinkingFlushTicks = DateTime.UtcNow.Ticks;
                 var streamingContentSb = new StringBuilder();
+                var streamingReasoningDeltaSb = new StringBuilder();
 
                 context.OnThinkingChunk = (chunk) =>
                 {
-                    // 锁内增量累积（StringBuilder.Append 均摊 O(1)）；按 60ms 节流后才全量读取推送，
-                    // 避免长思考输出时每个 chunk 都执行 O(n) ToString 与跨线程切换
+                    // 锁内增量累积（StringBuilder.Append 均摊 O(1)）；按 60ms 节流后
+                    // 只推送本窗口的 reasoning delta，避免反复序列化完整 thinking。
                     bool syncDue = false;
+                    string delta = string.Empty;
                     lock (_lock)
                     {
                         _streamingReasoning.Append(chunk);
+                        streamingReasoningDeltaSb.Append(chunk);
                         long nowTicks = DateTime.UtcNow.Ticks;
                         syncDue = nowTicks - lastThinkingFlushTicks >= StreamFlushSyncIntervalTicks;
                         if (!syncDue) return;
                         lastThinkingFlushTicks = nowTicks;
-                    }
-
-                    string reasoning;
-                    string content;
-                    lock (_lock)
-                    {
-                        reasoning = _streamingReasoning.ToString();
-                        var msg = capturedMsgIdx < _messages.Count ? _messages[capturedMsgIdx] : null;
-                        content = msg?.Content ?? string.Empty;
+                        delta = streamingReasoningDeltaSb.ToString();
+                        streamingReasoningDeltaSb.Clear();
                     }
                     _ = ThreadHelper.JoinableTaskFactory.RunAsync(async () =>
                     {
@@ -587,7 +611,7 @@ namespace DeepSeek_v4_for_VisualStudio.View
                         if (ChatWebView.CoreWebView2 == null || capturedMsgIdx < 0) return;
                         try
                         {
-                            BatchStreamingUpdate(capturedMsgIdx, content, reasoning);
+                            BatchStreamingUpdate(capturedMsgIdx, reasoningDelta: delta);
                         }
                         catch (Exception ex)
                         {
@@ -620,15 +644,13 @@ namespace DeepSeek_v4_for_VisualStudio.View
                         if (ChatWebView.CoreWebView2 == null || capturedMsgIdx < 0) return;
                         try
                         {
-                            string reasoning;
                             string content;
                             lock (_lock)
                             {
-                                reasoning = _streamingReasoning.ToString();
                                 content = capturedMsgIdx >= 0 && capturedMsgIdx < _messages.Count
                                     ? (_messages[capturedMsgIdx]?.Content ?? "") : "";
                             }
-                            BatchStreamingUpdate(capturedMsgIdx, content, reasoning);
+                            BatchStreamingUpdate(capturedMsgIdx, content);
                         }
                         catch (Exception ex)
                         {
@@ -654,16 +676,6 @@ namespace DeepSeek_v4_for_VisualStudio.View
                 }
                 if (_agentFactory.EditAgent is EditAgent editAgent)
                     editAgent.PlanUpdated += OnAgentPlanUpdated;
-
-                // ── 显式路由时注入系统消息：告知 AI 用户已显式指定 Agent，不要移交 ──
-                if (routing?.IsExplicit == true)
-                {
-                    string doNotHandoffMsg = string.Format(
-                        LocalizationService.Instance["agent.explicitRoute.doNotHandoff"],
-                        routing.TargetAgent);
-                    _contextManager.AddCustomMessage("system", doNotHandoffMsg);
-                    Logger.Info($"[Agent] 显式路由 @{routing.TargetAgent}: 已注入禁止移交指令");
-                }
 
                 // ── 联网搜索：在 Agent 执行前进行搜索，注入上下文和结果卡片 ──
                 List<WebSearchResult>? searchResults = null;
@@ -891,7 +903,11 @@ namespace DeepSeek_v4_for_VisualStudio.View
 
                     // 追加思考过程到摘要后面 —— 作为独立 HTML 注入，默认展开显示
                     string thinkingText;
-                    lock (_lock) { thinkingText = _agentThinkingContent.ToString(); }
+                    lock (_lock)
+                    {
+                        thinkingText = ReasoningTextPolicy.ClampStored(_agentThinkingContent.ToString())
+                            ?? string.Empty;
+                    }
                     string thinkingDetailsHtml = string.Empty;
                     if (!string.IsNullOrWhiteSpace(thinkingText))
                     {
@@ -923,7 +939,11 @@ namespace DeepSeek_v4_for_VisualStudio.View
 
                     // ── 收尾（共用 helper）：Cache footer + 最终化消息推送（含执行过程 HTML）──
                     string reasoningForRender;
-                    lock (_lock) { reasoningForRender = _streamingReasoning.ToString(); }
+                    lock (_lock)
+                    {
+                        reasoningForRender = ReasoningTextPolicy.ClampStored(_streamingReasoning.ToString())
+                            ?? string.Empty;
+                    }
                     string cacheFooter = BuildCacheFooterAndPersist(_agentStreamingMsgIndex);
                     FinalizeAgentMessage(_agentStreamingMsgIndex, finalContent, reasoningForRender, cacheFooter, thinkingDetailsHtml);
 
@@ -963,7 +983,11 @@ namespace DeepSeek_v4_for_VisualStudio.View
 
                     // ── 收尾（共用 helper）：Cache footer + 最终化消息推送 ──
                     string reasoningForRender;
-                    lock (_lock) { reasoningForRender = _streamingReasoning.ToString(); }
+                    lock (_lock)
+                    {
+                        reasoningForRender = ReasoningTextPolicy.ClampStored(_streamingReasoning.ToString())
+                            ?? string.Empty;
+                    }
                     string cacheFooter = BuildCacheFooterAndPersist(_agentStreamingMsgIndex);
                     FinalizeAgentMessage(_agentStreamingMsgIndex, agentResult.Content, reasoningForRender, cacheFooter);
                     StatusLabel.Text = LocalizationService.Instance["status.ready"];
@@ -1004,6 +1028,7 @@ namespace DeepSeek_v4_for_VisualStudio.View
             }
             finally
             {
+                StopConversationElapsedTimer();
                 _activePlan = null;
 
                 // ── P1-A：会话结束后清除 IDE 快照，避免过期上下文泄漏到非 Agent 的聊天轮次 ──
@@ -1155,6 +1180,8 @@ namespace DeepSeek_v4_for_VisualStudio.View
         private void FinalizeAgentMessage(int msgIndex, string content, string reasoning,
             string footerHtml, string? extraFooterHtml = null)
         {
+            reasoning = ReasoningTextPolicy.ClampStored(reasoning) ?? string.Empty;
+
             // ── 更新消息状态为最终完成态（下标无效时跳过更新，与旧分支行为一致）──
             lock (_lock)
             {
@@ -1904,6 +1931,9 @@ namespace DeepSeek_v4_for_VisualStudio.View
         {
             try
             {
+                if (IsCurrentProcessForeground())
+                    return;
+
                 var toastService = CompositionRoot.GetServiceOrDefault<ToastNotificationService>();
                 if (toastService == null) return;
 
@@ -1915,6 +1945,30 @@ namespace DeepSeek_v4_for_VisualStudio.View
                 Logger.Warn($"[Agent] 发送操作提醒 Toast 失败: {ex.Message}");
             }
         }
+
+        private static bool IsCurrentProcessForeground()
+        {
+            try
+            {
+                IntPtr foregroundWindow = GetForegroundWindow();
+                if (foregroundWindow == IntPtr.Zero)
+                    return false;
+
+                GetWindowThreadProcessId(foregroundWindow, out uint foregroundProcessId);
+                using var process = System.Diagnostics.Process.GetCurrentProcess();
+                return foregroundProcessId == (uint)process.Id;
+            }
+            catch
+            {
+                return false;
+            }
+        }
+
+        [DllImport("user32.dll")]
+        private static extern IntPtr GetForegroundWindow();
+
+        [DllImport("user32.dll")]
+        private static extern uint GetWindowThreadProcessId(IntPtr hWnd, out uint processId);
 
         private void OnAgentPermissionRequested(AgentPermissionRequest request)
         {
@@ -2001,6 +2055,15 @@ namespace DeepSeek_v4_for_VisualStudio.View
         /// </summary>
         private void OnAgentQuestionsRequested(AgentQuestionRequest request)
         {
+            lock (_lock)
+            {
+                if (!_presentedQuestionRequests.Add(request.RequestId))
+                {
+                    Logger.Warn($"[Agent] 忽略重复的提问请求: RequestId={request.RequestId}");
+                    return;
+                }
+            }
+
             _ = ThreadHelper.JoinableTaskFactory.RunAsync(async () =>
             {
                 await ThreadHelper.JoinableTaskFactory.SwitchToMainThreadAsync();
@@ -2010,6 +2073,7 @@ namespace DeepSeek_v4_for_VisualStudio.View
                     if (ChatWebView.CoreWebView2 == null)
                     {
                         Logger.Warn($"[Agent] CoreWebView2 未就绪，无法注入问题 UI (共 {request.Questions.Count} 个问题)，自动跳过");
+                        lock (_lock) { _presentedQuestionRequests.Remove(request.RequestId); }
                         var questionAgent = _agentFactory?.FindAgentWithPendingQuestion(request.RequestId) ?? _activeAgent;
                         questionAgent?.RespondToQuestions(request.RequestId, "[]");
                         return;
@@ -2058,6 +2122,7 @@ namespace DeepSeek_v4_for_VisualStudio.View
                 catch (Exception ex)
                 {
                     Logger.Warn($"[Agent] 问题 UI 注入失败: {ex.Message}\n{ex.StackTrace}");
+                    lock (_lock) { _presentedQuestionRequests.Remove(request.RequestId); }
                     var questionAgent = _agentFactory?.FindAgentWithPendingQuestion(request.RequestId) ?? _activeAgent;
                     questionAgent?.RespondToQuestions(request.RequestId, "{}");
                 }

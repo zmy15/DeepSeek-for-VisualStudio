@@ -53,7 +53,6 @@ namespace DeepSeek_v4_for_VisualStudio.Models
 
     /// <summary>
     /// Agent 意图类型：判断用户请求是需要修改代码还是普通问答。
-    /// 保留向后兼容，同时支持多 Agent 路由。
     /// </summary>
     public enum AgentIntent
     {
@@ -62,22 +61,6 @@ namespace DeepSeek_v4_for_VisualStudio.Models
 
         /// <summary>需要修改项目代码 / 修复 bug</summary>
         CodeChange,
-    }
-
-    /// <summary>
-    /// 将 AgentType 映射为 AgentIntent（向后兼容）。
-    /// </summary>
-    public static class AgentIntentMapper
-    {
-        public static AgentIntent ToIntent(this AgentType agentType) => agentType switch
-        {
-            AgentType.Ask => AgentIntent.QandA,
-            AgentType.Explore => AgentIntent.QandA,
-            AgentType.Plan => AgentIntent.CodeChange,
-            AgentType.Edit => AgentIntent.CodeChange,
-            AgentType.Build => AgentIntent.CodeChange,
-            _ => AgentIntent.QandA,
-        };
     }
 
     /// <summary>
@@ -109,11 +92,6 @@ namespace DeepSeek_v4_for_VisualStudio.Models
         /// <summary>AI 执行此步骤的完整响应文本（分析结论或代码变更）</summary>
         public string? AiResponse { get; set; }
 
-        /// <summary>本步骤修改的文件数量（执行后填充）</summary>
-        public int FilesModified { get; set; }
-
-        /// <summary>本步骤变更的代码行数（+/- 合计，执行后填充）</summary>
-        public int LinesChanged { get; set; }
     }
 
     /// <summary>
@@ -157,9 +135,6 @@ namespace DeepSeek_v4_for_VisualStudio.Models
 
         /// <summary>最终构建验证是否通过（Build Agent 成功修复后置为 true）</summary>
         public bool FinalBuildSucceeded { get; set; }
-
-        /// <summary>最终构建结果摘要（成功时保存，供最终总结使用）</summary>
-        public string? FinalBuildResult { get; set; }
 
         /// <summary>任务是否被用户取消</summary>
         public bool IsCancelled { get; set; }

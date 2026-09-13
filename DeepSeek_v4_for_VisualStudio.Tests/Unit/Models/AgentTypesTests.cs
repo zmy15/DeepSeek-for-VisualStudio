@@ -26,13 +26,7 @@ public class AgentTypesTests
 
         def.Type.Should().Be(default(AgentType)); // Ask = 0
         def.Name.Should().BeEmpty();
-        def.Description.Should().BeEmpty();
-        def.ArgumentHint.Should().BeEmpty();
-        def.UserInvocable.Should().BeTrue();
-        def.DisableModelInvocation.Should().BeFalse();
         def.AllowedTools.Should().BeEmpty();
-        def.SubAgents.Should().BeEmpty();
-        def.Handoffs.Should().BeEmpty();
         def.SystemPrompt.Should().BeEmpty();
     }
 
@@ -43,28 +37,13 @@ public class AgentTypesTests
         {
             Type = AgentType.Edit,
             Name = "edit",
-            Description = "Edit agent",
-            ArgumentHint = "[instructions]",
-            UserInvocable = false,
-            DisableModelInvocation = true,
             AllowedTools = new List<string> { "read_file", "write_file" },
-            SubAgents = new List<AgentType> { AgentType.Explore },
-            Handoffs = new List<AgentHandoff>
-            {
-                new() { Label = "Plan", TargetAgent = AgentType.Plan },
-            },
             SystemPrompt = "You are an edit agent.",
         };
 
         def.Type.Should().Be(AgentType.Edit);
         def.Name.Should().Be("edit");
-        def.Description.Should().Be("Edit agent");
-        def.ArgumentHint.Should().Be("[instructions]");
-        def.UserInvocable.Should().BeFalse();
-        def.DisableModelInvocation.Should().BeTrue();
         def.AllowedTools.Should().Contain("read_file");
-        def.SubAgents.Should().Contain(AgentType.Explore);
-        def.Handoffs.Should().HaveCount(1);
         def.SystemPrompt.Should().Be("You are an edit agent.");
     }
 
@@ -82,7 +61,6 @@ public class AgentTypesTests
         handoff.Prompt.Should().BeEmpty();
         handoff.AutoSend.Should().BeFalse();
         handoff.ShowContinueOn.Should().BeTrue();
-        handoff.Model.Should().BeNull();
     }
 
     [Fact]
@@ -95,7 +73,6 @@ public class AgentTypesTests
             Prompt = "Please implement the plan.",
             AutoSend = true,
             ShowContinueOn = false,
-            Model = "deepseek-chat",
         };
 
         handoff.Label.Should().Be("Continue with Edit");
@@ -103,7 +80,6 @@ public class AgentTypesTests
         handoff.Prompt.Should().Be("Please implement the plan.");
         handoff.AutoSend.Should().BeTrue();
         handoff.ShowContinueOn.Should().BeFalse();
-        handoff.Model.Should().Be("deepseek-chat");
     }
 
     #endregion
@@ -117,7 +93,6 @@ public class AgentTypesTests
 
         result.TargetAgent.Should().Be(AgentType.Ask);
         result.Confidence.Should().Be("medium");
-        result.Reason.Should().BeNull();
         result.NeedsPlanning.Should().BeFalse();
         result.IsExplicit.Should().BeFalse();
     }
@@ -129,14 +104,12 @@ public class AgentTypesTests
         {
             TargetAgent = AgentType.Plan,
             Confidence = "high",
-            Reason = "User requested planning",
             NeedsPlanning = true,
             IsExplicit = true,
         };
 
         result.TargetAgent.Should().Be(AgentType.Plan);
         result.Confidence.Should().Be("high");
-        result.Reason.Should().Be("User requested planning");
         result.NeedsPlanning.Should().BeTrue();
         result.IsExplicit.Should().BeTrue();
     }
@@ -215,109 +188,6 @@ public class AgentTypesTests
 
         result.Success.Should().BeFalse();
         result.ErrorMessage.Should().Be("Something went wrong.");
-    }
-
-    #endregion
-
-    #region SubagentTask / SubagentResult
-
-    [Fact]
-    public void SubagentTask_Defaults_AreSetCorrectly()
-    {
-        var task = new SubagentTask();
-
-        task.TaskId.Should().NotBeNullOrEmpty();
-        task.AgentType.Should().Be(AgentType.Explore);
-        task.Prompt.Should().BeEmpty();
-        task.SearchArea.Should().BeNull();
-    }
-
-    [Fact]
-    public void SubagentTask_CanSetAllProperties()
-    {
-        var task = new SubagentTask
-        {
-            TaskId = "task-1",
-            AgentType = AgentType.Ask,
-            Prompt = "Find all usages of Foo",
-            SearchArea = "src directory",
-        };
-
-        task.TaskId.Should().Be("task-1");
-        task.AgentType.Should().Be(AgentType.Ask);
-        task.Prompt.Should().Be("Find all usages of Foo");
-        task.SearchArea.Should().Be("src directory");
-    }
-
-    [Fact]
-    public void SubagentResult_Defaults_AreSetCorrectly()
-    {
-        var result = new SubagentResult();
-
-        result.TaskId.Should().BeEmpty();
-        result.Success.Should().BeTrue(); // 默认 true
-        result.ErrorMessage.Should().BeNull();
-    }
-
-    [Fact]
-    public void SubagentResult_CanSetAllProperties()
-    {
-        var result = new SubagentResult
-        {
-            TaskId = "task-1",
-            Success = true,
-            Findings = "Found 5 usages",
-            ErrorMessage = null,
-        };
-
-        result.TaskId.Should().Be("task-1");
-        result.Success.Should().BeTrue();
-        result.Findings.Should().Be("Found 5 usages");
-        result.RelevantFiles.Should().BeEmpty();
-        result.KeySymbols.Should().BeEmpty();
-    }
-
-    #endregion
-
-    #region AgentIntentMapper
-
-    [Fact]
-    public void AgentIntentMapper_Ask_ReturnsQandA()
-    {
-        var intent = AgentType.Ask.ToIntent();
-        intent.Should().Be(AgentIntent.QandA);
-    }
-
-    [Fact]
-    public void AgentIntentMapper_Explore_ReturnsQandA()
-    {
-        var intent = AgentType.Explore.ToIntent();
-        intent.Should().Be(AgentIntent.QandA);
-    }
-
-    [Fact]
-    public void AgentIntentMapper_Plan_ReturnsCodeChange()
-    {
-        var intent = AgentType.Plan.ToIntent();
-        intent.Should().Be(AgentIntent.CodeChange);
-    }
-
-    [Fact]
-    public void AgentIntentMapper_Edit_ReturnsCodeChange()
-    {
-        var intent = AgentType.Edit.ToIntent();
-        intent.Should().Be(AgentIntent.CodeChange);
-    }
-
-    [Fact]
-    public void AgentIntentMapper_AllAgentTypes_ReturnDefinedValue()
-    {
-        foreach (AgentType type in Enum.GetValues(typeof(AgentType)))
-        {
-            var intent = type.ToIntent();
-            // 所有值都应返回有效的 AgentIntent 枚举值
-            Enum.IsDefined(typeof(AgentIntent), intent).Should().BeTrue($"AgentType.{type} should map to a valid AgentIntent");
-        }
     }
 
     #endregion

@@ -15,7 +15,7 @@ public class OfficialModelCatalogServiceTests
 
         var models = await OfficialModelCatalogService.RefreshAsync("", default, handler);
 
-        models.Should().Equal(DeepSeekModelCatalog.All);
+        models.Should().BeEmpty();
         handler.Requests.Should().BeEmpty();
         OfficialModelCatalogService.ResetForTests();
     }
@@ -41,7 +41,7 @@ public class OfficialModelCatalogServiceTests
     }
 
     [Fact]
-    public async Task RefreshAsync_RemoteFailure_FallsBackToBuiltInCatalog()
+    public async Task RefreshAsync_RemoteFailure_DoesNotUseBuiltInFallback()
     {
         OfficialModelCatalogService.ResetForTests();
         var handler = new RoutingHandler();
@@ -50,7 +50,7 @@ public class OfficialModelCatalogServiceTests
 
         var models = await OfficialModelCatalogService.RefreshAsync("sk-test", default, handler);
 
-        models.Should().Equal(DeepSeekModelCatalog.All);
+        models.Should().BeEmpty();
         OfficialModelCatalogService.HasRemoteModels.Should().BeFalse();
         OfficialModelCatalogService.ResetForTests();
     }

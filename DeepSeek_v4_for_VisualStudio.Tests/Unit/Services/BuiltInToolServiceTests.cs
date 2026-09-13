@@ -15,13 +15,13 @@ public class BuiltInToolServiceTests
     #region Tool Registration
 
     [Fact]
-    public void Constructor_RegistersAll21Tools()
+    public void Constructor_RegistersAll23Tools()
     {
         var service = new BuiltInToolService();
 
         var defs = service.GetFilteredToolDefinitions(null);
 
-        defs.Should().HaveCount(21);
+        defs.Should().HaveCount(23);
     }
 
     [Fact]
@@ -43,7 +43,7 @@ public class BuiltInToolServiceTests
 
         var defs = service.GetFilteredToolDefinitions(new List<string>());
 
-        defs.Should().HaveCount(21);
+        defs.Should().HaveCount(23);
     }
 
     [Fact]
@@ -53,12 +53,12 @@ public class BuiltInToolServiceTests
 
         var defs = service.GetFilteredToolDefinitions(null);
 
-        defs.Should().HaveCount(21);
+        defs.Should().HaveCount(23);
     }
 
     [Theory]
     [InlineData("deepseek-v4-pro", false)]
-    [InlineData(DeepSeekModelCatalog.FlashVisionExp, true)]
+    [InlineData("deepseek-v4-flash-vision-exp", true)]
     public void GetFilteredToolDefinitions_IncludesCaptureWindowOnlyForVisionModels(
         string model,
         bool expectedVisible)
@@ -84,6 +84,8 @@ public class BuiltInToolServiceTests
     [InlineData("file_search", true)]
     [InlineData("grep_search", true)]
     [InlineData("get_errors", true)]
+    [InlineData("load_skill", true)]
+    [InlineData("read_skill_resource", true)]
     [InlineData("fetch_webpage", true)]
     [InlineData("capture_window", true)]
     [InlineData("build_solution", true)]
@@ -132,6 +134,23 @@ public class BuiltInToolServiceTests
     }
 
     [Fact]
+    public void ResetConversationState_ClearsRoundAndFileCache()
+    {
+        var service = new BuiltInToolService();
+        var path = Path.Combine(Path.GetTempPath(), "agent-round-reset-test.cs");
+        service.CurrentRound = 987;
+        service.UpdateFileReadCache(new[]
+        {
+            new KeyValuePair<string, string>(path, "cached content"),
+        });
+
+        service.ResetConversationState();
+
+        service.CurrentRound.Should().Be(0);
+        service.GetFileReadCacheSnapshot().Should().BeEmpty();
+    }
+
+    [Fact]
     public void BuildEventsSink_CountsProjectLevelSuccesses()
     {
         var sink = new BuildService.BuildEventsSink();
@@ -154,11 +173,11 @@ public class BuiltInToolServiceTests
     #region Static GetBuiltInToolDefinitions
 
     [Fact]
-    public void GetBuiltInToolDefinitions_Returns21Tools()
+    public void GetBuiltInToolDefinitions_Returns23Tools()
     {
         var defs = BuiltInToolService.GetBuiltInToolDefinitions();
 
-        defs.Should().HaveCount(21);
+        defs.Should().HaveCount(23);
     }
 
     [Fact]

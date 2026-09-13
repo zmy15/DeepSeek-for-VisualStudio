@@ -40,9 +40,9 @@ namespace DeepSeek_v4_for_VisualStudio.Services
         string GenerateSkillsSummary(SkillDiscoveryResult? discoveryResult = null);
 
         /// <summary>获取当前缓存的 Skill 总结</summary>
-        string? GetSkillsSummary();
+        string? GetSkillsSummary(string? solutionPath = null);
 
         /// <summary>从磁盘加载持久化的 Skill 总结</summary>
-        string? LoadSkillsSummaryFromDisk();
+        string? LoadSkillsSummaryFromDisk(string? solutionPath = null);
     }
 }

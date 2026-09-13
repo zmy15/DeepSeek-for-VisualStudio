@@ -11,14 +11,14 @@ namespace DeepSeek_v4_for_VisualStudio.Services
 {
     /// <summary>
     /// DeepSeek 官方模型目录缓存。启动时通过 OpenAI 兼容的 GET /models
-    /// 获取可用模型；请求失败时保留内置目录作为降级列表。
+    /// 获取可用模型；请求失败时保留最近一次成功获取的远程列表。
     /// </summary>
     public static class OfficialModelCatalogService
     {
         private static readonly object StateGate = new();
         private static readonly TimeSpan CacheLifetime = TimeSpan.FromMinutes(30);
 
-        private static IReadOnlyList<string> _models = DeepSeekModelCatalog.All;
+        private static IReadOnlyList<string> _models = Array.Empty<string>();
         private static bool _hasRemoteModels;
         private static string _lastApiKey = string.Empty;
         private static DateTimeOffset _lastFetchUtc = DateTimeOffset.MinValue;
@@ -45,11 +45,11 @@ namespace DeepSeek_v4_for_VisualStudio.Services
 
         /// <summary>官方模式没有选中模型时的默认模型；优先取接口返回的第一项。</summary>
         public static string GetDefaultModel()
-            => GetModels().FirstOrDefault() ?? DeepSeekModelCatalog.Pro;
+            => GetModels().FirstOrDefault() ?? string.Empty;
 
         /// <summary>
         /// 获取或刷新官方模型列表。相同 Key 的成功结果在缓存期内直接复用；
-        /// Key 变化会强制重新请求，失败时返回当前降级列表。
+        /// Key 变化会强制重新请求，失败时返回当前远程列表。
         /// </summary>
         public static Task<IReadOnlyList<string>> RefreshAsync(
             string? apiKey,
@@ -134,7 +134,7 @@ namespace DeepSeek_v4_for_VisualStudio.Services
             }
             catch (Exception ex)
             {
-                Logger.Warn($"[Models] 官方模型列表刷新失败，使用内置目录: {ex.Message}");
+                Logger.Warn($"[Models] 官方模型列表刷新失败，保留当前模型列表: {ex.Message}");
                 return GetModels();
             }
             finally
@@ -149,7 +149,7 @@ namespace DeepSeek_v4_for_VisualStudio.Services
         {
             lock (StateGate)
             {
-                _models = models ?? DeepSeekModelCatalog.All;
+                _models = models ?? Array.Empty<string>();
                 _hasRemoteModels = models != null;
                 _lastApiKey = string.Empty;
                 _lastFetchUtc = DateTimeOffset.MinValue;

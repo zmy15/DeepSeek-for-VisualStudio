@@ -53,6 +53,13 @@ namespace DeepSeek_v4_for_VisualStudio.Services
         public static string SkillSystemPromptFragment => L["system.skillSystemPromptFragment"];
 
         /// <summary>
+        /// 构建 Skill 系统提示词，使用占位符替换以避免模板中的字面量大括号被
+        /// <see cref="string.Format(string, object)"/> 误解析为格式项。
+        /// </summary>
+        public static string BuildSkillSystemPromptFragment(string discoveryContext)
+            => SkillSystemPromptFragment.Replace("{0}", discoveryContext ?? string.Empty);
+
+        /// <summary>
         /// 技能路由判断 — 系统提示词。
         /// 用于在用户提问时，先让 AI 判断是否应调用某个技能。
         /// </summary>
@@ -242,9 +249,36 @@ namespace DeepSeek_v4_for_VisualStudio.Services
         #region Edit Agent Prompts
 
         /// <summary>
-        /// Edit Agent 格式恢复提示 — 在上次输出格式不正确时追加。
+        /// Edit Agent 格式恢复提示 — 在上次未产生有效编辑工具调用时追加。
         /// </summary>
-        public static string EditFormatRecoveryPrompt => L["system.editFormatRecoveryPrompt"];
+        public static string EditFormatRecoveryPrompt => L["system.agent.editToolFormatRecoveryPrompt"];
+
+        /// <summary>Edit Agent — 强制使用原生编辑工具的规则。</summary>
+        public static string EditToolCallRule => L["system.agent.editToolCallRule"];
+
+        /// <summary>
+        /// Edit Agent 主体提示词；运行时将旧版“文本块不是工具调用”的说明改写为工具调用指令。
+        /// </summary>
+        public static string EditSystemPromptFragment
+        {
+            get
+            {
+                string prompt = L["system.agent.editPromptFragment"];
+                prompt = prompt.Replace(
+                    "- **重要提醒**：以上三种都是文本格式，在回复中直接输出即可，不要作为工具调用",
+                    "- **重要提醒**：以上文本格式仅用于兼容历史响应；实际修改必须调用真实编辑工具。");
+                prompt = prompt.Replace(
+                    "- **重要**：这是一个文本格式，不是工具调用 —— 直接在回复中输出代码块即可",
+                    "- **重要**：不要只输出代码块；必须调用 replace_string_in_file、multi_replace_string_in_file 或 apply_patch 工具完成实际修改。");
+                prompt = prompt.Replace(
+                    "- **Important reminder**: All three are text formats — output them directly in your response, not as tool calls",
+                    "- **Important reminder**: The text formats above are compatibility-only; actual changes must use real edit tools.");
+                prompt = prompt.Replace(
+                    "- **Important**: This is a text format, not a tool call — output the code block directly in your response",
+                    "- **Important**: Do not merely output a code block; call replace_string_in_file, multi_replace_string_in_file, or apply_patch to perform the actual edit.");
+                return prompt;
+            }
+        }
 
         /// <summary>
         /// Edit Agent 步骤提示词前缀。
@@ -311,6 +345,9 @@ namespace DeepSeek_v4_for_VisualStudio.Services
 
         #region Agent-Specific System Prompt Fragments
 
+        /// <summary>所有 Agent 专属提示词共用的结论停止规则</summary>
+        public static string AgentConclusionStopRule => L["system.agent.conclusionStopRule"];
+
         /// <summary>Ask Agent — 代码库探索策略 + 记忆系统 + 移交规则</summary>
         public static string AskAgentPromptFragment => L["system.agent.askPromptFragment"];
 
@@ -322,7 +359,7 @@ namespace DeepSeek_v4_for_VisualStudio.Services
 
         /// <summary>Explore Agent — 深度检索模式完整系统提示</summary>
         public static string ExploreAgentSystemPrompt =>
-            L["system.agent.explorePrompt"] + "\n\n" + ExploreMemoryInstructions;
+            L["system.agent.explorePrompt"] + "\n\n" + ExploreMemoryInstructions + AgentConclusionStopRule;
 
         /// <summary>Explore Agent — 定义描述</summary>
         public static string ExploreAgentDescription => L["system.agent.exploreDescription"];

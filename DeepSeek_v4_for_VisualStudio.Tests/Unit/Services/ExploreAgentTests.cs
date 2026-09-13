@@ -49,31 +49,6 @@ public class ExploreAgentTests
     }
 
     [Fact]
-    public void Definition_IsUserInvocable()
-    {
-        var agent = new ExploreAgent(_apiService);
-
-        // ExploreAgent 现在是用户可调用的（可直接通过 @explore 使用）
-        agent.Definition.UserInvocable.Should().BeTrue();
-    }
-
-    [Fact]
-    public void Definition_HasNoSubAgents()
-    {
-        var agent = new ExploreAgent(_apiService);
-
-        agent.Definition.SubAgents.Should().BeEmpty();
-    }
-
-    [Fact]
-    public void Definition_HasNoHandoffs()
-    {
-        var agent = new ExploreAgent(_apiService);
-
-        agent.Definition.Handoffs.Should().BeEmpty();
-    }
-
-    [Fact]
     public void Definition_AllowedTools_AreReadOnly()
     {
         var agent = new ExploreAgent(_apiService);
@@ -101,6 +76,17 @@ public class ExploreAgentTests
 
         agent.Definition.SystemPrompt.Should().Contain("Explore");
         agent.Definition.SystemPrompt.Should().Contain("强制工具使用");
+        agent.Definition.SystemPrompt.Should().Contain(
+            global::DeepSeek_v4_for_VisualStudio.Services.AiPrompts.AgentConclusionStopRule);
+    }
+
+    [Fact]
+    public void ExploreInstructions_DoNotRequireFixedMinimumToolCalls()
+    {
+        var instructions = global::DeepSeek_v4_for_VisualStudio.Services.AiPrompts.ExploreAgentInstructions;
+
+        instructions.Should().NotContain("3-5");
+        instructions.Should().Contain("立即停止");
     }
 
     #endregion

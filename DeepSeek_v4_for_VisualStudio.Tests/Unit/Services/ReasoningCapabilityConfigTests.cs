@@ -129,7 +129,7 @@ public class ReasoningCapabilityConfigTests
     {
         var config = ReasoningCapabilityConfig.Infer(
             "https://relay.example.com/v1",
-            DeepSeekModelCatalog.FlashVisionExp);
+            "deepseek-v4-flash-vision-exp");
 
         config.HasReasoningOptions.Should().BeTrue();
         config.SupportsThinking.Should().BeTrue();

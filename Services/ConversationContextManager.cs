@@ -236,7 +236,7 @@ namespace DeepSeek_v4_for_VisualStudio.Services
                 //     不使用 ?? string.Empty 兜底。JsonIgnoreCondition.WhenWritingNull
                 //     会省略 null 但序列化 "" → JSON 字节不同 → 前缀缓存断裂。
                 if (entry.Role == "assistant" && entry.HasToolCalls)
-                    apiMsg.ReasoningContent = entry.ReasoningContent;
+                    apiMsg.ReasoningContent = ReasoningTextPolicy.ClampStored(entry.ReasoningContent);
 
                 if (entry.Role == "assistant" && entry.ToolCalls != null && entry.ToolCalls.Count > 0)
                     apiMsg.ToolCalls = entry.ToolCalls;
@@ -524,6 +524,22 @@ namespace DeepSeek_v4_for_VisualStudio.Services
         }
 
         /// <summary>
+        /// 判断不可再压缩的固定 system[0] 与已生成压缩摘要是否已经占满 Token 预算。
+        /// 只有这部分本身达到上限时，才真正需要用户切换新对话。
+        /// </summary>
+        private bool IsSystemAndCompressedContextAtBudget()
+        {
+            if (_compressor == null || TokenBudget <= 0)
+                return false;
+
+            string? systemPrompt = _fixedSystemPrompt ?? BuildFinalSystemPrompt();
+            int systemTokens = EstimateTokens(systemPrompt);
+            int compressedTokens = EstimateTokens(_compressor.GetCompressedContextText());
+            int irreducibleTokens = (int)((systemTokens + compressedTokens) * _calibrationFactor);
+            return irreducibleTokens >= TokenBudget;
+        }
+
+        /// <summary>
         /// 标记需要在当前 Agent 工作流结束后提示用户切换新对话。
         /// </summary>
         private void MarkConversationResetNeeded(string reason)
@@ -659,6 +675,8 @@ namespace DeepSeek_v4_for_VisualStudio.Services
         /// <param name="toolCalls">工具调用列表（可为 null）</param>
         public void AddAssistantMessage(string? content, string? reasoningContent = null, List<ToolCall>? toolCalls = null)
         {
+            reasoningContent = ReasoningTextPolicy.ClampStored(reasoningContent);
+
             // ──  前缀缓存优化：写时合并连续 assistant 消息 ──
             //     如果上一条也是 assistant，合并内容而非新增条目，
             //     避免 BuildApiMessages 产生连续 assistant 消息，进而触发 ChatStreamAsync
@@ -781,13 +799,17 @@ namespace DeepSeek_v4_for_VisualStudio.Services
             //     保证待压缩内容既完整出现，又不会破坏这段缓存前缀。
             if (!_cacheSnapshotEntryIndex.HasValue)
             {
-                int compressionStart = ResolveCompressionStartIndex(startEntryIdx, out string compressionReason);
+                int compressionStart = ResolveCompressionStartIndex(
+                    startEntryIdx,
+                    out string compressionReason,
+                    out int targetSummaryTokens);
 
                 if (compressionStart > startEntryIdx)
                 {
                     if (!HasNewCompressibleEntries(compressionStart))
                     {
-                        MarkConversationResetNeeded(compressionReason);
+                        if (IsSystemAndCompressedContextAtBudget())
+                            MarkConversationResetNeeded(compressionReason);
                     }
                     else
                     {
@@ -799,7 +821,10 @@ namespace DeepSeek_v4_for_VisualStudio.Services
                             compressionDynamicBlock,
                             entryLimitOverride: compressionStart);
                         Logger.Info($"[CacheWindow] 触发压缩: {compressionReason}, 压缩前保留 {TurnCount} 轮");
-                        CompressEntriesBeforeWindow(compressionStart, compressionPrefix);
+                        CompressEntriesBeforeWindow(
+                            compressionStart,
+                            compressionPrefix,
+                            targetSummaryTokens);
 
                         // 压缩摘要已生成，立即刷新动态块，确保本轮正常请求就能注入结果。
                         dynamicBlock = _cachedDynamicBlock ?? BuildDynamicContextBlock();
@@ -819,13 +844,21 @@ namespace DeepSeek_v4_for_VisualStudio.Services
         /// 解析当前应当压缩到哪个条目边界。
         /// 供正常请求构建和同一用户请求内的工具循环共用，确保触发条件一致。
         /// </summary>
-        private int ResolveCompressionStartIndex(int startEntryIdx, out string compressionReason)
+        private int ResolveCompressionStartIndex(
+            int startEntryIdx,
+            out string compressionReason,
+            out int targetSummaryTokens)
         {
             int compressionStart = startEntryIdx;
             compressionReason = "none";
+            targetSummaryTokens = 0;
 
             if (_compressor != null && _compressor.Config.AutoCompressEnabled)
             {
+                var config = _compressor.Config;
+                double defaultTargetRatio = Math.Max(0.05, Math.Min(0.95, config.CompressionTargetRatio));
+                targetSummaryTokens = (int)(TokenBudget * defaultTargetRatio);
+
                 int tokenWindowStart = FindCacheWindowStart(out string triggerReason);
                 if (tokenWindowStart > compressionStart)
                 {
@@ -835,7 +868,6 @@ namespace DeepSeek_v4_for_VisualStudio.Services
                     compressionReason = triggerReason;
                 }
 
-                var config = _compressor.Config;
                 if (EstimatedTokens > TokenBudget * config.CompressionThreshold)
                 {
                     bool severe = EstimatedTokens > TokenBudget * config.AggressiveThreshold;
@@ -844,6 +876,7 @@ namespace DeepSeek_v4_for_VisualStudio.Services
                         : config.CompressionTargetRatio;
                     targetRatio = Math.Max(0.05, Math.Min(0.95, targetRatio));
                     int targetTokens = (int)(TokenBudget * targetRatio);
+                    targetSummaryTokens = targetTokens;
                     int budgetStart = FindTokenTargetStartIndex(targetTokens);
                     if (budgetStart > compressionStart)
                     {
@@ -884,13 +917,17 @@ namespace DeepSeek_v4_for_VisualStudio.Services
             if (_cacheSnapshotEntryIndex.HasValue)
                 return false;
 
-            int compressionStart = ResolveCompressionStartIndex(0, out string compressionReason);
+            int compressionStart = ResolveCompressionStartIndex(
+                0,
+                out string compressionReason,
+                out int targetSummaryTokens);
             if (compressionStart <= 0)
                 return false;
 
             if (!HasNewCompressibleEntries(compressionStart))
             {
-                MarkConversationResetNeeded(compressionReason);
+                if (IsSystemAndCompressedContextAtBudget())
+                    MarkConversationResetNeeded(compressionReason);
                 return false;
             }
 
@@ -912,7 +949,10 @@ namespace DeepSeek_v4_for_VisualStudio.Services
             Logger.Info($"[ToolLoopCompression] 触发压缩: {compressionReason}, " +
                 $"待压缩消息={removedMessageCount}, 当前={EstimatedTokens:N0}/{TokenBudget:N0}");
 
-            CompressEntriesBeforeWindow(compressionStart, compressionPrefix);
+            CompressEntriesBeforeWindow(
+                compressionStart,
+                compressionPrefix,
+                targetSummaryTokens);
             dynamicBlock = _cachedDynamicBlock ?? BuildDynamicContextBlock();
             return true;
         }
@@ -973,7 +1013,11 @@ namespace DeepSeek_v4_for_VisualStudio.Services
                 if (entry.Role == "assistant")
                 {
                     if (entry.HasToolCalls)
-                        apiMsg.ReasoningContent = entry.ReasoningContent;
+                    {
+                        apiMsg.ReasoningContent = entry.TurnIndex == TurnCount
+                            ? ReasoningTextPolicy.ClampStored(entry.ReasoningContent)
+                            : ReasoningTextPolicy.ClampHistoricalToolCall(entry.ReasoningContent);
+                    }
                 }
 
                 if (entry.Role == "assistant" && entry.ToolCalls != null && entry.ToolCalls.Count > 0)
@@ -1364,7 +1408,8 @@ namespace DeepSeek_v4_for_VisualStudio.Services
         /// </summary>
         private void CompressEntriesBeforeWindow(
             int windowStartIdx,
-            IReadOnlyList<ChatApiMessage>? compressionPrefix)
+            IReadOnlyList<ChatApiMessage>? compressionPrefix,
+            int targetSummaryTokens)
         {
             if (windowStartIdx <= 0)
                 return;
@@ -1409,7 +1454,8 @@ namespace DeepSeek_v4_for_VisualStudio.Services
                             fromTurn,
                             toTurn,
                             compressionPrefix,
-                            CancellationToken.None)).GetAwaiter().GetResult();
+                            CancellationToken.None,
+                            targetSummaryTokens)).GetAwaiter().GetResult();
 
                     _cachedDynamicBlock = BuildDynamicContextBlock();
                     Logger.Info($"[CacheWindow] 压缩第 {fromTurn}-{toTurn} 轮: " +
@@ -1906,7 +1952,7 @@ namespace DeepSeek_v4_for_VisualStudio.Services
                     Role = e.Role,
                     Content = e.Content,
                     MultimodalContent = CloneContentParts(e.MultimodalContent),
-                    ReasoningContent = e.ReasoningContent,
+                    ReasoningContent = ReasoningTextPolicy.ClampStored(e.ReasoningContent),
                 })
                 .ToList();
         }
@@ -1923,7 +1969,7 @@ namespace DeepSeek_v4_for_VisualStudio.Services
                     Role = e.Role,
                     Content = e.Content,
                     MultimodalContent = CloneContentParts(e.MultimodalContent),
-                    ReasoningContent = e.ReasoningContent,
+                    ReasoningContent = ReasoningTextPolicy.ClampStored(e.ReasoningContent),
                     ToolCalls = e.ToolCalls?.Select(tc => new ToolCall
                     {
                         Id = tc.Id,

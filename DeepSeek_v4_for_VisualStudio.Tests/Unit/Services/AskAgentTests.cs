@@ -48,34 +48,6 @@ public class AskAgentTests
     }
 
     [Fact]
-    public void Definition_IsUserInvocable()
-    {
-        var agent = new AskAgent(_apiService);
-
-        agent.Definition.UserInvocable.Should().BeTrue();
-    }
-
-    [Fact]
-    public void Definition_HasNoSubAgents()
-    {
-        var agent = new AskAgent(_apiService);
-
-        agent.Definition.SubAgents.Should().BeEmpty();
-    }
-
-    [Fact]
-    public void Definition_HasHandoffs_ToEditPlanAndBuild()
-    {
-        var agent = new AskAgent(_apiService);
-
-        // AskAgent 有 3 个 Handoff 目标
-        agent.Definition.Handoffs.Should().HaveCount(3);
-        agent.Definition.Handoffs.Should().Contain(h => h.TargetAgent == AgentType.Edit);
-        agent.Definition.Handoffs.Should().Contain(h => h.TargetAgent == AgentType.Plan);
-        agent.Definition.Handoffs.Should().Contain(h => h.TargetAgent == AgentType.Build);
-    }
-
-    [Fact]
     public void Definition_SystemPrompt_IsNotEmpty()
     {
         var agent = new AskAgent(_apiService);
@@ -84,6 +56,8 @@ public class AskAgentTests
         agent.Definition.SystemPrompt.Should().Contain("Ask");
         agent.Definition.SystemPrompt.Should().Contain("git");
         agent.Definition.SystemPrompt.Should().Contain("只读");
+        agent.Definition.SystemPrompt.Should().Contain(
+            global::DeepSeek_v4_for_VisualStudio.Services.AiPrompts.AgentConclusionStopRule);
     }
 
     [Fact]
@@ -207,6 +181,63 @@ public class AskAgentTests
         messages.Last().Content.Should().Be("AskAgent system prompt");
         messages.Count(m => m.Role == "system" && m.Content!.Contains("文件读取规则"))
             .Should().Be(1);
+    }
+
+    [Fact]
+    public void BuildContextAwareMessages_ExplicitRoute_AppendsOverrideAsLastSystemMessage()
+    {
+        var context = new AgentContext
+        {
+            IsExplicitRoute = true,
+            ExplicitRouteTarget = AgentType.Ask,
+        };
+        var agent = new AskAgent(_apiService)
+        {
+            Context = context,
+        };
+
+        var method = typeof(BaseAgent).GetMethod(
+            "BuildContextAwareMessages",
+            System.Reflection.BindingFlags.Instance | System.Reflection.BindingFlags.NonPublic,
+            binder: null,
+            new[] { typeof(string), typeof(string), typeof(int), typeof(bool) },
+            modifiers: null);
+
+        var messages = (List<ChatApiMessage>)method!.Invoke(
+            agent,
+            new object[] { "AskAgent system prompt", "user prompt", int.MaxValue, false })!;
+
+        messages.Last().Role.Should().Be("system");
+        messages.Last().Content.Should().Contain("@Ask");
+        messages.Last().Content.Should().Contain("重新分类");
+    }
+
+    [Fact]
+    public void BuildContextAwareMessages_ExplicitRouteForDifferentAgent_DoesNotAppendOverride()
+    {
+        var context = new AgentContext
+        {
+            IsExplicitRoute = true,
+            ExplicitRouteTarget = AgentType.Edit,
+        };
+        var agent = new AskAgent(_apiService)
+        {
+            Context = context,
+        };
+
+        var method = typeof(BaseAgent).GetMethod(
+            "BuildContextAwareMessages",
+            System.Reflection.BindingFlags.Instance | System.Reflection.BindingFlags.NonPublic,
+            binder: null,
+            new[] { typeof(string), typeof(string), typeof(int), typeof(bool) },
+            modifiers: null);
+
+        var messages = (List<ChatApiMessage>)method!.Invoke(
+            agent,
+            new object[] { "AskAgent system prompt", "user prompt", int.MaxValue, false })!;
+
+        messages.Last().Role.Should().Be("system");
+        messages.Last().Content.Should().Be("AskAgent system prompt");
     }
 
     [Fact]

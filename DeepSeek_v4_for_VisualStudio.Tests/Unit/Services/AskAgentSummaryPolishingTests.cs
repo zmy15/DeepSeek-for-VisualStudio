@@ -110,7 +110,7 @@ public class AskAgentSummaryPolishingTests
 
         public override Task<AgentResult> ExecuteAsync(string userMessage, AgentContext context)
         {
-            return Task.FromResult(new AgentResult { AgentType = AgentType.Ask, Content = userMessage });
+            return Task.FromResult(new AgentResult { Content = userMessage });
         }
     }
 

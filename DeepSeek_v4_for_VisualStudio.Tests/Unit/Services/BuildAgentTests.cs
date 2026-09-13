@@ -20,6 +20,8 @@ public class BuildAgentTests
         var agent = new BuildAgent(new DeepSeekApiService("test-api-key"));
 
         agent.Definition.SystemPrompt.Should().Contain("build_solution");
+        agent.Definition.SystemPrompt.Should().Contain(
+            global::DeepSeek_v4_for_VisualStudio.Services.AiPrompts.AgentConclusionStopRule);
         agent.Definition.SystemPrompt.Should().NotContain("build_solution 是异步的");
         agent.Definition.SystemPrompt.Should().NotContain("build_solution is async");
         agent.Definition.SystemPrompt.Should().NotContain("Turn 2");

@@ -96,11 +96,11 @@ namespace DeepSeek_v4_for_VisualStudio.View
             UpdateButtonsState();
 
             // 斜杠命令处理
-            string? skillInstructions = null;
+            ResolvedSkillCommand? directSkillCommand = null;
             if (!string.IsNullOrEmpty(userText) && userText.StartsWith("/"))
             {
-                skillInstructions = await ResolveSlashCommandAsync(userText);
-                if (skillInstructions == null)
+                directSkillCommand = await ResolveSlashCommandAsync(userText);
+                if (directSkillCommand == null)
                 {
                     lock (_lock) { _isGenerating = false; }
                     UpdateButtonsState();
@@ -108,12 +108,11 @@ namespace DeepSeek_v4_for_VisualStudio.View
                 }
             }
 
-            // ── 技能指令注入：将解析后的技能指令替换为用户实际发送内容 ──
-            // userText 保持原始命令用于气泡显示，skillInstructions 作为 AI 实际接收内容
-            string effectiveUserText = !string.IsNullOrEmpty(skillInstructions) ? skillInstructions : userText;
-            if (!string.IsNullOrEmpty(skillInstructions))
+            // 显式技能调用只把用户参数作为本轮 user 内容，完整技能指令稍后以 system 消息注入。
+            string effectiveUserText = directSkillCommand?.UserContent ?? userText;
+            if (directSkillCommand != null)
             {
-                Logger.Info($"[SkillFlow] 技能指令已注入 (长度: {skillInstructions.Length})，原始命令: \"{userText}\"");
+                Logger.Info($"[SkillFlow] 技能指令已解析 (长度: {directSkillCommand.Instructions.Length})，原始命令: \"{userText}\"");
             }
 
             if (string.IsNullOrEmpty(userText) && !hasAttachments)
@@ -297,7 +296,6 @@ namespace DeepSeek_v4_for_VisualStudio.View
                     discardedContext = true;
                     Logger.Info("[Context] 用户继续对话：已丢弃旧的压缩上文，仅保留新问题作为新一轮起点");
                 }
-                _contextManager.AddUserMessage(fullUserContent, visionContent);
                 earlyUserMsgIndex = _messages.Count - 1;
             }
             AddMessagesHtml(
@@ -319,6 +317,51 @@ namespace DeepSeek_v4_for_VisualStudio.View
             ClearAttachedFiles();
             TouchCurrentSessionLastActive();
             AutoTitleSession();
+
+            // 普通消息和普通 @agent 任务先经过轻量级 Skill 路由；@agent /skill 走显式技能路径。
+            string? autoSkillInstructions = null;
+            string autoRouteContent = fullUserContent;
+            bool hasExplicitAgentSkill = false;
+            if (!string.IsNullOrWhiteSpace(userText)
+                && userText.StartsWith("@", StringComparison.Ordinal))
+            {
+                var atParts = userText.Substring(1).Split(
+                    new[] { ' ' },
+                    2,
+                    StringSplitOptions.RemoveEmptyEntries);
+                if (atParts.Length > 1)
+                {
+                    string routedContent = atParts[1];
+                    hasExplicitAgentSkill = routedContent.StartsWith("/", StringComparison.Ordinal);
+                    if (!hasExplicitAgentSkill)
+                    {
+                        autoRouteContent = string.IsNullOrWhiteSpace(fileContext)
+                            ? routedContent
+                            : fileContext + "\n" + routedContent;
+                    }
+                }
+            }
+
+            if (!string.IsNullOrWhiteSpace(userText)
+                && !userText.StartsWith("/", StringComparison.Ordinal)
+                && !hasExplicitAgentSkill
+                && !string.IsNullOrWhiteSpace(autoRouteContent))
+            {
+                autoSkillInstructions = await RouteSkillAsync(autoRouteContent);
+            }
+
+            lock (_lock)
+            {
+                string? skillInstructionsToInject = directSkillCommand?.Instructions ?? autoSkillInstructions;
+                if (!string.IsNullOrEmpty(skillInstructionsToInject))
+                {
+                    _contextManager.AddCustomMessage("system", skillInstructionsToInject);
+                    Logger.Info($"[SkillFlow] 技能指令已注入 Agent 上下文 (长度: {skillInstructionsToInject.Length})");
+                }
+
+                _contextManager.AddUserMessage(fullUserContent, visionContent);
+            }
+
             // 注意：InputTextBox 和 UpdateButtonsState 已在上方立即执行
 
                 // ── URL 采用模型驱动的工具调用模式处理 ──
@@ -342,17 +385,18 @@ namespace DeepSeek_v4_for_VisualStudio.View
                     // ── @agent /skill 组合：先解析技能指令，注入到 Agent 工作流 ──
                     if (!string.IsNullOrWhiteSpace(agentRoutedUserText) && agentRoutedUserText.StartsWith("/"))
                     {
-                        string? skillResult = await ResolveSlashCommandAsync(agentRoutedUserText);
+                        ResolvedSkillCommand? skillResult = await ResolveSlashCommandAsync(agentRoutedUserText);
                         if (skillResult == null)
                         {
                             lock (_lock) { _isGenerating = false; }
                             UpdateButtonsState();
                             return;
                         }
-                        if (!string.IsNullOrEmpty(skillResult))
+                        if (!string.IsNullOrEmpty(skillResult.Instructions))
                         {
-                            agentSkillInstructions = skillResult;
-                            Logger.Info($"[Agent] @agent /skill 组合: Agent={explicitRoute.TargetAgent}, Skill 指令已解析 ({skillResult.Length} 字符)");
+                            agentSkillInstructions = skillResult.Instructions;
+                            agentRoutedUserText = skillResult.UserContent;
+                            Logger.Info($"[Agent] @agent /skill 组合: Agent={explicitRoute.TargetAgent}, Skill 指令已解析 ({skillResult.Instructions.Length} 字符)");
                         }
                     }
 
@@ -370,7 +414,8 @@ namespace DeepSeek_v4_for_VisualStudio.View
                 // 所有非斜杠命令消息统一走 Agent 工作流（从 AskAgent 起始）。
                 // 仅粘贴图片/文件、不输入文字时也要进入 Agent，否则 _isGenerating 不会复位，界面会卡死。
                 bool hasAgentInput = !string.IsNullOrEmpty(effectiveUserText) || hasAttachments;
-                if (_activeAgent != null && _agentFactory != null && hasAgentInput && !effectiveUserText.StartsWith("/"))
+                bool canEnterAgent = directSkillCommand != null || !effectiveUserText.StartsWith("/");
+                if (_activeAgent != null && _agentFactory != null && hasAgentInput && canEnterAgent)
                 {
                     // ── 确保系统提示词已初始化（新会话时 _fixedSystemPrompt 为 null）──
                     await EnsureSystemPromptInitializedAsync();
@@ -383,7 +428,6 @@ namespace DeepSeek_v4_for_VisualStudio.View
                     {
                         TargetAgent = AgentType.Ask,
                         Confidence = "high",
-                        Reason = "统一入口 AskAgent",
                         NeedsPlanning = taskSize == TaskSize.Large,
                         TaskSize = taskSize,
                     };
@@ -455,71 +499,6 @@ namespace DeepSeek_v4_for_VisualStudio.View
                 StatusLabel.Text = LocalizationService.Instance["status.ready"];
         }
 #pragma warning restore VSTHRD100
-        private string? BuildRoutingContext(string userText, string? fileContext, List<FileParseResult>? parseResults)
-        {
-            // 如果用户消息已经很长（≥50字），不需要附加上下文
-            if (!string.IsNullOrEmpty(userText) && userText.Length >= 50)
-                return null;
-
-            var sb = new StringBuilder();
-
-            // ── 1. 最近对话历史摘要（最多最近 5 轮）──
-            try
-            {
-                var history = _contextManager?.GetConversationHistory();
-                if (history != null && history.Count > 0)
-                {
-                    // 只取最近的角色交替消息（user/assistant），最多 5 对
-                    var recentMessages = history
-                        .Where(m => m.Role == "user" || m.Role == "assistant")
-                        .Reverse()
-                        .Take(10)
-                        .Reverse()
-                        .ToList();
-
-                    if (recentMessages.Count > 0)
-                    {
-                        sb.AppendLine(LocalizationService.Instance["messaging.recentConversation"]);
-                        foreach (var msg in recentMessages)
-                        {
-                            string role = msg.Role == "user"
-                                ? LocalizationService.Instance["chat.role.user"]
-                                : LocalizationService.Instance["chat.role.ai"];
-                            string content = (msg.Content ?? "").Truncate(120);
-                            if (!string.IsNullOrWhiteSpace(content))
-                                sb.AppendLine($"- {role}: {content}");
-                        }
-                    }
-                }
-            }
-            catch { }
-
-            // ── 2. 附加文件信息 ──
-            if (parseResults != null && parseResults.Count > 0)
-            {
-                sb.AppendLine();
-                sb.AppendLine(LocalizationService.Instance["messaging.attachedFilesHeader"]);
-                foreach (var pr in parseResults)
-                {
-                    if (pr.FileName != null)
-                    {
-                        string snippet = (pr.Content ?? "").Truncate(200);
-                        sb.AppendLine($"- {pr.FileName}");
-                        if (!string.IsNullOrWhiteSpace(snippet))
-                            sb.AppendLine(LocalizationService.Instance.Format("messaging.contentSnippet", snippet));
-                    }
-                }
-            }
-            else if (!string.IsNullOrWhiteSpace(fileContext))
-            {
-                sb.AppendLine();
-                sb.AppendLine(LocalizationService.Instance.Format("messaging.fileContextHeader", fileContext.Truncate(300)));
-            }
-
-            string result = sb.ToString().Trim();
-            return result.Length > 0 ? result : null;
-        }
-
         #region Vision Model Helpers
 
         private static readonly string[] VisionImageExtensions =
@@ -1022,7 +1001,7 @@ namespace DeepSeek_v4_for_VisualStudio.View
 
         /// <summary>
         /// 解析用户显式指定的 Agent（如 "@edit" → AgentType.Edit）。
-        /// 从 AgentDispatcher.ParseExplicitAgentRoute 搬过来，保留在 UI 层。
+        /// 解析用户输入的显式 @agent 路由。
         /// </summary>
         private static AgentRoutingResult ParseExplicitAgentRoute(string agentName)
         {
@@ -1040,7 +1019,6 @@ namespace DeepSeek_v4_for_VisualStudio.View
             {
                 TargetAgent = target,
                 Confidence = "high",
-                Reason = $"用户显式指定 @{agentName}",
                 NeedsPlanning = target == AgentType.Plan,
                 IsExplicit = true,
             };

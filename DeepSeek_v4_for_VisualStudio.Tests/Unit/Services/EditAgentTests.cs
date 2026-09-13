@@ -38,6 +38,34 @@ public class EditAgentTests
 
     #endregion
 
+    [Theory]
+    [InlineData(false, true, true, true, false, false, true)]
+    [InlineData(true, false, true, true, false, false, true)]
+    [InlineData(false, false, true, true, false, false, false)]
+    [InlineData(true, false, false, true, false, false, false)]
+    [InlineData(true, false, true, false, false, false, false)]
+    [InlineData(true, false, true, true, true, false, false)]
+    [InlineData(true, false, true, true, false, true, false)]
+    public void ShouldRunFinalBuild_RespectsNormalFlowAndExplicitRoute(
+        bool isPlanningMode,
+        bool isExplicitRoute,
+        bool planCompleted,
+        bool hasFileChanges,
+        bool planCancelled,
+        bool cancellationRequested,
+        bool expected)
+    {
+        bool result = EditAgent.ShouldRunFinalBuild(
+            isPlanningMode,
+            isExplicitRoute,
+            planCompleted,
+            hasFileChanges,
+            planCancelled,
+            cancellationRequested);
+
+        result.Should().Be(expected);
+    }
+
     #region Agent Definition
 
     [Fact]
@@ -49,50 +77,22 @@ public class EditAgentTests
     }
 
     [Fact]
-    public void Definition_IsUserInvocable()
-    {
-        var agent = new EditAgent(_apiService);
-
-        agent.Definition.UserInvocable.Should().BeTrue();
-    }
-
-    [Fact]
-    public void Definition_HasNoSubAgents()
-    {
-        var agent = new EditAgent(_apiService);
-
-        agent.Definition.SubAgents.Should().BeEmpty();
-    }
-
-    [Fact]
-    public void Definition_HasAskBuildAndPlanHandoffs()
-    {
-        var agent = new EditAgent(_apiService);
-
-        agent.Definition.Handoffs.Should().HaveCount(3);
-        agent.Definition.Handoffs.Should().Contain(h => h.TargetAgent == AgentType.Ask);
-        agent.Definition.Handoffs.Should().Contain(h => h.TargetAgent == AgentType.Build);
-        agent.Definition.Handoffs.Should().Contain(h => h.TargetAgent == AgentType.Plan);
-        // Ask handoff is auto-send (for summary generation)
-        var askHandoff = agent.Definition.Handoffs.First(h => h.TargetAgent == AgentType.Ask);
-        askHandoff.AutoSend.Should().BeTrue();
-        // Build handoff: AutoSend chains Edit→Build without user button
-        var buildHandoff = agent.Definition.Handoffs.First(h => h.TargetAgent == AgentType.Build);
-        buildHandoff.AutoSend.Should().BeTrue();
-        buildHandoff.ShowContinueOn.Should().BeFalse();
-        // Plan handoff: AutoSend for large tasks
-        var planHandoff = agent.Definition.Handoffs.First(h => h.TargetAgent == AgentType.Plan);
-        planHandoff.AutoSend.Should().BeTrue();
-        planHandoff.ShowContinueOn.Should().BeFalse();
-    }
-
-    [Fact]
     public void Definition_SystemPrompt_IsNotEmpty()
     {
         var agent = new EditAgent(_apiService);
 
         agent.Definition.SystemPrompt.Should().NotBeNullOrEmpty();
         agent.Definition.SystemPrompt.Should().Contain("Edit");
+        agent.Definition.SystemPrompt.Should().Contain(
+            global::DeepSeek_v4_for_VisualStudio.Services.AiPrompts.AgentConclusionStopRule);
+        agent.Definition.SystemPrompt.Should().Contain(
+            global::DeepSeek_v4_for_VisualStudio.Services.AiPrompts.EditToolCallRule);
+        global::DeepSeek_v4_for_VisualStudio.Services.AiPrompts.EditSystemPromptFragment
+            .Should().NotContain("不要作为工具调用")
+            .And.NotContain("not a tool call");
+        global::DeepSeek_v4_for_VisualStudio.Services.AiPrompts.EditFormatRecoveryPrompt
+            .Should().Contain("apply_patch")
+            .And.Contain("replace_string_in_file");
     }
 
     #endregion

@@ -67,7 +67,7 @@ namespace DeepSeek_v4_for_VisualStudio.Services
             });
 
             // ── Skill 服务 ──
-            services.AddSingleton<ISkillService, SkillService>();
+            services.AddSingleton<ISkillService>(_ => SkillService.Instance);
 
             // ── 搜索与 RAG ──
             services.AddSingleton<IWebSearchService, WebSearchService>();
@@ -89,7 +89,8 @@ namespace DeepSeek_v4_for_VisualStudio.Services
                 var webSearch = sp.GetService<IWebSearchService>() as WebSearchService;
                 var buildService = sp.GetService<IBuildService>();
                 var memoryService = sp.GetService<IMemoryService>();
-                return new BuiltInToolService(mcpManager, webSearch, buildService, memoryService);
+                var skillService = sp.GetRequiredService<ISkillService>();
+                return new BuiltInToolService(mcpManager, webSearch, buildService, memoryService, skillService);
             });
 
             // ── 持久化服务（适配器包装静态类） ──

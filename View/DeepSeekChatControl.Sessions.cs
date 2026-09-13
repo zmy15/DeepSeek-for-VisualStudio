@@ -25,7 +25,9 @@ namespace DeepSeek_v4_for_VisualStudio.View
         /// </summary>
         private ChatSession CreateNewSessionInternal()
         {
+            ResetConversationElapsedTimer();
             ResetActiveAgentToAsk();
+            _builtInToolService?.ResetConversationState();
 
             // ── 初始化新树 ──
             _tree = new ConversationTree();
@@ -146,11 +148,14 @@ namespace DeepSeek_v4_for_VisualStudio.View
                 Logger.Info("[AI标题] 正在调用 API 生成标题…");
                 using var cts = new CancellationTokenSource(TimeSpan.FromSeconds(15));
                 // ── toolChoice:"none" 防止 AI 调用工具；thinkingEnabled:false 防止思考模型只输出推理而 content 为空 ──
-                // 官方端点用轻量 flash 模型生成标题（便宜快速）；
-                // 自定义端点该模型不一定存在 → 使用当前生效的模型。
-                string titleModel = _apiService != null && !_apiService.IsDeepSeekEndpoint
-                    ? GetEffectiveModel()
-                    : "deepseek-v4-flash";
+                // 标题生成使用当前生效模型，避免依赖任何硬编码模型名。
+                string titleModel = GetEffectiveModel();
+                if (string.IsNullOrWhiteSpace(titleModel))
+                {
+                    Logger.Warn("[AI标题] 当前未选择模型，回退到截取模式");
+                    FallbackAutoTitle(firstUserMessage);
+                    return;
+                }
                 string rawTitle = await _activeAgent.CallAiWithMessagesAsync(messages, cts.Token, maxTokens: 128, temperature: 0.3, toolChoice: "none", model: titleModel, thinkingEnabled: false);
 
                 if (string.IsNullOrWhiteSpace(rawTitle))
@@ -233,6 +238,7 @@ namespace DeepSeek_v4_for_VisualStudio.View
         #pragma warning disable VSTHRD100 // async void 用于会话切换（从事件处理程序调用），异常已在方法内处理
         private async void SwitchToSession(ChatSession session)
         {
+            ResetConversationElapsedTimer();
             _discardContextOnNextSend = false;
             _contextManager.ClearConversationResetNotice();
             try
@@ -267,8 +273,11 @@ namespace DeepSeek_v4_for_VisualStudio.View
 
                     // ── 同步当前会话 ID 到内置工具服务（MemoryTool 需要）──
                     if (_builtInToolService != null)
+                    {
                         _builtInToolService.CurrentSessionId = _activeSession.Id;
                         _builtInToolService.CurrentSolutionPath = _solutionPath;
+                        _builtInToolService.ResetConversationState();
+                    }
 
                     // ── 重置 AI 标题生成状态（切换到的会话可能已有标题） ──
                     _pendingAiTitle = false;
@@ -574,8 +583,11 @@ namespace DeepSeek_v4_for_VisualStudio.View
 
                 // ── 同步当前会话 ID 到内置工具服务 ──
                 if (_builtInToolService != null)
+                {
                     _builtInToolService.CurrentSessionId = _activeSession.Id;
                     _builtInToolService.CurrentSolutionPath = _solutionPath;
+                    _builtInToolService.ResetConversationState();
+                }
 
                 lock (_lock)
                 {
@@ -666,6 +678,7 @@ namespace DeepSeek_v4_for_VisualStudio.View
                 _sessionsContainer.ActiveSessionId = _activeSession?.Id;
 
                 ResetActiveAgentToAsk();
+                _builtInToolService?.ResetConversationState();
 
                 lock (_lock)
                 {
@@ -763,10 +776,12 @@ namespace DeepSeek_v4_for_VisualStudio.View
             {
                 _discardContextOnNextSend = false;
                 _contextManager.ClearConversationResetNotice();
+                ResetConversationElapsedTimer();
                 // ── 重置累计 Token / 费用计数器 ──
                 _apiService?.ResetAccumulatedStats();
 
                 ResetActiveAgentToAsk();
+                _builtInToolService?.ResetConversationState();
 
                 // ── 重置树 ──
                 _tree = new ConversationTree();

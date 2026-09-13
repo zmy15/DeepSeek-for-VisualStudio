@@ -35,7 +35,7 @@ namespace DeepSeek_v4_for_VisualStudio.Services.Providers
 
         private volatile string _accountCurrency = "CNY";
 
-        public DeepSeekProvider(string apiKey, string model = DeepSeekModelCatalog.Pro,
+        public DeepSeekProvider(string apiKey, string model = "",
             int? requestTimeoutSeconds = null, string? baseUrl = null,
             bool isVision = false, bool isCustom = false)
             : base(apiKey, model, requestTimeoutSeconds, baseUrl, isVision, isCustom,
@@ -43,7 +43,7 @@ namespace DeepSeek_v4_for_VisualStudio.Services.Providers
         {
         }
 
-        public DeepSeekProvider(HttpClient httpClient, string model = DeepSeekModelCatalog.Pro,
+        public DeepSeekProvider(HttpClient httpClient, string model = "",
             string? baseUrl = null, bool isVision = false, bool isCustom = false)
             : base(httpClient, model, baseUrl, isVision, isCustom,
                 DefaultBaseUrl, "DeepSeek")
@@ -323,6 +323,6 @@ namespace DeepSeek_v4_for_VisualStudio.Services.Providers
         }
 
         private string ResolveFimModel()
-            => CurrentIsVision ? DeepSeekModelCatalog.Flash : CurrentModel;
+            => CurrentModel;
     }
 }
