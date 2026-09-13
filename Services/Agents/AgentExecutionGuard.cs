@@ -9,7 +9,7 @@ namespace DeepSeek_v4_for_VisualStudio.Services.Agents
     {
         public int MaxSteps { get; init; } = 200;
         public TimeSpan MaxWallTime { get; init; } = TimeSpan.FromMinutes(15);
-        public long MaxTotalTokens { get; init; } = 500_000;
+        public long MaxTotalTokens { get; init; }
         public int MaxToolCalls { get; init; } = 400;
         public int MaxExecutionDepth { get; init; } = 3;
         public int MaxNoProgressRounds { get; init; } = 5;
@@ -97,7 +97,7 @@ namespace DeepSeek_v4_for_VisualStudio.Services.Agents
         public AgentExecutionDecision RecordUsage(int promptTokens, int completionTokens)
         {
             _totalTokens += Math.Max(0, promptTokens) + Math.Max(0, completionTokens);
-            if (_totalTokens > _policy.MaxTotalTokens)
+            if (_policy.MaxTotalTokens > 0 && _totalTokens > _policy.MaxTotalTokens)
             {
                 return AgentExecutionDecision.Stop(
                     AgentExecutionStopReason.TokenBudget,
@@ -148,7 +148,7 @@ namespace DeepSeek_v4_for_VisualStudio.Services.Agents
             bool warning =
                 nextStep >= _policy.MaxSteps * 0.8 ||
                 _stopwatch.Elapsed >= TimeSpan.FromTicks((long)(_policy.MaxWallTime.Ticks * 0.8)) ||
-                _totalTokens >= _policy.MaxTotalTokens * 0.8 ||
+                (_policy.MaxTotalTokens > 0 && _totalTokens >= _policy.MaxTotalTokens * 0.8) ||
                 _toolCallCount >= _policy.MaxToolCalls * 0.8;
 
             if (!warning)

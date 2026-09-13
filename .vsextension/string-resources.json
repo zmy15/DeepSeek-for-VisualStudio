@@ -65,7 +65,7 @@
   "DeepSeek.Chat.settings.agentMaxDepth.displayName": "Maximum Sub-agent Depth",
   "DeepSeek.Chat.settings.agentMaxToolCalls.description": "Maximum total tool calls allowed in a single agent invocation. Default: 400.",
   "DeepSeek.Chat.settings.agentMaxToolCalls.displayName": "Agent Tool Call Budget",
-  "DeepSeek.Chat.settings.agentMaxTotalTokens.description": "Hard limit for cumulative input and output tokens in a single agent invocation. Default: 400000.",
+  "DeepSeek.Chat.settings.agentMaxTotalTokens.description": "Hard limit for cumulative input and output tokens in a single agent invocation. Default: 0, which means unlimited.",
   "DeepSeek.Chat.settings.agentMaxTotalTokens.displayName": "Agent Token Budget",
   "DeepSeek.Chat.settings.agentMaxWallTimeSeconds.description": "Maximum runtime for a single agent invocation. The agent safely returns its current result when the limit is reached. Default: 900 seconds.",
   "DeepSeek.Chat.settings.agentMaxWallTimeSeconds.displayName": "Agent Max Wall Time (seconds)",

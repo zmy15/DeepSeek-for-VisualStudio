@@ -65,7 +65,7 @@
   "DeepSeek.Chat.settings.agentMaxDepth.displayName": "子 Agent 最大递归深度",
   "DeepSeek.Chat.settings.agentMaxToolCalls.description": "单次 Agent 调用允许的工具调用总次数。默认 400。",
   "DeepSeek.Chat.settings.agentMaxToolCalls.displayName": "Agent 工具调用总上限",
-  "DeepSeek.Chat.settings.agentMaxTotalTokens.description": "单次 Agent 调用累计输入和输出 Token 的硬上限。默认 400000。",
+  "DeepSeek.Chat.settings.agentMaxTotalTokens.description": "单次 Agent 调用累计输入和输出 Token 的硬上限。默认 0，表示不限制。",
   "DeepSeek.Chat.settings.agentMaxTotalTokens.displayName": "Agent Token 预算",
   "DeepSeek.Chat.settings.agentMaxWallTimeSeconds.description": "单次 Agent 调用允许的最长运行时间，达到上限后安全返回当前结果。默认 900 秒。",
   "DeepSeek.Chat.settings.agentMaxWallTimeSeconds.displayName": "Agent 最长墙钟时间（秒）",

@@ -48,6 +48,16 @@ public class AgentExecutionGuardTests
     }
 
     [Fact]
+    public void RecordUsage_DefaultTokenBudget_IsUnlimited()
+    {
+        var guard = new AgentExecutionGuard(
+            new AgentExecutionPolicy(),
+            executionDepth: 0);
+
+        guard.RecordUsage(1_000_000, 1_000_000).ShouldStop.Should().BeFalse();
+    }
+
+    [Fact]
     public void RecordToolCalls_ToolBudget_Stops()
     {
         var guard = new AgentExecutionGuard(

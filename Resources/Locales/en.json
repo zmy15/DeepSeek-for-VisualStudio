@@ -82,7 +82,7 @@
     "settings.agentMaxWallTimeSeconds.displayName": "Agent Max Wall Time (seconds)",
     "settings.agentMaxWallTimeSeconds.description": "Maximum runtime for a single agent invocation. The agent safely returns its current result when the limit is reached. Default: 900 seconds.",
     "settings.agentMaxTotalTokens.displayName": "Agent Token Budget",
-    "settings.agentMaxTotalTokens.description": "Hard limit for cumulative input and output tokens in a single agent invocation. Default: 400000.",
+    "settings.agentMaxTotalTokens.description": "Hard limit for cumulative input and output tokens in a single agent invocation. Default: 0, which means unlimited.",
     "settings.agentMaxToolCalls.displayName": "Agent Tool Call Budget",
     "settings.agentMaxToolCalls.description": "Maximum total tool calls allowed in a single agent invocation. Default: 400.",
     "settings.agentMaxDepth.displayName": "Maximum Sub-agent Depth",

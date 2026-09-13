@@ -908,9 +908,9 @@ namespace DeepSeek_v4_for_VisualStudio.Services.Agents
                 30,
                 7200);
             int maxTotalTokens = NormalizeExecutionSetting(
-                options?.AgentMaxTotalTokens ?? 400_000,
-                Math.Min(500_000, Math.Max(200_000, contextBudget / 2)),
-                10_000,
+                options?.AgentMaxTotalTokens ?? 0,
+                0,
+                0,
                 2_000_000);
             int maxToolCalls = NormalizeExecutionSetting(
                 options?.AgentMaxToolCalls ?? Math.Max(100, effectiveRoundLimit * 2),

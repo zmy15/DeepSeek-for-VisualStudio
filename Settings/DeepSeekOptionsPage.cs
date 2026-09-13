@@ -758,7 +758,7 @@ namespace DeepSeek_v4_for_VisualStudio.Settings
         [LocalizedDisplayName("settings.agentMaxTotalTokens.displayName")]
         [LocalizedDescription("settings.agentMaxTotalTokens.description")]
         [DesignerSerializationVisibility(DesignerSerializationVisibility.Visible)]
-        public int AgentMaxTotalTokens { get; set; } = 400_000;
+        public int AgentMaxTotalTokens { get; set; } = 0;
 
         [LocalizedCategory("settings.category.agent")]
         [LocalizedDisplayName("settings.agentMaxToolCalls.displayName")]

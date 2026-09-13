@@ -368,10 +368,10 @@ namespace DeepSeek_v4_for_VisualStudio
 
         [VisualStudioContribution]
         internal static Setting.Integer AgentMaxTotalTokens { get; } =
-            new("deepseekAgentMaxTotalTokens", "%DeepSeek.Chat.settings.agentMaxTotalTokens.displayName%", GeneralCategory, defaultValue: 400_000)
+            new("deepseekAgentMaxTotalTokens", "%DeepSeek.Chat.settings.agentMaxTotalTokens.displayName%", GeneralCategory, defaultValue: 0)
             {
                 Description = "%DeepSeek.Chat.settings.agentMaxTotalTokens.description%",
-                Minimum = 10_000,
+                Minimum = 0,
                 Maximum = 2_000_000,
             };
 

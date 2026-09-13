@@ -28,6 +28,7 @@ public class BaseAgentTests
 
     [Theory]
     [InlineData(0, 100, 10, 1000, 100)]
+    [InlineData(0, 0, 0, 1000, 0)]
     [InlineData(1, 100, 10, 1000, 10)]
     [InlineData(2000, 100, 10, 1000, 1000)]
     [InlineData(500, 100, 10, 1000, 500)]
