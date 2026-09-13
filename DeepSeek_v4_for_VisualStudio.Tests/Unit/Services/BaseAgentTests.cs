@@ -11,6 +11,21 @@ namespace DeepSeek_v4_for_VisualStudio.Tests.Unit.Services;
 /// </summary>
 public class BaseAgentTests
 {
+    [Theory]
+    [InlineData(200, null, 200)]
+    [InlineData(200, 50, 50)]
+    [InlineData(500, 200, 200)]
+    [InlineData(0, null, 200)]
+    public void ResolveEffectiveToolRoundLimit_ReturnsPerInvocationLimit(
+        int configuredLimit,
+        int? maxToolRounds,
+        int expected)
+    {
+        int result = BaseAgent.ResolveEffectiveToolRoundLimit(configuredLimit, maxToolRounds);
+
+        result.Should().Be(expected);
+    }
+
     #region IsContentChunk
 
     [Theory]

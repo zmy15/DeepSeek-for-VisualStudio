@@ -64,6 +64,16 @@ namespace DeepSeek_v4_for_VisualStudio.Services
         }
 
         /// <summary>
+        /// Resets round-scoped state when switching to a new conversation.
+        /// </summary>
+        public void ResetConversationState()
+        {
+            _currentRound = 0;
+            _fileReadCache.Clear();
+            SyncRoundToReadFileTool();
+        }
+
+        /// <summary>
         /// 将 CurrentRound 和 RoundThreshold 同步到 ReadFileTool 实例。
         /// </summary>
         private void SyncRoundToReadFileTool()

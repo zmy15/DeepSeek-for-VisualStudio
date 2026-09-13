@@ -904,14 +904,15 @@ namespace DeepSeek_v4_for_VisualStudio.Services.Agents
             if (configuredSafetyLimit < 1) configuredSafetyLimit = 200;
             bool loopDetected = false;
 
-            int round = BuiltInTools?.CurrentRound ?? 0;
-            int initialRound = round;
-            int effectiveRoundLimit = maxToolRounds is > 0
-                ? Math.Min(configuredSafetyLimit, maxToolRounds.Value)
-                : configuredSafetyLimit;
-            int safetyLimit = initialRound > int.MaxValue - effectiveRoundLimit
-                ? int.MaxValue
-                : initialRound + effectiveRoundLimit;
+            // MaxToolCallRounds is a per-Agent-invocation limit. The global
+            // CurrentRound is only a cache-age offset and must not consume the
+            // next request's safety budget.
+            int round = 0;
+            int cacheRoundOffset = BuiltInTools?.CurrentRound ?? 0;
+            int effectiveRoundLimit = ResolveEffectiveToolRoundLimit(
+                configuredSafetyLimit,
+                maxToolRounds);
+            int safetyLimit = effectiveRoundLimit;
 
             // ──  v1.1.11：固定后缀插入点 ──
             // 消息结构：[prefix][稳定历史][tool_calls...][volatile][user][agent]
@@ -935,7 +936,12 @@ namespace DeepSeek_v4_for_VisualStudio.Services.Agents
 
                 // ── 同步当前轮次到文件读取缓存，用于轮数过期策略 ──
                 if (BuiltInTools != null)
-                    BuiltInTools.CurrentRound = round;
+                {
+                    int cacheRound = cacheRoundOffset > int.MaxValue - round
+                        ? int.MaxValue
+                        : cacheRoundOffset + round;
+                    BuiltInTools.CurrentRound = cacheRound;
+                }
 
                 toolCallAccumulator.Clear();
                 reasoningBuilder.Clear();
@@ -3414,6 +3420,22 @@ namespace DeepSeek_v4_for_VisualStudio.Services.Agents
             }
             catch { }
             return null;
+        }
+
+        /// <summary>
+        /// Resolves the per-invocation tool-loop limit. This value intentionally
+        /// does not include the global cache round counter.
+        /// </summary>
+        internal static int ResolveEffectiveToolRoundLimit(
+            int configuredSafetyLimit,
+            int? maxToolRounds)
+        {
+            if (configuredSafetyLimit < 1)
+                configuredSafetyLimit = 200;
+
+            return maxToolRounds is > 0
+                ? Math.Min(configuredSafetyLimit, maxToolRounds.Value)
+                : configuredSafetyLimit;
         }
 
         /// <summary>

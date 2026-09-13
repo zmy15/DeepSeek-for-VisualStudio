@@ -132,6 +132,23 @@ public class BuiltInToolServiceTests
     }
 
     [Fact]
+    public void ResetConversationState_ClearsRoundAndFileCache()
+    {
+        var service = new BuiltInToolService();
+        var path = Path.Combine(Path.GetTempPath(), "agent-round-reset-test.cs");
+        service.CurrentRound = 987;
+        service.UpdateFileReadCache(new[]
+        {
+            new KeyValuePair<string, string>(path, "cached content"),
+        });
+
+        service.ResetConversationState();
+
+        service.CurrentRound.Should().Be(0);
+        service.GetFileReadCacheSnapshot().Should().BeEmpty();
+    }
+
+    [Fact]
     public void BuildEventsSink_CountsProjectLevelSuccesses()
     {
         var sink = new BuildService.BuildEventsSink();

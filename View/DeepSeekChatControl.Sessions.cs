@@ -26,6 +26,7 @@ namespace DeepSeek_v4_for_VisualStudio.View
         private ChatSession CreateNewSessionInternal()
         {
             ResetActiveAgentToAsk();
+            _builtInToolService?.ResetConversationState();
 
             // ── 初始化新树 ──
             _tree = new ConversationTree();
@@ -267,8 +268,11 @@ namespace DeepSeek_v4_for_VisualStudio.View
 
                     // ── 同步当前会话 ID 到内置工具服务（MemoryTool 需要）──
                     if (_builtInToolService != null)
+                    {
                         _builtInToolService.CurrentSessionId = _activeSession.Id;
                         _builtInToolService.CurrentSolutionPath = _solutionPath;
+                        _builtInToolService.ResetConversationState();
+                    }
 
                     // ── 重置 AI 标题生成状态（切换到的会话可能已有标题） ──
                     _pendingAiTitle = false;
@@ -574,8 +578,11 @@ namespace DeepSeek_v4_for_VisualStudio.View
 
                 // ── 同步当前会话 ID 到内置工具服务 ──
                 if (_builtInToolService != null)
+                {
                     _builtInToolService.CurrentSessionId = _activeSession.Id;
                     _builtInToolService.CurrentSolutionPath = _solutionPath;
+                    _builtInToolService.ResetConversationState();
+                }
 
                 lock (_lock)
                 {
@@ -666,6 +673,7 @@ namespace DeepSeek_v4_for_VisualStudio.View
                 _sessionsContainer.ActiveSessionId = _activeSession?.Id;
 
                 ResetActiveAgentToAsk();
+                _builtInToolService?.ResetConversationState();
 
                 lock (_lock)
                 {
@@ -767,6 +775,7 @@ namespace DeepSeek_v4_for_VisualStudio.View
                 _apiService?.ResetAccumulatedStats();
 
                 ResetActiveAgentToAsk();
+                _builtInToolService?.ResetConversationState();
 
                 // ── 重置树 ──
                 _tree = new ConversationTree();
