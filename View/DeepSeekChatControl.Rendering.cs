@@ -425,6 +425,7 @@ namespace DeepSeek_v4_for_VisualStudio.View
                 }
 
                 Logger.Info($"[Render] WebView2 缩放已保存: {percent}%");
+                RecordRuntimeSettingsApplied();
             }
             catch (Exception ex)
             {

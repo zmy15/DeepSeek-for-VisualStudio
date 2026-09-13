@@ -235,104 +235,123 @@ namespace DeepSeek_v4_for_VisualStudio.View
         }
 
         /// <summary>
-        /// 设置变更事件回调（用户点击 Options 对话框的"确定"/"应用"时触发）。
-        /// 热重载 OCR、Web 搜索、模型等配置，无需重启聊天窗口。
-        /// <summary>
-        /// 选项页保存后即时应用核心设置（P1：ApiKey/模型/思考模式热更新）。
+        /// 设置变更统一入口。只刷新快照中实际变化的子系统，避免一次修改触发全量重置。
         /// </summary>
-        private void OnCoreSettingsChanged()
+        private void OnSettingsChanged()
         {
+            if (_disposed) return;
+
             try
             {
-                if (_options == null) return;
-
-                // Key 或端点保存后重新确认官方目录；自定义端点不影响官方模型列表。
-                _ = RefreshOfficialModelsAsync();
-
-                var config = DeepSeekEndpointResolver.Resolve(_options);
-
-                // Settings events are authoritative. Reading UI controls here caused
-                // Unified Settings changes to be overwritten with stale chat-window state.
-                // config（含 IsVision）为 resolver 权威输出，一次性同步 Key/BaseUrl/Model/IsCustom/IsVision。
-                _apiService?.UpdateEndpoint(config);
-
-                // 视觉标记/模型切换影响 capture_window 等工具可见性 → 使 Agent 完整工具集缓存失效
-                _agentFactory?.InvalidateFullToolSetCache();
-
-                var thinking = _options.IsThinkingEnabled;
-                var effort = _options.ReasoningEffort ?? "high";
-                _apiService?.ConfigureThinking(thinking, effort);
-                UpdateEndpointCapabilityControls();
-            }
-            catch (Exception ex)
-            {
-                Logger.Warn($"[Settings] 核心设置热更新失败: {ex.Message}");
-            }
-        }
-
-        private void OnOcrSettingsChanged()
-        {
-            Logger.Info("[Settings] 检测到设置变更，正在刷新...");
-            OnCoreSettingsChanged();
-            try
-            {
-                // ── 记录变更前的 API 配置，判断是否需要重建 API 服务 ──
-                string? oldApiKey = _options?.ApiKey;
-                string? oldCustomApiKey = _options?.CustomApiKey;
-                string? oldModel = _options?.SelectedModel;
-                string? oldBaseUrl = _options?.ApiBaseUrl;
-                string? oldCustomModel = _options?.CustomModelName;
-                string? oldActiveCustomModel = _options?.ActiveCustomModel;
-                string? oldModelSource = _options?.ActiveModelSource;
-                bool oldThinking = _options?.IsThinkingEnabled ?? true;
-                string? oldEffort = _options?.ReasoningEffort;
-
-                // 刷新 _options 引用（DialogPage 属性已由 VS 自动更新）
+                // DialogPage 可能被 VS 替换，先刷新实例引用，再与上次已应用快照比较。
                 if (_package != null)
                     _options = DeepSeekOptionsPage.Instance ?? _package.Options;
 
-                RefreshCoreControlsFromSettings();
+                if (_options == null) return;
 
-                // ── API Key / 模型 / 思考配置变更时，立即重建 API 服务（无需重启）──
-                // 修复：旧实现只刷新 _options 引用，却不重建 _apiService，
-                // 导致初次填写/修改 API Key 后仍用旧 Key（或空 Key）发请求 → 401，
-                // 必须重启才能生效。
-                bool apiConfigChanged =
-                    !string.Equals(oldApiKey, _options?.ApiKey, StringComparison.Ordinal) ||
-                    !string.Equals(oldCustomApiKey, _options?.CustomApiKey, StringComparison.Ordinal) ||
-                    !string.Equals(oldModel, _options?.SelectedModel, StringComparison.Ordinal) ||
-                    !string.Equals(oldBaseUrl, _options?.ApiBaseUrl, StringComparison.Ordinal) ||
-                    !string.Equals(oldCustomModel, _options?.CustomModelName, StringComparison.Ordinal) ||
-                    !string.Equals(oldActiveCustomModel, _options?.ActiveCustomModel, StringComparison.Ordinal) ||
-                    !string.Equals(oldModelSource, _options?.ActiveModelSource, StringComparison.Ordinal) ||
-                    oldThinking != (_options?.IsThinkingEnabled ?? true) ||
-                    !string.Equals(oldEffort, _options?.ReasoningEffort, StringComparison.Ordinal);
+                var previous = _lastAppliedSettings;
+                var current = RuntimeSettingsSnapshot.Capture(_options);
 
-                if (apiConfigChanged)
-                {
-                    Logger.Info("[Settings] API 配置已变更，重建 API 服务...");
-                    InitializeApiService();
-                }
+                var changes = previous == null
+                    ? RuntimeSettingsChangeSet.All
+                    : RuntimeSettingsChangeSet.Between(previous, current);
 
+                if (!changes.HasChanges) return;
+
+                Logger.Info(
+                    "[Settings] 应用增量设置变更: " +
+                    $"endpoint={changes.EndpointChanged}, modelUi={changes.ModelControlsChanged}, " +
+                    $"thinking={changes.ThinkingChanged}, approval={changes.ApprovalChanged}, " +
+                    $"ocr={changes.OcrChanged}, webSearch={changes.WebSearchChanged}, layout={changes.LayoutChanged}");
+
+                ExecuteWithoutCoreControlEvents(() => ApplyRuntimeSettingsChanges(changes));
+                _lastAppliedSettings = current;
+            }
+            catch (Exception ex)
+            {
+                Logger.Error($"[Settings] 设置热切换失败: {ex.Message}", ex);
+            }
+        }
+
+        private void ApplyRuntimeSettingsChanges(RuntimeSettingsChangeSet changes)
+        {
+            if (changes.OfficialApiKeyChanged)
+                _ = RefreshOfficialModelsAsync();
+
+            if (changes.ModelControlsChanged)
+                RefreshModelFromSettings();
+
+            if (changes.ThinkingChanged)
+            {
+                if (ThinkingCheckBox != null)
+                    ThinkingCheckBox.IsChecked = _options?.IsThinkingEnabled ?? true;
+                RefreshReasoningEffortFromSettings();
+            }
+
+            if (changes.ApprovalChanged)
+                RefreshApprovalModeFromSettings();
+
+            if (changes.EndpointChanged)
+                ApplyEndpointSettingsFromSettings();
+
+            if (changes.ThinkingChanged)
+                SyncThinkingToApiService();
+
+            if (changes.LayoutChanged)
+            {
                 ApplyBottomAreaScale();
                 ApplyPersistedWebView2Zoom();
+            }
 
-                // ── OCR 热重载 ──
+            if (changes.OcrChanged)
+            {
                 OcrService.ResetAllEngines();
                 InitializeOcrService();
                 Logger.Info($"[Settings] OCR 热切换完成 → {OcrService.CurrentEngine}");
+            }
 
-                // ── Web 搜索热重载 ──
+            if (changes.WebSearchChanged)
+            {
                 RefreshWebSearchFromSettings();
                 string resolvedEngine = ResolveWebSearchEngineFromOptions();
                 StatusLabel.Text = _webSearchEngine == "Off"
                     ? string.Format(LocalizationService.Instance["status.settings.updated.default"], resolvedEngine)
                     : string.Format(LocalizationService.Instance["status.settings.updated"], _webSearchEngine);
             }
-            catch (Exception ex)
+        }
+
+        private void ApplyEndpointSettingsFromSettings()
+        {
+            var config = DeepSeekEndpointResolver.Resolve(_options);
+            if (_apiService == null || string.IsNullOrEmpty(config.ApiKey))
             {
-                Logger.Error($"[Settings] 设置热切换失败: {ex.Message}", ex);
+                InitializeApiService();
+                return;
             }
+
+            SyncApiEndpointFromSettings();
+        }
+
+        private void SyncApiEndpointFromSettings()
+        {
+            var config = DeepSeekEndpointResolver.Resolve(_options);
+            _apiService?.UpdateEndpoint(config);
+            _agentFactory?.InvalidateFullToolSetCache();
+            UpdateEndpointCapabilityControls();
+        }
+
+        private void SyncThinkingToApiService()
+        {
+            if (_options == null) return;
+            _apiService?.ConfigureThinking(
+                _options.IsThinkingEnabled,
+                _options.ReasoningEffort ?? "high");
+        }
+
+        private void RecordRuntimeSettingsApplied()
+        {
+            if (_options != null)
+                _lastAppliedSettings = RuntimeSettingsSnapshot.Capture(_options);
         }
 
         /// <summary>用当前官方 Key 刷新 /models 列表；失败时保留上次成功结果。</summary>
@@ -858,6 +877,8 @@ namespace DeepSeek_v4_for_VisualStudio.View
                             Logger.Info("[Settings] 解决方案打开后同步 API 配置，重建 API 服务");
                             InitializeApiService();
                         }
+
+                        RecordRuntimeSettingsApplied();
                     }
 
                     // 先保存当前对话

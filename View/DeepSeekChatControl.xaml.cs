@@ -88,6 +88,7 @@ namespace DeepSeek_v4_for_VisualStudio.View
 
         private DeepSeek_v4_for_VisualStudioPackage? _package;
         private DeepSeekOptionsPage? _options;
+        private RuntimeSettingsSnapshot? _lastAppliedSettings;
         private DeepSeekApiService? _apiService;
         private WebSearchService? _webSearchService;
         private McpManagerService? _mcpManager;
@@ -167,6 +168,7 @@ namespace DeepSeek_v4_for_VisualStudio.View
 
         /// <summary>程序化填充会话下拉时抑制 SelectionChanged（P2 交互修复）。</summary>
         private bool _suppressSessionSelection;
+        private bool _isRefreshingCoreControls;
         private string _webSearchEngine = "Off"; // "Off" | "Baidu" | "DuckDuckGo"
 
         // ── 文件上传 ──
@@ -598,8 +600,7 @@ namespace DeepSeek_v4_for_VisualStudio.View
             _isControlStarted = true;
 
             // Subscribe first so user edits are not lost while persisted options are loading.
-            DeepSeekOptionsPage.SettingsChanged += OnOcrSettingsChanged;
-            DeepSeekOptionsPage.SettingsChanged += OnCoreSettingsChanged;
+            DeepSeekOptionsPage.SettingsChanged += OnSettingsChanged;
 
             // ── 订阅 diff 预览状态事件，刷新全局控制栏 ──
             EditorDiffMarkerService.Instance.PendingDiffCountChanged += RefreshDiffGlobalBar;
@@ -627,6 +628,7 @@ namespace DeepSeek_v4_for_VisualStudio.View
                     InitializeOcrService();
                     InitializeMcp(); // MCP 后台初始化，不阻塞 UI
                     InitializeSkills(); // Skill 后台发现，不阻塞 UI
+                    RecordRuntimeSettingsApplied();
 
                     // ── 链式初始化：先解析项目路径 → 再加载会话 ──
                     // 之前两者各自 fire-and-forget，导致首条消息发送时 _solutionPath 可能仍为 null。
@@ -1066,8 +1068,7 @@ namespace DeepSeek_v4_for_VisualStudio.View
             if (_disposed) return;
             _disposed = true;
 
-            DeepSeekOptionsPage.SettingsChanged -= OnOcrSettingsChanged;
-            DeepSeekOptionsPage.SettingsChanged -= OnCoreSettingsChanged;
+            DeepSeekOptionsPage.SettingsChanged -= OnSettingsChanged;
             OfficialModelCatalogService.ModelsChanged -= OnOfficialModelsChanged;
 
             // ── 取消主题事件订阅 ──
@@ -1386,22 +1387,17 @@ namespace DeepSeek_v4_for_VisualStudio.View
                     break;
                 }
             }
-
-            // 同步更新 API 服务端点配置（含自定义模型覆盖；Key/BaseUrl/视觉标记顺带与 Resolver 保持一致）
-            if (_apiService != null)
-            {
-                _apiService.UpdateEndpoint(config);
-
-                // 模型/来源刷新影响 capture_window 等工具可见性 → 使 Agent 完整工具集缓存失效
-                _agentFactory?.InvalidateFullToolSetCache();
-            }
         }
 
         /// <summary>官方模型列表从 /models 接口刷新完成后，回到 UI 线程重建下拉框。</summary>
         private void OnOfficialModelsChanged()
         {
             if (_disposed) return;
-            _ = Dispatcher.InvokeAsync(RefreshModelFromSettings);
+            _ = Dispatcher.InvokeAsync(() =>
+            {
+                RefreshModelFromSettings();
+                SyncApiEndpointFromSettings();
+            });
         }
 
         /// <summary>
@@ -1412,13 +1408,6 @@ namespace DeepSeek_v4_for_VisualStudio.View
             if (EffortComboBox == null || _options == null) return;
             string savedEffort = _options.ReasoningEffort ?? "high";
             EffortComboBox.SelectedItem = savedEffort == "max" ? "max" : "high";
-
-            // 同步更新 API 服务的推理强度
-            if (_apiService != null)
-            {
-                bool enabled = ThinkingCheckBox.IsChecked == true;
-                _apiService.ConfigureThinking(enabled, savedEffort);
-            }
         }
 
         /// <summary>
@@ -1428,12 +1417,32 @@ namespace DeepSeek_v4_for_VisualStudio.View
         {
             if (_options == null) return;
 
-            RefreshApprovalModeFromSettings();
-            RefreshModelFromSettings();
-            if (ThinkingCheckBox != null)
-                ThinkingCheckBox.IsChecked = _options.IsThinkingEnabled;
-            RefreshReasoningEffortFromSettings();
-            UpdateEndpointCapabilityControls();
+            ExecuteWithoutCoreControlEvents(() =>
+            {
+                RefreshApprovalModeFromSettings();
+                RefreshModelFromSettings();
+                if (ThinkingCheckBox != null)
+                    ThinkingCheckBox.IsChecked = _options.IsThinkingEnabled;
+                RefreshReasoningEffortFromSettings();
+                UpdateEndpointCapabilityControls();
+            });
+
+            SyncApiEndpointFromSettings();
+            SyncThinkingToApiService();
+        }
+
+        private void ExecuteWithoutCoreControlEvents(Action action)
+        {
+            bool wasRefreshing = _isRefreshingCoreControls;
+            _isRefreshingCoreControls = true;
+            try
+            {
+                action();
+            }
+            finally
+            {
+                _isRefreshingCoreControls = wasRefreshing;
+            }
         }
 
         /// <summary>
@@ -1487,27 +1496,30 @@ namespace DeepSeek_v4_for_VisualStudio.View
         {
             if (ApprovalModeComboBox?.ItemsSource is ApprovalModeOption[] options)
             {
-                var L = LocalizationService.Instance;
-                foreach (var opt in options)
+                ExecuteWithoutCoreControlEvents(() =>
                 {
-                    opt.DisplayText = opt.Mode switch
+                    var L = LocalizationService.Instance;
+                    foreach (var opt in options)
                     {
-                        Models.ApprovalMode.BlockAll => L["approval.blockAll"],
-                        Models.ApprovalMode.AllowAll => L["approval.allowAll"],
-                        Models.ApprovalMode.SmartBlock => L["approval.smartBlock"],
-                        _ => opt.DisplayText,
-                    };
-                }
-                // 强制刷新 ItemsSource 绑定
-                var selectedValue = ApprovalModeComboBox.SelectedValue;
-                ApprovalModeComboBox.ItemsSource = null;
-                ApprovalModeComboBox.ItemsSource = options;
-                ApprovalModeComboBox.SelectedValue = selectedValue;
+                        opt.DisplayText = opt.Mode switch
+                        {
+                            Models.ApprovalMode.BlockAll => L["approval.blockAll"],
+                            Models.ApprovalMode.AllowAll => L["approval.allowAll"],
+                            Models.ApprovalMode.SmartBlock => L["approval.smartBlock"],
+                            _ => opt.DisplayText,
+                        };
+                    }
+                    // 强制刷新 ItemsSource 绑定
+                    var selectedValue = ApprovalModeComboBox.SelectedValue;
+                    ApprovalModeComboBox.ItemsSource = null;
+                    ApprovalModeComboBox.ItemsSource = options;
+                    ApprovalModeComboBox.SelectedValue = selectedValue;
 
-                // 同步缓存，供后台线程快速判断审批模式
-                _cachedApprovalMode = ApprovalModeComboBox.SelectedValue is Models.ApprovalMode refreshedMode
-                    ? refreshedMode
-                    : Models.ApprovalMode.SmartBlock;
+                    // 同步缓存，供后台线程快速判断审批模式
+                    _cachedApprovalMode = ApprovalModeComboBox.SelectedValue is Models.ApprovalMode refreshedMode
+                        ? refreshedMode
+                        : Models.ApprovalMode.SmartBlock;
+                });
             }
         }
 
