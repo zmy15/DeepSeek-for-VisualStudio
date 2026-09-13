@@ -20,6 +20,16 @@ public class AgentExecutionGuardTests
     }
 
     [Fact]
+    public void CheckBeforeStep_DefaultWallTime_IsUnlimited()
+    {
+        var guard = new AgentExecutionGuard(
+            new AgentExecutionPolicy(),
+            executionDepth: 0);
+
+        guard.CheckBeforeStep(1).ShouldStop.Should().BeFalse();
+    }
+
+    [Fact]
     public void CheckBeforeStep_MaxDepth_Stops()
     {
         var guard = new AgentExecutionGuard(

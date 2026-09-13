@@ -8,7 +8,7 @@ namespace DeepSeek_v4_for_VisualStudio.Services.Agents
     public sealed class AgentExecutionPolicy
     {
         public int MaxSteps { get; init; } = 200;
-        public TimeSpan MaxWallTime { get; init; } = TimeSpan.FromMinutes(15);
+        public TimeSpan MaxWallTime { get; init; }
         public long MaxTotalTokens { get; init; }
         public int MaxToolCalls { get; init; } = 400;
         public int MaxExecutionDepth { get; init; } = 3;
@@ -67,6 +67,7 @@ namespace DeepSeek_v4_for_VisualStudio.Services.Agents
         }
 
         public int ExecutionDepth { get; }
+        private bool HasWallTimeLimit => _policy.MaxWallTime > TimeSpan.Zero;
 
         public AgentExecutionDecision CheckBeforeStep(int nextStep)
         {
@@ -84,7 +85,7 @@ namespace DeepSeek_v4_for_VisualStudio.Services.Agents
                     $"已达到最大工具循环步数 {_policy.MaxSteps}，已安全停止。");
             }
 
-            if (_stopwatch.Elapsed >= _policy.MaxWallTime)
+            if (HasWallTimeLimit && _stopwatch.Elapsed >= _policy.MaxWallTime)
             {
                 return AgentExecutionDecision.Stop(
                     AgentExecutionStopReason.WallTime,
@@ -147,7 +148,7 @@ namespace DeepSeek_v4_for_VisualStudio.Services.Agents
 
             bool warning =
                 nextStep >= _policy.MaxSteps * 0.8 ||
-                _stopwatch.Elapsed >= TimeSpan.FromTicks((long)(_policy.MaxWallTime.Ticks * 0.8)) ||
+                (HasWallTimeLimit && _stopwatch.Elapsed >= TimeSpan.FromTicks((long)(_policy.MaxWallTime.Ticks * 0.8))) ||
                 (_policy.MaxTotalTokens > 0 && _totalTokens >= _policy.MaxTotalTokens * 0.8) ||
                 _toolCallCount >= _policy.MaxToolCalls * 0.8;
 
@@ -158,7 +159,7 @@ namespace DeepSeek_v4_for_VisualStudio.Services.Agents
             return $"Agent 执行预算已使用超过 80%：steps={nextStep}/{_policy.MaxSteps}, " +
                 $"tokens={_totalTokens:N0}/{_policy.MaxTotalTokens:N0}, " +
                 $"tools={_toolCallCount}/{_policy.MaxToolCalls}, " +
-                $"elapsed={FormatDuration(_stopwatch.Elapsed)}/{FormatDuration(_policy.MaxWallTime)}";
+                $"elapsed={FormatDuration(_stopwatch.Elapsed)}/{FormatWallTimeLimit()}";
         }
 
         private static string ComputeFingerprint(IEnumerable<string> stateParts)
@@ -193,5 +194,8 @@ namespace DeepSeek_v4_for_VisualStudio.Services.Agents
             => duration.TotalMinutes >= 1
                 ? $"{duration.TotalMinutes:F1} min"
                 : $"{duration.TotalSeconds:F0} s";
+
+        private string FormatWallTimeLimit()
+            => HasWallTimeLimit ? FormatDuration(_policy.MaxWallTime) : "unlimited";
     }
 }

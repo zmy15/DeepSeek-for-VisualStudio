@@ -752,7 +752,7 @@ namespace DeepSeek_v4_for_VisualStudio.Settings
         [LocalizedDisplayName("settings.agentMaxWallTimeSeconds.displayName")]
         [LocalizedDescription("settings.agentMaxWallTimeSeconds.description")]
         [DesignerSerializationVisibility(DesignerSerializationVisibility.Visible)]
-        public int AgentMaxWallTimeSeconds { get; set; } = 900;
+        public int AgentMaxWallTimeSeconds { get; set; } = 0;
 
         [LocalizedCategory("settings.category.agent")]
         [LocalizedDisplayName("settings.agentMaxTotalTokens.displayName")]

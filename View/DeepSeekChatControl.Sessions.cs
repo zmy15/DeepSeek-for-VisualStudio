@@ -25,6 +25,7 @@ namespace DeepSeek_v4_for_VisualStudio.View
         /// </summary>
         private ChatSession CreateNewSessionInternal()
         {
+            ResetConversationElapsedTimer();
             ResetActiveAgentToAsk();
             _builtInToolService?.ResetConversationState();
 
@@ -237,6 +238,7 @@ namespace DeepSeek_v4_for_VisualStudio.View
         #pragma warning disable VSTHRD100 // async void 用于会话切换（从事件处理程序调用），异常已在方法内处理
         private async void SwitchToSession(ChatSession session)
         {
+            ResetConversationElapsedTimer();
             _discardContextOnNextSend = false;
             _contextManager.ClearConversationResetNotice();
             try
@@ -774,6 +776,7 @@ namespace DeepSeek_v4_for_VisualStudio.View
             {
                 _discardContextOnNextSend = false;
                 _contextManager.ClearConversationResetNotice();
+                ResetConversationElapsedTimer();
                 // ── 重置累计 Token / 费用计数器 ──
                 _apiService?.ResetAccumulatedStats();
 

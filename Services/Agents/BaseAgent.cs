@@ -907,9 +907,9 @@ namespace DeepSeek_v4_for_VisualStudio.Services.Agents
             int contextBudget = Context?.ContextManager?.TokenBudget ?? 900_000;
             var options = Settings.DeepSeekOptionsPage.Instance;
             int maxWallTimeSeconds = NormalizeExecutionSetting(
-                options?.AgentMaxWallTimeSeconds ?? 900,
-                900,
-                30,
+                options?.AgentMaxWallTimeSeconds ?? 0,
+                0,
+                0,
                 7200);
             int maxTotalTokens = NormalizeExecutionSetting(
                 options?.AgentMaxTotalTokens ?? 0,
@@ -3476,7 +3476,7 @@ namespace DeepSeek_v4_for_VisualStudio.Services.Agents
 
         /// <summary>
         /// Applies a configured execution budget with a deterministic fallback
-        /// and bounds. Invalid persisted values cannot disable the guard.
+        /// and bounds. A minimum of zero allows nullable or unlimited budgets.
         /// </summary>
         internal static int NormalizeExecutionSetting(
             int configuredValue,

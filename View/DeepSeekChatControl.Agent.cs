@@ -407,6 +407,7 @@ namespace DeepSeek_v4_for_VisualStudio.View
 
             try
             {
+                StartConversationElapsedTimer();
                 await ThreadHelper.JoinableTaskFactory.SwitchToMainThreadAsync();
                 // Start each ordinary user turn back at Ask instead of keeping the
                 // Plan/Edit agent left over from the previous turn's workflow.
@@ -1020,6 +1021,7 @@ namespace DeepSeek_v4_for_VisualStudio.View
             }
             finally
             {
+                StopConversationElapsedTimer();
                 _activePlan = null;
 
                 // ── P1-A：会话结束后清除 IDE 快照，避免过期上下文泄漏到非 Agent 的聊天轮次 ──

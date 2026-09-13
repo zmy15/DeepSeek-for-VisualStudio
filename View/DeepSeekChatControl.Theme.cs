@@ -123,6 +123,7 @@ namespace DeepSeek_v4_for_VisualStudio.View
                 // ── 状态栏 ──
                 ApplyBorderBrush(FindParentBorder(StatusLabel), panelBg, panelBorder);
                 if (StatusLabel != null) StatusLabel.Foreground = mutedText;
+                if (ConversationElapsedLabel != null) ConversationElapsedLabel.Foreground = mutedText;
 
                 // ── Diff 全局控制栏 ──
                 if (DiffGlobalBar != null) DiffGlobalBar.Background = diffBarBg;

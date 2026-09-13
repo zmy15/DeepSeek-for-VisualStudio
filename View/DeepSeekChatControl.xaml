@@ -437,8 +437,9 @@
                 Padding="12,4">
             <Grid>
                 <Grid.ColumnDefinitions>
-                    <ColumnDefinition Width="Auto"/>
                     <ColumnDefinition Width="*"/>
+                    <ColumnDefinition Width="Auto"/>
+                    <ColumnDefinition Width="Auto"/>
                 </Grid.ColumnDefinitions>
                 <TextBlock x:Name="StatusLabel"
                            Grid.Column="0"
@@ -447,8 +448,16 @@
                            VerticalAlignment="Center"
                            TextWrapping="Wrap"
                            TextTrimming="CharacterEllipsis" />
+                <TextBlock x:Name="ConversationElapsedLabel"
+                           Grid.Column="1"
+                           Margin="12,0,0,0"
+                           FontSize="11"
+                           Foreground="#888888"
+                           VerticalAlignment="Center"
+                           TextTrimming="CharacterEllipsis"
+                           Visibility="Collapsed" />
                 <Border x:Name="AgentModeBadge"
-                        Grid.Column="1"
+                        Grid.Column="2"
                         HorizontalAlignment="Right"
                         VerticalAlignment="Center"
                         MinWidth="60" Height="18"

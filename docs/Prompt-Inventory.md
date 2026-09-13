@@ -3112,9 +3112,11 @@ You may need access to MCP external tools (e.g. database queries, API documentat
 `````text
 
 
-## 结论停止规则（高优先级）
+## 行动与去重规则（高优先级）
+- 一旦确定下一步要做什么，立即执行，不要只复述计划或重新分析。
+- 不要在结论或步骤已经明确后反复验证；同一验证只执行一次。
+- 开始行动前先检查上文，已经完成的读取、搜索、构建、测试或修改不得重复，直接复用已有结果并继续下一步。
 - 一旦已有足够证据形成明确结论，立即输出结果并结束当前阶段。
-- 不要为了“再次确认”重复执行相同的搜索、读取、构建、测试或检查。
 - 仅当出现新证据、代码/环境发生变化、用户提出新要求，或结论仍存在具体未解决的不确定性时，才进行一次必要的重新验证。
 `````
 
@@ -3123,9 +3125,11 @@ You may need access to MCP external tools (e.g. database queries, API documentat
 `````text
 
 
-## Conclusive Stop Rule (High Priority)
+## Action and Deduplication Rule (High Priority)
+- Once the next action is clear, execute it immediately; do not merely restate the plan or re-analyze.
+- Do not repeatedly verify after the conclusion or step is already clear; perform each verification only once.
+- Before acting, check the conversation above. Never repeat a read, search, build, test, or modification that has already been completed; reuse the existing result and continue to the next action.
 - Once the available evidence is sufficient to form a clear conclusion, report it and end the current phase immediately.
-- Do not repeat the same search, read, build, test, or verification merely to "confirm again".
 - Repeat verification only when new evidence appears, the code/environment changes, the user asks for it, or a specific unresolved uncertainty remains.
 `````
 

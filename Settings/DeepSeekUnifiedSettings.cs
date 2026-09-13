@@ -359,10 +359,10 @@ namespace DeepSeek_v4_for_VisualStudio
 
         [VisualStudioContribution]
         internal static Setting.Integer AgentMaxWallTimeSeconds { get; } =
-            new("deepseekAgentMaxWallTimeSeconds", "%DeepSeek.Chat.settings.agentMaxWallTimeSeconds.displayName%", GeneralCategory, defaultValue: 900)
+            new("deepseekAgentMaxWallTimeSeconds", "%DeepSeek.Chat.settings.agentMaxWallTimeSeconds.displayName%", GeneralCategory, defaultValue: 0)
             {
                 Description = "%DeepSeek.Chat.settings.agentMaxWallTimeSeconds.description%",
-                Minimum = 30,
+                Minimum = 0,
                 Maximum = 7200,
             };
 

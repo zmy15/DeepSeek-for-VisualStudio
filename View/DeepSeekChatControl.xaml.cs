@@ -313,6 +313,10 @@ namespace DeepSeek_v4_for_VisualStudio.View
         private System.Windows.Threading.DispatcherTimer? _balanceTimer;
         private BalanceResponse? _lastBalance;
 
+        // ── 单次对话耗时 ──
+        private readonly Stopwatch _conversationStopwatch = Stopwatch.StartNew();
+        private System.Windows.Threading.DispatcherTimer? _conversationElapsedTimer;
+
         // ── Token 估算校准 ──
         private long _lastCalibratedPromptTokens; // 上次校准时的 prompt_tokens，避免重复校准
 
@@ -722,6 +726,86 @@ namespace DeepSeek_v4_for_VisualStudio.View
             _balanceTimer = null;
         }
 
+        /// <summary>开始单次对话耗时计时，并启动 UI 实时刷新。</summary>
+        private void StartConversationElapsedTimer()
+        {
+            _conversationStopwatch.Restart();
+            RunConversationTimerOnUiThread(() =>
+            {
+                if (_conversationElapsedTimer == null)
+                {
+                    _conversationElapsedTimer = new System.Windows.Threading.DispatcherTimer
+                    {
+                        Interval = TimeSpan.FromSeconds(1)
+                    };
+                    _conversationElapsedTimer.Tick += (_, _) => UpdateConversationElapsedLabel();
+                }
+
+                ConversationElapsedLabel.Visibility = Visibility.Visible;
+                UpdateConversationElapsedLabel();
+                _conversationElapsedTimer.Start();
+            });
+        }
+
+        /// <summary>停止单次对话耗时计时，并保留最终耗时。</summary>
+        private void StopConversationElapsedTimer()
+        {
+            if (!_conversationStopwatch.IsRunning)
+                return;
+
+            _conversationStopwatch.Stop();
+            TimeSpan elapsed = _conversationStopwatch.Elapsed;
+            RunConversationTimerOnUiThread(() =>
+            {
+                _conversationElapsedTimer?.Stop();
+                UpdateConversationElapsedLabel(elapsed);
+            });
+        }
+
+        /// <summary>清空单次对话耗时显示。</summary>
+        private void ResetConversationElapsedTimer()
+        {
+            _conversationStopwatch.Reset();
+            RunConversationTimerOnUiThread(() =>
+            {
+                _conversationElapsedTimer?.Stop();
+                if (ConversationElapsedLabel != null)
+                {
+                    ConversationElapsedLabel.Text = string.Empty;
+                    ConversationElapsedLabel.Visibility = Visibility.Collapsed;
+                }
+            });
+        }
+
+        private void RunConversationTimerOnUiThread(Action action)
+        {
+            if (Dispatcher.CheckAccess())
+                action();
+            else
+                _ = Dispatcher.BeginInvoke(action);
+        }
+
+        private void UpdateConversationElapsedLabel(TimeSpan? elapsedOverride = null)
+        {
+            if (ConversationElapsedLabel == null)
+                return;
+
+            TimeSpan elapsed = elapsedOverride ?? _conversationStopwatch.Elapsed;
+            ConversationElapsedLabel.Text = LocalizationService.Instance.Format(
+                "status.conversationElapsed",
+                FormatConversationElapsed(elapsed));
+        }
+
+        private static string FormatConversationElapsed(TimeSpan elapsed)
+        {
+            if (elapsed < TimeSpan.Zero)
+                elapsed = TimeSpan.Zero;
+
+            return elapsed.TotalHours >= 1
+                ? $"{(long)elapsed.TotalHours:00}:{elapsed.Minutes:00}:{elapsed.Seconds:00}"
+                : $"{elapsed.Minutes:00}:{elapsed.Seconds:00}";
+        }
+
         /// <summary>
         /// 异步查询余额并更新 UI。
         /// </summary>
@@ -1089,6 +1173,8 @@ namespace DeepSeek_v4_for_VisualStudio.View
             CancelStreaming();
             DisposeStreamingCts();
             StopBalanceTimer();
+            StopConversationElapsedTimer();
+            _conversationElapsedTimer = null;
             SubscribeApiRequestCompletion(null);
             _apiService?.Dispose();
             _webSearchService?.Dispose();
