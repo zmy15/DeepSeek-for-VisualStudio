@@ -468,7 +468,9 @@ namespace DeepSeek_v4_for_VisualStudio.Services.Providers
         {
             // ── 工具 Schema 规范化：按名称排序，消除注册顺序对缓存的影响 ──
             //     参考 CodeWhale prefix_cache.rs:316-331
-            List<ToolDefinition>? normalizedTools = ToolSchemaNormalizer.NormalizeForApi(tools);
+            List<ToolDefinition>? normalizedTools = tools == null
+                ? null
+                : ToolSchemaNormalizer.NormalizeForApi(tools);
 
             // toolChoice 优先级: 显式传入 > 有 tools 时 auto > null(不发送)
             string? effectiveToolChoice = toolChoice

@@ -109,7 +109,8 @@ namespace DeepSeek_v4_for_VisualStudio.Services.Agents
 
         /// <summary>
         /// 构建完整工具集（不过滤白名单），用于 DeepSeek Prefix Cache 稳定。
-        /// 所有 API 调用统一发送此完整工具集，保持 tools JSON 不变。
+        /// 常规工具调用统一发送此完整工具集，保持 tools JSON 不变。
+        /// 明确不需要工具的辅助调用可通过 includeTools=false 完全省略工具字段。
         /// 工具调用由客户端按 Agent 白名单拦截。
         /// 
         ///  双重合并：优先通过 BuiltInToolService 获取（已合并内置+MCP），
@@ -442,8 +443,8 @@ namespace DeepSeek_v4_for_VisualStudio.Services.Agents
 
         /// <summary>
         /// 使用预构建消息列表调用 AI（支持 toolChoice 和 temperature 参数）。
-        /// 
-        ///  缓存关键：与 CallAiLongAsync 不同，此方法直接使用传入的 messages，
+        ///
+        /// 缓存关键：与 CallAiLongAsync 不同，此方法直接使用传入的 messages，
         /// 不通过 BuildContextAwareMessages 重建。这使得跨阶段的对话延续成为可能——
         /// 对齐阶段的 tool call 历史可以直接传递给设计阶段，DeepSeek Prefix Cache
         /// 可以匹配整个对齐对话前缀，而非仅匹配 system prompt。
@@ -451,13 +452,13 @@ namespace DeepSeek_v4_for_VisualStudio.Services.Agents
         /// <param name="messages">预构建的完整消息列表（含 system + 历史 + user）</param>
         /// <param name="ct">取消令牌</param>
         /// <param name="maxTokens">最大输出 token 数</param>
-        /// <param name="toolChoice">工具调用策略（"none" 禁用工具）</param>
+        /// <param name="toolChoice">工具调用策略（"none" 禁用工具调用）</param>
         /// <param name="temperature">采样温度（0.0 = 确定性输出）</param>
         /// <param name="responseFormat">JSON Output 模式: "json_object" 启用，null 不启用</param>
-        /// <summary>
-        /// 使用预构建消息列表调用 AI（支持 toolChoice 和 temperature 参数）。
-        ///  始终传入完整工具集 + toolChoice="none" 以保持 Prefix Cache 稳定。
-        /// </summary>
+        /// <param name="model">临时覆盖模型；null 使用当前端点模型</param>
+        /// <param name="thinkingEnabled">临时覆盖思考模式；null 使用默认设置</param>
+        /// <param name="onThinking">思考内容流式回调；null 时使用当前 Agent 回调</param>
+        /// <param name="includeTools">是否随请求发送工具定义；路由等纯文本调用应设为 false</param>
         public async Task<string> CallAiWithMessagesAsync(
             List<ChatApiMessage> messages,
             CancellationToken ct,
@@ -467,13 +468,16 @@ namespace DeepSeek_v4_for_VisualStudio.Services.Agents
             string? responseFormat = null,
             string? model = null,
             bool? thinkingEnabled = null,
-            Action<string>? onThinking = null)
+            Action<string>? onThinking = null,
+            bool includeTools = true)
         {
-            //  传入完整工具集以保持 Prefix Cache 稳定
-            var fullTools = TryGetFullToolSet();
+            // 常规调用传入完整工具集以保持 Prefix Cache 稳定；
+            // 路由等明确不需要工具的调用必须完全省略 tools 和 tool_choice。
+            var fullTools = includeTools ? TryGetFullToolSet() : null;
+            var effectiveToolChoice = includeTools ? toolChoice : null;
             var sb = new StringBuilder();
             var effectiveOnThinking = onThinking ?? Context?.OnThinkingChunk;
-            await foreach (var chunk in _apiService.ChatStreamAsync(messages, fullTools, ct, maxTokens, toolChoice, temperature, responseFormat, model, thinkingEnabled))
+            await foreach (var chunk in _apiService.ChatStreamAsync(messages, fullTools, ct, maxTokens, effectiveToolChoice, temperature, responseFormat, model, thinkingEnabled))
             {
                 if (chunk.StartsWith("[THINKING]"))
                     effectiveOnThinking?.Invoke(chunk.Substring(10));
