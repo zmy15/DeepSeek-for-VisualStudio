@@ -2,16 +2,16 @@
 
 > **测试阶段** — 使用前请备份项目。
 
-# DeepSeek v4 for Visual Studio
+# DeepSeek for Visual Studio
 
 **面向 Visual Studio 2022 和 2026 的 AI 编程助手**
 
 [![License](https://img.shields.io/badge/license-MIT-blue)](LICENSE)
 [![Visual Studio](https://img.shields.io/badge/Visual%20Studio-2022%20%7C%202026-purple)]()
 [![.NET](https://img.shields.io/badge/.NET%20Framework-4.7.2-blueviolet)]()
-[![DeepSeek](https://img.shields.io/badge/DeepSeek-V4-green)]()
+[![DeepSeek](https://img.shields.io/badge/-DeepSeek-green)]()
 [![Platform](https://img.shields.io/badge/platform-Windows%20x64%20%2F%20ARM64-lightgrey)]()
-[![Version](https://img.shields.io/badge/version-1.2.2-blue)]()
+[![Version](https://img.shields.io/badge/version-1.2.0-blue)]()
 
 [English](README.md)
 
@@ -19,7 +19,7 @@
 
 ## 简介
 
-DeepSeek v4 for Visual Studio 将 AI 聊天、代码编辑、解决方案工具、终端执行和多模态理解直接带入 IDE。扩展支持 **Visual Studio 2022（17.14 及以上）** 和 **Visual Studio 2026**。
+DeepSeek for Visual Studio 将 AI 聊天、代码编辑、解决方案工具、终端执行和多模态理解直接带入 IDE。扩展支持 **Visual Studio 2022（17.14 及以上）** 和 **Visual Studio 2026**。除 DeepSeek 官方 API 外，还支持通过自定义 Base URL 接入任意 OpenAI 兼容的 `chat/completions` 端点。
 
 它通过 WebView2 提供原生级聊天体验，并结合五个协作 Agent、可复用 Skills、MCP 工具服务器、Ghost Text 补全和持久化项目记忆。
 
@@ -38,6 +38,7 @@ DeepSeek v4 for Visual Studio 将 AI 聊天、代码编辑、解决方案工具�
 ## 核心功能
 
 - **聊天与推理**：流式响应、Deep Reasoning、Pro/Flash 双模型、断点续传和 Prefix Cache。
+- **OpenAI 兼容端点**：通过自定义 Base URL 接入任意兼容 `chat/completions` 协议的服务。
 - **代码编辑**：Inline AI Edit、精确/多处替换、`apply_patch`、创建文件、Diff 预览和 Ghost Text 补全。
 - **项目工具**：解决方案浏览、文件解析、终端命令、Git 操作和构建验证。
 - **Skills 系统**：通过 `SKILL.md` 定义工作流，可用 `/skillname` 或语义匹配触发。

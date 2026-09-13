@@ -15,6 +15,10 @@ on:
         options:
           - standard
           - no-local-ocr
+      release_description:
+        description: '版本描述（可选，将显示在 Release 说明开头；留空则仅显示自动生成的更新日志）'
+        required: false
+        type: string
 
 permissions:
   contents: write
@@ -105,6 +109,7 @@ jobs:
       uses: softprops/action-gh-release@v2
       with:
         tag_name: ${{ steps.tag.outputs.tag }}
+        body: ${{ github.event.inputs.release_description }}
         files: bin/Release/net472/*.vsix
         generate_release_notes: true
       env:

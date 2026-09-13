@@ -2,16 +2,16 @@
 
 > **Beta Stage** — Back up your project before use.
 
-# DeepSeek v4 for Visual Studio
+# DeepSeek for Visual Studio
 
 **An AI coding assistant for Visual Studio 2022 and 2026**
 
 [![License](https://img.shields.io/badge/license-MIT-blue)](LICENSE)
 [![Visual Studio](https://img.shields.io/badge/Visual%20Studio-2022%20%7C%202026-purple)]()
 [![.NET](https://img.shields.io/badge/.NET%20Framework-4.7.2-blueviolet)]()
-[![DeepSeek](https://img.shields.io/badge/DeepSeek-V4-green)]()
+[![DeepSeek](https://img.shields.io/badge/-DeepSeek-green)]()
 [![Platform](https://img.shields.io/badge/platform-Windows%20x64%20%2F%20ARM64-lightgrey)]()
-[![Version](https://img.shields.io/badge/version-1.2.2-blue)]()
+[![Version](https://img.shields.io/badge/version-1.2.0-blue)]()
 
 [简体中文](README.zh-CN.md)
 
@@ -19,7 +19,7 @@
 
 ## Overview
 
-DeepSeek v4 for Visual Studio brings AI chat, code editing, solution-aware tools, terminal execution, and multimodal understanding directly into the IDE. It is designed for Visual Studio 2022 (17.14 or later) and Visual Studio 2026.
+DeepSeek for Visual Studio brings AI chat, code editing, solution-aware tools, terminal execution, and multimodal understanding directly into the IDE. It is designed for Visual Studio 2022 (17.14 or later) and Visual Studio 2026. Beyond the official DeepSeek API, it also supports any OpenAI-compatible `chat/completions` endpoint configured with a custom Base URL.
 
 The extension combines a native-grade WebView2 chat experience with five cooperating agents, reusable Skills, MCP tool servers, Ghost Text completion, and persistent project memory.
 
@@ -38,6 +38,7 @@ The extension combines a native-grade WebView2 chat experience with five coopera
 ## Core Features
 
 - **Chat and reasoning**: streaming responses, Deep Reasoning, Pro/Flash models, resumable streaming, and Prefix Cache.
+- **OpenAI-compatible endpoints**: connect any `chat/completions`-compatible service through a custom Base URL.
 - **Code editing**: inline AI edit, exact/multi replacement, `apply_patch`, file creation, diff preview, and Ghost Text completion.
 - **Project tools**: solution exploration, file parsing, terminal commands, Git operations, and build verification.
 - **Skills system**: reusable workflows defined in `SKILL.md`, triggered by `/skillname` or semantic matching.
