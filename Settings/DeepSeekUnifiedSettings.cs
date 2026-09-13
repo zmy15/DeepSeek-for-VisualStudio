@@ -144,24 +144,6 @@ namespace DeepSeek_v4_for_VisualStudio
             };
 
         [VisualStudioContribution]
-        internal static Setting.Enum ActiveModelSource { get; } =
-            new(
-                "deepseekModelSource",
-                "%DeepSeek.Chat.settings.modelSource.displayName%",
-                GeneralCategory,
-                new[]
-                {
-                    new EnumSettingEntry("auto", "%DeepSeek.Chat.settings.modelSource.auto%"),
-                    new EnumSettingEntry("official", "%DeepSeek.Chat.settings.modelSource.official%"),
-                    new EnumSettingEntry("custom", "%DeepSeek.Chat.settings.modelSource.custom%"),
-                },
-                defaultValue: "auto")
-            {
-                Description = "%DeepSeek.Chat.settings.modelSource.description%",
-                SearchKeywords = new[] { "source", "来源", "official", "custom" },
-            };
-
-        [VisualStudioContribution]
         internal static Setting.String CustomModelName { get; } =
             new("deepseekCustomModelName", "%DeepSeek.Chat.settings.customModelName.displayName%", GeneralCategory, defaultValue: string.Empty)
             {
