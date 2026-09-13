@@ -318,13 +318,36 @@ namespace DeepSeek_v4_for_VisualStudio.View
             TouchCurrentSessionLastActive();
             AutoTitleSession();
 
-            // 普通自然语言消息先经过轻量级 Skill 路由；显式 /skill 和 @agent 路径已单独处理。
+            // 普通消息和普通 @agent 任务先经过轻量级 Skill 路由；@agent /skill 走显式技能路径。
             string? autoSkillInstructions = null;
+            string autoRouteContent = fullUserContent;
+            bool hasExplicitAgentSkill = false;
+            if (!string.IsNullOrWhiteSpace(userText)
+                && userText.StartsWith("@", StringComparison.Ordinal))
+            {
+                var atParts = userText.Substring(1).Split(
+                    new[] { ' ' },
+                    2,
+                    StringSplitOptions.RemoveEmptyEntries);
+                if (atParts.Length > 1)
+                {
+                    string routedContent = atParts[1];
+                    hasExplicitAgentSkill = routedContent.StartsWith("/", StringComparison.Ordinal);
+                    if (!hasExplicitAgentSkill)
+                    {
+                        autoRouteContent = string.IsNullOrWhiteSpace(fileContext)
+                            ? routedContent
+                            : fileContext + "\n" + routedContent;
+                    }
+                }
+            }
+
             if (!string.IsNullOrWhiteSpace(userText)
                 && !userText.StartsWith("/", StringComparison.Ordinal)
-                && !userText.StartsWith("@", StringComparison.Ordinal))
+                && !hasExplicitAgentSkill
+                && !string.IsNullOrWhiteSpace(autoRouteContent))
             {
-                autoSkillInstructions = await RouteSkillAsync(fullUserContent);
+                autoSkillInstructions = await RouteSkillAsync(autoRouteContent);
             }
 
             lock (_lock)

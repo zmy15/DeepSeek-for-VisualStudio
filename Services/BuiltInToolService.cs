@@ -24,6 +24,7 @@ namespace DeepSeek_v4_for_VisualStudio.Services
         private readonly WebSearchService? _webSearchService;
         private readonly IBuildService? _buildService;
         private readonly IMemoryService? _memoryService;
+        private readonly ISkillService _skillService;
         private DeepSeekApiService? _apiService;
 
         // ── 文件读取缓存：同一会话内相同路径只从磁盘读取一次 ──
@@ -239,12 +240,14 @@ namespace DeepSeek_v4_for_VisualStudio.Services
             McpManagerService? mcpManager = null,
             WebSearchService? webSearchService = null,
             IBuildService? buildService = null,
-            IMemoryService? memoryService = null)
+            IMemoryService? memoryService = null,
+            ISkillService? skillService = null)
         {
             _mcpManager = mcpManager;
             _webSearchService = webSearchService;
             _buildService = buildService;
             _memoryService = memoryService;
+            _skillService = skillService ?? SkillService.Instance;
 
             // ── 注册所有内置工具 ──
             RegisterAllTools();
@@ -264,6 +267,8 @@ namespace DeepSeek_v4_for_VisualStudio.Services
             Register(new FileSearchTool());
             Register(new GrepSearchTool());
             Register(new SymbolSearchTool());
+            Register(new LoadSkillTool(_skillService));
+            Register(new ReadSkillResourceTool(_skillService));
             Register(new GetErrorsTool(_buildService));
             Register(new FetchWebpageTool(_webSearchService));
             Register(new CaptureWindowTool());
@@ -411,6 +416,8 @@ namespace DeepSeek_v4_for_VisualStudio.Services
                 new FileSearchTool(),
                 new GrepSearchTool(),
                 new SymbolSearchTool(),
+                new LoadSkillTool(SkillService.Instance),
+                new ReadSkillResourceTool(SkillService.Instance),
                 new GetErrorsTool(),
                 new FetchWebpageTool(),
                 new CaptureWindowTool(),
@@ -558,6 +565,7 @@ namespace DeepSeek_v4_for_VisualStudio.Services
                     or "fetch_webpage" or "capture_window" or "build_solution"
                     or "replace_string_in_file" or "multi_replace_string_in_file" or "create_file" or "delete_file"
                     or "apply_patch" or "create_directory"
+                    or "load_skill" or "read_skill_resource"
                     or "run_in_terminal" or "get_terminal_output" or "VisualStudio_askQuestions" or "askQuestions"
                     or "runSubagent" or "request_handoff" or "memory" or "git" => true,
                 _ => false

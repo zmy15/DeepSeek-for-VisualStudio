@@ -31,6 +31,8 @@ namespace DeepSeek_v4_for_VisualStudio.View
         {
             _skillService ??= SkillService.Instance;
             _skillDiscoveryResult = await _skillService.DiscoverSkillsAsync(_solutionPath, forceRefresh);
+            if (forceRefresh)
+                RefreshSkillContextIfInitialized();
             return _skillDiscoveryResult;
         }
 
@@ -478,12 +480,15 @@ namespace DeepSeek_v4_for_VisualStudio.View
                     return null;
 
                 string skillsSummary = SkillService.Instance.GenerateSkillsSummary(_skillDiscoveryResult);
-                string truncatedContent = fullUserContent;
+                string recentContext = GetConversationContextForDiscovery();
+                string routingContent = string.IsNullOrWhiteSpace(recentContext)
+                    ? fullUserContent
+                    : recentContext + "\n\n当前用户输入:\n" + fullUserContent;
 
                 string routingUserPrompt = string.Format(
                     AiPrompts.SkillRoutingUserPrompt,
                     skillsSummary,
-                    truncatedContent);
+                    routingContent);
 
                 var routingMessages = new List<ChatApiMessage>
                 {
@@ -552,6 +557,13 @@ namespace DeepSeek_v4_for_VisualStudio.View
                     return null;
                 }
 
+                if (!SkillService.IsAutoLoadConfidenceAllowed(routingResult.Confidence))
+                {
+                    Logger.Info($"[SkillRoute] 匹配置信度过低，跳过自动加载: {routingResult.Confidence}");
+                    StatusLabel.Text = LocalizationService.Instance["status.thinking"];
+                    return null;
+                }
+
                 string skillName = routingResult.Skill!;
                 Logger.Info($"[SkillRoute] ═══ AI 自动匹配技能 ═══");
                 Logger.Info($"[SkillRoute]   技能名称: {skillName}");
@@ -589,7 +601,6 @@ namespace DeepSeek_v4_for_VisualStudio.View
                 return null;
             }
         }
-
 
         #endregion
 

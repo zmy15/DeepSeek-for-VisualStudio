@@ -170,25 +170,7 @@ namespace DeepSeek_v4_for_VisualStudio.View
             try
             {
                 await DiscoverSkillsForCurrentSolutionAsync();
-
-                // 技能发现结果仅用于 /skill 解析和 UI 列表；不在系统提示中注入
-                // available_skills 清单，避免未显式调用技能时污染上下文。
-                _contextManager.SetSkillContext(null);
-
-                // 注入始终激活的技能完整指令（每次对话均加载）
-                string alwaysInjectContext = SkillService.Instance.GenerateAlwaysInjectSkillsContext(_skillDiscoveryResult);
-                _contextManager.SetAlwaysInjectSkillsContext(string.IsNullOrWhiteSpace(alwaysInjectContext) ? null : alwaysInjectContext);
-
-                if (_skillDiscoveryResult != null)
-                {
-                    var skillNames = string.Join(", ", _skillDiscoveryResult.AutoLoadableSkills.ConvertAll(s => s.Name));
-                    Logger.Info($"[Skill] 发现: {_skillDiscoveryResult.AutoLoadableSkills.Count} 个可选(不注入清单) + {_skillDiscoveryResult.AlwaysInjectSkills.Count} 个始终激活 → 可选: {skillNames}");
-                    if (_skillDiscoveryResult.AlwaysInjectSkills.Count > 0)
-                    {
-                        var alwaysNames = string.Join(", ", _skillDiscoveryResult.AlwaysInjectSkills.ConvertAll(s => s.Name));
-                        Logger.Info($"[Skill] 始终激活技能: {alwaysNames}");
-                    }
-                }
+                ApplySkillContextFromDiscovery();
             }
             catch (Exception ex) { Logger.Warn($"[Skill] 上下文初始化失败: {ex.Message}"); }
 
@@ -210,6 +192,44 @@ namespace DeepSeek_v4_for_VisualStudio.View
                 }
             }
             catch (Exception ex) { Logger.Warn($"[Memory] 上下文初始化失败: {ex.Message}"); }
+        }
+
+        /// <summary>应用当前 Skill 发现结果到主 Agent 的固定系统上下文。</summary>
+        private void ApplySkillContextFromDiscovery()
+        {
+            if (_contextManager == null || _skillDiscoveryResult == null) return;
+
+            string discoveryContext = SkillService.Instance.GenerateSkillsDiscoveryContext(_skillDiscoveryResult);
+            string? skillContext = null;
+            if (!string.IsNullOrWhiteSpace(discoveryContext))
+            {
+                skillContext = string.Format(AiPrompts.SkillSystemPromptFragment, discoveryContext);
+                string toolInstructions = LocalizationService.Instance["system.skillToolInstructions"];
+                if (!string.IsNullOrWhiteSpace(toolInstructions))
+                    skillContext += "\n\n" + toolInstructions;
+            }
+
+            _contextManager.SetSkillContext(skillContext);
+
+            string alwaysInjectContext = SkillService.Instance.GenerateAlwaysInjectSkillsContext(_skillDiscoveryResult);
+            _contextManager.SetAlwaysInjectSkillsContext(
+                string.IsNullOrWhiteSpace(alwaysInjectContext) ? null : alwaysInjectContext);
+
+            var skillNames = string.Join(", ", _skillDiscoveryResult.AutoLoadableSkills.ConvertAll(s => s.Name));
+            Logger.Info($"[Skill] 上下文已刷新: {_skillDiscoveryResult.AutoLoadableSkills.Count} 个可选 + " +
+                $"{_skillDiscoveryResult.AlwaysInjectSkills.Count} 个始终激活 → 可选: {skillNames}");
+        }
+
+        /// <summary>技能刷新后，若系统提示已经冻结，则同步重建固定前缀。</summary>
+        private void RefreshSkillContextIfInitialized()
+        {
+            if (_contextManager == null ||
+                string.IsNullOrEmpty(_contextManager.GetFixedSystemPrompt()))
+                return;
+
+            ApplySkillContextFromDiscovery();
+            _contextManager.FreezeSystemPrompt();
+            Logger.Info("[Skill] 当前会话的 Skill 系统上下文已热刷新");
         }
 
         /// <summary>

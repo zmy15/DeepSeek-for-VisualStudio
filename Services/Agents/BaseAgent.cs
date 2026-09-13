@@ -1028,6 +1028,14 @@ namespace DeepSeek_v4_for_VisualStudio.Services.Agents
 
                     // ── 构建白名单（仅用于客户端拦截，不影响 tools JSON）──
                     effectiveWhitelist = toolWhitelist ?? Definition.AllowedTools;
+                    if (effectiveWhitelist != null && effectiveWhitelist.Count > 0)
+                    {
+                        // Skill loading is a read-only capability shared by every Agent.
+                        effectiveWhitelist = effectiveWhitelist
+                            .Concat(new[] { "load_skill", "read_skill_resource" })
+                            .Distinct(StringComparer.OrdinalIgnoreCase)
+                            .ToList();
+                    }
 
                     if (Definition.Type != AgentType.Edit && Definition.Type != AgentType.Build && effectiveWhitelist != null)
                     {

@@ -439,6 +439,10 @@ namespace DeepSeek_v4_for_VisualStudio.Services
             return defaultValue;
         }
 
+        internal static bool IsAutoLoadConfidenceAllowed(string? confidence)
+            => string.Equals(confidence, "high", StringComparison.OrdinalIgnoreCase)
+                || string.Equals(confidence, "medium", StringComparison.OrdinalIgnoreCase);
+
         internal static string BuildSkillsSignature(IEnumerable<SkillDefinition> skills)
         {
             var builder = new StringBuilder();
@@ -452,6 +456,8 @@ namespace DeepSeek_v4_for_VisualStudio.Services
                 builder.Append(skill.UserInvocable).Append('\n');
                 builder.Append(skill.DisableModelInvocation).Append('\n');
                 builder.Append(skill.AlwaysInject).Append('\n');
+                foreach (var resource in skill.ResourceFiles.OrderBy(path => path, StringComparer.OrdinalIgnoreCase))
+                    builder.Append(resource).Append('\n');
             }
 
             using var sha = SHA256.Create();
@@ -489,7 +495,9 @@ namespace DeepSeek_v4_for_VisualStudio.Services
                 Logger.Warn($"[SkillService] 扫描资源文件失败 '{skillDirectory}': {ex.Message}");
             }
 
-            return resources;
+            return resources
+                .OrderBy(path => path, StringComparer.OrdinalIgnoreCase)
+                .ToList();
         }
 
         /// <summary>
@@ -630,6 +638,8 @@ namespace DeepSeek_v4_for_VisualStudio.Services
             return skills
                 .GroupBy(s => s.Name.ToLowerInvariant())
                 .Select(g => g.OrderBy(s => priorityMap.TryGetValue(s.Source, out var priority) ? priority : 99).First())
+                .OrderBy(s => s.Name, StringComparer.OrdinalIgnoreCase)
+                .ThenBy(s => s.Source)
                 .ToList();
         }
 
@@ -666,7 +676,9 @@ namespace DeepSeek_v4_for_VisualStudio.Services
                 string.Empty,
             };
 
-            foreach (var skill in result.AutoLoadableSkills)
+            foreach (var skill in result.AutoLoadableSkills
+                .OrderBy(s => s.Name, StringComparer.OrdinalIgnoreCase)
+                .ThenBy(s => s.Source))
             {
                 // 始终注入的技能不在此列出（它们已在系统提示中完整加载）
                 if (skill.AlwaysInject)
@@ -698,7 +710,9 @@ namespace DeepSeek_v4_for_VisualStudio.Services
                 string.Empty,
             };
 
-            foreach (var skill in result.AlwaysInjectSkills)
+            foreach (var skill in result.AlwaysInjectSkills
+                .OrderBy(s => s.Name, StringComparer.OrdinalIgnoreCase)
+                .ThenBy(s => s.Source))
             {
                 lines.Add(skill.GetFullInstructions());
                 lines.Add(string.Empty);
@@ -721,7 +735,9 @@ namespace DeepSeek_v4_for_VisualStudio.Services
             var L = LocalizationService.Instance;
             var lines = new List<string> { string.Format(L["skills.availableHeader"], "/") };
 
-            foreach (var skill in result.UserInvocableSkills)
+            foreach (var skill in result.UserInvocableSkills
+                .OrderBy(s => s.Name, StringComparer.OrdinalIgnoreCase)
+                .ThenBy(s => s.Source))
             {
                 var hint = skill.ArgumentHint != null ? $" [{skill.ArgumentHint}]" : "";
                 lines.Add($"- `/{skill.Name}{hint}` — {skill.Description}");
@@ -737,7 +753,10 @@ namespace DeepSeek_v4_for_VisualStudio.Services
         public string GenerateSkillsSummary(SkillDiscoveryResult? discoveryResult = null)
         {
             var result = discoveryResult ?? _cachedResult;
-            var routableSkills = result?.AutoLoadableSkills ?? new List<SkillDefinition>();
+            var routableSkills = result?.AutoLoadableSkills
+                .OrderBy(s => s.Name, StringComparer.OrdinalIgnoreCase)
+                .ThenBy(s => s.Source)
+                .ToList() ?? new List<SkillDefinition>();
             if (routableSkills.Count == 0)
             {
                 Logger.Info("[SkillService]  GenerateSkillsSummary: 无允许模型调用的技能");
