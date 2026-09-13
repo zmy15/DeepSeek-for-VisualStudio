@@ -122,6 +122,8 @@ namespace DeepSeek_v4_for_VisualStudio.Services.Agents
             "fetch_webpage",    // 获取网页内容
             "memory",           // 记忆管理
             "git",              // Git 版本控制（仅 status/diff/log 只读操作）
+            "run_in_terminal",  // 终端只读命令
+            "get_terminal_output", // 获取异步终端输出
         };
 
         protected override AgentDefinition CreateDefinition(AgentType agentType)

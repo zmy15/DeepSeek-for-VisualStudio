@@ -1008,7 +1008,7 @@ namespace DeepSeek_v4_for_VisualStudio.Services.Agents
 
                     if (Definition.Type != AgentType.Edit && Definition.Type != AgentType.Build && effectiveWhitelist != null)
                     {
-                        // run_in_terminal 不在本列表中：AskAgent 通过白名单显式启用，
+                        // run_in_terminal 不在本列表中：AskAgent/ExploreAgent 通过白名单显式启用，
                         // 但由 RunInTerminalTool / BaseAgent 在运行时拦截任何修改文件的命令（只读终端）。
                         var modifyingTools = new HashSet<string>(StringComparer.OrdinalIgnoreCase)
                         {
@@ -2180,15 +2180,8 @@ namespace DeepSeek_v4_for_VisualStudio.Services.Agents
                 }
                 catch { }
 
-                // 细化的只读判断：
-                // - status/diff/log 始终只读
-                // - branch 无参数（list）→ 只读
-                // - stash mode=list → 只读
-                // - reset + path（unstage）→ 只读
-                bool isReadOnly = operation is "status" or "diff" or "log" or "show"
-                    || (operation == "branch" && string.IsNullOrEmpty(branch) && !delete)
-                    || (operation == "stash" && string.Equals(stashMode, "list", StringComparison.OrdinalIgnoreCase))
-                    || (operation == "reset" && !string.IsNullOrEmpty(resetPath));
+                bool isReadOnly = GitTool.IsReadOnlyOperation(
+                    operation, branch, stashMode, resetPath, delete);
 
                 if (!isReadOnly && !string.IsNullOrWhiteSpace(operation))
                 {

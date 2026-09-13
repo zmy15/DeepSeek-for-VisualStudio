@@ -12,7 +12,7 @@ using System.Threading.Tasks;
 namespace DeepSeek_v4_for_VisualStudio.Services.BuiltInTools
 {
     /// <summary>
-    /// git 工具 — 支持常用 Git 操作（status/diff/log/add/commit/branch/checkout/pull/push/stash/reset）。
+    /// git 工具 — 支持常用 Git 操作，并显式提供安全的只读查询能力。
     /// 启动时自动检测 git 是否安装，写操作通过 BaseAgent 审批流程控制。
     /// </summary>
     public class GitTool : BuiltInToolBase
@@ -74,6 +74,7 @@ namespace DeepSeek_v4_for_VisualStudio.Services.BuiltInTools
         private static readonly HashSet<string> ReadOnlyOps = new(StringComparer.OrdinalIgnoreCase)
         {
             "status", "diff", "log", "show",
+            "describe", "tag", "rev-parse", "reflog", "ls-files",
         };
 
         /// <summary>写操作 — 需要审批</summary>
@@ -91,8 +92,9 @@ namespace DeepSeek_v4_for_VisualStudio.Services.BuiltInTools
         /// <summary>所有有效操作</summary>
         private static readonly HashSet<string> AllOps = new(StringComparer.OrdinalIgnoreCase)
         {
-            "status", "diff", "log", "show", "add", "commit", "branch",
-            "checkout", "pull", "push", "stash", "reset",
+            "status", "diff", "log", "show", "describe", "tag",
+            "rev-parse", "reflog", "ls-files",
+            "add", "commit", "branch", "checkout", "pull", "push", "stash", "reset",
         };
 
         /// <summary>同步模式超时</summary>
@@ -109,6 +111,25 @@ namespace DeepSeek_v4_for_VisualStudio.Services.BuiltInTools
         {
             get => CurrentAgentTypeAsyncLocal.Value;
             set => CurrentAgentTypeAsyncLocal.Value = value;
+        }
+
+        /// <summary>
+        /// 判断 Git 操作是否可安全地用于只读 Agent。
+        /// 统一供 GitTool 和 BaseAgent 审批逻辑使用，避免两处白名单漂移。
+        /// </summary>
+        internal static bool IsReadOnlyOperation(
+            string operation,
+            string branch,
+            string mode,
+            string path,
+            bool delete)
+        {
+            return ReadOnlyOps.Contains(operation)
+                || (operation == "branch" && string.IsNullOrEmpty(branch) && !delete)
+                || (operation == "stash"
+                    && (string.Equals(mode, "list", StringComparison.OrdinalIgnoreCase)
+                        || string.Equals(mode, "show", StringComparison.OrdinalIgnoreCase)))
+                || (operation == "reset" && !string.IsNullOrEmpty(path));
         }
 
         public override string Name => "git";
@@ -133,13 +154,15 @@ namespace DeepSeek_v4_for_VisualStudio.Services.BuiltInTools
                                 description = L["tool.git.param.operation"],
                                 @enum = new[]
                                 {
-                                    "status", "diff", "log", "show", "add", "commit",
-                                    "branch", "checkout", "pull", "push", "stash", "reset"
+                                    "status", "diff", "log", "show", "describe", "tag",
+                                    "rev-parse", "reflog", "ls-files",
+                                    "add", "commit", "branch", "checkout", "pull", "push", "stash", "reset"
                                 }
                             },
                             path = new { type = "string", description = L["tool.git.param.path"] },
                             message = new { type = "string", description = L["tool.git.param.message"] },
                             branch = new { type = "string", description = L["tool.git.param.branch"] },
+                            reference = new { type = "string", description = L["tool.git.param.reference"] },
                             files = new
                             {
                                 type = "array",
@@ -170,6 +193,11 @@ namespace DeepSeek_v4_for_VisualStudio.Services.BuiltInTools
                 "diff" => L["tool.git.displayDiff"],
                 "log" => L["tool.git.displayLog"],
                 "show" => L["tool.git.displayShow"],
+                "describe" => L["tool.git.displayDescribe"],
+                "tag" => L["tool.git.displayTag"],
+                "rev-parse" => L["tool.git.displayRevParse"],
+                "reflog" => L["tool.git.displayReflog"],
+                "ls-files" => L["tool.git.displayLsFiles"],
                 "add" => L["tool.git.displayAdd"],
                 "commit" => L["tool.git.displayCommit"],
                 "branch" => L["tool.git.displayBranch"],
@@ -217,13 +245,12 @@ namespace DeepSeek_v4_for_VisualStudio.Services.BuiltInTools
             // AskAgent / ExploreAgent 只能执行只读操作；EditAgent/BuildAgent 无限制
             if (CurrentAgentType is AgentType.Ask or AgentType.Explore)
             {
-                bool isReadOnly = ReadOnlyOps.Contains(operation)
-                    // branch 无参数（list）→ 只读
-                    || (operation == "branch" && string.IsNullOrEmpty(GetStringArg(args, "branch")) && !GetBoolArg(args, "delete"))
-                    // stash mode=list → 只读
-                    || (operation == "stash" && string.Equals(GetStringArg(args, "mode"), "list", StringComparison.OrdinalIgnoreCase))
-                    // reset + path（unstage）→ 只读
-                    || (operation == "reset" && !string.IsNullOrEmpty(GetStringArg(args, "path")));
+                bool isReadOnly = IsReadOnlyOperation(
+                    operation,
+                    GetStringArg(args, "branch"),
+                    GetStringArg(args, "mode"),
+                    GetStringArg(args, "path"),
+                    GetBoolArg(args, "delete"));
 
                 if (!isReadOnly)
                 {
@@ -293,7 +320,9 @@ namespace DeepSeek_v4_for_VisualStudio.Services.BuiltInTools
 
                 case "show":
                     {
-                        string commit = GetStringArg(args, "branch"); // reuse branch param for commit hash
+                        string commit = GetStringArg(args, "reference");
+                        if (string.IsNullOrEmpty(commit))
+                            commit = GetStringArg(args, "branch"); // backward compatibility
                         string path = GetStringArg(args, "path");
                         var sb = new StringBuilder("show");
                         if (!string.IsNullOrEmpty(commit))
@@ -303,6 +332,64 @@ namespace DeepSeek_v4_for_VisualStudio.Services.BuiltInTools
                         if (!string.IsNullOrEmpty(path))
                             sb.Append($" -- \"{EscapeArg(path)}\"");
                         return sb.ToString();
+                    }
+
+                case "describe":
+                    {
+                        string reference = GetStringArg(args, "reference");
+                        if (string.IsNullOrEmpty(reference))
+                            reference = GetStringArg(args, "branch");
+                        if (string.IsNullOrEmpty(reference))
+                            reference = "HEAD";
+                        return $"describe --tags --abbrev=0 {EscapeArg(reference)}";
+                    }
+
+                case "tag":
+                    {
+                        string reference = GetStringArg(args, "reference");
+                        if (string.IsNullOrEmpty(reference))
+                            reference = GetStringArg(args, "branch");
+
+                        var sb = new StringBuilder("tag --list --sort=-creatordate");
+                        if (!string.IsNullOrEmpty(reference))
+                            sb.Append($" --merged {EscapeArg(reference)}");
+                        return sb.ToString();
+                    }
+
+                case "rev-parse":
+                    {
+                        string reference = GetStringArg(args, "reference");
+                        if (string.IsNullOrEmpty(reference))
+                            reference = GetStringArg(args, "branch");
+                        if (string.IsNullOrEmpty(reference))
+                            reference = "HEAD";
+
+                        string mode = GetStringArg(args, "mode").ToLowerInvariant().Trim();
+                        return mode == "short"
+                            ? $"rev-parse --short {EscapeArg(reference)}"
+                            : $"rev-parse {EscapeArg(reference)}";
+                    }
+
+                case "reflog":
+                    {
+                        int count = GetIntArg(args, "count", 20);
+                        int clamped = count < 1 ? 1 : (count > 50 ? 50 : count);
+                        string reference = GetStringArg(args, "reference");
+                        if (string.IsNullOrEmpty(reference))
+                            reference = GetStringArg(args, "branch");
+
+                        var sb = new StringBuilder($"reflog show --date=iso -{clamped}");
+                        if (!string.IsNullOrEmpty(reference))
+                            sb.Append($" {EscapeArg(reference)}");
+                        return sb.ToString();
+                    }
+
+                case "ls-files":
+                    {
+                        string path = GetStringArg(args, "path");
+                        return string.IsNullOrEmpty(path)
+                            ? "ls-files"
+                            : $"ls-files -- \"{EscapeArg(path)}\"";
                     }
 
                 case "add":
@@ -343,7 +430,14 @@ namespace DeepSeek_v4_for_VisualStudio.Services.BuiltInTools
                         if (!string.IsNullOrEmpty(branch))
                             return $"branch \"{EscapeArg(branch)}\"";
 
-                        return "branch --list";
+                        string listMode = GetStringArg(args, "mode").ToLowerInvariant().Trim();
+                        return listMode switch
+                        {
+                            "all" => "branch --all",
+                            "remote" => "branch --remotes",
+                            "verbose" => "branch -vv",
+                            _ => "branch --list",
+                        };
                     }
 
                 case "checkout":
@@ -395,6 +489,7 @@ namespace DeepSeek_v4_for_VisualStudio.Services.BuiltInTools
                         {
                             "pop" => "stash pop",
                             "list" => "stash list",
+                            "show" => "stash show",
                             "apply" => "stash apply",
                             "drop" => "stash drop",
                             _ => string.IsNullOrEmpty(message)

@@ -359,9 +359,8 @@ namespace DeepSeek_v4_for_VisualStudio.Services.BuiltInTools
                 c, @"(?ix)(?:^|[\|\;\(]|&\s*)\s*(?:" + fileVerbs + @")\b"))
                 return true;
 
-            // ── git 写操作（与 git 工具的只读白名单一致：status/diff/log/show 放行）──
-            if (System.Text.RegularExpressions.Regex.IsMatch(
-                c, @"(?ix)\bgit\s+(?:add|commit|push|pull|checkout|switch|restore|reset|stash|merge|rebase|rm|mv|clean|apply|am|branch|tag|cherry-pick)\b"))
+            // ── git 写操作：按子命令和参数区分只读查询与写操作 ──
+            if (ContainsGitWriteCommand(c))
                 return true;
 
             // ── sed -i 原地编辑文件 ──
@@ -375,6 +374,235 @@ namespace DeepSeek_v4_for_VisualStudio.Services.BuiltInTools
                 return true;
 
             return false;
+        }
+
+        private static bool ContainsGitWriteCommand(string command)
+        {
+            var matches = System.Text.RegularExpressions.Regex.Matches(
+                command,
+                @"(?<![\w.-])git(?:\.exe)?[""']?\s+(?<args>[^\r\n;&|]+)",
+                System.Text.RegularExpressions.RegexOptions.IgnoreCase);
+
+            foreach (System.Text.RegularExpressions.Match match in matches)
+            {
+                if (!IsReadOnlyGitInvocation(match.Groups["args"].Value))
+                    return true;
+            }
+
+            return false;
+        }
+
+        private static bool IsReadOnlyGitInvocation(string arguments)
+        {
+            var tokens = new List<string>();
+            foreach (System.Text.RegularExpressions.Match match in
+                System.Text.RegularExpressions.Regex.Matches(
+                    arguments,
+                    @"""[^""]*""|'[^']*'|\S+"))
+            {
+                tokens.Add(match.Value.Trim('"', '\''));
+            }
+
+            if (tokens.Count == 0) return false;
+
+            // Skip Git's global options (for example: git -C <dir> status).
+            int index = 0;
+            while (index < tokens.Count)
+            {
+                string token = tokens[index];
+                bool hasInlineValue = token.StartsWith("--git-dir=", StringComparison.OrdinalIgnoreCase)
+                    || token.StartsWith("--work-tree=", StringComparison.OrdinalIgnoreCase)
+                    || token.StartsWith("--namespace=", StringComparison.OrdinalIgnoreCase)
+                    || token.StartsWith("--exec-path=", StringComparison.OrdinalIgnoreCase)
+                    || token.StartsWith("--config-env=", StringComparison.OrdinalIgnoreCase);
+                if (token == "-C" || token == "--git-dir" || token == "--work-tree"
+                    || token == "--namespace" || token == "--exec-path" || token == "--config-env"
+                    || hasInlineValue)
+                {
+                    index += hasInlineValue ? 1 : 2;
+                    continue;
+                }
+                if (token == "-c")
+                {
+                    index += 2;
+                    continue;
+                }
+                if (token.StartsWith("-c", StringComparison.Ordinal) && token.Length > 2)
+                {
+                    index++;
+                    continue;
+                }
+                if (token.StartsWith("--no-pager", StringComparison.OrdinalIgnoreCase)
+                    || token.StartsWith("--literal-pathspecs", StringComparison.OrdinalIgnoreCase)
+                    || token.StartsWith("--no-replace-objects", StringComparison.OrdinalIgnoreCase))
+                {
+                    index++;
+                    continue;
+                }
+                break;
+            }
+
+            if (index >= tokens.Count) return false;
+
+            string operation = tokens[index].ToLowerInvariant();
+            var args = tokens.Skip(index + 1).ToList();
+
+            return operation switch
+            {
+                "status" or "diff" or "diff-tree" or "diff-index" or "diff-files"
+                    or "log" or "show" or "describe" or "rev-parse" or "rev-list"
+                    or "ls-files" or "ls-tree" or "ls-remote" or "cat-file" or "grep"
+                    or "blame" or "shortlog" or "whatchanged" or "name-rev"
+                    or "for-each-ref" or "show-ref" or "verify-commit" or "verify-tag"
+                    or "count-objects" or "version" or "help" or "var" or "fsck"
+                    or "check-ignore" or "check-attr" or "merge-base" or "cherry"
+                    or "range-diff" or "patch-id" or "check-ref-format" or "verify-pack"
+                    or "show-index" or "get-tar-commit-id" or "mktag" or "--version" => true,
+                "merge-tree" => !args.Any(arg =>
+                    arg.Equals("--write-tree", StringComparison.OrdinalIgnoreCase)),
+                "hash-object" => !args.Any(arg =>
+                    arg.Equals("-w", StringComparison.OrdinalIgnoreCase)
+                    || arg.Equals("--literally", StringComparison.OrdinalIgnoreCase)),
+                "branch" => IsReadOnlyGitBranch(args),
+                "tag" => IsReadOnlyGitTag(args),
+                "stash" => args.Count > 0
+                    && (args[0].Equals("list", StringComparison.OrdinalIgnoreCase)
+                        || args[0].Equals("show", StringComparison.OrdinalIgnoreCase)),
+                "reset" => args.Contains("--", StringComparer.OrdinalIgnoreCase)
+                    || (args.Count >= 2
+                        && args[0].Equals("HEAD", StringComparison.OrdinalIgnoreCase)
+                        && !args[1].StartsWith("-", StringComparison.Ordinal)),
+                "remote" => args.Count == 0
+                    || args[0].Equals("-v", StringComparison.OrdinalIgnoreCase)
+                    || args[0].Equals("-vv", StringComparison.OrdinalIgnoreCase)
+                    || args[0].Equals("--verbose", StringComparison.OrdinalIgnoreCase)
+                    || args[0].Equals("show", StringComparison.OrdinalIgnoreCase)
+                    || args[0].Equals("get-url", StringComparison.OrdinalIgnoreCase),
+                "config" => IsReadOnlyGitConfig(args),
+                "worktree" => args.Count == 0
+                    || args[0].Equals("list", StringComparison.OrdinalIgnoreCase),
+                "reflog" => args.Count == 0
+                    || args[0].Equals("show", StringComparison.OrdinalIgnoreCase)
+                    || args[0].Equals("list", StringComparison.OrdinalIgnoreCase)
+                    || args[0].Equals("exists", StringComparison.OrdinalIgnoreCase),
+                "notes" => args.Count == 0
+                    || args[0].Equals("list", StringComparison.OrdinalIgnoreCase)
+                    || args[0].Equals("show", StringComparison.OrdinalIgnoreCase),
+                "submodule" => args.Count == 0
+                    || args[0].Equals("status", StringComparison.OrdinalIgnoreCase)
+                    || args[0].Equals("summary", StringComparison.OrdinalIgnoreCase),
+                "symbolic-ref" => IsReadOnlyGitSymbolicRef(args),
+                _ => false,
+            };
+        }
+
+        private static bool IsReadOnlyGitBranch(IReadOnlyList<string> args)
+        {
+            if (args.Count == 0) return true;
+
+            string[] writeFlags =
+            {
+                "-d", "-D", "-f", "-m", "-M", "-c", "-C",
+                "--delete", "--force", "--move", "--copy",
+                "--edit-description", "--set-upstream-to", "--unset-upstream",
+            };
+            if (args.Any(arg => writeFlags.Contains(arg, StringComparer.OrdinalIgnoreCase)))
+                return false;
+
+            return args.Any(arg =>
+                arg.Equals("-l", StringComparison.OrdinalIgnoreCase)
+                || arg.Equals("--list", StringComparison.OrdinalIgnoreCase)
+                || arg.Equals("-a", StringComparison.OrdinalIgnoreCase)
+                || arg.Equals("--all", StringComparison.OrdinalIgnoreCase)
+                || arg.Equals("-r", StringComparison.OrdinalIgnoreCase)
+                || arg.Equals("--remotes", StringComparison.OrdinalIgnoreCase)
+                || arg.Equals("-v", StringComparison.OrdinalIgnoreCase)
+                || arg.Equals("-vv", StringComparison.OrdinalIgnoreCase)
+                || arg.Equals("--verbose", StringComparison.OrdinalIgnoreCase)
+                || arg.StartsWith("--contains", StringComparison.OrdinalIgnoreCase)
+                || arg.StartsWith("--merged", StringComparison.OrdinalIgnoreCase)
+                || arg.StartsWith("--no-merged", StringComparison.OrdinalIgnoreCase)
+                || arg.StartsWith("--points-at", StringComparison.OrdinalIgnoreCase)
+                || arg.StartsWith("--sort", StringComparison.OrdinalIgnoreCase)
+                || arg.StartsWith("--format", StringComparison.OrdinalIgnoreCase)
+                || arg.StartsWith("--column", StringComparison.OrdinalIgnoreCase)
+                || arg.Equals("--show-current", StringComparison.OrdinalIgnoreCase)
+                || IsReadOnlyGitBranchShortFlag(arg));
+        }
+
+        private static bool IsReadOnlyGitTag(IReadOnlyList<string> args)
+        {
+            if (args.Count == 0) return true;
+
+            string[] writeFlags =
+            {
+                "-a", "--annotate", "-s", "--sign", "-d", "--delete",
+                "-f", "--force", "-m", "--message", "-F", "--file",
+                "--cleanup", "--create-reflog", "--local-user", "--edit",
+            };
+            if (args.Any(arg => writeFlags.Contains(arg, StringComparer.OrdinalIgnoreCase)))
+                return false;
+
+            return args.Any(arg =>
+                arg.Equals("-l", StringComparison.OrdinalIgnoreCase)
+                || arg.Equals("--list", StringComparison.OrdinalIgnoreCase)
+                || arg.Equals("-n", StringComparison.OrdinalIgnoreCase)
+                || IsReadOnlyGitTagCountFlag(arg)
+                || arg.Equals("-v", StringComparison.OrdinalIgnoreCase)
+                || arg.StartsWith("--merged", StringComparison.OrdinalIgnoreCase)
+                || arg.StartsWith("--no-merged", StringComparison.OrdinalIgnoreCase)
+                || arg.StartsWith("--contains", StringComparison.OrdinalIgnoreCase)
+                || arg.StartsWith("--no-contains", StringComparison.OrdinalIgnoreCase)
+                || arg.StartsWith("--points-at", StringComparison.OrdinalIgnoreCase)
+                || arg.StartsWith("--sort", StringComparison.OrdinalIgnoreCase)
+                || arg.StartsWith("--format", StringComparison.OrdinalIgnoreCase)
+                || arg.StartsWith("--column", StringComparison.OrdinalIgnoreCase)
+                || arg.StartsWith("--omit-empty", StringComparison.OrdinalIgnoreCase)
+                || arg.StartsWith("--verify", StringComparison.OrdinalIgnoreCase));
+        }
+
+        private static bool IsReadOnlyGitConfig(IReadOnlyList<string> args)
+        {
+            if (args.Count == 1
+                && !args[0].StartsWith("-", StringComparison.Ordinal)
+                && !args[0].Contains("="))
+            {
+                return true;
+            }
+
+            return args.Any(arg =>
+                arg.Equals("--get", StringComparison.OrdinalIgnoreCase)
+                || arg.Equals("--get-all", StringComparison.OrdinalIgnoreCase)
+                || arg.Equals("--get-regexp", StringComparison.OrdinalIgnoreCase)
+                || arg.Equals("--list", StringComparison.OrdinalIgnoreCase)
+                || arg.Equals("-l", StringComparison.OrdinalIgnoreCase)
+                || arg.Equals("--show-origin", StringComparison.OrdinalIgnoreCase)
+                || arg.Equals("--show-scope", StringComparison.OrdinalIgnoreCase));
+        }
+
+        private static bool IsReadOnlyGitSymbolicRef(IReadOnlyList<string> args)
+        {
+            if (args.Any(arg => arg.Equals("-d", StringComparison.OrdinalIgnoreCase)
+                || arg.Equals("--delete", StringComparison.OrdinalIgnoreCase)))
+            {
+                return false;
+            }
+
+            return args.Count(arg => !arg.StartsWith("-", StringComparison.Ordinal)) <= 1;
+        }
+
+        private static bool IsReadOnlyGitBranchShortFlag(string arg)
+        {
+            return arg.Length > 1
+                && arg[0] == '-'
+                && !arg.StartsWith("--", StringComparison.Ordinal)
+                && arg.Skip(1).All(ch => ch is 'a' or 'l' or 'r' or 'v');
+        }
+
+        private static bool IsReadOnlyGitTagCountFlag(string arg)
+        {
+            return arg.StartsWith("-n", StringComparison.OrdinalIgnoreCase)
+                && (arg.Length == 2 || arg.Skip(2).All(char.IsDigit));
         }
 
         /// <summary>生成只读 Agent 文件修改命令拦截结果文本。</summary>

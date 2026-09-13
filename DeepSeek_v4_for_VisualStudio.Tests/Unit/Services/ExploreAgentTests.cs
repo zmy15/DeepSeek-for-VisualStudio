@@ -56,7 +56,8 @@ public class ExploreAgentTests
         agent.Definition.AllowedTools.Should().NotContain("replace_string_in_file");
         agent.Definition.AllowedTools.Should().NotContain("create_file");
         agent.Definition.AllowedTools.Should().NotContain("delete_file");
-        agent.Definition.AllowedTools.Should().NotContain("run_in_terminal");
+        agent.Definition.AllowedTools.Should().Contain("run_in_terminal");
+        agent.Definition.AllowedTools.Should().Contain("get_terminal_output");
     }
 
     [Fact]
@@ -101,6 +102,8 @@ public class ExploreAgentTests
         ExploreAgent.DefaultReadTools.Should().Contain("grep_search");
         ExploreAgent.DefaultReadTools.Should().Contain("read_file");
         ExploreAgent.DefaultReadTools.Should().Contain("symbol_search");
+        ExploreAgent.DefaultReadTools.Should().Contain("run_in_terminal");
+        ExploreAgent.DefaultReadTools.Should().Contain("get_terminal_output");
         ExploreAgent.DefaultReadTools.Should().NotContain("search");
         ExploreAgent.DefaultReadTools.Should().NotContain("get_changed_files");
         ExploreAgent.DefaultReadTools.Should().NotContain("github_repo");
@@ -114,7 +117,6 @@ public class ExploreAgentTests
         ExploreAgent.DefaultReadTools.Should().NotContain("create_directory");
         ExploreAgent.DefaultReadTools.Should().NotContain("delete_file");
         ExploreAgent.DefaultReadTools.Should().NotContain("apply_patch");
-        ExploreAgent.DefaultReadTools.Should().NotContain("run_in_terminal");
     }
 
     #endregion
@@ -203,6 +205,7 @@ public class ExploreAgentTests
         result.Should().Contain("必须使用工具");
         result.Should().Contain("list_dir");
         result.Should().Contain("file_search");
+        result.Should().Contain("run_in_terminal");
     }
 
     #endregion

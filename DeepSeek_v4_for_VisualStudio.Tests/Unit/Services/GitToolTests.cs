@@ -131,7 +131,11 @@ public class GitToolTests
     [Fact]
     public void GetDisplayText_AllOperations_ReturnNonEmpty()
     {
-        var operations = new[] { "status", "diff", "log", "add", "commit", "branch", "checkout", "pull", "push", "stash", "reset" };
+        var operations = new[]
+        {
+            "status", "diff", "log", "show", "describe", "tag", "rev-parse", "reflog", "ls-files",
+            "add", "commit", "branch", "checkout", "pull", "push", "stash", "reset",
+        };
         var tool = new GitTool();
         foreach (var op in operations)
         {
@@ -475,6 +479,74 @@ public class GitToolTests
 
         result.Should().NotBeNullOrEmpty();
         result.Should().Contain("退出码: 0");
+    }
+
+    [Theory]
+    [InlineData("tag")]
+    [InlineData("rev-parse")]
+    [InlineData("reflog")]
+    [InlineData("ls-files")]
+    public async Task ExecuteAsync_NewReadOnlyOperations_AreAllowedForAskAgent(string operation)
+    {
+        var root = GetProjectRoot();
+        if (root == null || !GitTool.IsGitAvailable) return;
+
+        GitTool.CurrentAgentType = AgentType.Ask;
+        try
+        {
+            var args = ParseArgs($"{{\"operation\": \"{operation}\", \"count\": 3}}");
+            var result = await new GitTool().ExecuteAsync(args, root);
+
+            result.Should().NotContain("[BLOCKED] ");
+            result.Should().NotContain("不允许");
+            result.Should().Contain("退出码: 0");
+        }
+        finally
+        {
+            GitTool.CurrentAgentType = null;
+        }
+    }
+
+    [Fact]
+    public async Task ExecuteAsync_Describe_IsAllowedForAskAgent()
+    {
+        var root = GetProjectRoot();
+        if (root == null || !GitTool.IsGitAvailable) return;
+
+        GitTool.CurrentAgentType = AgentType.Ask;
+        try
+        {
+            var args = ParseArgs("{\"operation\": \"describe\"}");
+            var result = await new GitTool().ExecuteAsync(args, root);
+
+            result.Should().NotContain("[BLOCKED] ");
+            result.Should().NotContain("不允许");
+        }
+        finally
+        {
+            GitTool.CurrentAgentType = null;
+        }
+    }
+
+    [Fact]
+    public async Task ExecuteAsync_StashShow_IsAllowedForAskAgent()
+    {
+        var root = GetProjectRoot();
+        if (root == null || !GitTool.IsGitAvailable) return;
+
+        GitTool.CurrentAgentType = AgentType.Ask;
+        try
+        {
+            var args = ParseArgs("{\"operation\": \"stash\", \"mode\": \"show\"}");
+            var result = await new GitTool().ExecuteAsync(args, root);
+
+            result.Should().NotContain("[BLOCKED] ");
+            result.Should().NotContain("不允许");
+        }
+        finally
+        {
+            GitTool.CurrentAgentType = null;
+        }
     }
 
     [Fact]
