@@ -79,7 +79,7 @@ namespace DeepSeek_v4_for_VisualStudio.Services.BuiltInTools
             if (string.IsNullOrEmpty(expectedText))
                 return LocalizationService.Instance["tool.editVerify.missingExpected"];
 
-            var expectedParse = ExpectedContentVerifier.ParseLineNumberedContent(expectedText);
+            var expectedParse = ExpectedContentVerifier.ParseLineNumberedFragment(expectedText);
             if (!expectedParse.Success)
                 return expectedParse.Error;
 
@@ -208,7 +208,7 @@ namespace DeepSeek_v4_for_VisualStudio.Services.BuiltInTools
             string filePath)
         {
             string? actualContent = await ReadCurrentContentAsync(filePath);
-            return ExpectedContentVerifier.VerifyExpectedContent(
+            return ExpectedContentVerifier.VerifyExpectedFragment(
                 expectedText, actualContent, filePath);
         }
     }

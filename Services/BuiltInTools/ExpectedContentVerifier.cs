@@ -57,10 +57,7 @@ namespace DeepSeek_v4_for_VisualStudio.Services.BuiltInTools
                 }
                 if (!match.Success
                     || !int.TryParse(match.Groups[1].Value, out int lineNumber)
-                    || lineNumber < 1
-                    || (lines.Count == 0
-                        ? requireStartAtOne && lineNumber != 1
-                        : lineNumber != startLine + lines.Count))
+                    || lineNumber < 1)
                 {
                     return (false, 0, lines,
                         LocalizationService.Instance.Format(
@@ -68,7 +65,25 @@ namespace DeepSeek_v4_for_VisualStudio.Services.BuiltInTools
                 }
 
                 if (lines.Count == 0)
+                {
+                    if (requireStartAtOne && lineNumber != 1)
+                    {
+                        return (false, 0, lines,
+                            LocalizationService.Instance.Format(
+                                "tool.editVerify.expectedStartAtOne", lineNumber));
+                    }
+
                     startLine = lineNumber;
+                }
+                else if (lineNumber != startLine + lines.Count)
+                {
+                    return (false, 0, lines,
+                        LocalizationService.Instance.Format(
+                            "tool.editVerify.expectedSequential",
+                            i + 1,
+                            lineNumber,
+                            startLine + lines.Count));
+                }
 
                 lines.Add(match.Groups[2].Value);
             }
