@@ -1789,7 +1789,7 @@ namespace DeepSeek_v4_for_VisualStudio.View
                     return;
 
                 if (_agentTimelineContent.Length > 0)
-                    _agentTimelineContent.Append("\n\n");
+                    _agentTimelineContent.Append('\n');
                 _agentTimelineContent.Append(line.Trim());
 
                 msgIndex = _agentStreamingMsgIndex;
@@ -1823,7 +1823,7 @@ namespace DeepSeek_v4_for_VisualStudio.View
                 if (!string.IsNullOrWhiteSpace(segment) && !IsAgentStatusPlaceholder(segment))
                 {
                     if (_agentTimelineContent.Length > 0)
-                        _agentTimelineContent.Append("\n\n");
+                        _agentTimelineContent.Append('\n');
                     _agentTimelineContent.Append(segment);
                     msg.TimelineContent = _agentTimelineContent.ToString();
                 }

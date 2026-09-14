@@ -45,6 +45,7 @@ namespace DeepSeek_v4_for_VisualStudio.Services
                     {
                         _markdownPipeline = new MarkdownPipelineBuilder()
                             .UseAdvancedExtensions()
+                            .UseSoftlineBreakAsHardlineBreak()
                             .DisableHtml()
                             .Build();
                     }
@@ -150,7 +151,7 @@ namespace DeepSeek_v4_for_VisualStudio.Services
 
             if (timeline.Length == 0) return final;
             if (final.Length == 0) return timeline;
-            return timeline + "\n\n" + final;
+            return timeline + "\n" + final;
         }
 
         #region 高性能流式消息（PostWebMessageAsString 非阻塞通道）

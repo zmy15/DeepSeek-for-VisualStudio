@@ -26,13 +26,21 @@ public class ChatHtmlServiceTests
     }
 
     [Fact]
+    public void RenderMarkdownToHtml_SoftLineBreak_RendersLineBreak()
+    {
+        var result = ChatHtmlService.RenderMarkdownToHtml("first line\nsecond line");
+
+        result.Should().Contain("<br />");
+    }
+
+    [Fact]
     public void BuildAssistantDisplayContent_CombinesTimelineAndFinalAnswer()
     {
         string result = ChatHtmlService.BuildAssistantDisplayContent(
-            "正在读取文件\n\n**工具调用**：read_file",
+            "正在读取文件\n**工具调用**：read_file",
             "最终答复");
 
-        result.Should().Be("正在读取文件\n\n**工具调用**：read_file\n\n最终答复");
+        result.Should().Be("正在读取文件\n**工具调用**：read_file\n最终答复");
     }
 
     [Fact]
