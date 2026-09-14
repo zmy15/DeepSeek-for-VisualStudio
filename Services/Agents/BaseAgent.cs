@@ -344,6 +344,12 @@ namespace DeepSeek_v4_for_VisualStudio.Services.Agents
         /// </summary>
         private readonly ConcurrentDictionary<string, AgentQuestionRequest> _pendingQuestions = new();
 
+        /// <summary>
+        /// 文件修改类工具全局串行锁。读工具仍可并行执行，但写文件必须按顺序落盘，
+        /// 避免同一批工具调用同时写盘触发 IOException。
+        /// </summary>
+        private static readonly SemaphoreSlim FileMutationGate = new(1, 1);
+
         /// <summary>AI 通过 request_handoff 工具发起的待处理移交请求</summary>
         public HandoffRequest? PendingHandoffRequest { get; protected set; }
 
@@ -3323,6 +3329,33 @@ namespace DeepSeek_v4_for_VisualStudio.Services.Agents
         /// 成败判定沿用结果字符串约定：Error: （错误）/ Timeout: （超时）前缀视为失败。
         /// </summary>
         private async Task<string> ExecuteToolWithTelemetryAsync(
+            Services.Telemetry.AgentMetricsCollector? metrics,
+            int round,
+            ToolCall tc,
+            string? workspaceRoot,
+            CancellationToken ct,
+            TimeSpan timeout)
+        {
+            bool mutationLockHeld = false;
+            if (IsFileModifyingTool(NormalizeToolName(tc.Function.Name)))
+            {
+                await FileMutationGate.WaitAsync(ct).ConfigureAwait(false);
+                mutationLockHeld = true;
+            }
+
+            try
+            {
+                return await ExecuteToolWithTelemetryCoreAsync(
+                    metrics, round, tc, workspaceRoot, ct, timeout).ConfigureAwait(false);
+            }
+            finally
+            {
+                if (mutationLockHeld)
+                    FileMutationGate.Release();
+            }
+        }
+
+        private async Task<string> ExecuteToolWithTelemetryCoreAsync(
             Services.Telemetry.AgentMetricsCollector? metrics,
             int round,
             ToolCall tc,

@@ -6,6 +6,7 @@ using System.IO;
 using System.Linq;
 using System.Security.Cryptography;
 using System.Text;
+using System.Threading;
 
 namespace DeepSeek_v4_for_VisualStudio.Services.Editing
 {
@@ -141,7 +142,7 @@ namespace DeepSeek_v4_for_VisualStudio.Services.Editing
                 // ── 无 writer：直接落盘（原有行为，锁内执行）──
                 if (OpenDocumentWriter == null)
                 {
-                    File.WriteAllText(normalizedPath, content);
+                    WriteAllTextWithRetry(normalizedPath, content);
                     Logger.Info($"[StagedWorkspace] 写穿: {Path.GetFileName(normalizedPath)} ({content.Length} chars)");
                     return;
                 }
@@ -171,7 +172,35 @@ namespace DeepSeek_v4_for_VisualStudio.Services.Editing
             }
 
             if (!written)
-                File.WriteAllText(normalizedPath, content);
+                WriteAllTextWithRetry(normalizedPath, content);
+        }
+
+        /// <summary>
+        /// 写入文件并在遇到瞬时文件锁时短暂重试。VS、索引器或杀毒软件可能短暂持有文件句柄，
+        /// 单次 File.WriteAllText 失败并不代表编辑内容无效。
+        /// </summary>
+        private static void WriteAllTextWithRetry(string filePath, string content)
+        {
+            const int maxAttempts = 8;
+            IOException? lastError = null;
+
+            for (int attempt = 0; attempt < maxAttempts; attempt++)
+            {
+                try
+                {
+                    File.WriteAllText(filePath, content, Encoding.UTF8);
+                    if (attempt > 0)
+                        Logger.Info($"[StagedWorkspace] 文件锁重试成功: {Path.GetFileName(filePath)} (attempt {attempt + 1})");
+                    return;
+                }
+                catch (IOException ex) when (attempt < maxAttempts - 1)
+                {
+                    lastError = ex;
+                    Thread.Sleep(Math.Min(500, 50 * (attempt + 1)));
+                }
+            }
+
+            throw lastError ?? new IOException($"写入文件失败: {filePath}");
         }
 
         /// <summary>
