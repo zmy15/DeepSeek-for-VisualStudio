@@ -2583,9 +2583,8 @@ namespace DeepSeek_v4_for_VisualStudio.Services.Agents
             // ── 用户附加的文件上下文 ──
             if (!string.IsNullOrEmpty(context.FileContext))
             {
-                sb.AppendLine("## 用户上传的文件内容");
-                // RAG-MARK: no-truncate — 不再截断用户上传的文件内容
-                // RAG-SOURCE: file-read 用户上传的附件文件内容（EditAgent 上下文）
+                sb.AppendLine("## 用户上传的文件引用");
+                // 附件正文由 read_file 按需读取，避免在每次步骤请求中重复携带全文。
                 sb.AppendLine(context.FileContext);
                 sb.AppendLine();
             }

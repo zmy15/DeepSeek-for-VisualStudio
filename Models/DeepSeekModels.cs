@@ -803,7 +803,8 @@ namespace DeepSeek_v4_for_VisualStudio.Models
         [DataMember]
         public string FileExtension { get; set; } = string.Empty;
 
-        /// <summary>文件完整路径（仅上传时使用，不持久化）</summary>
+        /// <summary>文件完整路径，用于后续 read_file 读取和会话恢复。</summary>
+        [DataMember]
         public string FilePath { get; set; } = string.Empty;
 
         /// <summary>解析出的文本内容</summary>

@@ -182,6 +182,10 @@ namespace DeepSeek_v4_for_VisualStudio.View
                     .Cast<string>()
                     .ToList();
 
+                // 附件只传路径引用，正文由模型按需调用 read_file 获取。
+                parseResults = FileParserService.CreateFileReferences(_attachedFilePaths);
+                fileContext = FileParserService.FormatParseResultsForContext(parseResults);
+
                 if (visionModelSelected && !ocrExplicitlyRequested)
                 {
                     var directImagePaths = _attachedFilePaths
@@ -190,13 +194,7 @@ namespace DeepSeek_v4_for_VisualStudio.View
                     var directPdfPaths = _attachedFilePaths
                         .Where(IsPdfFile)
                         .ToList();
-                    var parsedPaths = _attachedFilePaths
-                        .Where(path => !directImagePaths.Contains(path, StringComparer.OrdinalIgnoreCase)
-                                    && !directPdfPaths.Contains(path, StringComparer.OrdinalIgnoreCase))
-                        .ToList();
-
                     var visionParts = new List<ChatContentPart>();
-                    var failedPdfPaths = new List<string>();
 
                     await Task.Run(async () =>
                     {
@@ -218,35 +216,18 @@ namespace DeepSeek_v4_for_VisualStudio.View
                                 pdf, streamingCts.Token);
                             if (pdfParts is { Count: > 0 })
                                 visionParts.AddRange(pdfParts);
-                            else
-                                failedPdfPaths.Add(pdf);
                         }
                     });
 
-                    // PDF 渲染失败时回退到 PdfPig 文本解析，避免内容完全丢失
-                    if (failedPdfPaths.Count > 0)
-                        parsedPaths.AddRange(failedPdfPaths);
-
                     visionContent = visionParts.Count > 0 ? visionParts : null;
-                    parseResults = parsedPaths.Count > 0
-                        ? await FileParserService.ParseFilesAsync(parsedPaths, streamingCts.Token)
-                        : new List<FileParseResult>();
-
-                    int directPdfCount = directPdfPaths.Count - failedPdfPaths.Count;
-                    Logger.Info($"[Vision] 直传图片 {directImagePaths.Count} 张，直传 PDF {directPdfCount}/{directPdfPaths.Count} 个，解析其他文件 {parsedPaths.Count} 个");
-                }
-                else
-                {
-                    parseResults = await FileParserService.ParseFilesAsync(
-                        _attachedFilePaths, streamingCts.Token);
+                    Logger.Info($"[Vision] 直传图片 {directImagePaths.Count} 张，直传 PDF {directPdfPaths.Count} 个；其余文件按路径引用");
                 }
 
                 if (TryCompleteCancelledGeneration(streamingCts))
                     return;
 
-                fileContext = FileParserService.FormatParseResultsForContext(parseResults);
                 if (!string.IsNullOrEmpty(fileContext))
-                    Logger.Info($"文件解析完成: {attachedFileNames.Count} 个文件");
+                    Logger.Info($"附件路径引用已生成: {attachedFileNames.Count} 个文件");
             }
 
             List<string> attachedImageDataUris = new();

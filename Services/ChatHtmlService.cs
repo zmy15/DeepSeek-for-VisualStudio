@@ -651,7 +651,7 @@ namespace DeepSeek_v4_for_VisualStudio.Services
             foreach (var file in attachedFiles)
             {
                 string escapedFileName = System.Net.WebUtility.HtmlEncode(file.FileName);
-                if (!file.Success || string.IsNullOrEmpty(file.Content))
+                if (!file.Success)
                 {
                     string errorMsg = System.Net.WebUtility.HtmlEncode(file.Error ?? L["chat.html.fileParseFailed"]);
                     blocks.Append("<div style='display:inline-block;background:#5c1a1a;color:#e07878;padding:2px 8px;border-radius:3px;font-size:10px;margin:2px'> ");
@@ -662,6 +662,14 @@ namespace DeepSeek_v4_for_VisualStudio.Services
 
                 bool isImage = IsImageExtension(file.FileExtension);
                 bool isPdf = string.Equals(file.FileExtension, ".pdf", StringComparison.OrdinalIgnoreCase);
+                if (string.IsNullOrEmpty(file.Content))
+                {
+                    string referenceIcon = isImage ? "🖼️" : isPdf ? "📄" : "📎";
+                    string escapedPath = System.Net.WebUtility.HtmlEncode(file.FilePath ?? string.Empty);
+                    blocks.Append($"<span class='file-attachment-reference' data-path=\"{escapedPath}\" title=\"{escapedPath}\" onclick=\"window.__openAttachment(this.getAttribute('data-path'))\" style='display:inline-block;cursor:pointer;background:#1f2937;color:#9cdcfe;border:1px solid #4b5563;border-radius:4px;padding:3px 8px;font-size:11px;margin:2px'>{referenceIcon} {escapedFileName} <span style='color:#9ca3af;font-size:9px'>({System.Net.WebUtility.HtmlEncode(L["chat.html.fileReadOnDemand"])})</span></span>");
+                    continue;
+                }
+
                 string lang = isImage ? string.Empty : GetLanguageFromExtension(file.FileExtension);
                 string borderColor = isImage ? "#6b3fa0" : isPdf ? "#8b4513" : "#3a5a3a";
                 string bgColor = isImage ? "#1a1a2e" : isPdf ? "#1e150a" : "#1a2e1a";
