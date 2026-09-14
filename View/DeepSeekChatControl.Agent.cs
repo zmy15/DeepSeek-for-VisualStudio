@@ -488,7 +488,8 @@ namespace DeepSeek_v4_for_VisualStudio.View
                     _createdPlanIds.Clear();
                     _presentedQuestionRequests.Clear();
                     _pendingLogEntries.Clear();
-                    _agentThinkingContent.Clear();
+                    _agentTimelineContent.Clear();
+                    _streamingContent.Clear();
                     _streamingReasoning.Clear();
                 }
                 _agentStreamingMsgIndex = -1;
@@ -535,7 +536,8 @@ namespace DeepSeek_v4_for_VisualStudio.View
 
                 // ── 创建实时思考气泡（AI 回答流式输出）──
                 await ThreadHelper.JoinableTaskFactory.SwitchToMainThreadAsync();
-                _agentThinkingContent.Clear();
+                _agentTimelineContent.Clear();
+                _streamingContent.Clear();
 
                 // ── 检查是否已有 retry fork 占位，有则复用，避免产生多余气泡 ──
                 bool reusedPlaceholder = false;
@@ -595,7 +597,6 @@ namespace DeepSeek_v4_for_VisualStudio.View
                 const long StreamFlushSyncIntervalTicks = 60 * TimeSpan.TicksPerMillisecond;
                 long lastContentFlushTicks = DateTime.UtcNow.Ticks;
                 long lastThinkingFlushTicks = DateTime.UtcNow.Ticks;
-                var streamingContentSb = new StringBuilder();
                 var streamingReasoningDeltaSb = new StringBuilder();
 
                 context.OnThinkingChunk = (chunk) =>
@@ -639,14 +640,14 @@ namespace DeepSeek_v4_for_VisualStudio.View
                     lock (_lock)
                     {
                         if (capturedMsgIdx < 0 || capturedMsgIdx >= _messages.Count) return;
-                        streamingContentSb.Append(chunk);
+                        _streamingContent.Append(chunk);
 
                         long nowTicks = DateTime.UtcNow.Ticks;
                         syncDue = nowTicks - lastContentFlushTicks >= StreamFlushSyncIntervalTicks;
                         if (!syncDue) return;
 
                         lastContentFlushTicks = nowTicks;
-                        _messages[capturedMsgIdx].Content = streamingContentSb.ToString();
+                        _messages[capturedMsgIdx].Content = _streamingContent.ToString();
                     }
                     _ = ThreadHelper.JoinableTaskFactory.RunAsync(async () =>
                     {
@@ -658,7 +659,10 @@ namespace DeepSeek_v4_for_VisualStudio.View
                             lock (_lock)
                             {
                                 content = capturedMsgIdx >= 0 && capturedMsgIdx < _messages.Count
-                                    ? (_messages[capturedMsgIdx]?.Content ?? "") : "";
+                                    ? ChatHtmlService.BuildAssistantDisplayContent(
+                                        _messages[capturedMsgIdx].TimelineContent,
+                                        _messages[capturedMsgIdx].Content)
+                                    : string.Empty;
                             }
                             BatchStreamingUpdate(capturedMsgIdx, content);
                         }
@@ -911,26 +915,6 @@ namespace DeepSeek_v4_for_VisualStudio.View
                         }
                     }
 
-                    // 追加思考过程到摘要后面 —— 作为独立 HTML 注入，默认展开显示
-                    string thinkingText;
-                    lock (_lock)
-                    {
-                        thinkingText = ReasoningTextPolicy.ClampStored(_agentThinkingContent.ToString())
-                            ?? string.Empty;
-                    }
-                    string thinkingDetailsHtml = string.Empty;
-                    if (!string.IsNullOrWhiteSpace(thinkingText))
-                    {
-                        // 将思考内容渲染为纯文本 HTML（保留换行）
-                        string escapedThinking = System.Net.WebUtility.HtmlEncode(thinkingText)
-                            .Replace("\n", "<br>");
-                        thinkingDetailsHtml =
-                            "<details class='reasoning-panel' style='margin-top:12px' open='true'>" +
-                            "<summary>" + LocalizationService.Instance["agent.panel.executionProcess"] + "</summary>" +
-                            "<div class='reasoning-content'>" + escapedThinking + "</div>" +
-                            "</details>";
-                    }
-
                     string finalContent = summaryBuilder.ToString().TrimEnd();
 
                     // ── 持久化任务计划 / Handoff JSON（重启后可重建任务面板与"开始执行"按钮）──
@@ -955,7 +939,7 @@ namespace DeepSeek_v4_for_VisualStudio.View
                             ?? string.Empty;
                     }
                     string cacheFooter = BuildCacheFooterAndPersist(_agentStreamingMsgIndex);
-                    FinalizeAgentMessage(_agentStreamingMsgIndex, finalContent, reasoningForRender, cacheFooter, thinkingDetailsHtml);
+                    FinalizeAgentMessage(_agentStreamingMsgIndex, finalContent, reasoningForRender, cacheFooter);
 
                     StatusLabel.Text = plan.IsCancelled
                         ? LocalizationService.Instance["agent.taskCancelled"]
@@ -1193,21 +1177,26 @@ namespace DeepSeek_v4_for_VisualStudio.View
             reasoning = ReasoningTextPolicy.ClampStored(reasoning) ?? string.Empty;
 
             // ── 更新消息状态为最终完成态（下标无效时跳过更新，与旧分支行为一致）──
+            string timelineContent;
+            string displayContent;
             lock (_lock)
             {
+                timelineContent = _agentTimelineContent.ToString().Trim();
                 if (msgIndex >= 0 && msgIndex < _messages.Count)
                 {
                     var msg = _messages[msgIndex];
                     msg.Content = content;
+                    msg.TimelineContent = timelineContent;
                     msg.ReasoningContent = reasoning;
                     msg.IsStreaming = false;
                     msg.IsRendered = true;
                 }
+                displayContent = ChatHtmlService.BuildAssistantDisplayContent(timelineContent, content);
             }
 
             // ── 同步批处理缓冲并强制刷新，确保增量内容已推送 ──
             string combinedFooter = (extraFooterHtml ?? string.Empty) + footerHtml;
-            BatchStreamingUpdate(msgIndex, content, reasoning, isComplete: true);
+            BatchStreamingUpdate(msgIndex, displayContent, reasoning, isComplete: true);
 
             // ── 使用非阻塞 PostWebMessageAsString 发送最终渲染 ──
             PostStreamEnd(msgIndex, content, reasoning, combinedFooter);
@@ -1787,27 +1776,80 @@ namespace DeepSeek_v4_for_VisualStudio.View
         }
 
         /// <summary>
-        /// 向实时思考气泡追加一行内容（Markdown 格式），并更新 DOM。
+        /// 向同一个 Agent 气泡的执行时间线追加一行内容，并更新 DOM。
+        /// 时间线与最终答复分开存储，渲染时按顺序合并。
         /// </summary>
         private void AppendAgentThinking(string line)
         {
+            int msgIndex;
+            string displayContent;
             lock (_lock)
             {
-                if (_agentStreamingMsgIndex < 0) return;
-                if (_agentThinkingContent.Length > 0)
-                    _agentThinkingContent.AppendLine();
-                _agentThinkingContent.Append(line);
+                if (_agentStreamingMsgIndex < 0 || _agentStreamingMsgIndex >= _messages.Count)
+                    return;
+
+                if (_agentTimelineContent.Length > 0)
+                    _agentTimelineContent.Append("\n\n");
+                _agentTimelineContent.Append(line.Trim());
+
+                msgIndex = _agentStreamingMsgIndex;
+                var msg = _messages[msgIndex];
+                msg.TimelineContent = _agentTimelineContent.ToString();
+                displayContent = ChatHtmlService.BuildAssistantDisplayContent(
+                    msg.TimelineContent,
+                    msg.Content);
             }
+
+            QueueAgentDisplayUpdate(msgIndex, displayContent);
+        }
+
+        /// <summary>
+        /// 工具调用发生前，把当前轮次已经流出的中间文本按顺序并入时间线。
+        /// 这样工具调用、工具之间的文本和下一条模型文本都保留在同一个气泡中。
+        /// </summary>
+        private void FlushStreamingContentToTimeline()
+        {
+            lock (_lock)
+            {
+                if (_agentStreamingMsgIndex < 0 || _agentStreamingMsgIndex >= _messages.Count)
+                    return;
+
+                string segment = _streamingContent.ToString().Trim();
+                _streamingContent.Clear();
+
+                var msg = _messages[_agentStreamingMsgIndex];
+                msg.Content = string.Empty;
+
+                if (!string.IsNullOrWhiteSpace(segment) && !IsAgentStatusPlaceholder(segment))
+                {
+                    if (_agentTimelineContent.Length > 0)
+                        _agentTimelineContent.Append("\n\n");
+                    _agentTimelineContent.Append(segment);
+                    msg.TimelineContent = _agentTimelineContent.ToString();
+                }
+            }
+        }
+
+        private static bool IsAgentStatusPlaceholder(string text)
+        {
+            string normalized = text.Trim();
+            if (normalized.Length == 0) return true;
+
+            string analyzing = LocalizationService.Instance["agent.status.analyzing"].Trim();
+            return string.Equals(normalized, analyzing, StringComparison.Ordinal)
+                || string.Equals(normalized, "Thinking...", StringComparison.OrdinalIgnoreCase)
+                || string.Equals(normalized, "Thinking…", StringComparison.OrdinalIgnoreCase);
+        }
+
+        private void QueueAgentDisplayUpdate(int messageIndex, string displayContent)
+        {
             _ = ThreadHelper.JoinableTaskFactory.RunAsync(async () =>
             {
                 await ThreadHelper.JoinableTaskFactory.SwitchToMainThreadAsync();
-                if (ChatWebView.CoreWebView2 == null || _agentStreamingMsgIndex < 0) return;
+                if (ChatWebView.CoreWebView2 == null || messageIndex < 0) return;
                 try
                 {
-                    string content;
-                    lock (_lock) { content = _agentThinkingContent.ToString(); }
-                    // 使用批处理：仅在内容显著变化时推送，避免频繁 WebView2 通信
-                    BatchStreamingUpdate(_agentStreamingMsgIndex, content, string.Empty);
+                    BatchStreamingUpdate(messageIndex, displayContent, string.Empty);
                 }
                 catch { }
             });
@@ -1923,7 +1965,11 @@ namespace DeepSeek_v4_for_VisualStudio.View
             // ── 更新实时思考气泡 ──
             string thinkingLine = FormatLogForThinking(entry);
             if (!string.IsNullOrEmpty(thinkingLine))
+            {
+                if (entry.Level == "TOOL")
+                    FlushStreamingContentToTimeline();
                 AppendAgentThinking(thinkingLine);
+            }
         }
 
         /// <summary>

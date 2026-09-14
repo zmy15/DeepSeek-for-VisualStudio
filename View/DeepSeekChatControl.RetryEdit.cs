@@ -131,7 +131,12 @@ namespace DeepSeek_v4_for_VisualStudio.View
                 }
 
                 // ── 重置思考内容，为 Edit 阶段准备新的实时气泡 ──
-                lock (_lock) { _agentThinkingContent.Clear(); _streamingReasoning.Clear(); }
+                lock (_lock)
+                {
+                    _agentTimelineContent.Clear();
+                    _streamingContent.Clear();
+                    _streamingReasoning.Clear();
+                }
                 _lastReportedStepIndex = 0;
                 _lastReportedStepStatus = string.Empty;
 
@@ -390,25 +395,6 @@ namespace DeepSeek_v4_for_VisualStudio.View
                         catch { }
                     }
 
-                    // ── 将 Edit 阶段的思考过程追加到最终输出 ──
-                    string thinkingText;
-                    lock (_lock)
-                    {
-                        thinkingText = ReasoningTextPolicy.ClampStored(_agentThinkingContent.ToString())
-                            ?? string.Empty;
-                    }
-                    string thinkingDetailsHtml = string.Empty;
-                    if (!string.IsNullOrWhiteSpace(thinkingText))
-                    {
-                        string escapedThinking = System.Net.WebUtility.HtmlEncode(thinkingText)
-                            .Replace("\n", "<br>");
-                        thinkingDetailsHtml =
-                            "<details class='reasoning-panel' style='margin-top:12px' open='true'>" +
- "<summary> " + LocalizationService.Instance["agent.panel.executionProcess"] + "</summary>" +
-                            "<div class='reasoning-content'>" + escapedThinking + "</div>" +
-                            "</details>";
-                    }
-
                     // ── 最终内容仅包含 Markdown 总结，不混入 HTML（避免 double-escape）──
                     string finalContent = agentResult.Content
                         ?? string.Format(LocalizationService.Instance["agent.result.taskCompletedSuccess"],
@@ -441,6 +427,7 @@ namespace DeepSeek_v4_for_VisualStudio.View
                         {
                             var msg = _messages[_agentStreamingMsgIndex];
                             msg.Content = persistedContent;
+                            msg.TimelineContent = _agentTimelineContent.ToString().Trim();
                             msg.ReasoningContent = boundedReasoning;
                             msg.IsStreaming = false;
                             msg.IsRendered = true;
@@ -459,11 +446,19 @@ namespace DeepSeek_v4_for_VisualStudio.View
 
                     // ── 强制刷新 DOM 显示最终结果 ──
                     string reasoningForRender = boundedReasoning;
-                    BatchStreamingUpdate(_agentStreamingMsgIndex, persistedContent, reasoningForRender, isComplete: true);
+                    string displayContent;
+                    lock (_lock)
+                    {
+                        displayContent = ChatHtmlService.BuildAssistantDisplayContent(
+                            _agentStreamingMsgIndex >= 0 && _agentStreamingMsgIndex < _messages.Count
+                                ? _messages[_agentStreamingMsgIndex].TimelineContent
+                                : null,
+                            persistedContent);
+                    }
+                    BatchStreamingUpdate(_agentStreamingMsgIndex, displayContent, reasoningForRender, isComplete: true);
 
-                    // ── 发送最终渲染：extraFooter 中注入执行过程 HTML + 缓存统计（纯 HTML，不经过 Markdown 转义）──
-                    string combinedFooter = thinkingDetailsHtml + cacheFooter;
-                    PostStreamEnd(_agentStreamingMsgIndex, finalContent, reasoningForRender, combinedFooter);
+                    // ── 发送最终渲染：缓存统计作为纯 HTML footer ──
+                    PostStreamEnd(_agentStreamingMsgIndex, finalContent, reasoningForRender, cacheFooter);
 
                     StatusLabel.Text = plan.ChangedFiles.Count > 0
                         ? string.Format(LocalizationService.Instance["agent.result.completed"], plan.ChangedFiles.Count)

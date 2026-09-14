@@ -1,4 +1,5 @@
 using System.Reflection;
+using DeepSeek_v4_for_VisualStudio.Models;
 
 namespace DeepSeek_v4_for_VisualStudio.Tests.Unit.Services;
 
@@ -22,6 +23,46 @@ public class ChatHtmlServiceTests
         result.Should().Contain("reasoning-panel");
         result.Should().Contain("reason here");
         result.Should().Contain("answer here");
+    }
+
+    [Fact]
+    public void BuildAssistantDisplayContent_CombinesTimelineAndFinalAnswer()
+    {
+        string result = ChatHtmlService.BuildAssistantDisplayContent(
+            "正在读取文件\n\n**工具调用**：read_file",
+            "最终答复");
+
+        result.Should().Be("正在读取文件\n\n**工具调用**：read_file\n\n最终答复");
+    }
+
+    [Fact]
+    public void BuildAssistantMessageHtml_RendersTimelineAndFinalAnswerInOneBubble()
+    {
+        var message = new ChatMessage
+        {
+            Role = "assistant",
+            TimelineContent = "**工具调用**：read_file",
+            Content = "最终答复",
+        };
+
+        string result = ChatHtmlService.BuildAssistantMessageHtml(message, 1);
+
+        result.Should().Contain("read_file");
+        result.Should().Contain("最终答复");
+    }
+
+    [Fact]
+    public void BuildStreamEndJson_IncludesTimelineAndFinalAnswer()
+    {
+        string json = ChatHtmlService.BuildStreamEndJson(
+            1,
+            "最终答复",
+            string.Empty,
+            extraFooterHtml: null,
+            timelineContent: "**工具调用**：read_file");
+
+        json.Should().Contain("read_file");
+        json.Should().Contain("最终答复");
     }
 
     [Fact]
