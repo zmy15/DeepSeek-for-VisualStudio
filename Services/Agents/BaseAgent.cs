@@ -864,7 +864,6 @@ namespace DeepSeek_v4_for_VisualStudio.Services.Agents
         /// <param name="messages">消息列表（system + 历史 + user）</param>
         /// <param name="workspaceRoot">工作区根目录，用于内置工具（如 file_search, list_dir）</param>
         /// <param name="ct">取消令牌</param>
-        /// <param name="maxTokens">最大 token 数</param>
         /// <param name="toolWhitelist">自定义工具白名单（null = 使用 Definition.AllowedTools）</param>
         /// <param name="onThinking">思考内容回调（用于 UI 实时更新）</param>
         /// <param name="onContent">内容回调（用于 UI 实时更新）</param>
@@ -880,7 +879,6 @@ namespace DeepSeek_v4_for_VisualStudio.Services.Agents
             List<ChatApiMessage> messages,
             string? workspaceRoot,
             CancellationToken ct,
-            int maxTokens = 4096,
             List<string>? toolWhitelist = null,
             Action<string>? onThinking = null,
             Action<string>? onContent = null,
@@ -1129,7 +1127,6 @@ namespace DeepSeek_v4_for_VisualStudio.Services.Agents
                             reasoningGuard.Reset();
                             await foreach (var chunk in _apiService.ChatStreamAsync(
                                 resumeMessages, toolDefs, ct,
-                                maxTokens: maxTokens,
                                 toolChoice: toolChoice,
                                 temperature: temperature,
                                 responseFormat: responseFormat))
@@ -1143,7 +1140,6 @@ namespace DeepSeek_v4_for_VisualStudio.Services.Agents
                             reasoningGuard.Reset();
                             await foreach (var chunk in _apiService.ChatStreamAsync(
                                 messages, toolDefs, ct,
-                                maxTokens: maxTokens,
                                 toolChoice: toolChoice,
                                 temperature: temperature,
                                 responseFormat: responseFormat))

@@ -36,6 +36,24 @@ public class EditAgentTests
         act.Should().Throw<ArgumentNullException>();
     }
 
+    [Theory]
+    [InlineData("", false)]
+    [InlineData("   ", false)]
+    [InlineData(".", false)]
+    [InlineData("无需修改", true)]
+    [InlineData("No changes needed", true)]
+    public void IsNoChangesResponse_RequiresExplicitNoChangeText(string response, bool expected)
+    {
+        var method = typeof(EditAgent).GetMethod(
+            "IsNoChangesResponse",
+            System.Reflection.BindingFlags.NonPublic | System.Reflection.BindingFlags.Static);
+        method.Should().NotBeNull();
+
+        bool result = (bool)method!.Invoke(null, new object[] { response })!;
+
+        result.Should().Be(expected);
+    }
+
     #endregion
 
     [Theory]

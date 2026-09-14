@@ -277,7 +277,6 @@ namespace DeepSeek_v4_for_VisualStudio.Services.Agents
                     messages,
                     workspaceRoot: context.SolutionPath,
                     ct: context.CancellationToken,
-                    maxTokens: 8192,
                     onThinking: context.OnThinkingChunk,
                     maxToolRounds: DiscoveryMaxToolRounds);
             }
@@ -497,7 +496,6 @@ namespace DeepSeek_v4_for_VisualStudio.Services.Agents
                     alignmentMessages,
                     context.SolutionPath,
                     ct,
-                    maxTokens: 4096,
                     onThinking: context.OnThinkingChunk,
                     onContent: (chunk) =>
                     {
@@ -633,7 +631,6 @@ namespace DeepSeek_v4_for_VisualStudio.Services.Agents
                 messages,
                 context.SolutionPath,
                 ct,
-                maxTokens: 16384,
                 toolWhitelist: CreateTextPhaseToolWhitelist(),
                 temperature: 0.0,
                 responseFormat: "json_object",
@@ -680,7 +677,6 @@ namespace DeepSeek_v4_for_VisualStudio.Services.Agents
                     string retryResponse = await CallAiWithMessagesAsync(
                         retryMessages,
                         ct,
-                        maxTokens: 8192,
                         toolChoice: "none",
                         temperature: 0.0,
                         responseFormat: "json_object",
@@ -1209,7 +1205,6 @@ namespace DeepSeek_v4_for_VisualStudio.Services.Agents
                 mdMessages,
                 context.SolutionPath,
                 ct,
-                maxTokens: 16384,
                 toolWhitelist: CreateTextPhaseToolWhitelist(),
                 toolChoiceOverride: "auto",
                 noToolsReminderAfterFirstToolRound: L["agent.plan.noMoreToolsAfterToolRound"]);
@@ -1250,7 +1245,6 @@ namespace DeepSeek_v4_for_VisualStudio.Services.Agents
                     string retryMd = await CallAiWithMessagesAsync(
                         retryMdMessages,
                         ct,
-                        maxTokens: 16384,
                         toolChoice: "none",
                         includeTools: false);
 

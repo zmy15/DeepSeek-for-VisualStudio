@@ -133,7 +133,6 @@ namespace DeepSeek_v4_for_VisualStudio.Services.Agents
                     messages,
                     workspaceRoot,
                     ct,
-                    maxTokens: 4096,
                     onThinking: (thinking) =>
                     {
                         thinkingBuilder.Append(thinking);

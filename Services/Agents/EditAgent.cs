@@ -696,6 +696,7 @@ namespace DeepSeek_v4_for_VisualStudio.Services.Agents
             List<ChatApiMessage>? messages = null;
             int stepPromptIndex = 0; // 步骤 prompt 在消息列表中的位置（重试时插入点）
             int stepToolLoopStart = 0; // 当前步骤工具循环新增消息的起点（排除转发/历史消息）
+            bool explicitlyNoChanges = false;
 
             for (int retry = 0; retry <= maxFormatRetries; retry++)
             {
@@ -736,7 +737,6 @@ namespace DeepSeek_v4_for_VisualStudio.Services.Agents
                     messages,
                     workspaceRoot,
                     ct,
-                    maxTokens: 8192,
                     toolWhitelist: stepToolWhitelist,
                     onThinking: (thinking) =>
                     {
@@ -765,6 +765,7 @@ namespace DeepSeek_v4_for_VisualStudio.Services.Agents
                 // ── 检测 AI 是否明确表示没有要更改的内容 ──
                 if (IsNoChangesResponse(result))
                 {
+                    explicitlyNoChanges = true;
                     // ── 但如果本轮有工具调用完成了编辑，则不视为空响应 ──
                     if (!HasToolMadeEdits(GetStepToolLoopMessages(messages!, stepToolLoopStart)))
                     {
@@ -839,9 +840,15 @@ namespace DeepSeek_v4_for_VisualStudio.Services.Agents
             // ── AI 明确表示没有要更改的内容 且 工具也未编辑文件 → 跳过编辑执行 ──
             if (string.IsNullOrWhiteSpace(result) && !hasToolEdits)
             {
-                step.ResultSummary = LocalizationService.Instance["agent.log.editNoChangesConfirmed"];
-                AddLog("INFO", LocalizationService.Instance["agent.log.editNoChange"]);
-                return;
+                if (explicitlyNoChanges)
+                {
+                    step.ResultSummary = LocalizationService.Instance["agent.log.editNoChangesConfirmed"];
+                    AddLog("INFO", LocalizationService.Instance["agent.log.editNoChange"]);
+                    return;
+                }
+
+                throw new InvalidOperationException(
+                    LocalizationService.Instance["agent.log.editNoEditsProduced"]);
             }
 
             // ── 初始化编辑工具（懒加载，使用当前 workspaceRoot）──
@@ -1090,7 +1097,6 @@ namespace DeepSeek_v4_for_VisualStudio.Services.Agents
                     verifyMessages,
                     workspaceRoot,
                     ct,
-                    maxTokens: 8192,
                     toolWhitelist: verifyToolWhitelist,
                     onToolCall: (toolSummary) =>
                     {
@@ -1938,12 +1944,13 @@ namespace DeepSeek_v4_for_VisualStudio.Services.Agents
         /// 检测 AI 输出是否包含任何有效的编辑格式。
         /// </summary>
         /// <summary>
-        /// 检测 AI 是否明确表示没有需要更改的内容（空响应、或明确说明无需修改）。
-        /// 用于格式重试循环中，让 AI 可以选择"输出空"来表示该步骤已无变更。
+        /// 检测 AI 是否明确表示没有需要更改的内容。
+        /// 只有明确的文字确认才算"无需修改"；空响应可能是 token 截断，
+        /// 不能据此跳过整个编辑步骤。
         /// </summary>
         private static bool IsNoChangesResponse(string aiResult)
         {
-            if (string.IsNullOrWhiteSpace(aiResult)) return true;
+            if (string.IsNullOrWhiteSpace(aiResult)) return false;
 
             // 去除 DSML/XML 标签后再判断
             string clean = System.Text.RegularExpressions.Regex.Replace(aiResult,
@@ -1962,12 +1969,11 @@ namespace DeepSeek_v4_for_VisualStudio.Services.Agents
             clean = System.Text.RegularExpressions.Regex.Replace(clean,
                 @"\s*think\s*", string.Empty, System.Text.RegularExpressions.RegexOptions.IgnoreCase);
 
-            if (string.IsNullOrWhiteSpace(clean)) return true;
+            if (string.IsNullOrWhiteSpace(clean)) return false;
 
             // 检测常见的"无需修改"短语（中英文）
             var noChangesPatterns = new[]
             {
-                @"^[。.！!]*\s*$",                             // 只有标点符号
                 @"不需要修改|无需修改|没有需要更改|无变更|已完成",
                 @"无需.*(?:修改|更改|变更|编辑)",
                 @"已经.*(?:完成|好了|修改好)",
@@ -3022,7 +3028,6 @@ namespace DeepSeek_v4_for_VisualStudio.Services.Agents
                 messages,
                 workspaceRoot,
                 ct,
-                maxTokens: 8192,
                 toolWhitelist: new List<string>(ReadOnlyExecutionTools),
                 onThinking: thinking =>
                 {

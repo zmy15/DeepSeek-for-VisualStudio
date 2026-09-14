@@ -132,7 +132,6 @@ namespace DeepSeek_v4_for_VisualStudio.Services.Agents
                     messages,
                     workspaceRoot,
                     ct,
-                    maxTokens: 8192,
                     toolWhitelist: new List<string>(BuildTools),
                     onThinking: (thinking) =>
                     {

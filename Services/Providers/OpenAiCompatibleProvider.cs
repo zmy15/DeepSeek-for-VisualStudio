@@ -52,6 +52,11 @@ namespace DeepSeek_v4_for_VisualStudio.Services.Providers
         public DeepSeekUsage? LastUsage { get; protected set; }
 
         /// <summary>
+        /// 最近一次流式调用的结束原因（stop / tool_calls / length 等）。
+        /// </summary>
+        public string? LastFinishReason { get; private set; }
+
+        /// <summary>
         /// 每次 ChatStreamAsync 正常完成后触发。UI 可据此刷新上下文与 Token 统计。
         /// </summary>
         public event Action? RequestCompleted;
@@ -466,6 +471,8 @@ namespace DeepSeek_v4_for_VisualStudio.Services.Providers
             string? model = null,
             bool? thinkingEnabled = null)
         {
+            LastFinishReason = null;
+
             // ── 工具 Schema 规范化：按名称排序，消除注册顺序对缓存的影响 ──
             //     参考 CodeWhale prefix_cache.rs:316-331
             List<ToolDefinition>? normalizedTools = tools == null
@@ -1086,7 +1093,17 @@ namespace DeepSeek_v4_for_VisualStudio.Services.Providers
                     var chunk = JsonSerializer.Deserialize<DeepSeekStreamChunk>(jsonData);
                     // P3-7：空 choices 数组（如仅携带 usage 的尾包）会令索引器抛
                     // ArgumentOutOfRangeException 且不在下方 catch 白名单内，直接击穿流迭代器。
+                    string? finishReason = null;
                     var delta = chunk?.Choices is { Count: > 0 } ? chunk.Choices[0]?.Delta : null;
+                    if (chunk?.Choices is { Count: > 0 })
+                    {
+                        finishReason = chunk.Choices[0]?.FinishReason;
+                        if (!string.IsNullOrEmpty(finishReason))
+                        {
+                            LastFinishReason = finishReason;
+                            Logger.Info($"[API] 流式响应结束原因: {finishReason}");
+                        }
+                    }
                     if (delta != null)
                     {
                         reasoning = delta.ReasoningContent;
