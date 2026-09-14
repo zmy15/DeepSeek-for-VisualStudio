@@ -52,6 +52,7 @@ public class UnifiedSettingsCoverageTests
         (nameof(DeepSeekOptionsPage.MaxRepeatedSameCall), "deepseekMaxRepeatedSameCall"),
         (nameof(DeepSeekOptionsPage.MaxConsecutiveErrors), "deepseekMaxConsecutiveErrors"),
         (nameof(DeepSeekOptionsPage.AgentMaxWallTimeSeconds), "deepseekAgentMaxWallTimeSeconds"),
+        (nameof(DeepSeekOptionsPage.AgentSubagentTimeoutSeconds), "deepseekAgentSubagentTimeoutSeconds"),
         (nameof(DeepSeekOptionsPage.AgentMaxTotalTokens), "deepseekAgentMaxTotalTokens"),
         (nameof(DeepSeekOptionsPage.AgentMaxToolCalls), "deepseekAgentMaxToolCalls"),
         (nameof(DeepSeekOptionsPage.AgentMaxDepth), "deepseekAgentMaxDepth"),
@@ -71,7 +72,7 @@ public class UnifiedSettingsCoverageTests
         var declaredIds = GetDeclaredSettingIds();
         var boundMonikers = GetBoundMonikers();
 
-        declaredIds.Should().HaveCount(45);
+        declaredIds.Should().HaveCount(46);
         foreach (var guideSettingId in GuideSettingIds)
             declaredIds.Should().Contain(guideSettingId);
 
@@ -79,8 +80,8 @@ public class UnifiedSettingsCoverageTests
             .Where(id => !GuideSettingIds.Contains(id, StringComparer.Ordinal))
             .ToList();
 
-        synchronizedIds.Should().HaveCount(41);
-        boundMonikers.Should().HaveCount(41);
+        synchronizedIds.Should().HaveCount(42);
+        boundMonikers.Should().HaveCount(42);
         declaredIds.GroupBy(id => id, StringComparer.Ordinal).Should().OnlyContain(group => group.Count() == 1);
         boundMonikers.GroupBy(id => id, StringComparer.Ordinal).Should().OnlyContain(group => group.Count() == 1);
 
@@ -94,7 +95,7 @@ public class UnifiedSettingsCoverageTests
     [Fact]
     public void UnifiedSettings_CoverLegacyNonSensitiveOptions()
     {
-        ExpectedCoverage.Should().HaveCount(41);
+        ExpectedCoverage.Should().HaveCount(42);
 
         var optionProperties = typeof(DeepSeekOptionsPage)
             .GetProperties(BindingFlags.Public | BindingFlags.Instance)

@@ -37,6 +37,44 @@ public class BaseAgentTests
     }
 
     [Theory]
+    [InlineData(0, -1d)]
+    [InlineData(900, 900d)]
+    [InlineData(99999, 7200d)]
+    public void ResolveSubagentWatchdogTimeout_ReturnsBoundedTimeout(
+        int configuredSeconds,
+        double expectedSeconds)
+    {
+        TimeSpan result = BaseAgent.ResolveSubagentWatchdogTimeout(configuredSeconds);
+
+        if (expectedSeconds < 0)
+            result.Should().Be(Timeout.InfiniteTimeSpan);
+        else
+            result.TotalSeconds.Should().Be(expectedSeconds);
+    }
+
+    [Fact]
+    public async Task ExplorePermissionRequest_IsRoutedThroughParentAgent()
+    {
+        var parent = new AskAgent(new DeepSeekApiService("test-api-key"));
+        var request = new AgentPermissionRequest
+        {
+            Title = "terminal command",
+            Command = "Get-ChildItem",
+            ResponseTcs = new TaskCompletionSource<bool>(),
+        };
+        var method = typeof(BaseAgent).GetMethod(
+            "OnExplorePermissionRequested",
+            System.Reflection.BindingFlags.NonPublic | System.Reflection.BindingFlags.Instance);
+
+        method!.Invoke(parent, new object[] { request });
+
+        parent.TryGetPendingPermission(request.RequestId).Should().BeSameAs(request);
+        parent.RespondToPermission(request.RequestId, approved: true);
+        (await request.ResponseTcs.Task).Should().BeTrue();
+        parent.TryGetPendingPermission(request.RequestId).Should().BeNull();
+    }
+
+    [Theory]
     [InlineData(0, 100, 10, 1000, 100)]
     [InlineData(0, 0, 0, 1000, 0)]
     [InlineData(1, 100, 10, 1000, 10)]

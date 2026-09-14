@@ -543,7 +543,8 @@ namespace DeepSeek_v4_for_VisualStudio.Services.Agents
                     onContent: (chunk) =>
                     {
                         alignmentContent.Append(chunk);
-                    });
+                    },
+                    maxAskQuestionsCalls: 2);
 
                 // 将 AI 在提问前生成的规划概要合并到结果中
                 string planSummary = alignmentContent.ToString().Trim();

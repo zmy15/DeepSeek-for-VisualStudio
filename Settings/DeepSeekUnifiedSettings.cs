@@ -367,6 +367,15 @@ namespace DeepSeek_v4_for_VisualStudio
             };
 
         [VisualStudioContribution]
+        internal static Setting.Integer AgentSubagentTimeoutSeconds { get; } =
+            new("deepseekAgentSubagentTimeoutSeconds", "%DeepSeek.Chat.settings.agentSubagentTimeoutSeconds.displayName%", GeneralCategory, defaultValue: 900)
+            {
+                Description = "%DeepSeek.Chat.settings.agentSubagentTimeoutSeconds.description%",
+                Minimum = 0,
+                Maximum = 7200,
+            };
+
+        [VisualStudioContribution]
         internal static Setting.Integer AgentMaxTotalTokens { get; } =
             new("deepseekAgentMaxTotalTokens", "%DeepSeek.Chat.settings.agentMaxTotalTokens.displayName%", GeneralCategory, defaultValue: 0)
             {

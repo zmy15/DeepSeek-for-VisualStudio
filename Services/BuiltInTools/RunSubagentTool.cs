@@ -92,8 +92,9 @@ namespace DeepSeek_v4_for_VisualStudio.Services.BuiltInTools
             if (!string.Equals(agentName, "Explore", StringComparison.OrdinalIgnoreCase))
                 return $"Error: runSubagent: 未知的子 Agent \"{agentName}\"。当前仅支持 \"Explore\"。";
 
+            string traceId = Guid.NewGuid().ToString("N").Substring(0, 8);
             string logDesc = string.IsNullOrWhiteSpace(description) ? prompt.Truncate(60) : description;
-            Logger.Info($"[RunSubagent] → ExploreAgent: {logDesc}");
+            Logger.Info($"[RunSubagent:{traceId}] → ExploreAgent: {logDesc}");
 
             try
             {
@@ -102,16 +103,17 @@ namespace DeepSeek_v4_for_VisualStudio.Services.BuiltInTools
                     Prompt = prompt,
                     Description = description ?? prompt,
                     WorkspaceRoot = workspaceRoot,
+                    TraceId = traceId,
                 };
 
                 string result = await _exploreHandler(context);
 
-                Logger.Info($"[RunSubagent] ExploreAgent 返回 {result.Length} 字符");
+                Logger.Info($"[RunSubagent:{traceId}] ExploreAgent 返回 {result.Length} 字符");
                 return result;
             }
             catch (Exception ex)
             {
-                Logger.Error($"[RunSubagent] ExploreAgent 执行失败: {ex.Message}", ex);
+                Logger.Error($"[RunSubagent:{traceId}] ExploreAgent 执行失败: {ex.Message}", ex);
                 return $"Error: ExploreAgent 执行异常: {ex.Message}";
             }
         }
@@ -157,5 +159,10 @@ namespace DeepSeek_v4_for_VisualStudio.Services.BuiltInTools
         /// 而非从ContextManager重建，使首轮API调用可命中父Agent的缓存。
         /// </summary>
         public List<ChatApiMessage>? ForwardedMessages { get; set; }
+
+        /// <summary>
+        /// 单次子代理执行的短追踪 ID，用于在并行 runSubagent 日志中唯一定位任务。
+        /// </summary>
+        public string TraceId { get; set; } = string.Empty;
     }
 }

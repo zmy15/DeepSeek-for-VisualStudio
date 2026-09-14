@@ -69,6 +69,7 @@ namespace DeepSeek_v4_for_VisualStudio.Settings
             (CategoryPrefix + "deepseekMaxRepeatedSameCall", p => p.MaxRepeatedSameCall, (p, v) => p.MaxRepeatedSameCall = (int)v!),
             (CategoryPrefix + "deepseekMaxConsecutiveErrors", p => p.MaxConsecutiveErrors, (p, v) => p.MaxConsecutiveErrors = (int)v!),
             (CategoryPrefix + "deepseekAgentMaxWallTimeSeconds", p => p.AgentMaxWallTimeSeconds, (p, v) => p.AgentMaxWallTimeSeconds = (int)v!),
+            (CategoryPrefix + "deepseekAgentSubagentTimeoutSeconds", p => p.AgentSubagentTimeoutSeconds, (p, v) => p.AgentSubagentTimeoutSeconds = (int)v!),
             (CategoryPrefix + "deepseekAgentMaxTotalTokens", p => p.AgentMaxTotalTokens, (p, v) => p.AgentMaxTotalTokens = (int)v!),
             (CategoryPrefix + "deepseekAgentMaxToolCalls", p => p.AgentMaxToolCalls, (p, v) => p.AgentMaxToolCalls = (int)v!),
             (CategoryPrefix + "deepseekAgentMaxDepth", p => p.AgentMaxDepth, (p, v) => p.AgentMaxDepth = (int)v!),
