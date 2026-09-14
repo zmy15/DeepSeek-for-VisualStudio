@@ -851,6 +851,7 @@
     "plan.md.note4": "- Keep it professional, clear, and executable",
     "plan.md.codebaseFindings": "## Codebase Research Findings",
     "plan.md.jsonPlan": "## Generated JSON Plan",
+    "plan.md.alignmentDecisions": "## User alignment decisions",
  "plan.md.savedTitle": "#  Implementation Plan",
     "plan.md.savedGeneratedAt": "\u003e **Generated at**: {0}",
     "plan.md.savedSolution": "\u003e **Solution**: {0}",

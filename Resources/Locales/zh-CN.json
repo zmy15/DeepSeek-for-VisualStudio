@@ -845,6 +845,7 @@
     "plan.md.note4": "- 保持专业、清晰、可执行",
     "plan.md.codebaseFindings": "## 代码库研究发现",
     "plan.md.jsonPlan": "## 已生成的 JSON 计划",
+    "plan.md.alignmentDecisions": "## 用户需求对齐结论",
  "plan.md.savedTitle": "#  实现计划",
     "plan.md.savedGeneratedAt": "\u003e **生成时间**: {0}",
     "plan.md.savedSolution": "\u003e **解决方案**: {0}",
