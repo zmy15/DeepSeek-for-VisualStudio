@@ -786,6 +786,19 @@ namespace DeepSeek_v4_for_VisualStudio.Services
         }
 
         /// <summary>
+        /// 构建仅包含稳定缓存前缀的 API 消息列表（固定 system prompt + 动态上下文块）。
+        /// 不包含任何对话历史，供需要隔离历史的 Agent 阶段复用同一前缀，避免缓存失效。
+        /// </summary>
+        public List<ChatApiMessage> BuildContextPrefix()
+        {
+            string? dynamicBlock = _cachedDynamicBlock ?? BuildDynamicContextBlock();
+            return BuildApiMessagesSnapshot(
+                startEntryIdx: 0,
+                dynamicBlock,
+                entryLimitOverride: 0);
+        }
+
+        /// <summary>
         /// 统一的消息列表构建核心。BuildApiMessages() 和 BuildApiMessagesRecentTurns()
         /// 共享相同的前缀构建、缓存窗口裁剪和条目转换逻辑，仅起始索引不同。
         /// </summary>
@@ -982,10 +995,7 @@ namespace DeepSeek_v4_for_VisualStudio.Services
             var messages = new List<ChatApiMessage>();
 
             // ── [0] 稳定系统提示词（共享前缀 + 固定提示词）──
-            string sharedPrefix = AiPrompts.SharedImmutablePrefix;
-            string? fixedPrompt = _fixedSystemPrompt
-                ?? (string.IsNullOrWhiteSpace(_systemPrompt) && string.IsNullOrWhiteSpace(_skillContext) ? null : BuildFinalSystemPrompt());
-            string stableSystemPrompt = CombineSystemParts(fixedPrompt, sharedPrefix);
+            string stableSystemPrompt = BuildStableSystemPrompt();
             if (!string.IsNullOrWhiteSpace(stableSystemPrompt))
                 messages.Add(new ChatApiMessage { Role = "system", Content = stableSystemPrompt });
 
@@ -2111,6 +2121,20 @@ namespace DeepSeek_v4_for_VisualStudio.Services
         #endregion
 
         #region Internal Helpers
+
+        /// <summary>
+        /// 构建完整稳定 system prompt（冻结的用户/Skill 提示词 + 共享前缀）。
+        /// 所有 API 构建路径必须通过此方法获取 messages[0]，避免前缀漂移。
+        /// </summary>
+        private string BuildStableSystemPrompt()
+        {
+            string sharedPrefix = AiPrompts.SharedImmutablePrefix;
+            string? fixedPrompt = _fixedSystemPrompt
+                ?? (string.IsNullOrWhiteSpace(_systemPrompt) && string.IsNullOrWhiteSpace(_skillContext)
+                    ? null
+                    : BuildFinalSystemPrompt());
+            return CombineSystemParts(fixedPrompt, sharedPrefix) ?? string.Empty;
+        }
 
         /// <summary>
         /// 组装最终的系统提示词（用户自定义 + Skill 上下文）。

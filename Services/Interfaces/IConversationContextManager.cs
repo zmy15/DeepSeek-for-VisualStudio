@@ -58,6 +58,7 @@ namespace DeepSeek_v4_for_VisualStudio.Services
 
         // ── 上下文获取 ──
         List<ChatApiMessage> BuildApiMessages();
+        List<ChatApiMessage> BuildContextPrefix();
         List<ChatApiMessage> BuildApiMessagesRecentTurns(int maxTurns);
         string GetDebugSummary();
 

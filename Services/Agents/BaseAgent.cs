@@ -739,7 +739,11 @@ namespace DeepSeek_v4_for_VisualStudio.Services.Agents
             }
             else
             {
-                messages.Add(new ChatApiMessage { Role = "system", Content = GetSharedImmutablePrefix() });
+                if (ctxManager != null)
+                    messages.AddRange(ctxManager.BuildContextPrefix());
+
+                if (messages.Count == 0)
+                    messages.Add(new ChatApiMessage { Role = "system", Content = GetSharedImmutablePrefix() });
             }
 
             // UI 层在进入 Agent 前已把当前轮原始 user 追加到 ContextManager。

@@ -186,6 +186,45 @@ public class AskAgentTests
     }
 
     [Fact]
+    public void BuildContextAwareMessages_MaxTurnsZero_PreservesStableContextPrefix()
+    {
+        var contextManager = new ConversationContextManager();
+        contextManager.SetSystemPrompt("Custom system prefix");
+        contextManager.SetMemoryContext("Repository memory");
+        contextManager.FreezeSystemPrompt();
+        contextManager.AddUserMessage("你好");
+
+        var context = new AgentContext
+        {
+            ContextManager = contextManager,
+            CurrentUserContent = "你好",
+        };
+        var agent = new AskAgent(_apiService)
+        {
+            Context = context,
+        };
+
+        var method = typeof(BaseAgent).GetMethod(
+            "BuildContextAwareMessages",
+            System.Reflection.BindingFlags.Instance | System.Reflection.BindingFlags.NonPublic,
+            binder: null,
+            new[] { typeof(string), typeof(string), typeof(int), typeof(bool) },
+            modifiers: null);
+        method.Should().NotBeNull();
+
+        var messages = (List<ChatApiMessage>)method!.Invoke(
+            agent,
+            new object[] { "Design system prompt", "design user prompt", 0, false })!;
+        var expectedPrefix = contextManager.BuildContextPrefix();
+
+        messages.Should().HaveCountGreaterThanOrEqualTo(3);
+        messages[0].Content.Should().Be(expectedPrefix[0].Content);
+        messages[0].Content.Should().Contain("Custom system prefix");
+        messages[1].Content.Should().Be(expectedPrefix[1].Content);
+        messages[1].Content.Should().Contain("Repository memory");
+    }
+
+    [Fact]
     public void BuildContextAwareMessages_ExplicitRoute_AppendsOverrideAsLastSystemMessage()
     {
         var context = new AgentContext

@@ -125,13 +125,12 @@ namespace DeepSeek_v4_for_VisualStudio.Services.Agents
                 // ── 阶段 2: 对齐 — 延续阶段 1 的对话，与用户澄清需求
                 //     新的阶段 system prompt 会显式结束发现阶段的 DONE-only 约束。
                 AddLog("INFO", L["agent.log.planPhaseAlign"]);
-                var (alignmentSummary, alignmentMessages) = await RunAlignmentAsync(userMessage, messages, context);
+                var (alignmentSummary, _) = await RunAlignmentAsync(userMessage, context);
 
-                // ── 阶段 3: 设计 — 延续阶段 1+2 的对话，产出实现计划
-                //     DeepSeek Prefix Cache 可命中阶段 1+2 的全部历史（~90-95% 命中率）──
+                // ── 阶段 3: 设计 — 使用独立的当前阶段上下文，产出实现计划 ──
                 AddLog("INFO", L["agent.log.planPhaseDesign"]);
-                var (plan, designMessages) = await CreatePlanAsync(
-                    userMessage, discoveryContext, alignmentSummary, alignmentMessages, context);
+                var (plan, _) = await CreatePlanAsync(
+                    userMessage, discoveryContext, alignmentSummary, context);
                 result.Plan = plan;
 
                 // ═══════════════════════════════════════════════════════════
@@ -164,7 +163,7 @@ namespace DeepSeek_v4_for_VisualStudio.Services.Agents
                     try
                     {
                         string planMarkdown = await GenerateDetailedPlanMarkdownAsync(
-                            userMessage, discoveryContext, alignmentSummary, plan, context, designMessages);
+                            userMessage, discoveryContext, alignmentSummary, plan, context);
                         string planFilePath = await SavePlanMarkdownAsync(planMarkdown, context);
                         plan.PlanFilePath = planFilePath;
                         context.PlanFilePath = planFilePath;
@@ -195,40 +194,6 @@ namespace DeepSeek_v4_for_VisualStudio.Services.Agents
                     catch (Exception ex)
                     {
                         AddLog("WARN", string.Format(L["agent.log.planMdGenFailed"], ex.Message));
-                    }
-
-                    // ── 将 Phase 3 设计阶段的对话历史同步到 ContextManager ──
-                    // Phase 1(发现) 和 Phase 2(对齐) 通过工具循环已写入 CM，
-                    // 但 Phase 3(JSON 设计) 使用 CallAiWithMessagesAsync 不写 CM。
-                    // EditAgent 接手时通过 BuildContextAwareMessages 可看到完整计划生成上下文。
-                    if (designMessages != null && designMessages.Count > 0 && context.ContextManager != null)
-                    {
-                        int phase12Count = alignmentMessages?.Count ?? 0;
-                        if (phase12Count > 0 && designMessages.Count > phase12Count)
-                        {
-                            int added = 0;
-                            for (int i = phase12Count; i < designMessages.Count; i++)
-                            {
-                                var msg = designMessages[i];
-                                if (msg.Role == "user" && !string.IsNullOrEmpty(msg.Content))
-                                {
-                                    context.ContextManager.AddUserMessage(msg.Content!);
-                                    added++;
-                                }
-                                else if (msg.Role == "assistant" && !string.IsNullOrEmpty(msg.Content))
-                                {
-                                    context.ContextManager.AddAssistantMessage(msg.Content!, msg.ReasoningContent);
-                                    added++;
-                                }
-                                else if (msg.Role == "system" && !string.IsNullOrEmpty(msg.Content))
-                                {
-                                    context.ContextManager.AddCustomMessage("system", msg.Content!);
-                                    added++;
-                                }
-                            }
-                            if (added > 0)
-                                AddLog("INFO", $"[Plan] Phase 3 设计对话已同步到 ContextManager ({added} 条消息)");
-                        }
                     }
 
                     // ── 设置 Handoff：计划完成后自动建议切换到 Edit Agent 执行 ──
@@ -512,31 +477,24 @@ namespace DeepSeek_v4_for_VisualStudio.Services.Agents
         /// </summary>
         /// <returns>(规划概要, 对齐对话消息列表)</returns>
         private async Task<(string Summary, List<ChatApiMessage> Messages)> RunAlignmentAsync(
-            string userMessage, List<ChatApiMessage> existingMessages, AgentContext context)
+            string userMessage, AgentContext context)
         {
             var L = LocalizationService.Instance;
             var ct = context.CancellationToken;
 
             try
             {
-                //  直接在同一对话历史中追加新的阶段 system prompt 和对齐指令。
-                //  DONE-only 只适用于发现阶段，必须由后续 system prompt 显式结束。
-                existingMessages.Add(new ChatApiMessage
-                {
-                    Role = "system",
-                    Content = L["agent.plan.alignmentSystemPrompt"]
-                });
-                existingMessages.Add(new ChatApiMessage
-                {
-                    Role = "user",
-                    Content = string.Format(AiPrompts.PlanAlignmentUserPrompt, userMessage)
-                });
+                // 与其他 Agent 相同：重建当前阶段上下文，阶段 system prompt 固定在最后，
+                // 不把发现阶段的 system/user 控制消息继续堆叠进来。
+                var alignmentMessages = BuildContextAwareMessages(
+                    L["agent.plan.alignmentSystemPrompt"],
+                    string.Format(AiPrompts.PlanAlignmentUserPrompt, userMessage));
 
                 // ── 使用 onContent 回调实时捕获 AI 生成的规划概要 ──
                 var alignmentContent = new StringBuilder();
                 //  使用统一工具白名单（不再按阶段过滤 tools JSON，由客户端拦截保证安全）
                 string alignmentResult = await CallAiWithToolLoopAsync(
-                    existingMessages,
+                    alignmentMessages,
                     context.SolutionPath,
                     ct,
                     maxTokens: 4096,
@@ -549,7 +507,7 @@ namespace DeepSeek_v4_for_VisualStudio.Services.Agents
 
                 // 将 AI 在提问前生成的规划概要合并到结果中
                 string planSummary = alignmentContent.ToString().Trim();
-                string alignmentAnswers = ExtractAlignmentAnswers(existingMessages);
+                string alignmentAnswers = ExtractAlignmentAnswers(alignmentMessages);
                 if (!string.IsNullOrWhiteSpace(alignmentAnswers))
                 {
                     planSummary = string.IsNullOrWhiteSpace(planSummary)
@@ -558,7 +516,7 @@ namespace DeepSeek_v4_for_VisualStudio.Services.Agents
                 }
 
                 AddLog("INFO", LocalizationService.Instance.Format("agent.log.planAlignmentDone", alignmentResult));
-                return (planSummary, existingMessages);
+                return (planSummary, alignmentMessages);
             }
             catch (OperationCanceledException)
             {
@@ -622,7 +580,7 @@ namespace DeepSeek_v4_for_VisualStudio.Services.Agents
         /// <returns>(计划, 含 AI JSON 回复的完整消息列表供 Phase 3.5 复用)</returns>
         private async Task<(AgentTaskPlan? Plan, List<ChatApiMessage> Messages)> CreatePlanAsync(
             string userMessage, string discoveryContext,
-            string alignmentSummary, List<ChatApiMessage>? alignmentMessages, AgentContext context)
+            string alignmentSummary, AgentContext context)
         {
             var L = LocalizationService.Instance;
             var ct = context.CancellationToken;
@@ -664,28 +622,11 @@ namespace DeepSeek_v4_for_VisualStudio.Services.Agents
             // ── 用户消息保持简洁（只有任务描述 + 指令），不含动态内容 ──
             string planPrompt = BuildPlanCreationPrompt(userMessage, context);
 
-            List<ChatApiMessage> messages;
-            if (alignmentMessages != null && alignmentMessages.Count > 0)
-            {
-                // 复用完整前序前缀，保持 Prefix Cache；只追加当前阶段的一条 user
-                // 指令和一条最终 system 约束，避免重复注入发现内容与任务文本。
-                messages = new List<ChatApiMessage>(alignmentMessages);
-                messages.Add(new ChatApiMessage { Role = "user", Content = planPrompt });
-                messages.Add(new ChatApiMessage
-                {
-                    Role = "system",
-                    Content = L["agent.plan.designSystemPrompt"]
-                });
-                AddLog("INFO", LocalizationService.Instance["agent.log.planReuseAlignment"]);
-            }
-            else
-            {
-                messages = BuildContextAwareMessages(
-                    L["agent.plan.designSystemPrompt"],
-                    planPrompt,
-                    extraSystemMessages,
-                    maxRecentTurns: 0);
-            }
+            var messages = BuildContextAwareMessages(
+                L["agent.plan.designSystemPrompt"],
+                planPrompt,
+                extraSystemMessages,
+                maxRecentTurns: 0);
 
             AddLog("INFO", L["agent.log.planGeneratingJson"]);
             string json = await CallAiWithToolLoopAsync(
@@ -724,40 +665,26 @@ namespace DeepSeek_v4_for_VisualStudio.Services.Agents
 
                 try
                 {
-                    // 重试：在已有对话基础上追加反工具调用 system 消息 + 严格 JSON 指令
-                    var retryMessages = new List<ChatApiMessage>(messages);
-                    retryMessages.Add(new ChatApiMessage
-                    {
-                        Role = "assistant",
-                        Content = string.IsNullOrWhiteSpace(rawResponse)
-                            ? "(empty response)"
-                            : rawResponse
-                    });
-                    retryMessages.Add(new ChatApiMessage
-                    {
-                        Role = "system",
-                        Content = " CRITICAL: You are in tool_choice=none mode. You have ZERO tools available. " +
-                                  "Do NOT output DSML, function_calls, tool_calls, XML invoke tags, or any " +
-                                  "tool invocation syntax. Your ONLY valid output is a raw JSON object."
-                    });
-                    retryMessages.Add(new ChatApiMessage
-                    {
-                        Role = "user",
-                        Content = " 严格指令：你只能输出 JSON 对象。不要调用任何工具（你无法调用工具）。" +
-                                  "不要输出任何 DSML、function_calls、tool_calls、XML invoke 标签、markdown、分析文字、" +
-                                  "代码块标记、或解释。直接以 { 字符开始，输出纯 JSON。违反此规则将导致系统故障。"
-                    });
+                    // 空响应/格式失败时改用干净上下文重试；当前阶段 system prompt 仍固定在最后。
+                    var retryMessages = BuildContextAwareMessages(
+                        L["agent.plan.designSystemPrompt"] + "\n\n" +
+                        " CRITICAL: You are in tool_choice=none mode. You have ZERO tools available. " +
+                        "Do NOT output DSML, function_calls, tool_calls, XML invoke tags, or any " +
+                        "tool invocation syntax. Your ONLY valid output is a raw JSON object.",
+                        " 严格指令：你只能输出 JSON 对象。不要调用任何工具（你无法调用工具）。" +
+                        "不要输出任何 DSML、function_calls、tool_calls、XML invoke 标签、markdown、分析文字、" +
+                        "代码块标记、或解释。直接以 { 字符开始，输出纯 JSON。违反此规则将导致系统故障。",
+                        extraSystemMessages,
+                        maxRecentTurns: 0);
 
-                    string retryResponse = await CallAiWithToolLoopAsync(
+                    string retryResponse = await CallAiWithMessagesAsync(
                         retryMessages,
-                        context.SolutionPath,
                         ct,
                         maxTokens: 8192,
-                        toolWhitelist: CreateTextPhaseToolWhitelist(),
+                        toolChoice: "none",
                         temperature: 0.0,
                         responseFormat: "json_object",
-                        toolChoiceOverride: "auto",
-                        noToolsReminderAfterFirstToolRound: L["agent.plan.noMoreToolsAfterToolRound"]);
+                        includeTools: false);
 
                     retryResponse = StripDsmlContent(retryResponse);
                     retryResponse = ExtractJsonFromMarkdown(retryResponse);
@@ -1197,7 +1124,7 @@ namespace DeepSeek_v4_for_VisualStudio.Services.Agents
         /// </summary>
         private async Task<string> GenerateDetailedPlanMarkdownAsync(
             string userMessage, string discoveryContext, string alignmentSummary,
-            AgentTaskPlan plan, AgentContext context, List<ChatApiMessage>? designMessages)
+            AgentTaskPlan plan, AgentContext context)
         {
             var ct = context.CancellationToken;
             var L = LocalizationService.Instance;
@@ -1271,27 +1198,11 @@ namespace DeepSeek_v4_for_VisualStudio.Services.Agents
             prompt.AppendLine(L["plan.md.note3"]);
             prompt.AppendLine(L["plan.md.note4"]);
 
-            List<ChatApiMessage> mdMessages;
-            if (designMessages != null && designMessages.Count > 0)
-            {
-                // 复用设计阶段的完整前缀；JSON 计划已作为 assistant 消息位于历史末尾，
-                // 只需追加 Markdown 指令和最终 system 约束。
-                mdMessages = new List<ChatApiMessage>(designMessages);
-                mdMessages.Add(new ChatApiMessage { Role = "user", Content = prompt.ToString() });
-                mdMessages.Add(new ChatApiMessage
-                {
-                    Role = "system",
-                    Content = L["agent.plan.markdownSystemPrompt"]
-                });
-            }
-            else
-            {
-                mdMessages = BuildContextAwareMessages(
-                    L["agent.plan.markdownSystemPrompt"],
-                    prompt.ToString(),
-                    extraSystemMessages,
-                    maxRecentTurns: 0);
-            }
+            var mdMessages = BuildContextAwareMessages(
+                L["agent.plan.markdownSystemPrompt"],
+                prompt.ToString(),
+                extraSystemMessages,
+                maxRecentTurns: 0);
 
             AddLog("INFO", L["agent.log.planGeneratingMd"]);
             string markdown = await CallAiWithToolLoopAsync(
@@ -1323,39 +1234,25 @@ namespace DeepSeek_v4_for_VisualStudio.Services.Agents
                 ct.ThrowIfCancellationRequested();
                 try
                 {
-                    // ── 重试：在 Phase 3 对话历史基础上追加反工具调用指令 ──
-                    var retryMdMessages = new List<ChatApiMessage>(mdMessages);
-                    retryMdMessages.Add(new ChatApiMessage
-                    {
-                        Role = "assistant",
-                        Content = string.IsNullOrWhiteSpace(rawMarkdown)
-                            ? "(empty response)"
-                            : rawMarkdown
-                    });
-                    retryMdMessages.Add(new ChatApiMessage
-                    {
-                        Role = "system",
-                        Content = " CRITICAL: You are in tool_choice=none mode. You have NO tools available. " +
-                                  "Do NOT output any function calls, DSML tags, XML tags, tool invocations, " +
-                                  "or code blocks that look like tool usage. Output ONLY the implementation plan " +
-                                  "in clean Markdown format as instructed below."
-                    });
-                    retryMdMessages.Add(new ChatApiMessage
-                    {
-                        Role = "user",
-                        Content = " RETRY: Your previous response contained tool call syntax instead of a plan document. " +
-                                  "Re-read the instructions and output ONLY a clean Markdown implementation plan. " +
-                                  "No DSML, no XML, no tool calls, no function invocations — just the plan document."
-                    });
+                    // 空响应/格式失败时改用干净上下文重试；当前阶段 system prompt 仍固定在最后。
+                    var retryMdMessages = BuildContextAwareMessages(
+                        L["agent.plan.markdownSystemPrompt"] + "\n\n" +
+                        " CRITICAL: You are in tool_choice=none mode. You have NO tools available. " +
+                        "Do NOT output any function calls, DSML tags, XML tags, tool invocations, " +
+                        "or code blocks that look like tool usage. Output ONLY the implementation plan " +
+                        "in clean Markdown format as instructed below.",
+                        " RETRY: Your previous response contained tool call syntax instead of a plan document. " +
+                        "Re-read the instructions and output ONLY a clean Markdown implementation plan. " +
+                        "No DSML, no XML, no tool calls, no function invocations — just the plan document.",
+                        extraSystemMessages,
+                        maxRecentTurns: 0);
 
-                    string retryMd = await CallAiWithToolLoopAsync(
+                    string retryMd = await CallAiWithMessagesAsync(
                         retryMdMessages,
-                        context.SolutionPath,
                         ct,
                         maxTokens: 16384,
-                        toolWhitelist: CreateTextPhaseToolWhitelist(),
-                        toolChoiceOverride: "auto",
-                        noToolsReminderAfterFirstToolRound: L["agent.plan.noMoreToolsAfterToolRound"]);
+                        toolChoice: "none",
+                        includeTools: false);
 
                     retryMd = StripDsmlContent(retryMd);
                     retryMd = retryMd.Trim();
@@ -1381,6 +1278,12 @@ namespace DeepSeek_v4_for_VisualStudio.Services.Agents
                 }
             }
 
+            if (markdown.Length < 200)
+            {
+                markdown = BuildFallbackPlanMarkdown(userMessage, discoveryContext, alignmentSummary, plan);
+                AddLog("WARN", $"[Plan] AI plan.md generation failed; using deterministic fallback Markdown ({markdown.Length} chars).");
+            }
+
             // 如果 AI 返回了代码块包裹的内容，去掉包裹
             if (markdown.StartsWith("```markdown") || markdown.StartsWith("```md"))
             {
@@ -1395,6 +1298,35 @@ namespace DeepSeek_v4_for_VisualStudio.Services.Agents
             }
 
             return markdown;
+        }
+
+        private static string BuildFallbackPlanMarkdown(
+            string userMessage, string discoveryContext, string alignmentSummary, AgentTaskPlan plan)
+        {
+            var L = LocalizationService.Instance;
+            var sb = new StringBuilder();
+
+            sb.AppendLine(L["plan.md.userTask"]);
+            sb.AppendLine(userMessage);
+            sb.AppendLine();
+
+            if (!string.IsNullOrWhiteSpace(alignmentSummary))
+            {
+                sb.AppendLine(L["plan.md.alignmentDecisions"]);
+                sb.AppendLine(alignmentSummary.Truncate(12000));
+                sb.AppendLine();
+            }
+
+            sb.AppendLine(FormatPlanAsMarkdown(plan));
+
+            if (!string.IsNullOrWhiteSpace(discoveryContext))
+            {
+                sb.AppendLine();
+                sb.AppendLine(L["plan.md.codebaseFindings"]);
+                sb.AppendLine(discoveryContext.Truncate(20000));
+            }
+
+            return sb.ToString().Trim();
         }
 
         /// <summary>
