@@ -400,6 +400,59 @@ namespace DeepSeek_v4_for_VisualStudio.View
             }
         }
 
+        /// <summary>
+        /// 捕获 IDE 上下文并发布当前上下文统计，供普通 Agent 与冷启动 Handoff 共用。
+        /// 必须在 UI 线程调用。
+        /// </summary>
+        private void CaptureAndPublishAgentExecutionContext()
+        {
+            // ── P1-A IDE Context：捕获编辑器实时态并注入 volatile 块（设置开关控制）──
+            try
+            {
+                _contextManager.SetSolutionPath(_solutionPath);
+                if (_options?.EnableIdeContextInjection == true)
+                {
+                    _ideContextTracker ??= new Services.IdeContext.IdeContextTracker();
+                    _ideContextTracker.CaptureFromActiveView();
+                    _contextManager.SetIdeContext(
+                        _ideContextTracker.Current?.ToPromptBlock(_solutionPath));
+                    if (_ideContextTracker.Current != null)
+                        Logger.Info($"[IdeContext] 已注入: {_ideContextTracker.Current.FilePath} " +
+                                    $"(选区={_ideContextTracker.Current.HasSelection}, " +
+                                    $"诊断={_ideContextTracker.Current.Diagnostics.Count})");
+                }
+                else
+                {
+                    _contextManager.SetIdeContext(null);
+                }
+            }
+            catch (Exception ideEx)
+            {
+                Logger.Warn($"[IdeContext] 注入失败: {ideEx.Message}");
+            }
+
+            // ── P2 Context Debugger：一行日志 + 聊天面板推送（设置开关复用 ShowContextStats）──
+            if (_options?.ShowContextStats == true)
+            {
+                try
+                {
+                    var dbgStats = _contextManager.GetStats();
+                    var ideCur = _ideContextTracker?.Current;
+                    Logger.Info($"[ContextDebug] IDE={(ideCur != null ? ideCur.FilePath : "off")}" +
+                        $"(sel={ideCur?.HasSelection == true}, diag={ideCur?.ErrorCount ?? 0}e/{ideCur?.WarningCount ?? 0}w) " +
+                        $"Search={_contextManager.HasSearchContext} RAG={_contextManager.HasRagContext} " +
+                        $"WS={_contextManager.GetWorkingSetTopPaths(6).Count} " +
+                        $"Tokens={dbgStats.EstimatedTokens:N0}/{dbgStats.TokenBudget:N0}");
+
+                    string? ctxJson = BuildContextDebugJson();
+                    if (!string.IsNullOrEmpty(ctxJson))
+                        ChatWebView.CoreWebView2?.PostWebMessageAsString(
+                            "{\"type\":\"contextDebug\",\"d\":" + ctxJson + "}");
+                }
+                catch { }
+            }
+        }
+
         private async Task RunAgentWorkflowAsync(
             string userText,
             string fileContext = "",
@@ -434,53 +487,7 @@ namespace DeepSeek_v4_for_VisualStudio.View
 
                 StatusLabel.Text = LocalizationService.Instance["agent.status.analyzing"];
 
-                // ── P1-A IDE Context：捕获编辑器实时态并注入 volatile 块（设置开关控制）──
-                //    在 UI 线程上单次捕获；Agent 每轮只读快照，不重复扫描 VS。
-                try
-                {
-                    _contextManager.SetSolutionPath(_solutionPath);
-                    if (_options?.EnableIdeContextInjection == true)
-                    {
-                        _ideContextTracker ??= new Services.IdeContext.IdeContextTracker();
-                        _ideContextTracker.CaptureFromActiveView();
-                        _contextManager.SetIdeContext(
-                            _ideContextTracker.Current?.ToPromptBlock(_solutionPath));
-                        if (_ideContextTracker.Current != null)
-                            Logger.Info($"[IdeContext] 已注入: {_ideContextTracker.Current.FilePath} " +
-                                        $"(选区={_ideContextTracker.Current.HasSelection}, " +
-                                        $"诊断={_ideContextTracker.Current.Diagnostics.Count})");
-                    }
-                    else
-                    {
-                        _contextManager.SetIdeContext(null);
-                    }
-                }
-                catch (Exception ideEx)
-                {
-                    Logger.Warn($"[IdeContext] 注入失败: {ideEx.Message}");
-                }
-
-                // ── P2 Context Debugger：一行日志 + 聊天面板推送（设置开关复用 ShowContextStats）──
-                if (_options?.ShowContextStats == true)
-                {
-                    try
-                    {
-                        var dbgStats = _contextManager.GetStats();
-                        var ideCur = _ideContextTracker?.Current;
-                        Logger.Info($"[ContextDebug] IDE={(ideCur != null ? ideCur.FilePath : "off")}" +
-                            $"(sel={ideCur?.HasSelection == true}, diag={ideCur?.ErrorCount ?? 0}e/{ideCur?.WarningCount ?? 0}w) " +
-                            $"Search={_contextManager.HasSearchContext} RAG={_contextManager.HasRagContext} " +
-                            $"WS={_contextManager.GetWorkingSetTopPaths(6).Count} " +
-                            $"Tokens={dbgStats.EstimatedTokens:N0}/{dbgStats.TokenBudget:N0}");
-
-                        // 推送到聊天窗口右上角抽屉（JS 懒创建，折叠展示）
-                        string? ctxJson = BuildContextDebugJson();
-                        if (!string.IsNullOrEmpty(ctxJson))
-                            ChatWebView.CoreWebView2?.PostWebMessageAsString(
-                                "{\"type\":\"contextDebug\",\"d\":" + ctxJson + "}");
-                    }
-                    catch { }
-                }
+                CaptureAndPublishAgentExecutionContext();
 
                 // ── 清理上一轮 Agent 执行的追踪状态 ──
                 lock (_lock)

@@ -119,6 +119,7 @@ namespace DeepSeek_v4_for_VisualStudio.View
             try
             {
                 handoffCts = CreateNewStreamingCts();
+                StartConversationElapsedTimer();
 
                 StatusLabel.Text = string.Format(LocalizationService.Instance["status.agentHandoff"], targetAgent);
 
@@ -164,6 +165,14 @@ namespace DeepSeek_v4_for_VisualStudio.View
                 _currentStreamingMsgIndex = _agentStreamingMsgIndex;
                 UpdateBrowser();
 
+                // 冷启动路径没有经过 SendMessageCoreAsync，必须在这里恢复固定
+                // system prompt、skill 和 memory 上下文。
+                await EnsureSystemPromptInitializedAsync();
+                await ThreadHelper.JoinableTaskFactory.SwitchToMainThreadAsync();
+                if (TryCompleteCancelledGeneration(handoffCts))
+                    return;
+
+                CaptureAndPublishAgentExecutionContext();
                 await TaskScheduler.Default;
 
                 // ── 构建包含 _pendingHandoff 上下文的 AgentContext ──
@@ -171,7 +180,12 @@ namespace DeepSeek_v4_for_VisualStudio.View
                 {
                     SolutionPath = _solutionPath,
                     ContextManager = _contextManager,
+                    ConversationHistory = _contextManager.GetConversationHistory(),
+                    CurrentUserContent = _pendingHandoff.Prompt,
                     IsPlanningMode = true,
+                    PreClassifiedTaskSize = TaskSize.Medium,
+                    IsExplicitRoute = true,
+                    ExplicitRouteTarget = _pendingHandoff.TargetAgent,
                     CancellationToken = handoffCts.Token,
                     ReadFileAsync = async (path) =>
                     {
@@ -517,6 +531,7 @@ namespace DeepSeek_v4_for_VisualStudio.View
                 lock (_lock) { _isGenerating = false; }
                 if (handoffCts != null)
                     DisposeStreamingCts(handoffCts);
+                StopConversationElapsedTimer();
                 UpdateButtonsState();
             }
 
