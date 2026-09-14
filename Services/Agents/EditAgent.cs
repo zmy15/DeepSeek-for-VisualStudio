@@ -2385,6 +2385,22 @@ namespace DeepSeek_v4_for_VisualStudio.Services.Agents
             return true; // 默认按代码步骤处理
         }
 
+        private static bool IsServiceStartupStep(AgentStep step)
+        {
+            string text = ((step.Title ?? string.Empty) + " " + (step.Description ?? string.Empty)).Trim();
+            if (text.Length == 0)
+                return false;
+
+            bool hasService = text.Contains("服务", StringComparison.OrdinalIgnoreCase)
+                || text.Contains("api", StringComparison.OrdinalIgnoreCase)
+                || text.Contains("refitter", StringComparison.OrdinalIgnoreCase);
+            bool hasStartup = text.Contains("启动", StringComparison.OrdinalIgnoreCase)
+                || text.Contains("运行", StringComparison.OrdinalIgnoreCase)
+                || text.Contains("refitter", StringComparison.OrdinalIgnoreCase);
+
+            return hasService && hasStartup;
+        }
+
         private string BuildStepPrompt(AgentStep step, AgentTaskPlan plan,
             AgentContext context, bool isCodeStep)
         {
@@ -2426,6 +2442,15 @@ namespace DeepSeek_v4_for_VisualStudio.Services.Agents
                 sb.AppendLine("## 代码修改步骤");
                 sb.AppendLine("- 按系统提示中的编辑格式和项目文件规则执行修改。");
                 sb.AppendLine("- 完成修改后直接结束本步骤，系统会自动执行编译验证与移交。");
+                if (IsServiceStartupStep(step))
+                {
+                    sb.AppendLine();
+                    sb.AppendLine("## 服务启动与接口验证");
+                    sb.AppendLine("- 启动 API、Web 服务或其他长驻进程必须使用 `run_in_terminal` 的 `detached` 模式；该模式会立即返回 PID 和日志路径，不会等待进程退出。");
+                    sb.AppendLine("- 服务端口就绪后执行本步骤要求的生成或验证命令，例如 `refitter`。");
+                    sb.AppendLine("- 一旦目标命令返回 0，且目标文件已更新或接口已验证，立即结束本步骤。");
+                    sb.AppendLine("- 不要反复检查端口、进程或日志；失败时只读取一次相关日志并说明阻塞原因。");
+                }
                 sb.AppendLine();
             }
 

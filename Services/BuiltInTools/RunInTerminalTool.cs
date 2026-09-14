@@ -41,6 +41,28 @@ namespace DeepSeek_v4_for_VisualStudio.Services.BuiltInTools
         /// <summary>同步模式最大等待时间（防止进程僵死导致 Agent 永久卡住）</summary>
         private static readonly TimeSpan SyncTimeout = TimeSpan.FromMinutes(10);
 
+        private static readonly string[] LongRunningCommandFragments =
+        {
+            "dotnet run",
+            "dotnet watch",
+            "npm run dev",
+            "npm run start",
+            "npm start",
+            "yarn dev",
+            "pnpm dev",
+            "ng serve",
+            "vite",
+            "webpack serve",
+            "uvicorn ",
+            "flask run",
+            "fastapi dev",
+            "manage.py runserver",
+            "python -m http.server",
+            "http-server",
+            "cargo watch",
+            "start-process",
+        };
+
         /// <summary>
         /// 异步终端作业注册表。get_terminal_output 只等待该 CompletionSource，
         /// 不需要通过“稍后重试”的方式轮询。
@@ -703,7 +725,7 @@ namespace DeepSeek_v4_for_VisualStudio.Services.BuiltInTools
                             {
                                 type = "string",
                                 description = LocalizationService.Instance["tool.runInTerminal.param.mode"],
-                                @enum = new[] { "sync", "async" }
+                                @enum = new[] { "sync", "async", "detached" }
                             }
                         },
                         required = new[] { "command", "explanation" }
@@ -833,9 +855,16 @@ namespace DeepSeek_v4_for_VisualStudio.Services.BuiltInTools
                 warningPrefix += pythonHint + "\n\n";
 
             bool isAsync = string.Equals(mode, "async", StringComparison.OrdinalIgnoreCase);
+            bool isDetached = string.Equals(mode, "detached", StringComparison.OrdinalIgnoreCase)
+                || IsLongRunningCommand(command);
 
             try
             {
+                if (isDetached)
+                {
+                    return StartDetachedCommand(command, workspaceRoot, warningPrefix);
+                }
+
                 ProcessStartInfo psi;
 
                 // ── cmake --build 专用路径：通过 cmd.exe + vcvars64.bat 初始化 MSVC 环境 ──
@@ -1040,6 +1069,7 @@ namespace DeepSeek_v4_for_VisualStudio.Services.BuiltInTools
         {
             private readonly TaskCompletionSource<TerminalProcessResult> _completion =
                 new(TaskCreationOptions.RunContinuationsAsynchronously);
+            private readonly Process? _detachedProcess;
 
             public TerminalProcessJob(string id, string command)
             {
@@ -1048,13 +1078,138 @@ namespace DeepSeek_v4_for_VisualStudio.Services.BuiltInTools
                 StartedAt = DateTimeOffset.Now;
             }
 
+            public TerminalProcessJob(
+                string id,
+                string command,
+                Process detachedProcess,
+                string logPath)
+            {
+                Id = id;
+                Command = command;
+                StartedAt = DateTimeOffset.Now;
+                _detachedProcess = detachedProcess;
+                LogPath = logPath;
+            }
+
             public string Id { get; }
             public string Command { get; }
             public DateTimeOffset StartedAt { get; }
             public Task<TerminalProcessResult> Completion => _completion.Task;
+            public bool IsDetached => _detachedProcess != null;
+            public string? LogPath { get; }
+
+            public bool IsRunning
+            {
+                get
+                {
+                    if (_detachedProcess == null)
+                        return false;
+
+                    try { return !_detachedProcess.HasExited; }
+                    catch { return false; }
+                }
+            }
+
+            public int? ExitCode
+            {
+                get
+                {
+                    if (_detachedProcess == null || IsRunning)
+                        return null;
+
+                    try { return _detachedProcess.ExitCode; }
+                    catch { return null; }
+                }
+            }
+
+            public string ReadLogSnapshot()
+                => ReadDetachedLog(LogPath);
+
+            public void DisposeDetachedProcess()
+            {
+                try { _detachedProcess?.Dispose(); } catch { }
+            }
 
             public bool TrySetResult(TerminalProcessResult result) => _completion.TrySetResult(result);
             public bool TrySetException(Exception exception) => _completion.TrySetException(exception);
+        }
+
+        internal static bool IsLongRunningCommand(string command)
+        {
+            if (string.IsNullOrWhiteSpace(command))
+                return false;
+
+            return LongRunningCommandFragments.Any(fragment =>
+                command.IndexOf(fragment, StringComparison.OrdinalIgnoreCase) >= 0);
+        }
+
+        private static string StartDetachedCommand(
+            string command,
+            string? workspaceRoot,
+            string warningPrefix)
+        {
+            string workingDirectory = workspaceRoot ?? Directory.GetCurrentDirectory();
+            string logDirectory = Path.Combine(Path.GetTempPath(), "DeepSeekVS", "terminal");
+            Directory.CreateDirectory(logDirectory);
+
+            string logPath = Path.Combine(logDirectory, $"detached-{Guid.NewGuid():N}.log");
+            string normalizedWorkingDirectory = workingDirectory.Replace("'", "''");
+            string normalizedLogPath = logPath.Replace("'", "''");
+            string script =
+                "$ErrorActionPreference = 'Continue'; " +
+                $"Set-Location -LiteralPath '{normalizedWorkingDirectory}'; " +
+                "& {\n" +
+                command +
+                $"\n}} *> '{normalizedLogPath}'";
+            string encodedCommand = Convert.ToBase64String(Encoding.Unicode.GetBytes(script));
+
+            var psi = new ProcessStartInfo
+            {
+                FileName = "powershell.exe",
+                Arguments = $"-NoProfile -ExecutionPolicy Bypass -EncodedCommand {encodedCommand}",
+                UseShellExecute = true,
+                CreateNoWindow = true,
+                WindowStyle = ProcessWindowStyle.Hidden,
+                WorkingDirectory = workingDirectory,
+            };
+
+            var process = Process.Start(psi);
+            if (process == null)
+                return LocalizationService.Instance["tool.runTerminal.cannotStart"];
+
+            string id = process.Id.ToString();
+            var job = new TerminalProcessJob(id, command, process, logPath);
+            AsyncJobs[id] = job;
+
+            return warningPrefix
+                + LocalizationService.Instance.Format("tool.runTerminal.detachedStarted", id, logPath)
+                + "\n"
+                + LocalizationService.Instance["tool.runTerminal.detachedHint"];
+        }
+
+        internal static string ReadDetachedLog(string? logPath)
+        {
+            if (string.IsNullOrWhiteSpace(logPath) || !File.Exists(logPath))
+                return string.Empty;
+
+            try
+            {
+                using var stream = new FileStream(
+                    logPath,
+                    FileMode.Open,
+                    FileAccess.Read,
+                    FileShare.ReadWrite | FileShare.Delete);
+                using var reader = new StreamReader(stream, Encoding.UTF8, true);
+                string text = reader.ReadToEnd();
+                const int maxChars = 12000;
+                return text.Length <= maxChars
+                    ? text
+                    : "...(较早输出已截断)...\n" + text.Substring(text.Length - maxChars);
+            }
+            catch
+            {
+                return string.Empty;
+            }
         }
 
         /// <summary>
