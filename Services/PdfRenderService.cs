@@ -3,6 +3,7 @@ using DeepSeek_v4_for_VisualStudio.Utils;
 using System;
 using System.Collections.Generic;
 using System.IO;
+using System.Threading;
 using System.Threading.Tasks;
 using Windows.Data.Pdf;
 using Windows.Graphics.Imaging;
@@ -36,11 +37,14 @@ namespace DeepSeek_v4_for_VisualStudio.Services
         /// 将 PDF 渲染为 image_url 视觉内容块列表。
         /// 渲染失败或文档无页时返回 null，调用方应回退到 PdfPig 文本解析。
         /// </summary>
-        public static async Task<List<ChatContentPart>?> BuildPdfVisionPartsAsync(string pdfPath)
+        public static async Task<List<ChatContentPart>?> BuildPdfVisionPartsAsync(
+            string pdfPath,
+            CancellationToken cancellationToken = default)
         {
             try
             {
-                List<string> uris = await RenderPdfToPngDataUrisAsync(pdfPath);
+                List<string> uris = await RenderPdfToPngDataUrisAsync(
+                    pdfPath, cancellationToken);
                 if (uris.Count == 0)
                     return null;
 
@@ -65,7 +69,9 @@ namespace DeepSeek_v4_for_VisualStudio.Services
         /// <summary>
         /// 将 PDF 逐页渲染为 PNG data URI 列表。受 <see cref="MaxPages"/> 页数上限约束。
         /// </summary>
-        private static async Task<List<string>> RenderPdfToPngDataUrisAsync(string pdfPath)
+        private static async Task<List<string>> RenderPdfToPngDataUrisAsync(
+            string pdfPath,
+            CancellationToken cancellationToken)
         {
             var uris = new List<string>();
 
@@ -77,6 +83,9 @@ namespace DeepSeek_v4_for_VisualStudio.Services
 
             for (int i = 0; i < count; i++)
             {
+                if (cancellationToken.IsCancellationRequested)
+                    break;
+
                 using (PdfPage page = pdf.GetPage((uint)i))
                 {
                     byte[] png = await RenderPageToPngAsync(page);

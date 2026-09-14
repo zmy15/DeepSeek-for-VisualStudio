@@ -273,8 +273,9 @@ namespace DeepSeek_v4_for_VisualStudio.Services.Agents
             result.Plan = plan;
             result.FileChanges = plan.ChangedFiles;
 
-            // ── 确定 Handoff 目标（AI 动态移交优先于程序化移交）──
-            result.Handoff = ResolveHandoff(plan);
+            // ── 确定 Handoff 目标（取消后不再启动后续 Agent）──
+            bool cancelled = plan.IsCancelled || context.CancellationToken.IsCancellationRequested;
+            result.Handoff = cancelled ? null : ResolveHandoff(plan);
 
             // ── 传递累积累的推理内容供 UI 渲染思考面板 ──
             if (!string.IsNullOrEmpty(_accumulatedReasoning))

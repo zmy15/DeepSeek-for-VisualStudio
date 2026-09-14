@@ -115,8 +115,11 @@ namespace DeepSeek_v4_for_VisualStudio.View
             lock (_lock) { _isGenerating = true; }
             UpdateButtonsState();
 
+            CancellationTokenSource? handoffCts = null;
             try
             {
+                handoffCts = CreateNewStreamingCts();
+
                 StatusLabel.Text = string.Format(LocalizationService.Instance["status.agentHandoff"], targetAgent);
 
                 // ── 隐藏 handoff 按钮（防止重复点击）──
@@ -169,6 +172,7 @@ namespace DeepSeek_v4_for_VisualStudio.View
                     SolutionPath = _solutionPath,
                     ContextManager = _contextManager,
                     IsPlanningMode = true,
+                    CancellationToken = handoffCts.Token,
                     ReadFileAsync = async (path) =>
                     {
                         // RAG-SOURCE: file-read EditAgent 读取文件内容（Handoff 执行上下文）
@@ -281,7 +285,10 @@ namespace DeepSeek_v4_for_VisualStudio.View
                 //    此处补充 Handoff 场景下的多层 AutoSend 链。 ──
                 int chainDepth = 0;
                 const int maxChainDepth = 10;
-                while (agentResult.Handoff != null && agentResult.Handoff.AutoSend)
+                while (agentResult.Handoff != null
+                    && agentResult.Handoff.AutoSend
+                    && !context.CancellationToken.IsCancellationRequested
+                    && agentResult.Plan?.IsCancelled != true)
                 {
                     chainDepth++;
                     if (chainDepth > maxChainDepth)
@@ -460,9 +467,11 @@ namespace DeepSeek_v4_for_VisualStudio.View
                     // ── 发送最终渲染：缓存统计作为纯 HTML footer ──
                     PostStreamEnd(_agentStreamingMsgIndex, finalContent, reasoningForRender, cacheFooter);
 
-                    StatusLabel.Text = plan.ChangedFiles.Count > 0
-                        ? string.Format(LocalizationService.Instance["agent.result.completed"], plan.ChangedFiles.Count)
-                        : LocalizationService.Instance["agent.result.planCompleted"];
+                    StatusLabel.Text = plan.IsCancelled
+                        ? LocalizationService.Instance["status.stopped"]
+                        : plan.ChangedFiles.Count > 0
+                            ? string.Format(LocalizationService.Instance["agent.result.completed"], plan.ChangedFiles.Count)
+                            : LocalizationService.Instance["agent.result.planCompleted"];
 
                     if (plan.ChangedFiles.Count > 0)
                         _pendingAgentFileChanges = new List<FileChangeSummary>(plan.ChangedFiles);
@@ -479,6 +488,12 @@ namespace DeepSeek_v4_for_VisualStudio.View
 
                 // ── 刷新右下角余额/Token 显示 ──
                 RefreshConsumptionDisplay();
+            }
+            catch (OperationCanceledException)
+            {
+                Logger.Info("[AgentHandoff] 用户停止生成");
+                await ThreadHelper.JoinableTaskFactory.SwitchToMainThreadAsync();
+                StatusLabel.Text = LocalizationService.Instance["status.stopped"];
             }
             catch (Exception ex)
             {
@@ -500,6 +515,8 @@ namespace DeepSeek_v4_for_VisualStudio.View
                 }
                 catch { }
                 lock (_lock) { _isGenerating = false; }
+                if (handoffCts != null)
+                    DisposeStreamingCts(handoffCts);
                 UpdateButtonsState();
             }
 
@@ -866,12 +883,21 @@ namespace DeepSeek_v4_for_VisualStudio.View
         {
             _pendingEditMsgIndex = -1;
 
-            lock (_lock) { _isGenerating = true; }
+            CancellationTokenSource editCts;
+            lock (_lock)
+            {
+                if (_isGenerating) return;
+                editCts = CreateNewStreamingCts();
+                _isGenerating = true;
+            }
             UpdateButtonsState();
             InputTextBox.Text = string.Empty;
             StatusLabel.Text = LocalizationService.Instance["agent.status.regenerating"];
 
             bool canProceed = await CheckAndRevertFileChangesAsync(userMsgIndex);
+            if (TryCompleteCancelledGeneration(editCts))
+                return;
+
             if (!canProceed)
             {
                 lock (_lock) { _isGenerating = false; }
@@ -922,6 +948,8 @@ namespace DeepSeek_v4_for_VisualStudio.View
 
                 // ── 恢复系统级上下文（Clear() 会清空 system prompt / memory / skill）──
                 await RestoreSystemContextAsync();
+                if (TryCompleteCancelledGeneration(editCts))
+                    return;
 
                 // ── 重新发送 ──
                 int newUserMsgIndex = -1;
@@ -940,7 +968,7 @@ namespace DeepSeek_v4_for_VisualStudio.View
                 }
 
                 if (newUserMsg != null)
-                    await ResendUserMessageAsync(newUserMsgIndex, newUserMsg);
+                    await ResendUserMessageAsync(newUserMsgIndex, newUserMsg, editCts);
             }
             catch (Exception ex)
             {
@@ -1054,7 +1082,10 @@ namespace DeepSeek_v4_for_VisualStudio.View
         /// <summary>
         /// 重新发送用户消息的核心逻辑。
         /// </summary>
-        private async Task ResendUserMessageAsync(int userMsgIndex, ChatMessage userMsg)
+        private async Task ResendUserMessageAsync(
+            int userMsgIndex,
+            ChatMessage userMsg,
+            CancellationTokenSource? existingCts = null)
         {
             if (_options == null || string.IsNullOrEmpty(_options.ApiKey))
             {
@@ -1076,6 +1107,13 @@ namespace DeepSeek_v4_for_VisualStudio.View
                 return;
             }
 
+            if (existingCts?.IsCancellationRequested == true)
+            {
+                TryCompleteCancelledGeneration(existingCts);
+                return;
+            }
+
+            var retryCts = existingCts ?? CreateNewStreamingCts();
             lock (_lock) { _isGenerating = true; }
             UpdateButtonsState();
 
@@ -1085,8 +1123,6 @@ namespace DeepSeek_v4_for_VisualStudio.View
 
             // ── 树状结构：不再需要裁剪 _messages（分支切换时已由 SyncMessagesFromTree 处理）──
             // ── 树状结构：上下文已由 RebuildContextFromTree 重建，无需手动检查 userExistsInHistory ──
-
-            var retryCts = CreateNewStreamingCts();
 
             ChatMessage? assistantMsg = null;
             int newAssistantIdx = -1;
@@ -1192,7 +1228,7 @@ namespace DeepSeek_v4_for_VisualStudio.View
                     assistantMsg.IsStreaming = false;
                 lock (_lock) { _isGenerating = false; }
                 StatusLabel.Text = string.Empty;
-                DisposeStreamingCts();
+                DisposeStreamingCts(retryCts);
                 UpdateButtonsState();
             }
         }

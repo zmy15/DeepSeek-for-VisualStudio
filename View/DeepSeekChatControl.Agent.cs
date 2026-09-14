@@ -705,7 +705,7 @@ namespace DeepSeek_v4_for_VisualStudio.View
                             "Bing" => "Bing",
                             _ => "DuckDuckGo",
                         };
-                        var searchCt = CancellationToken.None; // 搜索阶段不依赖外部取消令牌
+                        var searchCt = context.CancellationToken;
                         var L = LocalizationService.Instance;
 
                         // Step 1: AI 优化搜索关键词
@@ -714,6 +714,9 @@ namespace DeepSeek_v4_for_VisualStudio.View
                         await TaskScheduler.Default;
 
                         var optimization = await OptimizeSearchQueryAsync(userText, searchCt, isBaidu);
+                        if (context.CancellationToken.IsCancellationRequested)
+                            return;
+
                         string searchQuery = optimization?.SearchQuery ?? userText;
                         if (optimization?.NeedSearch == false)
                         {
@@ -728,6 +731,8 @@ namespace DeepSeek_v4_for_VisualStudio.View
 
                             searchResults = await _webSearchService.SearchAsync(searchQuery, searchCt,
                                 searchRecency: optimization?.SearchRecency);
+                            if (context.CancellationToken.IsCancellationRequested)
+                                return;
 
                             if (searchResults.Count > 0)
                             {
@@ -753,6 +758,11 @@ namespace DeepSeek_v4_for_VisualStudio.View
                                 Logger.Info($"[Search] {providerName} 返回 0 条结果");
                             }
                         }
+                    }
+                    catch (OperationCanceledException) when (context.CancellationToken.IsCancellationRequested)
+                    {
+                        Logger.Info("[Search] 用户停止生成，结束搜索阶段");
+                        return;
                     }
                     catch (Exception ex)
                     {
@@ -789,7 +799,10 @@ namespace DeepSeek_v4_for_VisualStudio.View
                 bool handoffChainCompleted = false;
                 string mergedReasoning = agentResult.ReasoningContent ?? string.Empty;
 
-                while (agentResult.Handoff != null && !handoffChainCompleted)
+                while (agentResult.Handoff != null
+                    && !handoffChainCompleted
+                    && !context.CancellationToken.IsCancellationRequested
+                    && agentResult.Plan?.IsCancelled != true)
                 {
                     handoffChainDepth++;
                     if (agentResult.Handoff.ForwardedMessages == null)

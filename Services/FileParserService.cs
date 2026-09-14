@@ -9,6 +9,7 @@ using System.Collections.Generic;
 using System.IO;
 using System.Linq;
 using System.Text;
+using System.Threading;
 using System.Threading.Tasks;
 using UglyToad.PdfPig;
 using UglyToad.PdfPig.Content;
@@ -217,13 +218,21 @@ namespace DeepSeek_v4_for_VisualStudio.Services
         /// </summary>
         /// <param name="filePaths">文件路径列表</param>
         /// <returns>解析结果列表</returns>
-        public static async Task<List<FileParseResult>> ParseFilesAsync(IEnumerable<string> filePaths)
+        public static async Task<List<FileParseResult>> ParseFilesAsync(
+            IEnumerable<string> filePaths,
+            CancellationToken cancellationToken = default)
         {
             var results = new List<FileParseResult>();
             foreach (var path in filePaths)
             {
+                if (cancellationToken.IsCancellationRequested)
+                    break;
+
                 var result = await ParseFileAsync(path);
                 results.Add(result);
+
+                if (cancellationToken.IsCancellationRequested)
+                    break;
             }
             return results;
         }

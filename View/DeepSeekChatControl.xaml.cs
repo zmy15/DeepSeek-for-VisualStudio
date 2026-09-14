@@ -141,13 +141,30 @@ namespace DeepSeek_v4_for_VisualStudio.View
         /// <summary>
         /// 线程安全地释放当前流式 CTS。
         /// </summary>
-        private void DisposeStreamingCts()
+        private void DisposeStreamingCts(CancellationTokenSource? expected = null)
         {
             lock (_lock)
             {
+                if (expected != null && !ReferenceEquals(_currentStreamingCts, expected))
+                    return;
+
                 _currentStreamingCts?.Dispose();
                 _currentStreamingCts = null;
             }
+        }
+
+        /// <summary>
+        /// 预处理阶段收到停止请求时，统一复位生成状态。
+        /// </summary>
+        private bool TryCompleteCancelledGeneration(CancellationTokenSource requestCts)
+        {
+            if (!requestCts.IsCancellationRequested)
+                return false;
+
+            lock (_lock) { _isGenerating = false; }
+            UpdateButtonsState();
+            StatusLabel.Text = LocalizationService.Instance["status.stopped"];
+            return true;
         }
         private string? _solutionPath;
 
