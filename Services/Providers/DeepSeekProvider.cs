@@ -54,6 +54,15 @@ namespace DeepSeek_v4_for_VisualStudio.Services.Providers
         public bool IsDeepSeekEndpoint
             => string.Equals(BaseUrl.TrimEnd('/'), DefaultBaseUrl, StringComparison.OrdinalIgnoreCase);
 
+        /// <summary>
+        /// DeepSeek 原生模型支持 JSON Output。自定义聚合端点上的非 DeepSeek
+        /// 模型无法可靠判断，因此不发送可能不被上游接受的 response_format。
+        /// </summary>
+        protected override bool SupportsJsonObjectResponseFormat(string model)
+            => IsDeepSeekEndpoint
+                || (!string.IsNullOrWhiteSpace(model)
+                    && model.Contains("deepseek", StringComparison.OrdinalIgnoreCase));
+
         /// <summary>账户币种（"CNY" 国内 / "USD" 国际）。</summary>
         public string AccountCurrency => _accountCurrency;
 

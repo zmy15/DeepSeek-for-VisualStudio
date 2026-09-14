@@ -426,6 +426,18 @@ namespace DeepSeek_v4_for_VisualStudio.Services.Providers
         /// <summary>当前使用的模型标识（用于视觉模型等能力分支判断）。</summary>
         public string CurrentModel => _model;
 
+        /// <summary>
+        /// 当前 Provider 是否支持 OpenAI 兼容的 JSON Output 参数
+        /// <c>response_format: {"type":"json_object"}</c>。
+        /// 默认不发送，由具体 Provider 根据端点与模型能力覆写。
+        /// </summary>
+        protected virtual bool SupportsJsonObjectResponseFormat(string model) => false;
+
+        private ResponseFormat? CreateResponseFormat(string? responseFormat, string model)
+            => responseFormat == "json_object" && SupportsJsonObjectResponseFormat(model)
+                ? new ResponseFormat { Type = "json_object" }
+                : null;
+
         /// <summary>当前模型是否具备多模态（视觉）能力，由端点解析器权威赋值。</summary>
         public bool CurrentIsVision { get; protected set; }
 
@@ -483,18 +495,17 @@ namespace DeepSeek_v4_for_VisualStudio.Services.Providers
             string? effectiveToolChoice = toolChoice
                 ?? (normalizedTools != null && normalizedTools.Count > 0 ? "auto" : null);
 
+            string effectiveModel = model ?? _model;
             var request = new DeepSeekChatRequest
             {
-                Model = model ?? _model,
+                Model = effectiveModel,
                 Messages = new List<ChatApiMessage>(messages),
                 Stream = true,
                 Tools = normalizedTools,
                 ToolChoice = effectiveToolChoice,
                 MaxTokens = maxTokens,
                 Temperature = temperature,
-                ResponseFormat = responseFormat == "json_object"
-                    ? new ResponseFormat { Type = "json_object" }
-                    : null
+                ResponseFormat = CreateResponseFormat(responseFormat, effectiveModel)
             };
             ApplyProviderRequestOptions(request, thinkingEnabled);
             ApplyProviderEndpointShaping(request, isStreaming: true);
@@ -1330,9 +1341,7 @@ namespace DeepSeek_v4_for_VisualStudio.Services.Providers
                 // P1-3 修复：非流式路径同样深克隆，避免对调用方消息对象就地修改（ReasoningContent 注入）
                 Messages = messages.Select(m => CloneMessage(m)).ToList(),
                 Stream = false,
-                ResponseFormat = responseFormat == "json_object"
-                    ? new ResponseFormat { Type = "json_object" }
-                    : null
+                ResponseFormat = CreateResponseFormat(responseFormat, _model)
             };
             ApplyProviderRequestOptions(request, thinkingEnabled: false);
             ApplyProviderEndpointShaping(request, isStreaming: false);
