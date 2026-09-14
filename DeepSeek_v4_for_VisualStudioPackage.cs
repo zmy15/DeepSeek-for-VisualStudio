@@ -42,7 +42,7 @@ namespace DeepSeek_v4_for_VisualStudio
         public static readonly Guid PackageGuid = new(PackageGuidString);
 
         /// <summary>
-        /// 静态构造函数：注册 AssemblyResolve 以处理 VS2022 中 System.Memory 等
+        /// 静态构造函数：注册 AssemblyResolve 以处理 Visual Studio 2022/2026 中 System.Memory 等
         /// .NET Standard 桥接程序集的版本绑定问题。
         /// Markdig 编译时引用 System.Memory 4.0.5.0，但实际部署的是 NuGet 版本
         /// (4.5.5, 程序集版本 4.0.1.2)，需要通过此处理器完成运行时重定向。
@@ -690,7 +690,7 @@ namespace DeepSeek_v4_for_VisualStudio
     internal static class Vsix
     {
         public const string Name = "DeepSeek Chat for Visual Studio";
-        public const string Description = "DeepSeek AI chat integration for Visual Studio 2022.";
-        public const string Version = "1.2.0";
+        public const string Description = "DeepSeek AI chat integration for Visual Studio 2022 and 2026.";
+        public const string Version = "1.2.1";
     }
 }

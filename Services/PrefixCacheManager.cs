@@ -10,7 +10,7 @@ using System.Text.Json;
 namespace DeepSeek_v4_for_VisualStudio.Services
 {
     /// <summary>
-    /// 前缀缓存稳定性管理器 — 基于 SHA-256 指纹监控前缀变化，保障 DeepSeek V4 自动前缀缓存命中率。
+    /// 前缀缓存稳定性管理器 — 基于 SHA-256 指纹监控前缀变化，保障 DeepSeek 自动前缀缓存命中率。
     /// 
     /// 核心职责：
     /// 1. 对不可变前缀（system prompt + tool catalog）计算 SHA-256 指纹

@@ -2952,7 +2952,7 @@ namespace DeepSeek_v4_for_VisualStudio.Services.Agents
         }
 
         /// <summary>
-        /// 剥离 DeepSeek V4 泄露到 content 中的 DSML/工具调用 XML 标签。
+        /// 剥离 DeepSeek 泄露到 content 中的 DSML/工具调用 XML 标签。
         /// PlanAgent / BaseAgent 共享使用。
         /// </summary>
         protected static string StripDsmlContent(string text)
@@ -2962,7 +2962,7 @@ namespace DeepSeek_v4_for_VisualStudio.Services.Agents
             // ── 移除完整的 DSML/工具调用 XML 块（含嵌套内容）──
             // 支持两种格式：
             //   1. 标准 XML: <tagname>...</tagname>
-            //   2. DeepSeek V4 管道分隔: <|tagname|>...</|tagname|>
+            //   2. DeepSeek 管道分隔: <|tagname|>...</|tagname|>
             string[] blockTags = {
                 "DSML", "function_calls?", "tool_calls?", "invoke", "parameter",
                 "VisualStudio_askQuestions", "runSubagent", "tool_result",
@@ -2970,7 +2970,7 @@ namespace DeepSeek_v4_for_VisualStudio.Services.Agents
                 "semantic_search", "fetch_webpage", "run_in_terminal",
                 "create_file", "replace_string_in_file",
                 "create_directory", "runSubagent", "mcp_\\w+", "github_\\w+",
-                // DeepSeek V4 DSML wrapper tags
+                // DeepSeek DSML wrapper tags
                 "response", "result", "output", "answer"
             };
 
@@ -3741,14 +3741,14 @@ namespace DeepSeek_v4_for_VisualStudio.Services.Agents
 
         /// <summary>
         /// 从 AI 返回结果中提取 JSON（可能被 markdown 代码块包裹）。
-        /// 同时剥离 DeepSeek V4 可能在 content 中输出的 XML 风格标签。
+        /// 同时剥离 DeepSeek 可能在 content 中输出的 XML 风格标签。
         /// 当 tools=null 时，DeepSeek 会将工具调用意图以 DSML/function_call 等标签泄露到 content。
         /// </summary>
         protected static string ExtractJsonFromMarkdown(string text)
         {
             if (string.IsNullOrWhiteSpace(text)) return "{}";
 
-            // ── 剥离 XML 风格的标签（DeepSeek V4 可能将推理/工具调用泄露到 content 字段）──
+            // ── 剥离 XML 风格的标签（DeepSeek 可能将推理/工具调用泄露到 content 字段）──
             // 支持标准 XML <tag> 和 DeepSeek 管道分隔 <|tag|> 两种格式
             string cleaned = System.Text.RegularExpressions.Regex.Replace(
                 text,

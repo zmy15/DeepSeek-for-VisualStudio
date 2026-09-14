@@ -1,13 +1,13 @@
 # 项目交接报告 — 供新一轮对话使用
 
-> 基线 `644068a` (v1.1.14) → HEAD，标签 `v1.2.0`，43 提交。
+> 基线 `644068a` (v1.1.14) → HEAD，标签 `v1.2.1`，43 提交。
 > 本文档为完整上下文快照，新对话可直接从此处继续。
 
 ---
 
 ## 一、项目概况
 
-DeepSeek v4 for Visual Studio 扩展（VSIX），net472 + WPF + WebView2。
+DeepSeek for Visual Studio 扩展（VSIX），net472 + WPF + WebView2。
 Phase 1.5 目标：可观测性 → IDE Context → Copilot 交互 → 评测驱动优化。
 
 ## 二、已完成（全部验证通过）
@@ -92,7 +92,7 @@ powershell -File tools\build-vs26.ps1
 | docs/Phase1.5-BuildTest-Report.md | 构建&测试报告 |
 | docs/A-Phase-Execution-Report.md | A 阶段执行报告 |
 | docs/Settings-UnifiedIntegration-Feasibility.md | Unified Settings 可行性调查（含 §八 Step2 深度调查）|
-| CHANGELOG.md | v1.2.0 更新日志 |
+| CHANGELOG.md | v1.2.1 更新日志 |
 | benchmark/README.md | Benchmark 规程 |
 | tools/build-vs26.ps1 | 可复现构建入口 |
 | tools/de-emoji.ps1 | locale emoji 清扫脚本 |

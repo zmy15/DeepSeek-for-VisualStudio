@@ -24,7 +24,7 @@ namespace DeepSeek_v4_for_VisualStudio.Services
     /// ── 缓存对齐策略（v1.1.9）──
     /// 压缩摘要不再作为独立的 system 消息注入，而是合并到动态上下文块中。
     /// 这样 messages[0]（冻结的系统提示词）和对话历史的前缀在压缩前后保持不变，
-    /// DeepSeek V4 的自动前缀缓存可以持续命中。
+    /// DeepSeek 的自动前缀缓存可以持续命中。
     /// 参考：CodeWhale compaction.rs Cache-Aligned Summary Path
     /// </summary>
     public class ContextCompressorService : IContextCompressorService

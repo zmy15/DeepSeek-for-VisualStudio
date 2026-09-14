@@ -178,7 +178,7 @@
     "settings.autocompleteContinueAfterAccept.displayName": "接受后继续补全",
     "settings.autocompleteContinueAfterAccept.description": "启用后，接受一条补全会立即触发新的预测。",
     "settings.tokenBudget.displayName": "Token 预算上限",
-    "settings.tokenBudget.description": "DeepSeek V4 拥有 1M Token 上下文窗口。\n此设置控制发送给 API 的最大 Token 数（预留 100K 给模型输出）。\n默认 900,000。减小此值可降低 API 费用，增大可容纳更多上下文。",
+    "settings.tokenBudget.description": "DeepSeek 拥有 1M Token 上下文窗口。\n此设置控制发送给 API 的最大 Token 数（预留 100K 给模型输出）。\n默认 900,000。减小此值可降低 API 费用，增大可容纳更多上下文。",
     "settings.enableAutoCompression.displayName": "启用自动压缩",
     "settings.enableAutoCompression.description": "当上下文接近 Token 预算时，自动将早期对话压缩为摘要，\n而非直接删除旧消息。关闭后回退到旧的截断行为。",
     "settings.compressionThreshold.displayName": "压缩触发阈值 (%)",

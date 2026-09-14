@@ -561,8 +561,8 @@ namespace DeepSeek_v4_for_VisualStudio.Services.Agents
         #region Plan Creation
 
         /// <summary>
-        /// 剥离 DeepSeek V4 泄露到 content 中的 DSML/工具调用 XML 标签。
-        /// 当 toolChoice=none 时，DeepSeek V4 仍可能在 content 中输出工具调用意图的 XML 片段。
+        /// 剥离 DeepSeek 泄露到 content 中的 DSML/工具调用 XML 标签。
+        /// 当 toolChoice=none 时，DeepSeek 仍可能在 content 中输出工具调用意图的 XML 片段。
         /// 此方法移除所有已知的 DSML 标签及其内容，保留纯文本/JSON。
         /// </summary>
         private new static string StripDsmlContent(string text)
@@ -644,7 +644,7 @@ namespace DeepSeek_v4_for_VisualStudio.Services.Agents
                 ? rawResponse.Substring(0, 500) + "..."
                 : rawResponse;
             AddLog("INFO", $"[Plan] JSON raw response (first 500 chars): {rawPreview}");
-            // 先剥离 DSML/XML 标签（DeepSeek V4 可能在 toolChoice=none 时仍泄露工具调用意图到 content）
+            // 先剥离 DSML/XML 标签（DeepSeek 可能在 toolChoice=none 时仍泄露工具调用意图到 content）
             json = StripDsmlContent(json);
             json = ExtractJsonFromMarkdown(json);
 
@@ -1211,7 +1211,7 @@ namespace DeepSeek_v4_for_VisualStudio.Services.Agents
             AddLog("INFO", L["agent.log.planMdGenerated"]);
 
             // ── 后处理：剥离 DSML/工具调用泄露 ──
-            // DeepSeek V4 即使在 toolChoice=none 时也可能将工具调用意图泄露到 content 字段，
+            // DeepSeek 即使在 toolChoice=none 时也可能将工具调用意图泄露到 content 字段，
             // 导致 plan.md 内容被 DSML/XML 标签污染。此处先剥离再检测。
             string rawMarkdown = markdown;
             markdown = StripDsmlContent(markdown);

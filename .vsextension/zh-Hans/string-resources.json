@@ -104,7 +104,7 @@
   "DeepSeek.Chat.Settings.ThemeFollowVS": "跟随 Visual Studio",
   "DeepSeek.Chat.settings.themeMode.description": "界面主题：自动（跟随VS）、深色、浅色",
   "DeepSeek.Chat.settings.themeMode.displayName": "主题",
-  "DeepSeek.Chat.settings.tokenBudget.description": "DeepSeek V4 拥有 1M Token 上下文窗口。\n此设置控制发送给 API 的最大 Token 数（预留 100K 给模型输出）。\n默认 900,000。减小此值可降低 API 费用，增大可容纳更多上下文。",
+  "DeepSeek.Chat.settings.tokenBudget.description": "DeepSeek 拥有 1M Token 上下文窗口。\n此设置控制发送给 API 的最大 Token 数（预留 100K 给模型输出）。\n默认 900,000。减小此值可降低 API 费用，增大可容纳更多上下文。",
   "DeepSeek.Chat.settings.tokenBudget.displayName": "Token 预算上限",
   "DeepSeek.Chat.Settings.WebView2ZoomDescription": "聊天窗口的缩放级别（50% - 300%）。",
   "DeepSeek.Chat.Settings.WebView2ZoomTitle": "WebView2 缩放",

@@ -4,7 +4,7 @@
   "environment": {
     "repository_commit": "<fixture repo commit>",
     "vs_version": "17.14",
-    "extension_version": "1.2.0",
+    "extension_version": "1.2.1",
     "model": "deepseek-v4-pro",
     "model_parameters": { "thinking": true, "reasoning_effort": "max", "temperature": null },
     "prompt_version": "2026-08-22",

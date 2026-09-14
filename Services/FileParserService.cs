@@ -76,7 +76,7 @@ namespace DeepSeek_v4_for_VisualStudio.Services
 
         /// <summary>单文件最大解析大小（字节），超过则记录警告但不截断。</summary>
         /// <remarks>
-        /// DeepSeek V4 拥有 1M Token 上下文窗口，足以容纳大型文件。
+        /// DeepSeek 拥有 1M Token 上下文窗口，足以容纳大型文件。
         /// 此处仅作为日志警告阈值，不再截断文件内容。
         /// 实际限制由 ContextManager 的 Token 预算统一管理。
         /// </remarks>
@@ -87,7 +87,7 @@ namespace DeepSeek_v4_for_VisualStudio.Services
 
         /// <summary>
         /// 解析后文本最大长度（字符）。
-        /// DeepSeek V4 1M 上下文窗口下不再截断文件内容。
+        /// DeepSeek 1M 上下文窗口下不再截断文件内容。
         /// 设为 int.MaxValue 以完全禁用截断。
         /// </summary>
         private const int MaxParsedChars = int.MaxValue;
@@ -201,7 +201,7 @@ namespace DeepSeek_v4_for_VisualStudio.Services
                     return result;
                 }
 
-                // 不再截断内容。DeepSeek V4 1M Token 上下文窗口足以容纳大型文件。
+                // 不再截断内容。DeepSeek 1M Token 上下文窗口足以容纳大型文件。
                 // 上下文管理由 ConversationContextManager 的 Token 预算统一控制。
                 // 如果内容极大（>500K 字符），记录日志便于追踪。
                 if (result.Content != null && result.Content.Length > 500_000)

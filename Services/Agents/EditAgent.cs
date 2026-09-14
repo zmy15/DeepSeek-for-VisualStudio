@@ -3131,19 +3131,19 @@ namespace DeepSeek_v4_for_VisualStudio.Services.Agents
                 if (plan.IsCancelled)
                 {
                     toastService.Show(
-                        "DeepSeek V4",
+                        "DeepSeek",
                         string.Format(LocalizationService.Instance["toast.taskCancelled"], completed, total));
                 }
                 else if (plan.IsCompleted && failed == 0)
                 {
                     toastService.Show(
-                        "DeepSeek V4",
+                        "DeepSeek",
                         string.Format(LocalizationService.Instance["toast.taskComplete"], completed, total));
                 }
                 else if (plan.IsCompleted && failed > 0)
                 {
                     toastService.Show(
-                        "DeepSeek V4",
+                        "DeepSeek",
                         string.Format(LocalizationService.Instance["toast.taskPartialComplete"], completed, total, failed));
                 }
             }

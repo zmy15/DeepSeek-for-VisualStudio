@@ -104,7 +104,7 @@
   "DeepSeek.Chat.Settings.ThemeFollowVS": "Follow Visual Studio",
   "DeepSeek.Chat.settings.themeMode.description": "Interface theme: Auto (follow VS), Dark, or Light",
   "DeepSeek.Chat.settings.themeMode.displayName": "Theme",
-  "DeepSeek.Chat.settings.tokenBudget.description": "DeepSeek V4 has a 1M token context window.\nThis setting controls the maximum tokens sent to the API (reserving 100K for model output).\nDefault is 900,000. Reduce to lower API costs; increase for more context.",
+  "DeepSeek.Chat.settings.tokenBudget.description": "DeepSeek has a 1M token context window.\nThis setting controls the maximum tokens sent to the API (reserving 100K for model output).\nDefault is 900,000. Reduce to lower API costs; increase for more context.",
   "DeepSeek.Chat.settings.tokenBudget.displayName": "Token Budget Limit",
   "DeepSeek.Chat.Settings.WebView2ZoomDescription": "Zoom level of the chat window (50% - 300%).",
   "DeepSeek.Chat.Settings.WebView2ZoomTitle": "WebView2 Zoom",

@@ -642,7 +642,7 @@ namespace DeepSeek_v4_for_VisualStudio.Settings
         public bool AutoCompleteContinueAfterAccept { get; set; } = true;
 
         // ═══════════════════════════════════════════════
-        //  上下文管理设置（DeepSeek V4 1M 上下文窗口）
+        //  上下文管理设置（DeepSeek 1M 上下文窗口）
         // ═══════════════════════════════════════════════
 
         [LocalizedCategory("settings.category.context")]

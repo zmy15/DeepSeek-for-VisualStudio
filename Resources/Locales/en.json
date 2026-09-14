@@ -178,7 +178,7 @@
     "settings.autocompleteContinueAfterAccept.displayName": "Continue Completion After Accept",
     "settings.autocompleteContinueAfterAccept.description": "When enabled, accepting a completion immediately triggers a new prediction.",
     "settings.tokenBudget.displayName": "Token Budget Limit",
-    "settings.tokenBudget.description": "DeepSeek V4 has a 1M token context window.\nThis setting controls the maximum tokens sent to the API (reserving 100K for model output).\nDefault is 900,000. Reduce to lower API costs; increase for more context.",
+    "settings.tokenBudget.description": "DeepSeek has a 1M token context window.\nThis setting controls the maximum tokens sent to the API (reserving 100K for model output).\nDefault is 900,000. Reduce to lower API costs; increase for more context.",
     "settings.enableAutoCompression.displayName": "Enable Auto Compression",
     "settings.enableAutoCompression.description": "When context approaches the token budget, automatically compress early conversation into summaries\nrather than deleting old messages. When disabled, falls back to the old truncation behavior.",
     "settings.compressionThreshold.displayName": "Compression Trigger Threshold (%)",

@@ -171,14 +171,14 @@ namespace DeepSeek_v4_for_VisualStudio.Services
 
         /// <summary>
         /// 判断是否为超大上下文模型（窗口 ≥ 500K tokens）。
-        /// DeepSeek V4 系列为 1M 窗口，属于大上下文模型。
+        /// DeepSeek 系列为 1M 窗口，属于大上下文模型。
         /// </summary>
         internal static bool IsLargeContextModel(string model)
         {
             if (string.IsNullOrEmpty(model))
                 return true; // 默认按大上下文处理，保守策略
 
-            // DeepSeek V4 系列
+            // DeepSeek 系列
             if (model.Contains("deepseek", StringComparison.OrdinalIgnoreCase)
                 && (model.Contains("v4", StringComparison.OrdinalIgnoreCase)
                     || model.Contains("reasoner", StringComparison.OrdinalIgnoreCase)))
