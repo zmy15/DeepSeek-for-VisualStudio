@@ -578,9 +578,9 @@ namespace DeepSeek_v4_for_VisualStudio.Services.Providers
                         // 如果后者有 reasoning_content，保留后者
                         if (!string.IsNullOrWhiteSpace(clone.ReasoningContent))
                             lastMsg.ReasoningContent = clone.ReasoningContent;
-                        // 如果后者有 tool_calls，保留后者
-                        if (clone.ToolCalls != null && clone.ToolCalls.Count > 0)
-                            lastMsg.ToolCalls = clone.ToolCalls;
+                        // 连续 assistant 可能各自声明过工具调用，必须合并而不是覆盖，
+                        // 否则前一批 tool_call_id 会变成孤儿，对应 tool 消息随后被 Rule6 删除。
+                        MergeAssistantToolCalls(lastMsg, clone);
 
                         mergedCount++;
                         msgIndex++;
@@ -1266,6 +1266,33 @@ namespace DeepSeek_v4_for_VisualStudio.Services.Providers
                 ToolCallId = m.ToolCallId,
                 Name = m.Name,
             };
+        }
+
+        /// <summary>
+        /// 合并连续 assistant 消息的 ToolCalls，按 tool_call_id 去重。
+        /// </summary>
+        internal static void MergeAssistantToolCalls(ChatApiMessage target, ChatApiMessage source)
+        {
+            if (source.ToolCalls == null || source.ToolCalls.Count == 0)
+                return;
+
+            if (target.ToolCalls == null || target.ToolCalls.Count == 0)
+            {
+                target.ToolCalls = source.ToolCalls;
+                return;
+            }
+
+            var seenIds = new HashSet<string>(
+                target.ToolCalls
+                    .Where(tc => !string.IsNullOrEmpty(tc.Id))
+                    .Select(tc => tc.Id!),
+                StringComparer.Ordinal);
+
+            foreach (var toolCall in source.ToolCalls)
+            {
+                if (string.IsNullOrEmpty(toolCall.Id) || seenIds.Add(toolCall.Id))
+                    target.ToolCalls.Add(toolCall);
+            }
         }
 
         /// <summary>

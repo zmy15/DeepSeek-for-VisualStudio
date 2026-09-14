@@ -85,4 +85,59 @@ public class DeepSeekApiServiceCloneTests
         clone.ReasoningContent.Should().BeNull();
         clone.Content.Should().Be("plain");
     }
+
+    [Fact]
+    public void MergeAssistantToolCalls_PreservesBothBatches()
+    {
+        var target = new ChatApiMessage
+        {
+            Role = "assistant",
+            Content = "first",
+            ToolCalls = new List<ToolCall>
+            {
+                new() { Id = "call_1", Type = "function", Function = new ToolCallFunction { Name = "read_file", Arguments = "{}" } },
+            },
+        };
+        var source = new ChatApiMessage
+        {
+            Role = "assistant",
+            Content = "second",
+            ToolCalls = new List<ToolCall>
+            {
+                new() { Id = "call_2", Type = "function", Function = new ToolCallFunction { Name = "grep_search", Arguments = "{}" } },
+                new() { Id = "call_3", Type = "function", Function = new ToolCallFunction { Name = "list_dir", Arguments = "{}" } },
+            },
+        };
+
+        DeepSeekApiService.MergeAssistantToolCalls(target, source);
+
+        target.ToolCalls.Should().NotBeNull();
+        target.ToolCalls!.Select(tc => tc.Id).Should().Equal("call_1", "call_2", "call_3");
+    }
+
+    [Fact]
+    public void MergeAssistantToolCalls_DeduplicatesSameToolCallId()
+    {
+        var target = new ChatApiMessage
+        {
+            Role = "assistant",
+            ToolCalls = new List<ToolCall>
+            {
+                new() { Id = "call_1", Type = "function", Function = new ToolCallFunction { Name = "read_file", Arguments = "{}" } },
+            },
+        };
+        var source = new ChatApiMessage
+        {
+            Role = "assistant",
+            ToolCalls = new List<ToolCall>
+            {
+                new() { Id = "call_1", Type = "function", Function = new ToolCallFunction { Name = "read_file", Arguments = "{}" } },
+                new() { Id = "call_2", Type = "function", Function = new ToolCallFunction { Name = "grep_search", Arguments = "{}" } },
+            },
+        };
+
+        DeepSeekApiService.MergeAssistantToolCalls(target, source);
+
+        target.ToolCalls!.Select(tc => tc.Id).Should().Equal("call_1", "call_2");
+    }
 }

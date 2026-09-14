@@ -1478,11 +1478,6 @@ namespace DeepSeek_v4_for_VisualStudio.Services.Agents
                             toolCalls);
                     }
 
-                    // ──  Explore 子代理消息注入：记录 ContextManager 当前条目数
-                    //     （在 AddAssistantMessage 之后，避免注入时重复读取本条 assistant）。
-                    //     供 runSubagent 执行后回读 Explore 内部工具循环消息。──
-                    int cmCountBefore = Context?.ContextManager?.MessageCount ?? 0;
-
                     // ── 并行执行工具调用（带超时保护，长时工具使用更长超时，已去重）──
                     //    被白名单拦截的工具跳过执行，直接返回拒绝消息。
                     var toolTasks = dedupedIndices.Select(idx =>
@@ -1509,10 +1504,6 @@ namespace DeepSeek_v4_for_VisualStudio.Services.Agents
                         return ExecuteToolWithTelemetryAsync(metrics, round, tc, workspaceRoot, ct, timeout);
                     }).ToList();
                     var dedupedResults = await Task.WhenAll(toolTasks).ConfigureAwait(false);
-
-                    // ──  记录 Explore 执行后的 CM 条目数（tool 结果尚未写入），
-                    //     用于精确读取 Explore 内部消息（不含即将写入的 runSubagent tool 结果）。──
-                    int cmCountAfterExplore = Context?.ContextManager?.MessageCount ?? 0;
 
                     // ── 将去重后的结果映射回原始 toolCalls 数组 ──
                     var toolResults = new string[toolCalls.Count];
@@ -1639,37 +1630,6 @@ namespace DeepSeek_v4_for_VisualStudio.Services.Agents
                         contentBuilder.Clear();
                         contentBuilder.Append(terminatedBuilder.ToString());
                         break;
-                    }
-
-                    // ──  Explore 子代理消息注入（v1.1.11）：将 Explore 内部工具循环消息
-                    //     回注到父 Agent 的 messages 列表，确保后续轮次从 ContextManager
-                    //     重建时前缀结构完全一致。
-                    //     Explore 执行期间通过 AddAssistantMessage/AddToolResult 写入
-                    //     ContextManager 的消息，在此刻读出。
-                    //      v1.1.12：注入到 [user] 之后、[agent] 之前，
-                    //     与 runSubagent 工具结果同位置，保持前缀不被破坏以最大化缓存命中。──
-                    if (toolCalls.Any(tc => tc.Function.Name == "runSubagent")
-                        && Context?.ContextManager != null)
-                    {
-                        if (cmCountAfterExplore > cmCountBefore)
-                        {
-                            // 读取 [cmCountBefore, cmCountAfterExplore) 范围的条目
-                            // （不含 tool 结果，因为 cmCountAfterExplore 在结果写入 CM 之前记录）
-                            var rawExploreMessages =
-                                Context.ContextManager.GetEntryMessages(cmCountBefore, cmCountAfterExplore);
-                            var exploreMessages = CleanIncompleteToolChains(rawExploreMessages);
-                            if (exploreMessages.Count > 0)
-                            {
-                                foreach (var em in exploreMessages)
-                                {
-                                    messages.Insert(messages.Count - 1, em);
-                                }
-                                Logger.Info($"[Agent:{Definition.Name}]  注入 Explore 子代理消息: " +
-                                    $"{exploreMessages.Count} 条 " +
-                                    $"(原始 {rawExploreMessages.Count} 条, CM 索引 {cmCountBefore}→{cmCountAfterExplore})" +
-                                    $" → 末尾注入 (pos={messages.Count - 1 - exploreMessages.Count}..{messages.Count - 2})");
-                            }
-                        }
                     }
 
                     // ── 移交检测：如果 AI 调用了 request_handoff，立即终止循环 ──
@@ -2041,11 +2001,12 @@ namespace DeepSeek_v4_for_VisualStudio.Services.Agents
                         if (Context != null)
                             Context.ForwardedMessages = null; // 消费后清空
 
-                        // ── 同步上下文与执行深度到 ExploreAgent ──
-                        if (ExploreAgent.BuiltInTools == null)
-                            ExploreAgent.BuiltInTools = this.BuiltInTools;
-                        if (ExploreAgent.McpManager == null)
-                            ExploreAgent.McpManager = this.McpManager;
+                        // 每次子代理执行使用独立实例，避免并行任务共享 ExploreAgent.Context。
+                        var exploreAgent = new ExploreAgent(_apiService)
+                        {
+                            BuiltInTools = BuiltInTools ?? effectiveExploreAgent.BuiltInTools,
+                            McpManager = McpManager ?? effectiveExploreAgent.McpManager,
+                        };
 
                         // ── 构建 ExploreAgent 上下文 ──
                         // 为 ExploreAgent 创建 FileReadCache 副本，避免共享同一实例导致
@@ -2058,7 +2019,10 @@ namespace DeepSeek_v4_for_VisualStudio.Services.Agents
                         {
                             SolutionPath = ctx.WorkspaceRoot ?? Context?.SolutionPath,
                             CancellationToken = ct,
-                            ContextManager = Context?.ContextManager,
+                            // 子代理内部消息必须与父对话隔离。共享 ContextManager 会把
+                            // Explore 的 assistant/tool 链插入父 assistant(tool_calls) 与
+                            // 对应 tool 结果之间，破坏 API 要求的严格配对顺序。
+                            ContextManager = new ConversationContextManager(),
                             ExecutionDepth = (Context?.ExecutionDepth ?? 0) + 1,
                             FileReadCache = exploreFileCache,
                             DiscoveredFiles = Context?.DiscoveredFiles,
@@ -2066,7 +2030,7 @@ namespace DeepSeek_v4_for_VisualStudio.Services.Agents
                             //    使ExploreAgent的首轮API调用可复用父Agent的缓存前缀。
                             ForwardedMessages = ctx.ForwardedMessages,
                         };
-                        ExploreAgent.Context = exploreCtx;
+                        exploreAgent.Context = exploreCtx;
 
                         AddLog("INFO", $"[{Definition.Name}] → ExploreAgent: {ctx.Description}");
 
@@ -2081,7 +2045,7 @@ namespace DeepSeek_v4_for_VisualStudio.Services.Agents
                         AgentResult? exploreResult = null;
                         try
                         {
-                            exploreResult = await ExploreAgent.ExecuteAsync(ctx.Prompt, exploreCtx);
+                            exploreResult = await exploreAgent.ExecuteAsync(ctx.Prompt, exploreCtx);
                         }
                         finally
                         {
