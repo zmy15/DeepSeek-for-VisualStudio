@@ -1373,7 +1373,7 @@ namespace DeepSeek_v4_for_VisualStudio.Services.Agents
                     blockedToolIndices = new HashSet<int>();
                     for (int i = 0; i < toolCalls.Count; i++)
                     {
-                        if (!whitelistSet.Contains(toolCalls[i].Function.Name))
+                        if (!whitelistSet.Contains(NormalizeToolName(toolCalls[i].Function.Name)))
                         {
                             blockedToolIndices.Add(i);
                         }
@@ -1505,7 +1505,7 @@ namespace DeepSeek_v4_for_VisualStudio.Services.Agents
                                     : "请直接说明无法完成的原因。") +
                                 "\n再次发生白名单外工具调用将终止本轮工具循环。");
                         }
-                        var timeout = GetToolTimeout(tc.Function.Name);
+                        var timeout = GetToolTimeout(NormalizeToolName(tc.Function.Name));
                         return ExecuteToolWithTelemetryAsync(metrics, round, tc, workspaceRoot, ct, timeout);
                     }).ToList();
                     var dedupedResults = await Task.WhenAll(toolTasks).ConfigureAwait(false);
@@ -2006,6 +2006,8 @@ namespace DeepSeek_v4_for_VisualStudio.Services.Agents
         /// </summary>
         private async Task<string> ExecuteToolAsync(string toolName, string argumentsJson, string? workspaceRoot, CancellationToken ct)
         {
+            toolName = NormalizeToolName(toolName);
+
             if (BuiltInTools != null)
                 BuiltInTools.CurrentSolutionPath = Context?.SolutionPath;
 
@@ -2302,8 +2304,8 @@ namespace DeepSeek_v4_for_VisualStudio.Services.Agents
                 }
             }
 
-            // ── VisualStudio_askQuestions / askQuestions：向用户提问并等待回答 ──
-            if (toolName == "VisualStudio_askQuestions" || toolName == "askQuestions")
+            // ── VisualStudio_askQuestions：向用户提问并等待回答 ──
+            if (toolName == "VisualStudio_askQuestions")
             {
                 string questionsJson = string.Empty;
                 try
@@ -3180,6 +3182,14 @@ namespace DeepSeek_v4_for_VisualStudio.Services.Agents
                 or "grep_search"             // 同上
                 or "git"                     // 写操作需要用户审批
                 or "runSubagent";            // 子代理可能需要用户审批（如 Explore 用 git）
+        }
+
+        internal static string NormalizeToolName(string toolName)
+        {
+            if (string.Equals(toolName, "askQuestions", StringComparison.OrdinalIgnoreCase))
+                return "VisualStudio_askQuestions";
+
+            return toolName;
         }
 
         /// <summary>

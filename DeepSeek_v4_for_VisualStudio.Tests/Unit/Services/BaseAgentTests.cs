@@ -12,6 +12,16 @@ namespace DeepSeek_v4_for_VisualStudio.Tests.Unit.Services;
 public class BaseAgentTests
 {
     [Theory]
+    [InlineData("askQuestions", "VisualStudio_askQuestions")]
+    [InlineData("ASKQUESTIONS", "VisualStudio_askQuestions")]
+    [InlineData("VisualStudio_askQuestions", "VisualStudio_askQuestions")]
+    [InlineData("read_file", "read_file")]
+    public void NormalizeToolName_MapsLegacyAskQuestionsAlias(string input, string expected)
+    {
+        BaseAgent.NormalizeToolName(input).Should().Be(expected);
+    }
+
+    [Theory]
     [InlineData(200, null, 200)]
     [InlineData(200, 50, 50)]
     [InlineData(500, 200, 200)]

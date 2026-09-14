@@ -56,6 +56,8 @@ public class AskAgentTests
         agent.Definition.SystemPrompt.Should().Contain("Ask");
         agent.Definition.SystemPrompt.Should().Contain("git");
         agent.Definition.SystemPrompt.Should().Contain("只读");
+        agent.Definition.SystemPrompt.Should().Contain("VisualStudio_askQuestions");
+        agent.Definition.SystemPrompt.Should().Contain("必须直接调用");
         agent.Definition.SystemPrompt.Should().Contain(
             global::DeepSeek_v4_for_VisualStudio.Services.AiPrompts.AgentConclusionStopRule);
     }
