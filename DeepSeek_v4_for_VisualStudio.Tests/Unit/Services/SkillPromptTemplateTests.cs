@@ -14,5 +14,7 @@ public class SkillPromptTemplateTests
         result.Should().Contain(discoveryContext);
         result.Should().Contain("{");
         result.Should().NotContain("{0}");
+        result.Should().Contain("技能执行边界");
+        result.Should().Contain("1-2 处");
     }
 }

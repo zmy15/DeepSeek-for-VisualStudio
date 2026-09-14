@@ -74,6 +74,7 @@ namespace DeepSeek_v4_for_VisualStudio.Settings
             (CategoryPrefix + "deepseekAgentMaxDepth", p => p.AgentMaxDepth, (p, v) => p.AgentMaxDepth = (int)v!),
             (CategoryPrefix + "deepseekAgentNoProgressRounds", p => p.AgentNoProgressRounds, (p, v) => p.AgentNoProgressRounds = (int)v!),
             (CategoryPrefix + "deepseekEnableAutoBuild", p => p.EnableAutoBuild, (p, v) => p.EnableAutoBuild = (bool)v!),
+            (CategoryPrefix + "deepseekEnableAutoSkillRouting", p => p.EnableAutoSkillRouting, (p, v) => p.EnableAutoSkillRouting = (bool)v!),
             (CategoryPrefix + "deepseekApprovalMode", p => p.ApprovalMode, (p, v) => p.ApprovalMode = (string?)v ?? "SmartBlock"),
             (CategoryPrefix + "deepseekThemeMode", p => p.ThemeModeString, (p, v) => p.ThemeModeString = (string?)v ?? "Auto"),
             (CategoryPrefix + "deepseekInputBoxHeight", p => p.InputBoxHeight, (p, v) => p.InputBoxHeight = (int)v!),

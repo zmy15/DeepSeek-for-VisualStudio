@@ -41,6 +41,8 @@
   "DeepSeek.Chat.settings.visionModels.displayName": "视觉模型",
   "DeepSeek.Chat.settings.enableAutoBuild.description": "Edit Agent 完成代码修改后，是否自动调用 Build Agent 编译验证。关闭后，编译步骤将显示为按钮由您手动触发。您也可以在提问中使用「不要编译」「跳过构建」等短语临时跳过构建。默认开启。",
   "DeepSeek.Chat.settings.enableAutoBuild.displayName": "代码修改后自动编译",
+  "DeepSeek.Chat.settings.enableAutoSkillRouting.description": "是否允许 AI 在发送请求前自动匹配并加载技能。关闭后，仅在您显式输入 /技能名 时使用技能；始终注入技能不受影响。默认关闭。",
+  "DeepSeek.Chat.settings.enableAutoSkillRouting.displayName": "自动匹配技能",
   "DeepSeek.Chat.settings.enableAutoCompression.description": "当上下文接近 Token 预算时，自动将早期对话压缩为摘要，\n而非直接删除旧消息。关闭后回退到旧的截断行为。",
   "DeepSeek.Chat.settings.enableAutoCompression.displayName": "启用自动压缩",
   "DeepSeek.Chat.settings.enableIdeContextInjection.description": "每条消息发送时，将当前活动文件、光标位置、选中代码与当前文件的错误/警告摘要自动提供给 AI（注入为易变上下文，不影响缓存命中）。深度查询仍可通过 get_errors 等工具完成。",

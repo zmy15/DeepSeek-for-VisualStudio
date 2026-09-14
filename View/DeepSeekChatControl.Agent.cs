@@ -199,14 +199,17 @@ namespace DeepSeek_v4_for_VisualStudio.View
         {
             if (_contextManager == null || _skillDiscoveryResult == null) return;
 
-            string discoveryContext = SkillService.Instance.GenerateSkillsDiscoveryContext(_skillDiscoveryResult);
             string? skillContext = null;
-            if (!string.IsNullOrWhiteSpace(discoveryContext))
+            if (IsAutoSkillRoutingEnabled())
             {
-                skillContext = AiPrompts.BuildSkillSystemPromptFragment(discoveryContext);
-                string toolInstructions = LocalizationService.Instance["system.skillToolInstructions"];
-                if (!string.IsNullOrWhiteSpace(toolInstructions))
-                    skillContext += "\n\n" + toolInstructions;
+                string discoveryContext = SkillService.Instance.GenerateSkillsDiscoveryContext(_skillDiscoveryResult);
+                if (!string.IsNullOrWhiteSpace(discoveryContext))
+                {
+                    skillContext = AiPrompts.BuildSkillSystemPromptFragment(discoveryContext);
+                    string toolInstructions = LocalizationService.Instance["system.skillToolInstructions"];
+                    if (!string.IsNullOrWhiteSpace(toolInstructions))
+                        skillContext += "\n\n" + toolInstructions;
+                }
             }
 
             _contextManager.SetSkillContext(skillContext);
@@ -215,9 +218,16 @@ namespace DeepSeek_v4_for_VisualStudio.View
             _contextManager.SetAlwaysInjectSkillsContext(
                 string.IsNullOrWhiteSpace(alwaysInjectContext) ? null : alwaysInjectContext);
 
-            var skillNames = string.Join(", ", _skillDiscoveryResult.AutoLoadableSkills.ConvertAll(s => s.Name));
-            Logger.Info($"[Skill] 上下文已刷新: {_skillDiscoveryResult.AutoLoadableSkills.Count} 个可选 + " +
-                $"{_skillDiscoveryResult.AlwaysInjectSkills.Count} 个始终激活 → 可选: {skillNames}");
+            if (skillContext == null)
+            {
+                Logger.Info($"[Skill] 自动技能路由已关闭；始终注入技能: {_skillDiscoveryResult.AlwaysInjectSkills.Count} 个");
+            }
+            else
+            {
+                var skillNames = string.Join(", ", _skillDiscoveryResult.AutoLoadableSkills.ConvertAll(s => s.Name));
+                Logger.Info($"[Skill] 上下文已刷新: {_skillDiscoveryResult.AutoLoadableSkills.Count} 个可选 + " +
+                    $"{_skillDiscoveryResult.AlwaysInjectSkills.Count} 个始终激活 → 可选: {skillNames}");
+            }
         }
 
         /// <summary>技能刷新后，若系统提示已经冻结，则同步重建固定前缀。</summary>

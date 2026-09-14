@@ -124,8 +124,16 @@ namespace DeepSeek_v4_for_VisualStudio.Services.Agents
             if (BuiltInTools != null)
             {
                 var defs = BuiltInTools.GetFullToolDefinitions();
+                bool autoSkillRoutingEnabled =
+                    Settings.DeepSeekOptionsPage.Instance?.EnableAutoSkillRouting == true;
                 foreach (var def in defs)
                 {
+                    if (!autoSkillRoutingEnabled &&
+                        string.Equals(def.Function.Name, "load_skill", StringComparison.OrdinalIgnoreCase))
+                    {
+                        continue;
+                    }
+
                     fullSet.Add(def);
                     seenNames.Add(def.Function.Name);
                 }
@@ -1000,8 +1008,14 @@ namespace DeepSeek_v4_for_VisualStudio.Services.Agents
                     if (effectiveWhitelist != null && effectiveWhitelist.Count > 0)
                     {
                         // Skill loading is a read-only capability shared by every Agent.
+                        // When automatic routing is disabled, keep resource reads available
+                        // for explicitly invoked skills, but do not let the model load skills on its own.
+                        bool autoSkillRoutingEnabled =
+                            Settings.DeepSeekOptionsPage.Instance?.EnableAutoSkillRouting == true;
                         effectiveWhitelist = effectiveWhitelist
-                            .Concat(new[] { "load_skill", "read_skill_resource" })
+                            .Concat(autoSkillRoutingEnabled
+                                ? new[] { "load_skill", "read_skill_resource" }
+                                : new[] { "read_skill_resource" })
                             .Distinct(StringComparer.OrdinalIgnoreCase)
                             .ToList();
                     }

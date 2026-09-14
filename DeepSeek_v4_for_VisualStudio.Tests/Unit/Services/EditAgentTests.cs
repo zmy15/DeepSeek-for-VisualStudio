@@ -93,6 +93,11 @@ public class EditAgentTests
         global::DeepSeek_v4_for_VisualStudio.Services.AiPrompts.EditFormatRecoveryPrompt
             .Should().Contain("apply_patch")
             .And.Contain("replace_string_in_file");
+        global::DeepSeek_v4_for_VisualStudio.Services.AiPrompts.EditToolCallRule
+            .Should().Contain("终态")
+            .And.Contain("不要再次读取");
+        global::DeepSeek_v4_for_VisualStudio.Services.AiPrompts.AgentConclusionStopRule
+            .Should().Contain("超过 2 种");
     }
 
     #endregion

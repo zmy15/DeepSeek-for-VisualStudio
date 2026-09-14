@@ -264,7 +264,8 @@ namespace DeepSeek_v4_for_VisualStudio.View
                     "[Settings] 应用增量设置变更: " +
                     $"endpoint={changes.EndpointChanged}, modelUi={changes.ModelControlsChanged}, " +
                     $"thinking={changes.ThinkingChanged}, approval={changes.ApprovalChanged}, " +
-                    $"ocr={changes.OcrChanged}, webSearch={changes.WebSearchChanged}, layout={changes.LayoutChanged}");
+                    $"autoSkillRouting={changes.AutoSkillRoutingChanged}, ocr={changes.OcrChanged}, " +
+                    $"webSearch={changes.WebSearchChanged}, layout={changes.LayoutChanged}");
 
                 ExecuteWithoutCoreControlEvents(() => ApplyRuntimeSettingsChanges(changes));
                 _lastAppliedSettings = current;
@@ -292,6 +293,13 @@ namespace DeepSeek_v4_for_VisualStudio.View
 
             if (changes.ApprovalChanged)
                 RefreshApprovalModeFromSettings();
+
+            if (changes.AutoSkillRoutingChanged)
+            {
+                RefreshSkillContextIfInitialized();
+                _agentFactory?.InvalidateFullToolSetCache();
+                Logger.Info($"[Settings] 自动技能路由热切换完成 → {IsAutoSkillRoutingEnabled()}");
+            }
 
             if (changes.EndpointChanged)
                 ApplyEndpointSettingsFromSettings();

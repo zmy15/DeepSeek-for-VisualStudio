@@ -57,7 +57,8 @@ namespace DeepSeek_v4_for_VisualStudio.Services
         /// <see cref="string.Format(string, object)"/> 误解析为格式项。
         /// </summary>
         public static string BuildSkillSystemPromptFragment(string discoveryContext)
-            => SkillSystemPromptFragment.Replace("{0}", discoveryContext ?? string.Empty);
+            => SkillSystemPromptFragment.Replace("{0}", discoveryContext ?? string.Empty)
+                + L["system.skillExecutionPolicy"];
 
         /// <summary>
         /// 技能路由判断 — 系统提示词。

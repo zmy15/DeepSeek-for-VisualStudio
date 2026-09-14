@@ -345,6 +345,7 @@ namespace DeepSeek_v4_for_VisualStudio.View
             if (!string.IsNullOrWhiteSpace(userText)
                 && !userText.StartsWith("/", StringComparison.Ordinal)
                 && !hasExplicitAgentSkill
+                && IsAutoSkillRoutingEnabled()
                 && !string.IsNullOrWhiteSpace(autoRouteContent))
             {
                 autoSkillInstructions = await RouteSkillAsync(autoRouteContent);

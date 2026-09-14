@@ -57,6 +57,7 @@ public class UnifiedSettingsCoverageTests
         (nameof(DeepSeekOptionsPage.AgentMaxDepth), "deepseekAgentMaxDepth"),
         (nameof(DeepSeekOptionsPage.AgentNoProgressRounds), "deepseekAgentNoProgressRounds"),
         (nameof(DeepSeekOptionsPage.EnableAutoBuild), "deepseekEnableAutoBuild"),
+        (nameof(DeepSeekOptionsPage.EnableAutoSkillRouting), "deepseekEnableAutoSkillRouting"),
         (nameof(DeepSeekOptionsPage.ApprovalMode), "deepseekApprovalMode"),
         (nameof(DeepSeekOptionsPage.ThemeModeString), "deepseekThemeMode"),
         (nameof(DeepSeekOptionsPage.InputBoxHeight), "deepseekInputBoxHeight"),
@@ -70,7 +71,7 @@ public class UnifiedSettingsCoverageTests
         var declaredIds = GetDeclaredSettingIds();
         var boundMonikers = GetBoundMonikers();
 
-        declaredIds.Should().HaveCount(44);
+        declaredIds.Should().HaveCount(45);
         foreach (var guideSettingId in GuideSettingIds)
             declaredIds.Should().Contain(guideSettingId);
 
@@ -78,8 +79,8 @@ public class UnifiedSettingsCoverageTests
             .Where(id => !GuideSettingIds.Contains(id, StringComparer.Ordinal))
             .ToList();
 
-        synchronizedIds.Should().HaveCount(40);
-        boundMonikers.Should().HaveCount(40);
+        synchronizedIds.Should().HaveCount(41);
+        boundMonikers.Should().HaveCount(41);
         declaredIds.GroupBy(id => id, StringComparer.Ordinal).Should().OnlyContain(group => group.Count() == 1);
         boundMonikers.GroupBy(id => id, StringComparer.Ordinal).Should().OnlyContain(group => group.Count() == 1);
 
@@ -93,7 +94,7 @@ public class UnifiedSettingsCoverageTests
     [Fact]
     public void UnifiedSettings_CoverLegacyNonSensitiveOptions()
     {
-        ExpectedCoverage.Should().HaveCount(40);
+        ExpectedCoverage.Should().HaveCount(41);
 
         var optionProperties = typeof(DeepSeekOptionsPage)
             .GetProperties(BindingFlags.Public | BindingFlags.Instance)
@@ -109,6 +110,12 @@ public class UnifiedSettingsCoverageTests
 
         GetBoundMonikers().Should().NotContain(moniker =>
             moniker.Contains("ApiKey", StringComparison.OrdinalIgnoreCase));
+    }
+
+    [Fact]
+    public void AutoSkillRouting_DefaultsToDisabled()
+    {
+        DeepSeekOptionsPage.DefaultEnableAutoSkillRouting.Should().BeFalse();
     }
 
     [Fact]

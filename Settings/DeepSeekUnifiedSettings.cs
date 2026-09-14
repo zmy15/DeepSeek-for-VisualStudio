@@ -410,6 +410,13 @@ namespace DeepSeek_v4_for_VisualStudio
             };
 
         [VisualStudioContribution]
+        internal static Setting.Boolean EnableAutoSkillRouting { get; } =
+            new("deepseekEnableAutoSkillRouting", "%DeepSeek.Chat.settings.enableAutoSkillRouting.displayName%", GeneralCategory, defaultValue: Settings.DeepSeekOptionsPage.DefaultEnableAutoSkillRouting)
+            {
+                Description = "%DeepSeek.Chat.settings.enableAutoSkillRouting.description%",
+            };
+
+        [VisualStudioContribution]
         internal static Setting.Enum ApprovalMode { get; } =
             new(
                 "deepseekApprovalMode",

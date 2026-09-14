@@ -470,6 +470,12 @@ namespace DeepSeek_v4_for_VisualStudio.View
         /// </summary>
         private async Task<string?> RouteSkillAsync(string fullUserContent)
         {
+            if (!IsAutoSkillRoutingEnabled())
+            {
+                Logger.Info("[SkillRoute] 自动技能路由已关闭，跳过");
+                return null;
+            }
+
             try
             {
                 await DiscoverSkillsForCurrentSolutionAsync();
@@ -610,6 +616,9 @@ namespace DeepSeek_v4_for_VisualStudio.View
                 return null;
             }
         }
+
+        private bool IsAutoSkillRoutingEnabled()
+            => _options?.EnableAutoSkillRouting == true;
 
         #endregion
 
