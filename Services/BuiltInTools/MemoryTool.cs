@@ -319,10 +319,7 @@ namespace DeepSeek_v4_for_VisualStudio.Services.BuiltInTools
         {
             if (string.IsNullOrEmpty(toolResult)) return LocalizationService.Instance["tool.common.noResult"];
             if (toolResult.StartsWith("Error: ")) return toolResult;
-            // 截取结果的前80字符作为摘要
-            return toolResult.Length > 80
-                ? toolResult.Substring(0, 80) + "..."
-                : toolResult;
+            return toolResult;
         }
 
         #endregion

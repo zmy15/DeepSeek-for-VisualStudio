@@ -689,7 +689,7 @@ namespace DeepSeek_v4_for_VisualStudio.Services
                             Title = refItem.TryGetProperty("title", out var title) ? title.GetString() ?? "" : "",
                             Url = refItem.TryGetProperty("url", out var url) ? url.GetString() ?? "" : "",
                             Snippet = refItem.TryGetProperty("content", out var content)
-                                ? TruncateSnippet(content.GetString() ?? "")
+                                ? NormalizeSnippet(content.GetString() ?? "")
                                 : "",
                             Date = refItem.TryGetProperty("date", out var date) ? date.GetString() ?? "" : "",
                         });
@@ -885,7 +885,7 @@ namespace DeepSeek_v4_for_VisualStudio.Services
                             Title = page.TryGetProperty("name", out var name) ? name.GetString() ?? "" : "",
                             Url = page.TryGetProperty("url", out var url) ? url.GetString() ?? "" : "",
                             Snippet = page.TryGetProperty("snippet", out var snippet)
-                                ? TruncateSnippet(snippet.GetString() ?? "")
+                                ? NormalizeSnippet(snippet.GetString() ?? "")
                                 : "",
                             Date = page.TryGetProperty("datePublished", out var date) ? date.GetString() ?? "" : "",
                         });
@@ -1046,13 +1046,12 @@ namespace DeepSeek_v4_for_VisualStudio.Services
         }
 
         /// <summary>
-        /// 截断过长的摘要文本。
+        /// 规范化摘要文本。
         /// </summary>
-        private static string TruncateSnippet(string snippet, int maxLength = 500)
+        private static string NormalizeSnippet(string snippet)
         {
             if (string.IsNullOrEmpty(snippet)) return LocalizationService.Instance["service.webSearch.noSummary"];
-            if (snippet.Length <= maxLength) return snippet.Trim();
-            return snippet.Substring(0, maxLength).Trim() + "...";
+            return snippet.Trim();
         }
 
         /// <summary>

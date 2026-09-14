@@ -186,7 +186,7 @@ namespace DeepSeek_v4_for_VisualStudio.View
                             _ => ""
                         };
                         var typeLabel = skill.UserInvocable ? L["skills.help.typeInvocable"] : L["skills.help.typeAuto"];
-                        var desc = TruncateText(skill.Description, 60);
+                        var desc = skill.Description;
                         sb.AppendLine($"| `/{skill.Name}` | {sourceLabel} | {typeLabel} | {desc} |");
                     }
                     sb.AppendLine();

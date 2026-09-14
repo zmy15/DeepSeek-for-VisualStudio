@@ -117,7 +117,7 @@ namespace DeepSeek_v4_for_VisualStudio.Services.BuiltInTools
         public override string GetDisplayText(Dictionary<string, JsonElement> args)
         {
             string target = GetStringArg(args, "targetAgent") ?? "?";
-            string reason = GetStringArg(args, "reason")?.Truncate(50) ?? "移交任务";
+            string reason = GetStringArg(args, "reason") ?? "移交任务";
             return LocalizationService.Instance.Format("tool.requestHandoff.handoffTo", target, reason);
         }
 
@@ -125,7 +125,7 @@ namespace DeepSeek_v4_for_VisualStudio.Services.BuiltInTools
         {
             if (string.IsNullOrEmpty(toolResult)) return "移交完成";
             if (toolResult.StartsWith("HANDOFF_REQUESTED", StringComparison.Ordinal)) return LocalizationService.Instance["tool.requestHandoff.completed"];
-            return toolResult.Truncate(80);
+            return toolResult;
         }
     }
 }

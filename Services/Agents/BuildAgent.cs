@@ -105,7 +105,7 @@ namespace DeepSeek_v4_for_VisualStudio.Services.Agents
             PendingHandoffRequest = null;
 
             var L = LocalizationService.Instance;
-            AddLog("INFO", string.Format(L["agent.log.buildStarted"], userMessage.Truncate(100)));
+            AddLog("INFO", string.Format(L["agent.log.buildStarted"], userMessage));
 
             var result = new AgentResult
             {

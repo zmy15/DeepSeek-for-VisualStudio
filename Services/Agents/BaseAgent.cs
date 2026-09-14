@@ -1730,7 +1730,7 @@ namespace DeepSeek_v4_for_VisualStudio.Services.Agents
                                 {
                                     string result = toolResults[i];
                                     if (!string.IsNullOrWhiteSpace(result))
-                                        terminatedBuilder.Append($"\n\n###  最后一次 `{toolCalls[i].Function.Name}` 结果\n\n{result.Truncate(3000)}");
+                                        terminatedBuilder.Append($"\n\n###  最后一次 `{toolCalls[i].Function.Name}` 结果\n\n{result}");
                                 }
 
                                 terminatedBuilder.Append($"\n\n>  检测到 `{toolName}` 重复调用 {repeatCount} 次且每次返回相同结果，已自动终止循环。请根据以上工具结果修复问题后重新请求。");
@@ -1815,7 +1815,7 @@ namespace DeepSeek_v4_for_VisualStudio.Services.Agents
                                 string result = toolResults[i];
                                 if (!string.IsNullOrWhiteSpace(result))
                                 {
-                                    terminatedBuilder.Append($"\n\n###  最后一次 `{toolCalls[i].Function.Name}` 结果\n\n{result.Truncate(3000)}");
+                                    terminatedBuilder.Append($"\n\n###  最后一次 `{toolCalls[i].Function.Name}` 结果\n\n{result}");
                                 }
                             }
 
@@ -2058,7 +2058,7 @@ namespace DeepSeek_v4_for_VisualStudio.Services.Agents
                                     _logs.Add(new AgentLogEntry
                                     {
                                         Level = log.Level,
-                                        Message = $"[Explore] {log.Message.Truncate(200)}"
+                                        Message = $"[Explore] {log.Message}"
                                     });
                                 }
                                 // ── 通过 AddLog 触发 LogEntryAdded 事件，使 UI 实时更新执行进度 ──
@@ -2229,7 +2229,7 @@ namespace DeepSeek_v4_for_VisualStudio.Services.Agents
                     && RunInTerminalTool.DetectFileEditingCommand(command))
                 {
                     // 只读 Agent：直接拒绝会修改文件的终端命令，不进入审批流程
-                    AddLog("WARN", $"[BLOCKED] 只读 Agent 的文件修改命令被拦截: {command.Truncate(100)}");
+                    AddLog("WARN", $"[BLOCKED] 只读 Agent 的文件修改命令被拦截: {command}");
                     return RunInTerminalTool.FormatFileEditBlocked(command);
                 }
 
@@ -4198,7 +4198,7 @@ namespace DeepSeek_v4_for_VisualStudio.Services.Agents
 
                     QuestionsRequested!.Invoke(request);
                     AddLog("INFO", string.Format(LocalizationService.Instance["agent.log.waitingAnswers"],
-                        questions.Count, questions[0].Header.Truncate(60)));
+                        questions.Count, questions[0].Header));
 
                     // 无限等待用户回答（不设超时），用户提交或跳过时通过 ResponseTcs 唤醒
                     string answers = await request.ResponseTcs.Task;
@@ -4206,7 +4206,7 @@ namespace DeepSeek_v4_for_VisualStudio.Services.Agents
                     // 清理
                     _pendingQuestions.TryRemove(request.RequestId, out _);
                     AddLog("INFO", string.Format(LocalizationService.Instance["agent.log.answersReceived"],
-                        answers.Truncate(200)));
+                        answers));
                     return answers;
                 }
                 finally

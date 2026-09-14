@@ -161,7 +161,7 @@ namespace DeepSeek_v4_for_VisualStudio.Services.Agents
             int firstNewline = userMessage.IndexOf('\n');
             if (firstNewline > 0)
                 logMessage = userMessage.Substring(0, firstNewline).TrimEnd('\r');
-            AddLog("INFO", LocalizationService.Instance.Format("agent.log.exploreStarted", logMessage.Truncate(100)));
+            AddLog("INFO", LocalizationService.Instance.Format("agent.log.exploreStarted", logMessage));
 
             var result = new AgentResult
             {
@@ -633,7 +633,7 @@ namespace DeepSeek_v4_for_VisualStudio.Services.Agents
 
             try
             {
-                AddLog("INFO", $"[Discover] 智能文件发现开始: \"{userQuery.Truncate(100)}\"");
+                AddLog("INFO", $"[Discover] 智能文件发现开始: \"{userQuery}\"");
 
                 // ── 阶段 0: 提取搜索关键词（AI 优先，规则兜底）──
                 var keywords = new HashSet<string>(StringComparer.OrdinalIgnoreCase);

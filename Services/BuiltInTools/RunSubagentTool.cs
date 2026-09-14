@@ -100,7 +100,7 @@ namespace DeepSeek_v4_for_VisualStudio.Services.BuiltInTools
                 var context = new ExplorationContext
                 {
                     Prompt = prompt,
-                    Description = description ?? prompt.Truncate(60),
+                    Description = description ?? prompt,
                     WorkspaceRoot = workspaceRoot,
                 };
 
@@ -121,7 +121,7 @@ namespace DeepSeek_v4_for_VisualStudio.Services.BuiltInTools
             string agentName = GetStringArg(args, "agentName");
             string desc = GetStringArg(args, "description");
             string displayDesc = string.IsNullOrWhiteSpace(desc)
-                ? GetStringArg(args, "prompt")?.Truncate(50) ?? L["tool.runSubagent.fallbackDesc"]
+                ? GetStringArg(args, "prompt") ?? L["tool.runSubagent.fallbackDesc"]
                 : desc;
 
             return $" **{agentName ?? "Explore"}** — {displayDesc}";

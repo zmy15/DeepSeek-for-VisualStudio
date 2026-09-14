@@ -106,7 +106,7 @@ namespace DeepSeek_v4_for_VisualStudio.Services.BuiltInTools
                         for (int i = 0; i < selectedErrors.Count; i++)
                         {
                             var e = selectedErrors[i];
-                            string desc = e.Description.Truncate(80);
+                            string desc = e.Description;
                             string file = Path.GetFileName(e.FileName ?? "");
                             string line = e.Line > 0 ? e.Line.ToString() : "-";
                             string col = e.Column > 0 ? e.Column.ToString() : "-";
@@ -198,7 +198,7 @@ namespace DeepSeek_v4_for_VisualStudio.Services.BuiltInTools
                     string file = Path.GetFileName(e.FileName ?? "");
                     string loc = e.Line > 0 ? $":{e.Line}" : "";
                     string code = string.IsNullOrEmpty(e.ErrorCode) ? "" : $" [{e.ErrorCode}]";
-                    sb.AppendLine($"- {(string.IsNullOrEmpty(file) ? "(no file)" : file + loc)}{code}: {e.Description.Truncate(160)}");
+                    sb.AppendLine($"- {(string.IsNullOrEmpty(file) ? "(no file)" : file + loc)}{code}: {e.Description}");
                 }
                 if (items.Count > errors.Count)
                     sb.AppendLine($"(+{items.Count - errors.Count} warnings/others omitted)");

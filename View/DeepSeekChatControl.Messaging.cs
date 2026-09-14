@@ -825,15 +825,6 @@ namespace DeepSeek_v4_for_VisualStudio.View
         }
 
         /// <summary>
-        /// 截断文本到指定长度，超出部分用 "..." 替代。
-        /// </summary>
-        private static string TruncateText(string text, int maxLength)
-        {
-            if (string.IsNullOrEmpty(text) || text.Length <= maxLength) return text;
-            return text.Substring(0, maxLength) + "...";
-        }
-
-        /// <summary>
         /// 预处理 OCR 工具参数：AI 可能传文件名而非 base64，自动转换。
         /// 同时记录 OCR 调用参数格式提醒（input_data 必需，output_mode/file_type 可选）。
         /// 静态方法，可由 BaseAgent 在执行工具前调用。

@@ -52,9 +52,9 @@ namespace DeepSeek_v4_for_VisualStudio.Services.BuiltInTools
             string incPattern = GetStringArg(args, "includePattern");
             string grepDesc = string.IsNullOrEmpty(grepQuery)
                 ? LocalizationService.Instance["tool.grepSearch.searching"]
-                : LocalizationService.Instance.Format("tool.grepSearch.searchingQuery", TruncateText(grepQuery, 40));
+                : LocalizationService.Instance.Format("tool.grepSearch.searchingQuery", grepQuery);
             if (!string.IsNullOrEmpty(incPattern))
-                grepDesc += LocalizationService.Instance.Format("tool.grepSearch.inPattern", TruncateText(incPattern, 40));
+                grepDesc += LocalizationService.Instance.Format("tool.grepSearch.inPattern", incPattern);
             return grepDesc;
         }
 
@@ -159,7 +159,7 @@ namespace DeepSeek_v4_for_VisualStudio.Services.BuiltInTools
                                 string relativePath = file;
                                 if (file.StartsWith(searchRoot, StringComparison.OrdinalIgnoreCase))
                                     relativePath = file.Substring(searchRoot.Length).TrimStart('\\', '/');
-                                results.Add($"{relativePath}:{i + 1}: {lines[i].Trim().Truncate(200)}");
+                                results.Add($"{relativePath}:{i + 1}: {lines[i].Trim()}");
                             }
                         }
                     }

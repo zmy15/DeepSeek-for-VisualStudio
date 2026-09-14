@@ -107,7 +107,7 @@ namespace DeepSeek_v4_for_VisualStudio.Services.Agents
             PendingHandoffRequest = null;
 
             var L = LocalizationService.Instance;
-            AddLog("INFO", string.Format(L["agent.log.planStarted"], userMessage.Truncate(100)));
+            AddLog("INFO", string.Format(L["agent.log.planStarted"], userMessage));
 
             var result = new AgentResult
             {
@@ -548,7 +548,7 @@ namespace DeepSeek_v4_for_VisualStudio.Services.Agents
                 // 将 AI 在提问前生成的规划概要合并到结果中
                 string planSummary = alignmentContent.ToString().Trim();
 
-                AddLog("INFO", LocalizationService.Instance.Format("agent.log.planAlignmentDone", alignmentResult.Truncate(200)));
+                AddLog("INFO", LocalizationService.Instance.Format("agent.log.planAlignmentDone", alignmentResult));
                 return (planSummary, existingMessages);
             }
             catch (OperationCanceledException)
