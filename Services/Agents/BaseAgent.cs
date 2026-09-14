@@ -124,8 +124,16 @@ namespace DeepSeek_v4_for_VisualStudio.Services.Agents
             if (BuiltInTools != null)
             {
                 var defs = BuiltInTools.GetFullToolDefinitions();
+                bool autoSkillRoutingEnabled =
+                    Settings.DeepSeekOptionsPage.Instance?.EnableAutoSkillRouting == true;
                 foreach (var def in defs)
                 {
+                    if (!autoSkillRoutingEnabled &&
+                        string.Equals(def.Function.Name, "load_skill", StringComparison.OrdinalIgnoreCase))
+                    {
+                        continue;
+                    }
+
                     fullSet.Add(def);
                     seenNames.Add(def.Function.Name);
                 }
@@ -336,6 +344,12 @@ namespace DeepSeek_v4_for_VisualStudio.Services.Agents
         /// </summary>
         private readonly ConcurrentDictionary<string, AgentQuestionRequest> _pendingQuestions = new();
 
+        /// <summary>
+        /// 文件修改类工具全局串行锁。读工具仍可并行执行，但写文件必须按顺序落盘，
+        /// 避免同一批工具调用同时写盘触发 IOException。
+        /// </summary>
+        private static readonly SemaphoreSlim FileMutationGate = new(1, 1);
+
         /// <summary>AI 通过 request_handoff 工具发起的待处理移交请求</summary>
         public HandoffRequest? PendingHandoffRequest { get; protected set; }
 
@@ -344,6 +358,11 @@ namespace DeepSeek_v4_for_VisualStudio.Services.Agents
         /// 避免过多子代理同时读取文件导致 token 浪费和缓存冲突。
         /// </summary>
         private static readonly SemaphoreSlim SubagentConcurrencyLimiter = new(3, 3);
+
+        /// <summary>
+        /// 当前 Agent 最近一次可观测活动，用于子代理看门狗超时时报告卡住阶段。
+        /// </summary>
+        internal string CurrentActivity { get; private set; } = "尚未开始";
 
         protected BaseAgent(DeepSeekApiService apiService, AgentType agentType)
         {
@@ -726,7 +745,11 @@ namespace DeepSeek_v4_for_VisualStudio.Services.Agents
             }
             else
             {
-                messages.Add(new ChatApiMessage { Role = "system", Content = GetSharedImmutablePrefix() });
+                if (ctxManager != null)
+                    messages.AddRange(ctxManager.BuildContextPrefix());
+
+                if (messages.Count == 0)
+                    messages.Add(new ChatApiMessage { Role = "system", Content = GetSharedImmutablePrefix() });
             }
 
             // UI 层在进入 Agent 前已把当前轮原始 user 追加到 ContextManager。
@@ -847,24 +870,35 @@ namespace DeepSeek_v4_for_VisualStudio.Services.Agents
         /// <param name="messages">消息列表（system + 历史 + user）</param>
         /// <param name="workspaceRoot">工作区根目录，用于内置工具（如 file_search, list_dir）</param>
         /// <param name="ct">取消令牌</param>
-        /// <param name="maxTokens">最大 token 数</param>
         /// <param name="toolWhitelist">自定义工具白名单（null = 使用 Definition.AllowedTools）</param>
         /// <param name="onThinking">思考内容回调（用于 UI 实时更新）</param>
         /// <param name="onContent">内容回调（用于 UI 实时更新）</param>
         /// <param name="onToolCall">工具调用回调（用于 UI 通知）</param>
         /// <param name="maxToolRounds">本次工具循环的最大轮数（null = 仅使用全局安全上限）</param>
+        /// <param name="maxAskQuestionsCalls">本次工具循环最多允许执行的 askQuestions 次数（null = 不限制）</param>
+        /// <param name="responseFormat">响应格式（例如 json_object）</param>
+        /// <param name="temperature">采样温度</param>
+        /// <param name="toolChoiceOverride">覆盖本轮工具选择策略（例如 auto / none）</param>
+        /// <param name="noToolsReminderAfterFirstToolRound">首次完成工具调用后追加的“禁止继续调用工具”提示</param>
         /// <returns>AI 最终生成的文本内容</returns>
         protected async Task<string> CallAiWithToolLoopAsync(
             List<ChatApiMessage> messages,
             string? workspaceRoot,
             CancellationToken ct,
-            int maxTokens = 4096,
             List<string>? toolWhitelist = null,
             Action<string>? onThinking = null,
             Action<string>? onContent = null,
             Action<string>? onToolCall = null,
-            int? maxToolRounds = null)
+            int? maxToolRounds = null,
+            int? maxAskQuestionsCalls = null,
+            string? responseFormat = null,
+            double? temperature = null,
+            string? toolChoiceOverride = null,
+            string? noToolsReminderAfterFirstToolRound = null)
         {
+            string? originalUserQuestion = messages
+                .LastOrDefault(m => string.Equals(m.Role, "user", StringComparison.OrdinalIgnoreCase))
+                ?.Content;
             var reasoningBuilder = new StringBuilder();
             var contentBuilder = new StringBuilder();
             var toolCallAccumulator = new Dictionary<int, Models.ToolCallAccumulator>();
@@ -887,6 +921,8 @@ namespace DeepSeek_v4_for_VisualStudio.Services.Agents
             var rejectedToolNames = new List<string>();
             int rejectedToolRounds = 0;
             int consecutiveErrorRounds = 0;
+            int askQuestionsCallCount = 0;
+            bool noToolsReminderAppended = false;
             int maxRepeatedSameCall = Settings.DeepSeekOptionsPage.Instance?.MaxRepeatedSameCall ?? 5;
             if (maxRepeatedSameCall < 1) maxRepeatedSameCall = 5;
             int maxConsecutiveErrors = Settings.DeepSeekOptionsPage.Instance?.MaxConsecutiveErrors ?? 5;
@@ -967,6 +1003,7 @@ namespace DeepSeek_v4_for_VisualStudio.Services.Agents
 
                 // ── P0 Telemetry：本轮 LLM 请求计时开始（TTFT/耗时基准）──
                 metrics?.BeginTurn(round);
+                CurrentActivity = $"等待模型响应（第 {round} 轮）";
 
                 // ── 同步当前轮次到文件读取缓存，用于轮数过期策略 ──
                 if (BuiltInTools != null)
@@ -1000,8 +1037,14 @@ namespace DeepSeek_v4_for_VisualStudio.Services.Agents
                     if (effectiveWhitelist != null && effectiveWhitelist.Count > 0)
                     {
                         // Skill loading is a read-only capability shared by every Agent.
+                        // When automatic routing is disabled, keep resource reads available
+                        // for explicitly invoked skills, but do not let the model load skills on its own.
+                        bool autoSkillRoutingEnabled =
+                            Settings.DeepSeekOptionsPage.Instance?.EnableAutoSkillRouting == true;
                         effectiveWhitelist = effectiveWhitelist
-                            .Concat(new[] { "load_skill", "read_skill_resource" })
+                            .Concat(autoSkillRoutingEnabled
+                                ? new[] { "load_skill", "read_skill_resource" }
+                                : new[] { "read_skill_resource" })
                             .Distinct(StringComparer.OrdinalIgnoreCase)
                             .ToList();
                     }
@@ -1033,6 +1076,10 @@ namespace DeepSeek_v4_for_VisualStudio.Services.Agents
                     if (effectiveWhitelist != null && effectiveWhitelist.Count == 0)
                     {
                         toolChoice = "none";
+                    }
+                    else if (!string.IsNullOrWhiteSpace(toolChoiceOverride))
+                    {
+                        toolChoice = toolChoiceOverride;
                     }
 
                     Logger.Info($"[Agent:{Definition.Name}] 本轮携带 {toolDefs.Count} 个工具定义(完整集)" +
@@ -1071,7 +1118,7 @@ namespace DeepSeek_v4_for_VisualStudio.Services.Agents
                                 ? "…(截断)…" + savedPartialContent.Substring(savedPartialContent.Length - 300)
                                 : savedPartialContent;
                             string resumeInstruction = reasoningLoopRetryPending
-                                ? "[系统指令] 检测到你刚才的思考在原地打转。不要重复已经分析过的内容。只总结已经确认的事实、当前最重要的下一步，然后直接继续完成用户任务。"
+                                ? BuildReasoningLoopRetryPrompt(originalUserQuestion)
                                 : $"[系统指令] 你之前的回复因网络中断被截断。以下是已发送的末尾内容：\n```\n{tailContent}\n```\n请从截断处**精确**继续，不要重复任何已发送的内容，不要道歉或解释中断。直接继续未完成的句子或代码块。";
                             resumeMessages.Add(new ChatApiMessage
                             {
@@ -1087,7 +1134,11 @@ namespace DeepSeek_v4_for_VisualStudio.Services.Agents
 
                             // 使用 resume 消息而不是原始消息
                             reasoningGuard.Reset();
-                            await foreach (var chunk in _apiService.ChatStreamAsync(resumeMessages, toolDefs, ct, toolChoice: toolChoice))
+                            await foreach (var chunk in _apiService.ChatStreamAsync(
+                                resumeMessages, toolDefs, ct,
+                                toolChoice: toolChoice,
+                                temperature: temperature,
+                                responseFormat: responseFormat))
                             {
                                 ThrowIfReasoningLoopDetected(chunk, reasoningGuard);
                                 ProcessStreamChunk(chunk, reasoningBuilder, contentBuilder, toolCallAccumulator, onThinking, onContent);
@@ -1096,7 +1147,11 @@ namespace DeepSeek_v4_for_VisualStudio.Services.Agents
                         else
                         {
                             reasoningGuard.Reset();
-                            await foreach (var chunk in _apiService.ChatStreamAsync(messages, toolDefs, ct, toolChoice: toolChoice))
+                            await foreach (var chunk in _apiService.ChatStreamAsync(
+                                messages, toolDefs, ct,
+                                toolChoice: toolChoice,
+                                temperature: temperature,
+                                responseFormat: responseFormat))
                             {
                                 ThrowIfReasoningLoopDetected(chunk, reasoningGuard);
                                 ProcessStreamChunk(chunk, reasoningBuilder, contentBuilder, toolCallAccumulator, onThinking, onContent);
@@ -1359,7 +1414,7 @@ namespace DeepSeek_v4_for_VisualStudio.Services.Agents
                     blockedToolIndices = new HashSet<int>();
                     for (int i = 0; i < toolCalls.Count; i++)
                     {
-                        if (!whitelistSet.Contains(toolCalls[i].Function.Name))
+                        if (!whitelistSet.Contains(NormalizeToolName(toolCalls[i].Function.Name)))
                         {
                             blockedToolIndices.Add(i);
                         }
@@ -1381,6 +1436,8 @@ namespace DeepSeek_v4_for_VisualStudio.Services.Agents
                 if (toolCalls.Count > 0)
                 {
                     Logger.Info($"[Agent:{Definition.Name}] 检测到 {toolCalls.Count} 个工具调用: {string.Join(", ", toolCalls.Select(t => t.Function.Name))}");
+                    CurrentActivity = $"执行工具（第 {round} 轮）: " +
+                        string.Join(", ", toolCalls.Select(t => t.Function.Name));
 
                     // ── 去重：检测同一批次中完全相同的工具调用（同函数名+同参数），避免重复执行 ──
                     // 例如 AI 可能误调用 3 次相同的 runSubagent，去重后只执行 1 次，结果复用
@@ -1390,6 +1447,35 @@ namespace DeepSeek_v4_for_VisualStudio.Services.Agents
                     {
                         int skipped = toolCalls.Count - dedupedIndices.Count;
                         Logger.Info($"[Agent:{Definition.Name}]  去重: 跳过 {skipped} 个重复工具调用（{toolCalls.Count} → {dedupedIndices.Count} 个唯一调用）");
+                    }
+
+                    // ── 限制同一阶段内的用户提问次数，避免模型收到回答后继续重复提问 ──
+                    HashSet<int>? suppressedAskQuestionIndices = null;
+                    if (maxAskQuestionsCalls is int askQuestionLimit)
+                    {
+                        int effectiveLimit = Math.Max(0, askQuestionLimit);
+                        foreach (int idx in dedupedIndices)
+                        {
+                            if (!string.Equals(
+                                NormalizeToolName(toolCalls[idx].Function.Name),
+                                "VisualStudio_askQuestions",
+                                StringComparison.OrdinalIgnoreCase))
+                            {
+                                continue;
+                            }
+
+                            if (askQuestionsCallCount >= effectiveLimit)
+                                (suppressedAskQuestionIndices ??= new HashSet<int>()).Add(idx);
+                            else
+                                askQuestionsCallCount++;
+                        }
+
+                        if (suppressedAskQuestionIndices?.Count > 0)
+                        {
+                            Logger.Warn(
+                                $"[Agent:{Definition.Name}] 已拦截重复的 VisualStudio_askQuestions 调用" +
+                                $"（本阶段上限 {effectiveLimit} 次），不再向用户弹出重复问题。");
+                        }
                     }
 
                     // ── 通知工具调用（含详细信息，每轮仅一次，去重后只通知唯一调用）──
@@ -1464,16 +1550,18 @@ namespace DeepSeek_v4_for_VisualStudio.Services.Agents
                             toolCalls);
                     }
 
-                    // ──  Explore 子代理消息注入：记录 ContextManager 当前条目数
-                    //     （在 AddAssistantMessage 之后，避免注入时重复读取本条 assistant）。
-                    //     供 runSubagent 执行后回读 Explore 内部工具循环消息。──
-                    int cmCountBefore = Context?.ContextManager?.MessageCount ?? 0;
-
                     // ── 并行执行工具调用（带超时保护，长时工具使用更长超时，已去重）──
                     //    被白名单拦截的工具跳过执行，直接返回拒绝消息。
                     var toolTasks = dedupedIndices.Select(idx =>
                     {
                         var tc = toolCalls[idx];
+                        if (suppressedAskQuestionIndices?.Contains(idx) == true)
+                        {
+                            return Task.FromResult(
+                                "Error: 本阶段已经收到用户回答，禁止再次调用 VisualStudio_askQuestions。" +
+                                "请立即基于用户回答继续，不要重复提问；需求对齐阶段必须只回复 DONE。");
+                        }
+
                         // ── 白名单拦截：不在白名单中的工具不执行，返回拒绝消息 ──
                         if (blockedToolIndices != null && blockedToolIndices.Contains(idx))
                         {
@@ -1491,14 +1579,11 @@ namespace DeepSeek_v4_for_VisualStudio.Services.Agents
                                     : "请直接说明无法完成的原因。") +
                                 "\n再次发生白名单外工具调用将终止本轮工具循环。");
                         }
-                        var timeout = GetToolTimeout(tc.Function.Name);
+                        var timeout = GetToolTimeout(NormalizeToolName(tc.Function.Name));
                         return ExecuteToolWithTelemetryAsync(metrics, round, tc, workspaceRoot, ct, timeout);
                     }).ToList();
                     var dedupedResults = await Task.WhenAll(toolTasks).ConfigureAwait(false);
-
-                    // ──  记录 Explore 执行后的 CM 条目数（tool 结果尚未写入），
-                    //     用于精确读取 Explore 内部消息（不含即将写入的 runSubagent tool 结果）。──
-                    int cmCountAfterExplore = Context?.ContextManager?.MessageCount ?? 0;
+                    CurrentActivity = $"工具已完成（第 {round} 轮），准备下一轮";
 
                     // ── 将去重后的结果映射回原始 toolCalls 数组 ──
                     var toolResults = new string[toolCalls.Count];
@@ -1578,6 +1663,19 @@ namespace DeepSeek_v4_for_VisualStudio.Services.Agents
                         Logger.Info($"[Agent:{Definition.Name}] 工具 {tc.Function.Name} 返回: {(toolResult.Length > 200 ? toolResult.Substring(0, 200) + "..." : toolResult)}");
                     }
 
+                    if (!noToolsReminderAppended
+                        && !string.IsNullOrWhiteSpace(noToolsReminderAfterFirstToolRound))
+                    {
+                        messages.Insert(toolInsertPos, new ChatApiMessage
+                        {
+                            Role = "system",
+                            Content = noToolsReminderAfterFirstToolRound
+                        });
+                        toolInsertPos++;
+                        noToolsReminderAppended = true;
+                        Logger.Info($"[Agent:{Definition.Name}] 首次工具调用已处理，已追加禁止继续调用工具的提示");
+                    }
+
                     // ── 工具结果写回后立即检查：同一用户请求内超限也触发压缩。──
                     TryCompressToolLoopContext(ref messages, ref toolInsertPos);
 
@@ -1625,37 +1723,6 @@ namespace DeepSeek_v4_for_VisualStudio.Services.Agents
                         contentBuilder.Clear();
                         contentBuilder.Append(terminatedBuilder.ToString());
                         break;
-                    }
-
-                    // ──  Explore 子代理消息注入（v1.1.11）：将 Explore 内部工具循环消息
-                    //     回注到父 Agent 的 messages 列表，确保后续轮次从 ContextManager
-                    //     重建时前缀结构完全一致。
-                    //     Explore 执行期间通过 AddAssistantMessage/AddToolResult 写入
-                    //     ContextManager 的消息，在此刻读出。
-                    //      v1.1.12：注入到 [user] 之后、[agent] 之前，
-                    //     与 runSubagent 工具结果同位置，保持前缀不被破坏以最大化缓存命中。──
-                    if (toolCalls.Any(tc => tc.Function.Name == "runSubagent")
-                        && Context?.ContextManager != null)
-                    {
-                        if (cmCountAfterExplore > cmCountBefore)
-                        {
-                            // 读取 [cmCountBefore, cmCountAfterExplore) 范围的条目
-                            // （不含 tool 结果，因为 cmCountAfterExplore 在结果写入 CM 之前记录）
-                            var rawExploreMessages =
-                                Context.ContextManager.GetEntryMessages(cmCountBefore, cmCountAfterExplore);
-                            var exploreMessages = CleanIncompleteToolChains(rawExploreMessages);
-                            if (exploreMessages.Count > 0)
-                            {
-                                foreach (var em in exploreMessages)
-                                {
-                                    messages.Insert(messages.Count - 1, em);
-                                }
-                                Logger.Info($"[Agent:{Definition.Name}]  注入 Explore 子代理消息: " +
-                                    $"{exploreMessages.Count} 条 " +
-                                    $"(原始 {rawExploreMessages.Count} 条, CM 索引 {cmCountBefore}→{cmCountAfterExplore})" +
-                                    $" → 末尾注入 (pos={messages.Count - 1 - exploreMessages.Count}..{messages.Count - 2})");
-                            }
-                        }
                     }
 
                     // ── 移交检测：如果 AI 调用了 request_handoff，立即终止循环 ──
@@ -1756,7 +1823,7 @@ namespace DeepSeek_v4_for_VisualStudio.Services.Agents
                                 {
                                     string result = toolResults[i];
                                     if (!string.IsNullOrWhiteSpace(result))
-                                        terminatedBuilder.Append($"\n\n###  最后一次 `{toolCalls[i].Function.Name}` 结果\n\n{result.Truncate(3000)}");
+                                        terminatedBuilder.Append($"\n\n###  最后一次 `{toolCalls[i].Function.Name}` 结果\n\n{result}");
                                 }
 
                                 terminatedBuilder.Append($"\n\n>  检测到 `{toolName}` 重复调用 {repeatCount} 次且每次返回相同结果，已自动终止循环。请根据以上工具结果修复问题后重新请求。");
@@ -1841,7 +1908,7 @@ namespace DeepSeek_v4_for_VisualStudio.Services.Agents
                                 string result = toolResults[i];
                                 if (!string.IsNullOrWhiteSpace(result))
                                 {
-                                    terminatedBuilder.Append($"\n\n###  最后一次 `{toolCalls[i].Function.Name}` 结果\n\n{result.Truncate(3000)}");
+                                    terminatedBuilder.Append($"\n\n###  最后一次 `{toolCalls[i].Function.Name}` 结果\n\n{result}");
                                 }
                             }
 
@@ -1863,6 +1930,17 @@ namespace DeepSeek_v4_for_VisualStudio.Services.Agents
             LogTotalCacheHitRate(round);
 
             return contentBuilder.ToString().Trim();
+        }
+
+        internal static string BuildReasoningLoopRetryPrompt(string? originalUserQuestion)
+        {
+            const string instruction =
+                "[系统指令] 检测到你刚才的思考在原地打转。不要重复已经分析过的内容。只总结已经确认的事实、当前最重要的下一步，然后直接继续完成用户任务。";
+
+            if (string.IsNullOrWhiteSpace(originalUserQuestion))
+                return instruction;
+
+            return $"{instruction}\n\n原始用户提问：\n{originalUserQuestion}";
         }
 
         /// <summary>
@@ -1992,6 +2070,8 @@ namespace DeepSeek_v4_for_VisualStudio.Services.Agents
         /// </summary>
         private async Task<string> ExecuteToolAsync(string toolName, string argumentsJson, string? workspaceRoot, CancellationToken ct)
         {
+            toolName = NormalizeToolName(toolName);
+
             if (BuiltInTools != null)
                 BuiltInTools.CurrentSolutionPath = Context?.SolutionPath;
 
@@ -2017,6 +2097,18 @@ namespace DeepSeek_v4_for_VisualStudio.Services.Agents
                 }
                 BuiltInTools.ExploreHandler = async (ctx) =>
                 {
+                    string traceId = string.IsNullOrWhiteSpace(ctx.TraceId)
+                        ? Guid.NewGuid().ToString("N").Substring(0, 8)
+                        : ctx.TraceId;
+                    int configuredSubagentTimeoutSeconds =
+                        Settings.DeepSeekOptionsPage.Instance?.AgentSubagentTimeoutSeconds ?? 900;
+                    TimeSpan watchdogTimeout =
+                        ResolveSubagentWatchdogTimeout(configuredSubagentTimeoutSeconds);
+                    using var subagentCts = CancellationTokenSource.CreateLinkedTokenSource(ct);
+                    if (watchdogTimeout != Timeout.InfiniteTimeSpan)
+                        subagentCts.CancelAfter(watchdogTimeout);
+                    ExploreAgent? activeExploreAgent = null;
+
                     try
                     {
                         // ──  子Agent缓存优化：消费父Agent保存的ForwardedMessages，
@@ -2025,11 +2117,18 @@ namespace DeepSeek_v4_for_VisualStudio.Services.Agents
                         if (Context != null)
                             Context.ForwardedMessages = null; // 消费后清空
 
-                        // ── 同步上下文与执行深度到 ExploreAgent ──
-                        if (ExploreAgent.BuiltInTools == null)
-                            ExploreAgent.BuiltInTools = this.BuiltInTools;
-                        if (ExploreAgent.McpManager == null)
-                            ExploreAgent.McpManager = this.McpManager;
+                        // 每次子代理执行使用独立实例，避免并行任务共享 ExploreAgent.Context。
+                        var exploreAgent = new ExploreAgent(_apiService)
+                        {
+                            BuiltInTools = BuiltInTools ?? effectiveExploreAgent.BuiltInTools,
+                            McpManager = McpManager ?? effectiveExploreAgent.McpManager,
+                        };
+                        activeExploreAgent = exploreAgent;
+
+                        // 并行子代理使用独立 ExploreAgent 实例，必须显式桥接交互事件；
+                        // 否则 run_in_terminal 等审批会停在子代理内部，父 Agent/UI 永远收不到。
+                        exploreAgent.PermissionRequested += OnExplorePermissionRequested;
+                        exploreAgent.QuestionsRequested += OnExploreQuestionsRequested;
 
                         // ── 构建 ExploreAgent 上下文 ──
                         // 为 ExploreAgent 创建 FileReadCache 副本，避免共享同一实例导致
@@ -2041,8 +2140,11 @@ namespace DeepSeek_v4_for_VisualStudio.Services.Agents
                         var exploreCtx = new AgentContext
                         {
                             SolutionPath = ctx.WorkspaceRoot ?? Context?.SolutionPath,
-                            CancellationToken = ct,
-                            ContextManager = Context?.ContextManager,
+                            CancellationToken = subagentCts.Token,
+                            // 子代理内部消息必须与父对话隔离。共享 ContextManager 会把
+                            // Explore 的 assistant/tool 链插入父 assistant(tool_calls) 与
+                            // 对应 tool 结果之间，破坏 API 要求的严格配对顺序。
+                            ContextManager = new ConversationContextManager(),
                             ExecutionDepth = (Context?.ExecutionDepth ?? 0) + 1,
                             FileReadCache = exploreFileCache,
                             DiscoveredFiles = Context?.DiscoveredFiles,
@@ -2050,26 +2152,49 @@ namespace DeepSeek_v4_for_VisualStudio.Services.Agents
                             //    使ExploreAgent的首轮API调用可复用父Agent的缓存前缀。
                             ForwardedMessages = ctx.ForwardedMessages,
                         };
-                        ExploreAgent.Context = exploreCtx;
+                        exploreAgent.Context = exploreCtx;
 
-                        AddLog("INFO", $"[{Definition.Name}] → ExploreAgent: {ctx.Description}");
+                        AddLog("INFO", $"[{Definition.Name}][{traceId}] → ExploreAgent: {ctx.Description}");
+                        Logger.Info($"[Subagent:{traceId}] 开始: {ctx.Description.Truncate(120)}");
 
                         // ── 并行子代理限流：获取信号量，限制同时运行的 Explore 子代理数量 ──
-                        await SubagentConcurrencyLimiter.WaitAsync(ct);
-
-                        // ── 获取信号量后再次检查取消（防止在排队等待期间用户点了停止）──
-                        ct.ThrowIfCancellationRequested();
+                        bool limiterAcquired = false;
 
                         // ── 不再通过 LogEntryAdded 事件转发 Explore 日志（并行 runSubagent 会导致重复订阅）
                         //    改为在 Explore 完成后从 exploreResult.Logs 批量导入。 ──
                         AgentResult? exploreResult = null;
                         try
                         {
-                            exploreResult = await ExploreAgent.ExecuteAsync(ctx.Prompt, exploreCtx);
+                            await SubagentConcurrencyLimiter.WaitAsync(subagentCts.Token);
+                            limiterAcquired = true;
+
+                            // ── 获取信号量后再次检查取消（防止在排队等待期间用户点了停止）──
+                            subagentCts.Token.ThrowIfCancellationRequested();
+
+                            var executionTask = exploreAgent.ExecuteAsync(ctx.Prompt, exploreCtx);
+                            if (watchdogTimeout != Timeout.InfiniteTimeSpan)
+                            {
+                                var watchdogTask = Task.Delay(watchdogTimeout, CancellationToken.None);
+                                var completed = await Task.WhenAny(executionTask, watchdogTask).ConfigureAwait(false);
+                                if (completed != executionTask)
+                                {
+                                    subagentCts.Cancel();
+                                    string timeoutMessage =
+                                        $"子 Agent 看门狗超时（{watchdogTimeout.TotalMinutes:F0} 分钟），" +
+                                        $"已取消。最后活动: {exploreAgent.CurrentActivity}";
+                                    Logger.Warn($"[Subagent:{traceId}] {timeoutMessage}; task={ctx.Description.Truncate(120)}");
+                                    AddLog("WARN", $"[{Definition.Type}][{traceId}] {timeoutMessage}");
+                                    _ = ObserveSubagentCompletionAsync(executionTask, traceId);
+                                    return $"Timeout: {timeoutMessage}。请缩小探索范围后重试。";
+                                }
+                            }
+
+                            exploreResult = await executionTask.ConfigureAwait(false);
                         }
                         finally
                         {
-                            SubagentConcurrencyLimiter.Release();
+                            if (limiterAcquired)
+                                SubagentConcurrencyLimiter.Release();
                             // ── 导入 ExploreAgent 的日志到父 Agent 的 _logs ──
                             if (exploreResult != null && exploreResult.Logs.Count > 0)
                             {
@@ -2078,7 +2203,7 @@ namespace DeepSeek_v4_for_VisualStudio.Services.Agents
                                     _logs.Add(new AgentLogEntry
                                     {
                                         Level = log.Level,
-                                        Message = $"[Explore] {log.Message.Truncate(200)}"
+                                        Message = $"[Explore] {log.Message}"
                                     });
                                 }
                                 // ── 通过 AddLog 触发 LogEntryAdded 事件，使 UI 实时更新执行进度 ──
@@ -2109,7 +2234,8 @@ namespace DeepSeek_v4_for_VisualStudio.Services.Agents
 
                         if (exploreResult.Success && !string.IsNullOrEmpty(exploreResult.Content))
                         {
-                            AddLog("INFO", $"[{Definition.Name}] ExploreAgent 完成: {exploreResult.Content!.Length} 字符");
+                            Logger.Info($"[Subagent:{traceId}] 完成: {exploreResult.Content!.Length} 字符");
+                            AddLog("INFO", $"[{Definition.Name}][{traceId}] ExploreAgent 完成: {exploreResult.Content!.Length} 字符");
                             return exploreResult.Content;
                         }
 
@@ -2117,14 +2243,23 @@ namespace DeepSeek_v4_for_VisualStudio.Services.Agents
                             ? "(ExploreAgent 完成但无内容)"
                             : $"Error: ExploreAgent 失败: {exploreResult.ErrorMessage ?? "未知错误"}";
                     }
+                    catch (OperationCanceledException) when (!ct.IsCancellationRequested && subagentCts.IsCancellationRequested)
+                    {
+                        string timeoutMessage =
+                            $"子 Agent 看门狗超时（{watchdogTimeout.TotalMinutes:F0} 分钟），" +
+                            $"已取消。最后活动: {activeExploreAgent?.CurrentActivity ?? "启动前"}";
+                        Logger.Warn($"[Subagent:{traceId}] {timeoutMessage}; task={ctx.Description.Truncate(120)}");
+                        AddLog("WARN", $"[{Definition.Type}][{traceId}] {timeoutMessage}");
+                        return $"Timeout: {timeoutMessage}。请缩小探索范围后重试。";
+                    }
                     catch (OperationCanceledException)
                     {
-                        Logger.Info($"[BaseAgent] runSubagent 被取消 (ExploreAgent: {ctx.Description.Truncate(80)})");
+                        Logger.Info($"[Subagent:{traceId}] runSubagent 被取消 (ExploreAgent: {ctx.Description.Truncate(80)})");
                         throw; // 让取消信号向上传播，停止整个 Agent 流程
                     }
                     catch (Exception ex)
                     {
-                        Logger.Error($"[BaseAgent] runSubagent 异常: {ex.Message}", ex);
+                        Logger.Error($"[Subagent:{traceId}] runSubagent 异常: {ex.Message}", ex);
                         return $"Error: runSubagent 执行异常: {ex.Message}";
                     }
                 };
@@ -2249,7 +2384,7 @@ namespace DeepSeek_v4_for_VisualStudio.Services.Agents
                     && RunInTerminalTool.DetectFileEditingCommand(command))
                 {
                     // 只读 Agent：直接拒绝会修改文件的终端命令，不进入审批流程
-                    AddLog("WARN", $"[BLOCKED] 只读 Agent 的文件修改命令被拦截: {command.Truncate(100)}");
+                    AddLog("WARN", $"[BLOCKED] 只读 Agent 的文件修改命令被拦截: {command}");
                     return RunInTerminalTool.FormatFileEditBlocked(command);
                 }
 
@@ -2288,8 +2423,8 @@ namespace DeepSeek_v4_for_VisualStudio.Services.Agents
                 }
             }
 
-            // ── VisualStudio_askQuestions / askQuestions：向用户提问并等待回答 ──
-            if (toolName == "VisualStudio_askQuestions" || toolName == "askQuestions")
+            // ── VisualStudio_askQuestions：向用户提问并等待回答 ──
+            if (toolName == "VisualStudio_askQuestions")
             {
                 string questionsJson = string.Empty;
                 try
@@ -2837,7 +2972,7 @@ namespace DeepSeek_v4_for_VisualStudio.Services.Agents
         }
 
         /// <summary>
-        /// 剥离 DeepSeek V4 泄露到 content 中的 DSML/工具调用 XML 标签。
+        /// 剥离 DeepSeek 泄露到 content 中的 DSML/工具调用 XML 标签。
         /// PlanAgent / BaseAgent 共享使用。
         /// </summary>
         protected static string StripDsmlContent(string text)
@@ -2847,7 +2982,7 @@ namespace DeepSeek_v4_for_VisualStudio.Services.Agents
             // ── 移除完整的 DSML/工具调用 XML 块（含嵌套内容）──
             // 支持两种格式：
             //   1. 标准 XML: <tagname>...</tagname>
-            //   2. DeepSeek V4 管道分隔: <|tagname|>...</|tagname|>
+            //   2. DeepSeek 管道分隔: <|tagname|>...</|tagname|>
             string[] blockTags = {
                 "DSML", "function_calls?", "tool_calls?", "invoke", "parameter",
                 "VisualStudio_askQuestions", "runSubagent", "tool_result",
@@ -2855,7 +2990,7 @@ namespace DeepSeek_v4_for_VisualStudio.Services.Agents
                 "semantic_search", "fetch_webpage", "run_in_terminal",
                 "create_file", "replace_string_in_file",
                 "create_directory", "runSubagent", "mcp_\\w+", "github_\\w+",
-                // DeepSeek V4 DSML wrapper tags
+                // DeepSeek DSML wrapper tags
                 "response", "result", "output", "answer"
             };
 
@@ -2990,6 +3125,15 @@ namespace DeepSeek_v4_for_VisualStudio.Services.Agents
         /// </summary>
         private void OnExplorePermissionRequested(AgentPermissionRequest request)
         {
+            // 临时 ExploreAgent 不在 AgentFactory 中，UI 的响应会回退到父 Agent。
+            // 将同一个请求对象登记到父 Agent，确保批准/拒绝能完成子代理共享的 TCS。
+            _pendingPermissions[request.RequestId] = request;
+            _ = request.ResponseTcs.Task.ContinueWith(
+                _completed => _pendingPermissions.TryRemove(request.RequestId, out _),
+                CancellationToken.None,
+                TaskContinuationOptions.ExecuteSynchronously,
+                TaskScheduler.Default);
+
             PermissionRequested?.Invoke(request);
             AddLog("INFO", $"[Explore→{Definition.Name}] 转发权限请求: {request.Title}");
         }
@@ -2999,6 +3143,13 @@ namespace DeepSeek_v4_for_VisualStudio.Services.Agents
         /// </summary>
         private void OnExploreQuestionsRequested(AgentQuestionRequest request)
         {
+            _pendingQuestions[request.RequestId] = request;
+            _ = request.ResponseTcs.Task.ContinueWith(
+                _completed => _pendingQuestions.TryRemove(request.RequestId, out _),
+                CancellationToken.None,
+                TaskContinuationOptions.ExecuteSynchronously,
+                TaskScheduler.Default);
+
             QuestionsRequested?.Invoke(request);
             AddLog("INFO", $"[Explore→{Definition.Name}] 转发提问请求: {request.Questions.Count} 个问题");
         }
@@ -3168,6 +3319,14 @@ namespace DeepSeek_v4_for_VisualStudio.Services.Agents
                 or "runSubagent";            // 子代理可能需要用户审批（如 Explore 用 git）
         }
 
+        internal static string NormalizeToolName(string toolName)
+        {
+            if (string.Equals(toolName, "askQuestions", StringComparison.OrdinalIgnoreCase))
+                return "VisualStudio_askQuestions";
+
+            return toolName;
+        }
+
         /// <summary>
         /// 根据工具类型返回合适的超时时间（仅对非交互式、非构建类工具生效）。
         /// 交互式工具和构建类工具由 IsInteractiveTool 直接跳过超时。
@@ -3184,6 +3343,33 @@ namespace DeepSeek_v4_for_VisualStudio.Services.Agents
         /// 成败判定沿用结果字符串约定：Error: （错误）/ Timeout: （超时）前缀视为失败。
         /// </summary>
         private async Task<string> ExecuteToolWithTelemetryAsync(
+            Services.Telemetry.AgentMetricsCollector? metrics,
+            int round,
+            ToolCall tc,
+            string? workspaceRoot,
+            CancellationToken ct,
+            TimeSpan timeout)
+        {
+            bool mutationLockHeld = false;
+            if (IsFileModifyingTool(NormalizeToolName(tc.Function.Name)))
+            {
+                await FileMutationGate.WaitAsync(ct).ConfigureAwait(false);
+                mutationLockHeld = true;
+            }
+
+            try
+            {
+                return await ExecuteToolWithTelemetryCoreAsync(
+                    metrics, round, tc, workspaceRoot, ct, timeout).ConfigureAwait(false);
+            }
+            finally
+            {
+                if (mutationLockHeld)
+                    FileMutationGate.Release();
+            }
+        }
+
+        private async Task<string> ExecuteToolWithTelemetryCoreAsync(
             Services.Telemetry.AgentMetricsCollector? metrics,
             int round,
             ToolCall tc,
@@ -3213,6 +3399,22 @@ namespace DeepSeek_v4_for_VisualStudio.Services.Agents
             metrics.RecordToolCall(round, tc.Function.Name, sw.ElapsedMilliseconds, outcome.Success,
                 outcome.Success ? null : result.Truncate(200));
             return result;
+        }
+
+        private static async Task ObserveSubagentCompletionAsync(Task<AgentResult> task, string traceId)
+        {
+            try
+            {
+                await task.ConfigureAwait(false);
+            }
+            catch (OperationCanceledException)
+            {
+                Logger.Info($"[Subagent:{traceId}] 超时取消已生效");
+            }
+            catch (Exception ex)
+            {
+                Logger.Error($"[Subagent:{traceId}] 超时后子代理仍抛出异常: {ex.Message}", ex);
+            }
         }
 
         /// <summary>
@@ -3467,6 +3669,14 @@ namespace DeepSeek_v4_for_VisualStudio.Services.Agents
                 : configuredSafetyLimit;
         }
 
+        internal static TimeSpan ResolveSubagentWatchdogTimeout(int configuredSeconds)
+        {
+            if (configuredSeconds <= 0)
+                return Timeout.InfiniteTimeSpan;
+
+            return TimeSpan.FromSeconds(Math.Min(configuredSeconds, 7200));
+        }
+
         /// <summary>
         /// Applies a configured execution budget with a deterministic fallback
         /// and bounds. A minimum of zero allows nullable or unlimited budgets.
@@ -3578,14 +3788,14 @@ namespace DeepSeek_v4_for_VisualStudio.Services.Agents
 
         /// <summary>
         /// 从 AI 返回结果中提取 JSON（可能被 markdown 代码块包裹）。
-        /// 同时剥离 DeepSeek V4 可能在 content 中输出的 XML 风格标签。
+        /// 同时剥离 DeepSeek 可能在 content 中输出的 XML 风格标签。
         /// 当 tools=null 时，DeepSeek 会将工具调用意图以 DSML/function_call 等标签泄露到 content。
         /// </summary>
         protected static string ExtractJsonFromMarkdown(string text)
         {
             if (string.IsNullOrWhiteSpace(text)) return "{}";
 
-            // ── 剥离 XML 风格的标签（DeepSeek V4 可能将推理/工具调用泄露到 content 字段）──
+            // ── 剥离 XML 风格的标签（DeepSeek 可能将推理/工具调用泄露到 content 字段）──
             // 支持标准 XML <tag> 和 DeepSeek 管道分隔 <|tag|> 两种格式
             string cleaned = System.Text.RegularExpressions.Regex.Replace(
                 text,
@@ -4210,7 +4420,7 @@ namespace DeepSeek_v4_for_VisualStudio.Services.Agents
 
                     QuestionsRequested!.Invoke(request);
                     AddLog("INFO", string.Format(LocalizationService.Instance["agent.log.waitingAnswers"],
-                        questions.Count, questions[0].Header.Truncate(60)));
+                        questions.Count, questions[0].Header));
 
                     // 无限等待用户回答（不设超时），用户提交或跳过时通过 ResponseTcs 唤醒
                     string answers = await request.ResponseTcs.Task;
@@ -4218,7 +4428,7 @@ namespace DeepSeek_v4_for_VisualStudio.Services.Agents
                     // 清理
                     _pendingQuestions.TryRemove(request.RequestId, out _);
                     AddLog("INFO", string.Format(LocalizationService.Instance["agent.log.answersReceived"],
-                        answers.Truncate(200)));
+                        answers));
                     return answers;
                 }
                 finally

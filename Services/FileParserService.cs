@@ -9,6 +9,7 @@ using System.Collections.Generic;
 using System.IO;
 using System.Linq;
 using System.Text;
+using System.Threading;
 using System.Threading.Tasks;
 using UglyToad.PdfPig;
 using UglyToad.PdfPig.Content;
@@ -75,7 +76,7 @@ namespace DeepSeek_v4_for_VisualStudio.Services
 
         /// <summary>单文件最大解析大小（字节），超过则记录警告但不截断。</summary>
         /// <remarks>
-        /// DeepSeek V4 拥有 1M Token 上下文窗口，足以容纳大型文件。
+        /// DeepSeek 拥有 1M Token 上下文窗口，足以容纳大型文件。
         /// 此处仅作为日志警告阈值，不再截断文件内容。
         /// 实际限制由 ContextManager 的 Token 预算统一管理。
         /// </remarks>
@@ -86,7 +87,7 @@ namespace DeepSeek_v4_for_VisualStudio.Services
 
         /// <summary>
         /// 解析后文本最大长度（字符）。
-        /// DeepSeek V4 1M 上下文窗口下不再截断文件内容。
+        /// DeepSeek 1M 上下文窗口下不再截断文件内容。
         /// 设为 int.MaxValue 以完全禁用截断。
         /// </summary>
         private const int MaxParsedChars = int.MaxValue;
@@ -109,6 +110,15 @@ namespace DeepSeek_v4_for_VisualStudio.Services
                 || ExcelExtensions.Contains(ext)
                 || PdfExtensions.Contains(ext)
                 || ImageExtensions.Contains(ext);
+        }
+
+        /// <summary>
+        /// 判断文件是否应按纯文本直接读取。
+        /// </summary>
+        public static bool IsTextFormat(string filePath)
+        {
+            if (string.IsNullOrWhiteSpace(filePath)) return false;
+            return TextFileExtensions.Contains(Path.GetExtension(filePath));
         }
 
         /// <summary>
@@ -191,7 +201,7 @@ namespace DeepSeek_v4_for_VisualStudio.Services
                     return result;
                 }
 
-                // 不再截断内容。DeepSeek V4 1M Token 上下文窗口足以容纳大型文件。
+                // 不再截断内容。DeepSeek 1M Token 上下文窗口足以容纳大型文件。
                 // 上下文管理由 ConversationContextManager 的 Token 预算统一控制。
                 // 如果内容极大（>500K 字符），记录日志便于追踪。
                 if (result.Content != null && result.Content.Length > 500_000)
@@ -217,19 +227,57 @@ namespace DeepSeek_v4_for_VisualStudio.Services
         /// </summary>
         /// <param name="filePaths">文件路径列表</param>
         /// <returns>解析结果列表</returns>
-        public static async Task<List<FileParseResult>> ParseFilesAsync(IEnumerable<string> filePaths)
+        public static async Task<List<FileParseResult>> ParseFilesAsync(
+            IEnumerable<string> filePaths,
+            CancellationToken cancellationToken = default)
         {
             var results = new List<FileParseResult>();
             foreach (var path in filePaths)
             {
+                if (cancellationToken.IsCancellationRequested)
+                    break;
+
                 var result = await ParseFileAsync(path);
                 results.Add(result);
+
+                if (cancellationToken.IsCancellationRequested)
+                    break;
             }
             return results;
         }
 
         /// <summary>
-        /// 将解析结果格式化为可发送给 AI 的上下文字符串。
+        /// 创建轻量附件引用。只记录文件元数据和路径，不读取正文。
+        /// 实际内容由模型按需调用 read_file 获取。
+        /// </summary>
+        public static List<FileParseResult> CreateFileReferences(IEnumerable<string> filePaths)
+        {
+            if (filePaths == null) return new List<FileParseResult>();
+
+            return filePaths
+                .Where(path => !string.IsNullOrWhiteSpace(path))
+                .Distinct(StringComparer.OrdinalIgnoreCase)
+                .Select(path =>
+                {
+                    bool exists = File.Exists(path);
+                    return new FileParseResult
+                    {
+                        FileName = Path.GetFileName(path),
+                        FileExtension = Path.GetExtension(path),
+                        FilePath = path,
+                        Success = exists,
+                        Error = exists
+                            ? null
+                            : string.Format(LocalizationService.Instance["file.notFound"], path),
+                        Content = null,
+                    };
+                })
+                .ToList();
+        }
+
+        /// <summary>
+        /// 将附件引用格式化为可发送给 AI 的路径清单。
+        /// 不包含文件正文，模型需要时调用 read_file 读取。
         /// </summary>
         /// <param name="results">解析结果列表</param>
         /// <returns>格式化的上下文字符串</returns>
@@ -237,8 +285,10 @@ namespace DeepSeek_v4_for_VisualStudio.Services
         {
             if (results == null || results.Count == 0) return string.Empty;
 
+            var L = LocalizationService.Instance;
             var sb = new StringBuilder();
-            sb.AppendLine("=== 用户上传的文件 ===");
+            sb.AppendLine(L["file.referenceHeader"]);
+            sb.AppendLine(L["file.referenceInstruction"]);
             sb.AppendLine();
 
             foreach (var r in results)
@@ -250,26 +300,35 @@ namespace DeepSeek_v4_for_VisualStudio.Services
                     continue;
                 }
 
-                string lang = GetLanguageFromExtension(r.FileExtension);
-                sb.AppendLine($" {r.FileName}");
-                if (!string.IsNullOrEmpty(r.FilePath))
-                {
-                    sb.AppendLine($"路径: {r.FilePath}");
-                }
-
-                if (r.Truncated && !string.IsNullOrEmpty(r.TruncationNote))
-                {
-                    sb.AppendLine(r.TruncationNote);
-                }
-
-                sb.AppendLine("```" + lang);
-                sb.AppendLine(r.Content);
-                sb.AppendLine("```");
+                sb.AppendLine($"- {r.FileName} ({GetFileKind(r.FileExtension)})");
+                sb.AppendLine($"  {L["file.referencePathLabel"]}: {r.FilePath}");
                 sb.AppendLine();
             }
 
-            sb.AppendLine("=== 文件结束 ===");
+            sb.AppendLine(L["file.referenceFooter"]);
             return sb.ToString();
+        }
+
+        /// <summary>
+        /// 按文件类型读取供 read_file 工具返回的文本。
+        /// 文档、PDF、表格和图片走解析/OCR；其余文件按文本读取。
+        /// </summary>
+        public static async Task<string> ReadFileContentForToolAsync(string filePath)
+        {
+            string ext = Path.GetExtension(filePath).ToLowerInvariant();
+
+            if (WordExtensions.Contains(ext)
+                || ExcelExtensions.Contains(ext)
+                || PdfExtensions.Contains(ext)
+                || ImageExtensions.Contains(ext))
+            {
+                var parsed = await ParseFileAsync(filePath);
+                if (!parsed.Success)
+                    throw new InvalidOperationException(parsed.Error ?? LocalizationService.Instance["tool.readFile.failed"]);
+                return parsed.Content ?? string.Empty;
+            }
+
+            return await ReadTextFileAsync(filePath);
         }
 
         #endregion
@@ -703,6 +762,20 @@ namespace DeepSeek_v4_for_VisualStudio.Services
                 ".proto" => "protobuf",
                 _ => string.Empty,
             };
+        }
+
+        /// <summary>
+        /// 获取面向用户的文件类型描述。
+        /// </summary>
+        private static string GetFileKind(string extension)
+        {
+            string ext = (extension ?? string.Empty).ToLowerInvariant();
+            if (WordExtensions.Contains(ext)) return "Word";
+            if (ExcelExtensions.Contains(ext)) return "Excel";
+            if (PdfExtensions.Contains(ext)) return "PDF";
+            if (ImageExtensions.Contains(ext)) return "Image/OCR";
+            if (TextFileExtensions.Contains(ext)) return "Text";
+            return "File";
         }
 
         /// <summary>

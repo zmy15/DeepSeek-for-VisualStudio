@@ -10,6 +10,8 @@ namespace DeepSeek_v4_for_VisualStudio.Services.BuiltInTools
     /// 1|using System;
     /// 2|
     /// 3|class Example { }
+    /// 格式严格为“行号|原始行内容”，竖线后不添加分隔空格。
+    /// 因此 Markdown 表格行写成 4|| column |，空行写成 5|。
     /// </summary>
     internal static class ExpectedContentVerifier
     {

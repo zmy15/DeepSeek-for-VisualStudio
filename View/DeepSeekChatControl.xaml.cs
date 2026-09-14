@@ -141,13 +141,30 @@ namespace DeepSeek_v4_for_VisualStudio.View
         /// <summary>
         /// 线程安全地释放当前流式 CTS。
         /// </summary>
-        private void DisposeStreamingCts()
+        private void DisposeStreamingCts(CancellationTokenSource? expected = null)
         {
             lock (_lock)
             {
+                if (expected != null && !ReferenceEquals(_currentStreamingCts, expected))
+                    return;
+
                 _currentStreamingCts?.Dispose();
                 _currentStreamingCts = null;
             }
+        }
+
+        /// <summary>
+        /// 预处理阶段收到停止请求时，统一复位生成状态。
+        /// </summary>
+        private bool TryCompleteCancelledGeneration(CancellationTokenSource requestCts)
+        {
+            if (!requestCts.IsCancellationRequested)
+                return false;
+
+            lock (_lock) { _isGenerating = false; }
+            UpdateButtonsState();
+            StatusLabel.Text = LocalizationService.Instance["status.stopped"];
+            return true;
         }
         private string? _solutionPath;
 
@@ -438,7 +455,8 @@ namespace DeepSeek_v4_for_VisualStudio.View
 
         // ── Agent 实时思考气泡 ──
         private int _agentStreamingMsgIndex = -1;
-        private readonly StringBuilder _agentThinkingContent = new();
+        private readonly StringBuilder _agentTimelineContent = new();
+        private readonly StringBuilder _streamingContent = new();
         private readonly StringBuilder _streamingReasoning = new();
         private int _lastReportedStepIndex;
         private string _lastReportedStepStatus = string.Empty;
@@ -907,7 +925,7 @@ namespace DeepSeek_v4_for_VisualStudio.View
         /// <summary>
         /// 格式化当前会话的 token 消耗信息。
         /// 包含：API 实际 Token 消耗 + 费用估算 + 上下文窗口利用率。
-        /// 费用基于 DeepSeek V4 官方定价，按"国内/国际 × 模型（Flash/Pro）× 时段"分档
+        /// 费用基于 DeepSeek 官方定价，按"国内/国际 × 模型（Flash/Pro）× 时段"分档
         /// （国内 ¥ 价目 / 国际 $ 价目，高峰时段为北京时间周一至周五 9:00-12:00、14:00-18:00，
         /// 周六、周日全天为空闲时段，详见 DeepSeekProvider.GetPricing）。
         /// 币种由余额 API 返回值自动判定（CNY→国内价，USD→国际价），首次查询前默认国内价。

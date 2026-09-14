@@ -168,7 +168,7 @@ namespace DeepSeek_v4_for_VisualStudio.Services.Agents
             return new AgentResult
             {
                 Success = true,
-                Content = $"此任务规模较大（\"{userMessage.Truncate(80)}\"），需要先制定详细计划。正在转交 Plan Agent...",
+                Content = $"此任务规模较大（\"{userMessage}\"），需要先制定详细计划。正在转交 Plan Agent...",
                 Plan = null,
                 Handoff = new AgentHandoff
                 {
@@ -315,7 +315,7 @@ namespace DeepSeek_v4_for_VisualStudio.Services.Agents
             string firstLine = userMessage.Split(new[] { '\r', '\n' }, StringSplitOptions.RemoveEmptyEntries)
                 .FirstOrDefault() ?? userMessage;
 
-            return firstLine.Length > 80 ? firstLine.Substring(0, 80) + "..." : firstLine;
+            return firstLine;
         }
 
         #endregion

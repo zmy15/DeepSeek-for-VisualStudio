@@ -36,6 +36,24 @@ public class EditAgentTests
         act.Should().Throw<ArgumentNullException>();
     }
 
+    [Theory]
+    [InlineData("", false)]
+    [InlineData("   ", false)]
+    [InlineData(".", false)]
+    [InlineData("无需修改", true)]
+    [InlineData("No changes needed", true)]
+    public void IsNoChangesResponse_RequiresExplicitNoChangeText(string response, bool expected)
+    {
+        var method = typeof(EditAgent).GetMethod(
+            "IsNoChangesResponse",
+            System.Reflection.BindingFlags.NonPublic | System.Reflection.BindingFlags.Static);
+        method.Should().NotBeNull();
+
+        bool result = (bool)method!.Invoke(null, new object[] { response })!;
+
+        result.Should().Be(expected);
+    }
+
     #endregion
 
     [Theory]
@@ -66,6 +84,73 @@ public class EditAgentTests
         result.Should().Be(expected);
     }
 
+    [Fact]
+    public async Task ExecutePlanAsync_WithCancelledContext_MarksPlanCancelledWithoutExecutingStep()
+    {
+        var agent = new EditAgent(_apiService);
+        using var cts = new CancellationTokenSource();
+        cts.Cancel();
+
+        var plan = new AgentTaskPlan
+        {
+            Title = "Cancellation test",
+            Steps =
+            {
+                new AgentStep
+                {
+                    Index = 1,
+                    Title = "Step 1",
+                    Description = "Should not execute",
+                },
+            },
+        };
+        var context = new AgentContext
+        {
+            CancellationToken = cts.Token,
+        };
+
+        await agent.ExecutePlanAsync(plan, context);
+
+        plan.IsCancelled.Should().BeTrue();
+        plan.IsCompleted.Should().BeFalse();
+        plan.Steps.Should().ContainSingle()
+            .Which.Status.Should().Be(AgentStepStatus.Pending);
+    }
+
+    [Fact]
+    public async Task ExecuteAsync_WithCancelledPlan_DoesNotCreateFollowUpHandoff()
+    {
+        var agent = new EditAgent(_apiService);
+        using var cts = new CancellationTokenSource();
+        cts.Cancel();
+
+        var plan = new AgentTaskPlan
+        {
+            Title = "Cancellation handoff test",
+            Source = PlanSource.PlanAgent,
+            Steps =
+            {
+                new AgentStep
+                {
+                    Index = 1,
+                    Title = "Step 1",
+                    Description = "Should not execute",
+                },
+            },
+        };
+        var context = new AgentContext
+        {
+            ActivePlan = plan,
+            CancellationToken = cts.Token,
+        };
+
+        var result = await agent.ExecuteAsync("Execute the plan", context);
+
+        result.Success.Should().BeTrue();
+        result.Plan.Should().BeSameAs(plan);
+        result.Handoff.Should().BeNull();
+    }
+
     #region Agent Definition
 
     [Fact]
@@ -93,6 +178,11 @@ public class EditAgentTests
         global::DeepSeek_v4_for_VisualStudio.Services.AiPrompts.EditFormatRecoveryPrompt
             .Should().Contain("apply_patch")
             .And.Contain("replace_string_in_file");
+        global::DeepSeek_v4_for_VisualStudio.Services.AiPrompts.EditToolCallRule
+            .Should().Contain("终态")
+            .And.Contain("不要再次读取");
+        global::DeepSeek_v4_for_VisualStudio.Services.AiPrompts.AgentConclusionStopRule
+            .Should().Contain("超过 2 种");
     }
 
     #endregion

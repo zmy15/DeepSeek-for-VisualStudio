@@ -141,7 +141,7 @@ namespace DeepSeek_v4_for_VisualStudio.Services.BuiltInTools
             string ssQuery = GetStringArg(args, "query");
             return string.IsNullOrEmpty(ssQuery)
                 ? LocalizationService.Instance["tool.symbolSearch.searching"]
-                : LocalizationService.Instance.Format("tool.symbolSearch.searchingQuery", TruncateText(ssQuery, 60));
+                : LocalizationService.Instance.Format("tool.symbolSearch.searchingQuery", ssQuery);
         }
 
         public override string GetResultSummary(string toolResult)
@@ -313,7 +313,7 @@ namespace DeepSeek_v4_for_VisualStudio.Services.BuiltInTools
 
                                     results.Add((
                                         relativePath,
-                                        line.Trim().Truncate(80),
+                                        line.Trim(),
                                         "",
                                         relativePath,
                                         i + 1

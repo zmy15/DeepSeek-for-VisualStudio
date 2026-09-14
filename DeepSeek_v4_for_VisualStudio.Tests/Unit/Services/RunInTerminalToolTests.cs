@@ -1,6 +1,8 @@
 using DeepSeek_v4_for_VisualStudio.Services.BuiltInTools;
 using FluentAssertions;
+using System;
 using System.Collections.Generic;
+using System.Linq;
 using System.Text.Json;
 using System.Threading.Tasks;
 
@@ -167,6 +169,66 @@ public class RunInTerminalToolTests
         var result = await tool.ExecuteAsync(args, null);
 
         result.Should().Contain("build_solution");
+    }
+
+    [Theory]
+    [InlineData("dotnet run --project Eventask.ApiService", true)]
+    [InlineData("Start-Process -FilePath dotnet -ArgumentList @('run')", true)]
+    [InlineData("npm run dev", true)]
+    [InlineData("git status --short", false)]
+    [InlineData("refitter --settings-file .refitter", false)]
+    public void IsLongRunningCommand_ClassifiesOnlyLongRunningProcesses(
+        string command,
+        bool expected)
+    {
+        RunInTerminalTool.IsLongRunningCommand(command).Should().Be(expected);
+    }
+
+    [Fact]
+    public async Task ExecuteAsync_DetachedCommandReturnsSnapshotWithoutWaitingForExit()
+    {
+        var tool = new RunInTerminalTool();
+        var command = "Write-Output 'DETACHED_OK'; Start-Sleep -Seconds 2";
+        var args = ParseArgs(JsonSerializer.Serialize(new Dictionary<string, string>
+        {
+            ["command"] = command,
+            ["explanation"] = "test detached mode",
+            ["mode"] = "detached",
+        }));
+        var existingIds = new HashSet<string>(
+            RunInTerminalTool.AsyncJobs.Keys,
+            StringComparer.Ordinal);
+
+        string startResult = await tool.ExecuteAsync(args, null);
+
+        startResult.Should().Contain("PID");
+        var job = RunInTerminalTool.AsyncJobs.Values
+            .Single(candidate => !existingIds.Contains(candidate.Id));
+
+        try
+        {
+            var outputTool = new GetTerminalOutputTool();
+            var outputArgs = ParseArgs(JsonSerializer.Serialize(new Dictionary<string, string>
+            {
+                ["id"] = job.Id,
+            }));
+
+            string outputSnapshot = string.Empty;
+            for (int attempt = 0; attempt < 35; attempt++)
+            {
+                outputSnapshot = await outputTool.ExecuteAsync(outputArgs, null);
+                if (outputSnapshot.Contains("DETACHED_OK"))
+                    break;
+                await Task.Delay(100);
+            }
+
+            outputSnapshot.Should().Contain("DETACHED_OK");
+        }
+        finally
+        {
+            RunInTerminalTool.AsyncJobs.TryRemove(job.Id, out _);
+            job.DisposeDetachedProcess();
+        }
     }
 
     [Fact]

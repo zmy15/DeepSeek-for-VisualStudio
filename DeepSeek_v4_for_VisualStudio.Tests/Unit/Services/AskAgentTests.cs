@@ -56,6 +56,8 @@ public class AskAgentTests
         agent.Definition.SystemPrompt.Should().Contain("Ask");
         agent.Definition.SystemPrompt.Should().Contain("git");
         agent.Definition.SystemPrompt.Should().Contain("只读");
+        agent.Definition.SystemPrompt.Should().Contain("VisualStudio_askQuestions");
+        agent.Definition.SystemPrompt.Should().Contain("必须直接调用");
         agent.Definition.SystemPrompt.Should().Contain(
             global::DeepSeek_v4_for_VisualStudio.Services.AiPrompts.AgentConclusionStopRule);
     }
@@ -181,6 +183,45 @@ public class AskAgentTests
         messages.Last().Content.Should().Be("AskAgent system prompt");
         messages.Count(m => m.Role == "system" && m.Content!.Contains("文件读取规则"))
             .Should().Be(1);
+    }
+
+    [Fact]
+    public void BuildContextAwareMessages_MaxTurnsZero_PreservesStableContextPrefix()
+    {
+        var contextManager = new ConversationContextManager();
+        contextManager.SetSystemPrompt("Custom system prefix");
+        contextManager.SetMemoryContext("Repository memory");
+        contextManager.FreezeSystemPrompt();
+        contextManager.AddUserMessage("你好");
+
+        var context = new AgentContext
+        {
+            ContextManager = contextManager,
+            CurrentUserContent = "你好",
+        };
+        var agent = new AskAgent(_apiService)
+        {
+            Context = context,
+        };
+
+        var method = typeof(BaseAgent).GetMethod(
+            "BuildContextAwareMessages",
+            System.Reflection.BindingFlags.Instance | System.Reflection.BindingFlags.NonPublic,
+            binder: null,
+            new[] { typeof(string), typeof(string), typeof(int), typeof(bool) },
+            modifiers: null);
+        method.Should().NotBeNull();
+
+        var messages = (List<ChatApiMessage>)method!.Invoke(
+            agent,
+            new object[] { "Design system prompt", "design user prompt", 0, false })!;
+        var expectedPrefix = contextManager.BuildContextPrefix();
+
+        messages.Should().HaveCountGreaterThanOrEqualTo(3);
+        messages[0].Content.Should().Be(expectedPrefix[0].Content);
+        messages[0].Content.Should().Contain("Custom system prefix");
+        messages[1].Content.Should().Be(expectedPrefix[1].Content);
+        messages[1].Content.Should().Contain("Repository memory");
     }
 
     [Fact]

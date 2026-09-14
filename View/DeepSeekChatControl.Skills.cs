@@ -186,7 +186,7 @@ namespace DeepSeek_v4_for_VisualStudio.View
                             _ => ""
                         };
                         var typeLabel = skill.UserInvocable ? L["skills.help.typeInvocable"] : L["skills.help.typeAuto"];
-                        var desc = TruncateText(skill.Description, 60);
+                        var desc = skill.Description;
                         sb.AppendLine($"| `/{skill.Name}` | {sourceLabel} | {typeLabel} | {desc} |");
                     }
                     sb.AppendLine();
@@ -468,8 +468,16 @@ namespace DeepSeek_v4_for_VisualStudio.View
         /// AI 技能路由：根据用户问题和可用技能总结，判断是否应自动调用某个技能。
         /// 发送轻量级 AI 查询，解析返回的 JSON 判断结果。
         /// </summary>
-        private async Task<string?> RouteSkillAsync(string fullUserContent)
+        private async Task<string?> RouteSkillAsync(
+            string fullUserContent,
+            CancellationToken cancellationToken = default)
         {
+            if (!IsAutoSkillRoutingEnabled())
+            {
+                Logger.Info("[SkillRoute] 自动技能路由已关闭，跳过");
+                return null;
+            }
+
             try
             {
                 await DiscoverSkillsForCurrentSolutionAsync();
@@ -500,7 +508,8 @@ namespace DeepSeek_v4_for_VisualStudio.View
                 Logger.Info($"[SkillRoute] 开始技能路由判断 (用户输入 {fullUserContent.Length} 字符)");
 
                 string? routingResponse = null;
-                using var cts = new CancellationTokenSource(TimeSpan.FromSeconds(8));
+                using var cts = CancellationTokenSource.CreateLinkedTokenSource(cancellationToken);
+                cts.CancelAfter(TimeSpan.FromSeconds(8));
                 try
                 {
                     routingResponse = await _activeAgent.CallAiWithMessagesAsync(
@@ -511,10 +520,20 @@ namespace DeepSeek_v4_for_VisualStudio.View
                         includeTools: false);
                     routingResponse = routingResponse?.Trim();
                 }
+                catch (OperationCanceledException) when (cancellationToken.IsCancellationRequested)
+                {
+                    Logger.Info("[SkillRoute] 用户已停止生成，结束技能路由");
+                    return null;
+                }
                 catch (OperationCanceledException) when (cts.IsCancellationRequested)
                 {
                     Logger.Warn("[SkillRoute] 路由判断超时，跳过技能匹配");
                     StatusLabel.Text = LocalizationService.Instance["status.thinking"];
+                    return null;
+                }
+                catch (ObjectDisposedException) when (cancellationToken.IsCancellationRequested)
+                {
+                    Logger.Info("[SkillRoute] 用户已停止生成，结束技能路由");
                     return null;
                 }
                 catch (ObjectDisposedException) when (cts.IsCancellationRequested)
@@ -610,6 +629,9 @@ namespace DeepSeek_v4_for_VisualStudio.View
                 return null;
             }
         }
+
+        private bool IsAutoSkillRoutingEnabled()
+            => _options?.EnableAutoSkillRouting == true;
 
         #endregion
 

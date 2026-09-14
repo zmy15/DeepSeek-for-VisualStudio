@@ -329,7 +329,18 @@ namespace DeepSeek_v4_for_VisualStudio.View
 
             try
             {
-                string json = ChatHtmlService.BuildStreamEndJson(messageIndex, fullContent, reasoningContent, extraFooterHtml);
+                string? timelineContent = null;
+                lock (_lock)
+                {
+                    if (messageIndex >= 0 && messageIndex < _messages.Count)
+                        timelineContent = _messages[messageIndex].TimelineContent;
+                }
+                string json = ChatHtmlService.BuildStreamEndJson(
+                    messageIndex,
+                    fullContent,
+                    reasoningContent,
+                    extraFooterHtml,
+                    timelineContent);
                 ChatWebView.CoreWebView2.PostWebMessageAsString(json);
             }
             catch (Exception ex)

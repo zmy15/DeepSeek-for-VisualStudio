@@ -367,6 +367,15 @@ namespace DeepSeek_v4_for_VisualStudio
             };
 
         [VisualStudioContribution]
+        internal static Setting.Integer AgentSubagentTimeoutSeconds { get; } =
+            new("deepseekAgentSubagentTimeoutSeconds", "%DeepSeek.Chat.settings.agentSubagentTimeoutSeconds.displayName%", GeneralCategory, defaultValue: 900)
+            {
+                Description = "%DeepSeek.Chat.settings.agentSubagentTimeoutSeconds.description%",
+                Minimum = 0,
+                Maximum = 7200,
+            };
+
+        [VisualStudioContribution]
         internal static Setting.Integer AgentMaxTotalTokens { get; } =
             new("deepseekAgentMaxTotalTokens", "%DeepSeek.Chat.settings.agentMaxTotalTokens.displayName%", GeneralCategory, defaultValue: 0)
             {
@@ -407,6 +416,13 @@ namespace DeepSeek_v4_for_VisualStudio
             new("deepseekEnableAutoBuild", "%DeepSeek.Chat.settings.enableAutoBuild.displayName%", GeneralCategory, defaultValue: true)
             {
                 Description = "%DeepSeek.Chat.settings.enableAutoBuild.description%",
+            };
+
+        [VisualStudioContribution]
+        internal static Setting.Boolean EnableAutoSkillRouting { get; } =
+            new("deepseekEnableAutoSkillRouting", "%DeepSeek.Chat.settings.enableAutoSkillRouting.displayName%", GeneralCategory, defaultValue: Settings.DeepSeekOptionsPage.DefaultEnableAutoSkillRouting)
+            {
+                Description = "%DeepSeek.Chat.settings.enableAutoSkillRouting.description%",
             };
 
         [VisualStudioContribution]

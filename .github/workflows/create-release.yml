@@ -16,7 +16,7 @@ on:
           - standard
           - no-local-ocr
       release_description:
-        description: '版本描述（可选，将显示在 Release 说明开头；留空则仅显示自动生成的更新日志）'
+        description: '版本描述（可选，将显示在 Release 说明开头；留空则仅显示自动生成的更新日志）。注意：GitHub 输入框不支持多行，请用字面量 \n 表示换行，例如：修复了A\n新增了B'
         required: false
         type: string
 
@@ -105,11 +105,33 @@ jobs:
         Rename-Item $vsix.FullName $newName
         Write-Host "已重命名为: $newName"
 
+    - name: '处理版本描述（\n 还原为换行）'
+      id: release_notes
+      shell: pwsh
+      env:
+        RELEASE_DESCRIPTION: ${{ github.event.inputs.release_description }}
+      run: |
+        # GitHub 的 workflow_dispatch 输入框是单行文本框，浏览器会剥离粘贴内容中的换行符，
+        # 因此约定用字面量 \n 表示换行，这里统一还原为真实换行后写入多行 output。
+        $desc = [string]$env:RELEASE_DESCRIPTION
+        $desc = $desc.Trim() -replace '\\n', "`n"
+        if ($desc) {
+          # 多行值必须使用 heredoc 语法写入 GITHUB_OUTPUT（delimiter 需唯一）
+          $delimiter = "RELEASE_BODY_$([guid]::NewGuid().ToString('N'))"
+          "body<<$delimiter" >> $env:GITHUB_OUTPUT
+          $desc >> $env:GITHUB_OUTPUT
+          $delimiter >> $env:GITHUB_OUTPUT
+          $lineCount = ($desc -split "`n").Count
+          Write-Host "版本描述已还原：$lineCount 行"
+        } else {
+          Write-Host "版本描述为空，仅使用自动生成的更新日志"
+        }
+
     - name: 发布 Release 并上传 VSIX
       uses: softprops/action-gh-release@v2
       with:
         tag_name: ${{ steps.tag.outputs.tag }}
-        body: ${{ github.event.inputs.release_description }}
+        body: ${{ steps.release_notes.outputs.body }}
         files: bin/Release/net472/*.vsix
         generate_release_notes: true
       env:

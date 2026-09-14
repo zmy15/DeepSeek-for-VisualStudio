@@ -12,6 +12,16 @@ namespace DeepSeek_v4_for_VisualStudio.Tests.Unit.Services;
 public class BaseAgentTests
 {
     [Theory]
+    [InlineData("askQuestions", "VisualStudio_askQuestions")]
+    [InlineData("ASKQUESTIONS", "VisualStudio_askQuestions")]
+    [InlineData("VisualStudio_askQuestions", "VisualStudio_askQuestions")]
+    [InlineData("read_file", "read_file")]
+    public void NormalizeToolName_MapsLegacyAskQuestionsAlias(string input, string expected)
+    {
+        BaseAgent.NormalizeToolName(input).Should().Be(expected);
+    }
+
+    [Theory]
     [InlineData(200, null, 200)]
     [InlineData(200, 50, 50)]
     [InlineData(500, 200, 200)]
@@ -24,6 +34,56 @@ public class BaseAgentTests
         int result = BaseAgent.ResolveEffectiveToolRoundLimit(configuredLimit, maxToolRounds);
 
         result.Should().Be(expected);
+    }
+
+    [Theory]
+    [InlineData(0, -1d)]
+    [InlineData(900, 900d)]
+    [InlineData(99999, 7200d)]
+    public void ResolveSubagentWatchdogTimeout_ReturnsBoundedTimeout(
+        int configuredSeconds,
+        double expectedSeconds)
+    {
+        TimeSpan result = BaseAgent.ResolveSubagentWatchdogTimeout(configuredSeconds);
+
+        if (expectedSeconds < 0)
+            result.Should().Be(Timeout.InfiniteTimeSpan);
+        else
+            result.TotalSeconds.Should().Be(expectedSeconds);
+    }
+
+    [Fact]
+    public void BuildReasoningLoopRetryPrompt_AppendsOriginalUserQuestionVerbatim()
+    {
+        const string originalUserQuestion = "第一行提问\n第二行提问：保留空格 和 *Markdown*";
+
+        string prompt = BaseAgent.BuildReasoningLoopRetryPrompt(originalUserQuestion);
+
+        prompt.Should().EndWith($"原始用户提问：\n{originalUserQuestion}");
+        prompt.Should().Contain("不要重复已经分析过的内容");
+        prompt.Should().NotContain("复述");
+    }
+
+    [Fact]
+    public async Task ExplorePermissionRequest_IsRoutedThroughParentAgent()
+    {
+        var parent = new AskAgent(new DeepSeekApiService("test-api-key"));
+        var request = new AgentPermissionRequest
+        {
+            Title = "terminal command",
+            Command = "Get-ChildItem",
+            ResponseTcs = new TaskCompletionSource<bool>(),
+        };
+        var method = typeof(BaseAgent).GetMethod(
+            "OnExplorePermissionRequested",
+            System.Reflection.BindingFlags.NonPublic | System.Reflection.BindingFlags.Instance);
+
+        method!.Invoke(parent, new object[] { request });
+
+        parent.TryGetPendingPermission(request.RequestId).Should().BeSameAs(request);
+        parent.RespondToPermission(request.RequestId, approved: true);
+        (await request.ResponseTcs.Task).Should().BeTrue();
+        parent.TryGetPendingPermission(request.RequestId).Should().BeNull();
     }
 
     [Theory]

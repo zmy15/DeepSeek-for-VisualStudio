@@ -52,6 +52,11 @@ namespace DeepSeek_v4_for_VisualStudio.Services.Providers
         public DeepSeekUsage? LastUsage { get; protected set; }
 
         /// <summary>
+        /// 最近一次流式调用的结束原因（stop / tool_calls / length 等）。
+        /// </summary>
+        public string? LastFinishReason { get; private set; }
+
+        /// <summary>
         /// 每次 ChatStreamAsync 正常完成后触发。UI 可据此刷新上下文与 Token 统计。
         /// </summary>
         public event Action? RequestCompleted;
@@ -421,6 +426,18 @@ namespace DeepSeek_v4_for_VisualStudio.Services.Providers
         /// <summary>当前使用的模型标识（用于视觉模型等能力分支判断）。</summary>
         public string CurrentModel => _model;
 
+        /// <summary>
+        /// 当前 Provider 是否支持 OpenAI 兼容的 JSON Output 参数
+        /// <c>response_format: {"type":"json_object"}</c>。
+        /// 默认不发送，由具体 Provider 根据端点与模型能力覆写。
+        /// </summary>
+        protected virtual bool SupportsJsonObjectResponseFormat(string model) => false;
+
+        private ResponseFormat? CreateResponseFormat(string? responseFormat, string model)
+            => responseFormat == "json_object" && SupportsJsonObjectResponseFormat(model)
+                ? new ResponseFormat { Type = "json_object" }
+                : null;
+
         /// <summary>当前模型是否具备多模态（视觉）能力，由端点解析器权威赋值。</summary>
         public bool CurrentIsVision { get; protected set; }
 
@@ -466,6 +483,8 @@ namespace DeepSeek_v4_for_VisualStudio.Services.Providers
             string? model = null,
             bool? thinkingEnabled = null)
         {
+            LastFinishReason = null;
+
             // ── 工具 Schema 规范化：按名称排序，消除注册顺序对缓存的影响 ──
             //     参考 CodeWhale prefix_cache.rs:316-331
             List<ToolDefinition>? normalizedTools = tools == null
@@ -476,18 +495,17 @@ namespace DeepSeek_v4_for_VisualStudio.Services.Providers
             string? effectiveToolChoice = toolChoice
                 ?? (normalizedTools != null && normalizedTools.Count > 0 ? "auto" : null);
 
+            string effectiveModel = model ?? _model;
             var request = new DeepSeekChatRequest
             {
-                Model = model ?? _model,
+                Model = effectiveModel,
                 Messages = new List<ChatApiMessage>(messages),
                 Stream = true,
                 Tools = normalizedTools,
                 ToolChoice = effectiveToolChoice,
                 MaxTokens = maxTokens,
                 Temperature = temperature,
-                ResponseFormat = responseFormat == "json_object"
-                    ? new ResponseFormat { Type = "json_object" }
-                    : null
+                ResponseFormat = CreateResponseFormat(responseFormat, effectiveModel)
             };
             ApplyProviderRequestOptions(request, thinkingEnabled);
             ApplyProviderEndpointShaping(request, isStreaming: true);
@@ -578,9 +596,9 @@ namespace DeepSeek_v4_for_VisualStudio.Services.Providers
                         // 如果后者有 reasoning_content，保留后者
                         if (!string.IsNullOrWhiteSpace(clone.ReasoningContent))
                             lastMsg.ReasoningContent = clone.ReasoningContent;
-                        // 如果后者有 tool_calls，保留后者
-                        if (clone.ToolCalls != null && clone.ToolCalls.Count > 0)
-                            lastMsg.ToolCalls = clone.ToolCalls;
+                        // 连续 assistant 可能各自声明过工具调用，必须合并而不是覆盖，
+                        // 否则前一批 tool_call_id 会变成孤儿，对应 tool 消息随后被 Rule6 删除。
+                        MergeAssistantToolCalls(lastMsg, clone);
 
                         mergedCount++;
                         msgIndex++;
@@ -1086,7 +1104,17 @@ namespace DeepSeek_v4_for_VisualStudio.Services.Providers
                     var chunk = JsonSerializer.Deserialize<DeepSeekStreamChunk>(jsonData);
                     // P3-7：空 choices 数组（如仅携带 usage 的尾包）会令索引器抛
                     // ArgumentOutOfRangeException 且不在下方 catch 白名单内，直接击穿流迭代器。
+                    string? finishReason = null;
                     var delta = chunk?.Choices is { Count: > 0 } ? chunk.Choices[0]?.Delta : null;
+                    if (chunk?.Choices is { Count: > 0 })
+                    {
+                        finishReason = chunk.Choices[0]?.FinishReason;
+                        if (!string.IsNullOrEmpty(finishReason))
+                        {
+                            LastFinishReason = finishReason;
+                            Logger.Info($"[API] 流式响应结束原因: {finishReason}");
+                        }
+                    }
                     if (delta != null)
                     {
                         reasoning = delta.ReasoningContent;
@@ -1269,6 +1297,33 @@ namespace DeepSeek_v4_for_VisualStudio.Services.Providers
         }
 
         /// <summary>
+        /// 合并连续 assistant 消息的 ToolCalls，按 tool_call_id 去重。
+        /// </summary>
+        internal static void MergeAssistantToolCalls(ChatApiMessage target, ChatApiMessage source)
+        {
+            if (source.ToolCalls == null || source.ToolCalls.Count == 0)
+                return;
+
+            if (target.ToolCalls == null || target.ToolCalls.Count == 0)
+            {
+                target.ToolCalls = source.ToolCalls;
+                return;
+            }
+
+            var seenIds = new HashSet<string>(
+                target.ToolCalls
+                    .Where(tc => !string.IsNullOrEmpty(tc.Id))
+                    .Select(tc => tc.Id!),
+                StringComparer.Ordinal);
+
+            foreach (var toolCall in source.ToolCalls)
+            {
+                if (string.IsNullOrEmpty(toolCall.Id) || seenIds.Add(toolCall.Id))
+                    target.ToolCalls.Add(toolCall);
+            }
+        }
+
+        /// <summary>
         /// 非流式调用 API，用于搜索查询优化等需要快速完整响应的场景。
         /// </summary>
         /// <param name="messages">消息列表</param>
@@ -1286,9 +1341,7 @@ namespace DeepSeek_v4_for_VisualStudio.Services.Providers
                 // P1-3 修复：非流式路径同样深克隆，避免对调用方消息对象就地修改（ReasoningContent 注入）
                 Messages = messages.Select(m => CloneMessage(m)).ToList(),
                 Stream = false,
-                ResponseFormat = responseFormat == "json_object"
-                    ? new ResponseFormat { Type = "json_object" }
-                    : null
+                ResponseFormat = CreateResponseFormat(responseFormat, _model)
             };
             ApplyProviderRequestOptions(request, thinkingEnabled: false);
             ApplyProviderEndpointShaping(request, isStreaming: false);

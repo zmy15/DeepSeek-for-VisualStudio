@@ -454,6 +454,7 @@ namespace DeepSeek_v4_for_VisualStudio.Models
     {
         private string _role = "user";
         private string _content = string.Empty;
+        private string _timelineContent = string.Empty;
         private string _reasoningContent = string.Empty;
         private string _htmlContent = string.Empty;
         private string _htmlDataUri = string.Empty;
@@ -473,6 +474,17 @@ namespace DeepSeek_v4_for_VisualStudio.Models
         {
             get => _content;
             set => SetProperty(ref _content, value);
+        }
+
+        /// <summary>
+        /// Agent 执行期间的时间线内容：按发生顺序保存工具调用、进度事件，以及工具调用之间的中间文本。
+        /// 它与最终答复 <see cref="Content"/> 分开持久化，渲染时合并到同一个助理气泡。
+        /// </summary>
+        [DataMember]
+        public string TimelineContent
+        {
+            get => _timelineContent;
+            set => SetProperty(ref _timelineContent, value);
         }
 
         /// <summary>
@@ -791,7 +803,8 @@ namespace DeepSeek_v4_for_VisualStudio.Models
         [DataMember]
         public string FileExtension { get; set; } = string.Empty;
 
-        /// <summary>文件完整路径（仅上传时使用，不持久化）</summary>
+        /// <summary>文件完整路径，用于后续 read_file 读取和会话恢复。</summary>
+        [DataMember]
         public string FilePath { get; set; } = string.Empty;
 
         /// <summary>解析出的文本内容</summary>

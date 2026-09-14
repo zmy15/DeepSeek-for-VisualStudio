@@ -22,6 +22,7 @@ namespace DeepSeek_v4_for_VisualStudio.Settings
         string BaiduApiKey,
         string BingApiKey,
         string ApprovalMode,
+        bool EnableAutoSkillRouting,
         int InputBoxHeight,
         int BottomAreaScalePercent,
         int WebView2ZoomPercent)
@@ -48,6 +49,7 @@ namespace DeepSeek_v4_for_VisualStudio.Settings
                 options.BaiduApiKey ?? string.Empty,
                 options.BingApiKey ?? string.Empty,
                 options.ApprovalMode ?? string.Empty,
+                options.EnableAutoSkillRouting,
                 options.InputBoxHeight,
                 options.BottomAreaScalePercent,
                 options.WebView2ZoomPercent);
@@ -63,6 +65,7 @@ namespace DeepSeek_v4_for_VisualStudio.Settings
         bool ModelControlsChanged,
         bool ThinkingChanged,
         bool ApprovalChanged,
+        bool AutoSkillRoutingChanged,
         bool OcrChanged,
         bool WebSearchChanged,
         bool LayoutChanged)
@@ -73,6 +76,7 @@ namespace DeepSeek_v4_for_VisualStudio.Settings
             ModelControlsChanged ||
             ThinkingChanged ||
             ApprovalChanged ||
+            AutoSkillRoutingChanged ||
             OcrChanged ||
             WebSearchChanged ||
             LayoutChanged;
@@ -83,6 +87,7 @@ namespace DeepSeek_v4_for_VisualStudio.Settings
             ModelControlsChanged: true,
             ThinkingChanged: true,
             ApprovalChanged: true,
+            AutoSkillRoutingChanged: true,
             OcrChanged: true,
             WebSearchChanged: true,
             LayoutChanged: true);
@@ -110,6 +115,8 @@ namespace DeepSeek_v4_for_VisualStudio.Settings
                     previous.IsThinkingEnabled != current.IsThinkingEnabled ||
                     Changed(previous.ReasoningEffort, current.ReasoningEffort),
                 ApprovalChanged: Changed(previous.ApprovalMode, current.ApprovalMode),
+                AutoSkillRoutingChanged:
+                    previous.EnableAutoSkillRouting != current.EnableAutoSkillRouting,
                 OcrChanged: Changed(previous.OcrEngine, current.OcrEngine),
                 WebSearchChanged:
                     previous.EnableWebSearch != current.EnableWebSearch ||

@@ -62,15 +62,42 @@ namespace DeepSeek_v4_for_VisualStudio.Services.BuiltInTools
                 return LocalizationService.Instance["tool.getTerminalOutput.missingId"];
             }
 
-            // 原子领取作业：同一个 ID 只允许一次 get_terminal_output。
-            // 这能防止模型在等待期间重复调用同一作业。
-            if (!RunInTerminalTool.AsyncJobs.TryRemove(id, out var job))
+            if (!RunInTerminalTool.AsyncJobs.TryGetValue(id, out var job))
             {
                 return LocalizationService.Instance.Format("tool.getTerminalOutput.notFound", id);
             }
 
             try
             {
+                if (job.IsDetached)
+                {
+                    bool isRunning = job.IsRunning;
+                    int? exitCode = job.ExitCode;
+                    string output = job.ReadLogSnapshot();
+                    var detachedOutput = new StringBuilder();
+                    detachedOutput.AppendLine(isRunning
+                        ? LocalizationService.Instance.Format("tool.getTerminalOutput.detachedRunning", job.Id)
+                        : LocalizationService.Instance.Format(
+                            "tool.getTerminalOutput.completed",
+                            exitCode ?? -1));
+                    if (!string.IsNullOrWhiteSpace(output))
+                        detachedOutput.AppendLine(output);
+
+                    if (!isRunning)
+                    {
+                        job.DisposeDetachedProcess();
+                        RunInTerminalTool.AsyncJobs.TryRemove(id, out _);
+                    }
+
+                    return detachedOutput.ToString().TrimEnd();
+                }
+
+                // 普通异步作业只允许领取一次，避免模型在等待期间重复调用。
+                if (!RunInTerminalTool.AsyncJobs.TryRemove(id, out job))
+                {
+                    return LocalizationService.Instance.Format("tool.getTerminalOutput.notFound", id);
+                }
+
                 // 关键点：这里 await 作业完成事件。命令仍在运行时工具调用保持 pending，
                 // Agent 循环不会发起下一轮模型请求，因此不需要 get_terminal_output 轮询。
                 var completionTask = job.Completion;

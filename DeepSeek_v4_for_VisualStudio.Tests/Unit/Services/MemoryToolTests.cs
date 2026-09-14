@@ -307,12 +307,12 @@ public class MemoryToolTests
     }
 
     [Fact]
-    public void GetResultSummary_LongText_Truncated()
+    public void GetResultSummary_LongText_ReturnsFullText()
     {
         string longText = new string('x', 200);
         var summary = _tool.GetResultSummary(longText);
 
-        summary.Length.Should().BeLessOrEqualTo(83); // 80 + "..."
+        summary.Should().Be(longText);
     }
 
     #endregion

@@ -100,7 +100,7 @@ namespace DeepSeek_v4_for_VisualStudio.Services.Agents
                 return await ExecuteSummaryAsync(userMessage, context);
             }
 
-            AddLog("INFO", string.Format(LocalizationService.Instance["agent.log.askStarted"], userMessage.Truncate(100)));
+            AddLog("INFO", string.Format(LocalizationService.Instance["agent.log.askStarted"], userMessage));
 
             var result = new AgentResult
             {
@@ -133,7 +133,6 @@ namespace DeepSeek_v4_for_VisualStudio.Services.Agents
                     messages,
                     workspaceRoot,
                     ct,
-                    maxTokens: 4096,
                     onThinking: (thinking) =>
                     {
                         thinkingBuilder.Append(thinking);
@@ -381,9 +380,7 @@ namespace DeepSeek_v4_for_VisualStudio.Services.Agents
                             || step.ResultSummary.StartsWith("修改了 ")
                             || step.ResultSummary.StartsWith("Modified ")))
                     {
-                        string desc = step.Description.Length > 120
-                            ? step.Description.Substring(0, 117) + "..."
-                            : step.Description;
+                        string desc = step.Description;
                         sb.AppendLine($"  > {desc}");
                     }
                 }
@@ -419,7 +416,6 @@ namespace DeepSeek_v4_for_VisualStudio.Services.Agents
                         + $"{(change.LinesRemoved > 0 ? $" -{change.LinesRemoved}" : "")}";
                     string desc = change.Description ?? (change.LinesAdded > 0 && change.LinesRemoved == 0 ? L["agent.panel.fileChangeAdded"]
                         : change.LinesRemoved > 0 && change.LinesAdded == 0 ? L["agent.panel.fileChangeDeleted"] : L["agent.panel.fileChangeModified"]);
-                    if (desc.Length > 40) desc = desc.Substring(0, 37) + "...";
                     sb.AppendLine($"| `{change.FileName}` | {delta} | {desc} |");
                 }
                 sb.AppendLine();
@@ -592,9 +588,7 @@ namespace DeepSeek_v4_for_VisualStudio.Services.Agents
                         if (!string.IsNullOrWhiteSpace(step.Description)
                             && (step.ResultSummary!.StartsWith("修改了 ") || step.ResultSummary.StartsWith("Modified ")))
                         {
-                            string desc = step.Description.Length > 120
-                                ? step.Description.Substring(0, 117) + "..."
-                                : step.Description;
+                            string desc = step.Description;
                             sb.AppendLine($"  > {desc}");
                         }
                     }
@@ -650,7 +644,6 @@ namespace DeepSeek_v4_for_VisualStudio.Services.Agents
                     string delta = $"{(change.LinesAdded > 0 ? $"+{change.LinesAdded}" : "")}"
                         + $"{(change.LinesRemoved > 0 ? $" -{change.LinesRemoved}" : "")}";
                     string desc = change.Description ?? (change.LinesAdded > 0 && change.LinesRemoved == 0 ? L["agent.panel.fileChangeAdded"] : change.LinesRemoved > 0 && change.LinesAdded == 0 ? L["agent.panel.fileChangeDeleted"] : L["agent.panel.fileChangeModified"]);
-                    if (desc.Length > 40) desc = desc.Substring(0, 37) + "...";
                     sb.AppendLine($"| `{change.FileName}` | {delta} | {desc} |");
                 }
                 sb.AppendLine();

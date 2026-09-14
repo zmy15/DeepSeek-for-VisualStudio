@@ -20,11 +20,11 @@ namespace DeepSeek_v4_for_VisualStudio.Services
     public class ToastNotificationService
     {
         private const string AppId = "DeepSeekV4.VisualStudio.Extension";
-        private const string ShortcutName = "DeepSeek V4 for Visual Studio.lnk";
+        private const string ShortcutName = "DeepSeek for Visual Studio.lnk";
         private static readonly string ShortcutDirectory = Path.Combine(
             Environment.GetFolderPath(Environment.SpecialFolder.StartMenu),
             "Programs",
-            "DeepSeek V4 for Visual Studio");
+            "DeepSeek for Visual Studio");
 
         private static readonly string ShortcutPath = Path.Combine(ShortcutDirectory, ShortcutName);
 
@@ -255,7 +255,7 @@ namespace DeepSeek_v4_for_VisualStudio.Services
                 shellLink.SetPath(vsExePath);
                 shellLink.SetArguments("/RootSuffix Exp");
                 shellLink.SetWorkingDirectory(Path.GetDirectoryName(vsExePath));
-                shellLink.SetDescription("DeepSeek V4 for Visual Studio - AI 编程助手通知");
+                shellLink.SetDescription("DeepSeek for Visual Studio - AI 编程助手通知");
                 shellLink.SetIconLocation(vsExePath, 0);
 
                 // 设置 AppUserModelID

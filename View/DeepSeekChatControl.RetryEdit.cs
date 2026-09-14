@@ -115,8 +115,12 @@ namespace DeepSeek_v4_for_VisualStudio.View
             lock (_lock) { _isGenerating = true; }
             UpdateButtonsState();
 
+            CancellationTokenSource? handoffCts = null;
             try
             {
+                handoffCts = CreateNewStreamingCts();
+                StartConversationElapsedTimer();
+
                 StatusLabel.Text = string.Format(LocalizationService.Instance["status.agentHandoff"], targetAgent);
 
                 // ── 隐藏 handoff 按钮（防止重复点击）──
@@ -131,7 +135,12 @@ namespace DeepSeek_v4_for_VisualStudio.View
                 }
 
                 // ── 重置思考内容，为 Edit 阶段准备新的实时气泡 ──
-                lock (_lock) { _agentThinkingContent.Clear(); _streamingReasoning.Clear(); }
+                lock (_lock)
+                {
+                    _agentTimelineContent.Clear();
+                    _streamingContent.Clear();
+                    _streamingReasoning.Clear();
+                }
                 _lastReportedStepIndex = 0;
                 _lastReportedStepStatus = string.Empty;
 
@@ -156,6 +165,14 @@ namespace DeepSeek_v4_for_VisualStudio.View
                 _currentStreamingMsgIndex = _agentStreamingMsgIndex;
                 UpdateBrowser();
 
+                // 冷启动路径没有经过 SendMessageCoreAsync，必须在这里恢复固定
+                // system prompt、skill 和 memory 上下文。
+                await EnsureSystemPromptInitializedAsync();
+                await ThreadHelper.JoinableTaskFactory.SwitchToMainThreadAsync();
+                if (TryCompleteCancelledGeneration(handoffCts))
+                    return;
+
+                CaptureAndPublishAgentExecutionContext();
                 await TaskScheduler.Default;
 
                 // ── 构建包含 _pendingHandoff 上下文的 AgentContext ──
@@ -163,7 +180,13 @@ namespace DeepSeek_v4_for_VisualStudio.View
                 {
                     SolutionPath = _solutionPath,
                     ContextManager = _contextManager,
+                    ConversationHistory = _contextManager.GetConversationHistory(),
+                    CurrentUserContent = _pendingHandoff.Prompt,
                     IsPlanningMode = true,
+                    PreClassifiedTaskSize = TaskSize.Medium,
+                    IsExplicitRoute = true,
+                    ExplicitRouteTarget = _pendingHandoff.TargetAgent,
+                    CancellationToken = handoffCts.Token,
                     ReadFileAsync = async (path) =>
                     {
                         // RAG-SOURCE: file-read EditAgent 读取文件内容（Handoff 执行上下文）
@@ -276,7 +299,10 @@ namespace DeepSeek_v4_for_VisualStudio.View
                 //    此处补充 Handoff 场景下的多层 AutoSend 链。 ──
                 int chainDepth = 0;
                 const int maxChainDepth = 10;
-                while (agentResult.Handoff != null && agentResult.Handoff.AutoSend)
+                while (agentResult.Handoff != null
+                    && agentResult.Handoff.AutoSend
+                    && !context.CancellationToken.IsCancellationRequested
+                    && agentResult.Plan?.IsCancelled != true)
                 {
                     chainDepth++;
                     if (chainDepth > maxChainDepth)
@@ -390,25 +416,6 @@ namespace DeepSeek_v4_for_VisualStudio.View
                         catch { }
                     }
 
-                    // ── 将 Edit 阶段的思考过程追加到最终输出 ──
-                    string thinkingText;
-                    lock (_lock)
-                    {
-                        thinkingText = ReasoningTextPolicy.ClampStored(_agentThinkingContent.ToString())
-                            ?? string.Empty;
-                    }
-                    string thinkingDetailsHtml = string.Empty;
-                    if (!string.IsNullOrWhiteSpace(thinkingText))
-                    {
-                        string escapedThinking = System.Net.WebUtility.HtmlEncode(thinkingText)
-                            .Replace("\n", "<br>");
-                        thinkingDetailsHtml =
-                            "<details class='reasoning-panel' style='margin-top:12px' open='true'>" +
- "<summary> " + LocalizationService.Instance["agent.panel.executionProcess"] + "</summary>" +
-                            "<div class='reasoning-content'>" + escapedThinking + "</div>" +
-                            "</details>";
-                    }
-
                     // ── 最终内容仅包含 Markdown 总结，不混入 HTML（避免 double-escape）──
                     string finalContent = agentResult.Content
                         ?? string.Format(LocalizationService.Instance["agent.result.taskCompletedSuccess"],
@@ -441,6 +448,7 @@ namespace DeepSeek_v4_for_VisualStudio.View
                         {
                             var msg = _messages[_agentStreamingMsgIndex];
                             msg.Content = persistedContent;
+                            msg.TimelineContent = _agentTimelineContent.ToString().Trim();
                             msg.ReasoningContent = boundedReasoning;
                             msg.IsStreaming = false;
                             msg.IsRendered = true;
@@ -459,15 +467,25 @@ namespace DeepSeek_v4_for_VisualStudio.View
 
                     // ── 强制刷新 DOM 显示最终结果 ──
                     string reasoningForRender = boundedReasoning;
-                    BatchStreamingUpdate(_agentStreamingMsgIndex, persistedContent, reasoningForRender, isComplete: true);
+                    string displayContent;
+                    lock (_lock)
+                    {
+                        displayContent = ChatHtmlService.BuildAssistantDisplayContent(
+                            _agentStreamingMsgIndex >= 0 && _agentStreamingMsgIndex < _messages.Count
+                                ? _messages[_agentStreamingMsgIndex].TimelineContent
+                                : null,
+                            persistedContent);
+                    }
+                    BatchStreamingUpdate(_agentStreamingMsgIndex, displayContent, reasoningForRender, isComplete: true);
 
-                    // ── 发送最终渲染：extraFooter 中注入执行过程 HTML + 缓存统计（纯 HTML，不经过 Markdown 转义）──
-                    string combinedFooter = thinkingDetailsHtml + cacheFooter;
-                    PostStreamEnd(_agentStreamingMsgIndex, finalContent, reasoningForRender, combinedFooter);
+                    // ── 发送最终渲染：缓存统计作为纯 HTML footer ──
+                    PostStreamEnd(_agentStreamingMsgIndex, finalContent, reasoningForRender, cacheFooter);
 
-                    StatusLabel.Text = plan.ChangedFiles.Count > 0
-                        ? string.Format(LocalizationService.Instance["agent.result.completed"], plan.ChangedFiles.Count)
-                        : LocalizationService.Instance["agent.result.planCompleted"];
+                    StatusLabel.Text = plan.IsCancelled
+                        ? LocalizationService.Instance["status.stopped"]
+                        : plan.ChangedFiles.Count > 0
+                            ? string.Format(LocalizationService.Instance["agent.result.completed"], plan.ChangedFiles.Count)
+                            : LocalizationService.Instance["agent.result.planCompleted"];
 
                     if (plan.ChangedFiles.Count > 0)
                         _pendingAgentFileChanges = new List<FileChangeSummary>(plan.ChangedFiles);
@@ -484,6 +502,12 @@ namespace DeepSeek_v4_for_VisualStudio.View
 
                 // ── 刷新右下角余额/Token 显示 ──
                 RefreshConsumptionDisplay();
+            }
+            catch (OperationCanceledException)
+            {
+                Logger.Info("[AgentHandoff] 用户停止生成");
+                await ThreadHelper.JoinableTaskFactory.SwitchToMainThreadAsync();
+                StatusLabel.Text = LocalizationService.Instance["status.stopped"];
             }
             catch (Exception ex)
             {
@@ -505,6 +529,9 @@ namespace DeepSeek_v4_for_VisualStudio.View
                 }
                 catch { }
                 lock (_lock) { _isGenerating = false; }
+                if (handoffCts != null)
+                    DisposeStreamingCts(handoffCts);
+                StopConversationElapsedTimer();
                 UpdateButtonsState();
             }
 
@@ -871,12 +898,21 @@ namespace DeepSeek_v4_for_VisualStudio.View
         {
             _pendingEditMsgIndex = -1;
 
-            lock (_lock) { _isGenerating = true; }
+            CancellationTokenSource editCts;
+            lock (_lock)
+            {
+                if (_isGenerating) return;
+                editCts = CreateNewStreamingCts();
+                _isGenerating = true;
+            }
             UpdateButtonsState();
             InputTextBox.Text = string.Empty;
             StatusLabel.Text = LocalizationService.Instance["agent.status.regenerating"];
 
             bool canProceed = await CheckAndRevertFileChangesAsync(userMsgIndex);
+            if (TryCompleteCancelledGeneration(editCts))
+                return;
+
             if (!canProceed)
             {
                 lock (_lock) { _isGenerating = false; }
@@ -927,6 +963,8 @@ namespace DeepSeek_v4_for_VisualStudio.View
 
                 // ── 恢复系统级上下文（Clear() 会清空 system prompt / memory / skill）──
                 await RestoreSystemContextAsync();
+                if (TryCompleteCancelledGeneration(editCts))
+                    return;
 
                 // ── 重新发送 ──
                 int newUserMsgIndex = -1;
@@ -945,7 +983,7 @@ namespace DeepSeek_v4_for_VisualStudio.View
                 }
 
                 if (newUserMsg != null)
-                    await ResendUserMessageAsync(newUserMsgIndex, newUserMsg);
+                    await ResendUserMessageAsync(newUserMsgIndex, newUserMsg, editCts);
             }
             catch (Exception ex)
             {
@@ -1059,7 +1097,10 @@ namespace DeepSeek_v4_for_VisualStudio.View
         /// <summary>
         /// 重新发送用户消息的核心逻辑。
         /// </summary>
-        private async Task ResendUserMessageAsync(int userMsgIndex, ChatMessage userMsg)
+        private async Task ResendUserMessageAsync(
+            int userMsgIndex,
+            ChatMessage userMsg,
+            CancellationTokenSource? existingCts = null)
         {
             if (_options == null || string.IsNullOrEmpty(_options.ApiKey))
             {
@@ -1081,6 +1122,13 @@ namespace DeepSeek_v4_for_VisualStudio.View
                 return;
             }
 
+            if (existingCts?.IsCancellationRequested == true)
+            {
+                TryCompleteCancelledGeneration(existingCts);
+                return;
+            }
+
+            var retryCts = existingCts ?? CreateNewStreamingCts();
             lock (_lock) { _isGenerating = true; }
             UpdateButtonsState();
 
@@ -1090,8 +1138,6 @@ namespace DeepSeek_v4_for_VisualStudio.View
 
             // ── 树状结构：不再需要裁剪 _messages（分支切换时已由 SyncMessagesFromTree 处理）──
             // ── 树状结构：上下文已由 RebuildContextFromTree 重建，无需手动检查 userExistsInHistory ──
-
-            var retryCts = CreateNewStreamingCts();
 
             ChatMessage? assistantMsg = null;
             int newAssistantIdx = -1;
@@ -1197,7 +1243,7 @@ namespace DeepSeek_v4_for_VisualStudio.View
                     assistantMsg.IsStreaming = false;
                 lock (_lock) { _isGenerating = false; }
                 StatusLabel.Text = string.Empty;
-                DisposeStreamingCts();
+                DisposeStreamingCts(retryCts);
                 UpdateButtonsState();
             }
         }

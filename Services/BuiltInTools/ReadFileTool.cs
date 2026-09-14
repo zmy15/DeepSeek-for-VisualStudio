@@ -111,17 +111,18 @@ namespace DeepSeek_v4_for_VisualStudio.Services.BuiltInTools
             return LocalizationService.Instance.Format("tool.readFile.readCompleteLines", readLines.Length);
         }
 
-        public override Task<string> ExecuteAsync(Dictionary<string, JsonElement> args, string? workspaceRoot)
+        public override async Task<string> ExecuteAsync(Dictionary<string, JsonElement> args, string? workspaceRoot)
         {
             string filePath = GetStringArg(args, "filePath");
             if (string.IsNullOrEmpty(filePath))
-                return Task.FromResult(LocalizationService.Instance["tool.readFile.missingParam"]);
+                return LocalizationService.Instance["tool.readFile.missingParam"];
 
             int reqStartLine = GetIntArg(args, "startLine", 1);
             int reqEndLine = GetIntArg(args, "endLine", int.MaxValue);
+            bool cacheable = !RequiresStructuredParsing(filePath);
 
             // ── 缓存命中 ──
-            if (_fileReadCache.TryGetValue(filePath, out FileReadCacheEntry cachedEntry))
+            if (cacheable && _fileReadCache.TryGetValue(filePath, out FileReadCacheEntry cachedEntry))
             {
                 string cachedFull = cachedEntry.FullContent;
                 int lastRound = cachedEntry.LastReadRound;
@@ -131,7 +132,7 @@ namespace DeepSeek_v4_for_VisualStudio.Services.BuiltInTools
                 {
                     if (File.Exists(filePath))
                     {
-                        string currentContent = File.ReadAllText(filePath);
+                        string currentContent = await FileParserService.ReadFileContentForToolAsync(filePath);
                         if (currentContent != cachedFull)
                         {
                             fileChanged = true;
@@ -150,7 +151,7 @@ namespace DeepSeek_v4_for_VisualStudio.Services.BuiltInTools
                     else
                     {
                         _fileReadCache.TryRemove(filePath, out _);
-                        return Task.FromResult(LocalizationService.Instance.Format("tool.readFile.fileNotFound", filePath));
+                        return LocalizationService.Instance.Format("tool.readFile.fileNotFound", filePath);
                     }
                 }
                 catch { /* 读取失败时不阻塞，使用缓存内容 */ }
@@ -183,9 +184,9 @@ namespace DeepSeek_v4_for_VisualStudio.Services.BuiltInTools
                             },
                             cachedEntry);
                         var fname = Path.GetFileName(filePath);
-                        return Task.FromResult(staleCache
+                        return staleCache
                             ? LocalizationService.Instance.Format("tool.readFile.cacheExpiredStale", fname, filePath, totalLines, reqStartLine, actualEnd, freshContent)
-                            : LocalizationService.Instance.Format("tool.readFile.cacheExpiredRound", roundsSinceLastRead, RoundThreshold, fname, filePath, totalLines, reqStartLine, actualEnd, freshContent));
+                            : LocalizationService.Instance.Format("tool.readFile.cacheExpiredRound", roundsSinceLastRead, RoundThreshold, fname, filePath, totalLines, reqStartLine, actualEnd, freshContent);
                     }
 
                     // ── 行范围覆盖检查 ──
@@ -211,7 +212,7 @@ namespace DeepSeek_v4_for_VisualStudio.Services.BuiltInTools
                         if (cacheTruncated)
                             cachedSb.AppendLine($"\n[TRUNCATED] Showing lines {cacheShownStart}-{cacheShownEnd} of {cachedTotalLines}. To continue, call read_file with path=\"{filePath}\" start_line={cacheShownEnd + 1}");
                         cachedSb.Append("</file>");
-                        return Task.FromResult(cachedSb.ToString());
+                        return cachedSb.ToString();
                     }
 
                     // 请求范围未被覆盖 → 从缓存中提取新范围，更新已读范围
@@ -234,7 +235,7 @@ namespace DeepSeek_v4_for_VisualStudio.Services.BuiltInTools
                     if (truncated)
                         sb.AppendLine($"\n[TRUNCATED] Showing lines {shownStart}-{shownEnd} of {cachedTotalLines}. To continue, call read_file with path=\"{filePath}\" start_line={shownEnd + 1}");
                     sb.Append("</file>");
-                    return Task.FromResult(sb.ToString());
+                    return sb.ToString();
                 }
 
                 // 文件已变更 → 返回完整最新内容（已读范围已清空，重新开始追踪）
@@ -261,7 +262,7 @@ namespace DeepSeek_v4_for_VisualStudio.Services.BuiltInTools
                 if (cTruncated)
                     csb.AppendLine($"\n[TRUNCATED] File changed. Showing lines {reqStartLine}-{cShownEnd} of {changedTotalLines}.");
                 csb.Append("</file>");
-                return Task.FromResult(csb.ToString());
+                return csb.ToString();
             }
 
             // ── 首次读取（缓存未命中）──
@@ -271,13 +272,13 @@ namespace DeepSeek_v4_for_VisualStudio.Services.BuiltInTools
                     ? "\n" + LocalizationService.Instance.Format("tool.readFile.workspaceHint", workspaceRoot)
                     : "";
                 wsHint += "\n" + LocalizationService.Instance["tool.readFile.newFileHint"];
-                return Task.FromResult(LocalizationService.Instance.Format("tool.readFile.fileNotFound", filePath) + wsHint);
+                return LocalizationService.Instance.Format("tool.readFile.fileNotFound", filePath) + wsHint;
             }
 
             try
             {
                 // 读取完整文件内容用于缓存
-                string fullContent = File.ReadAllText(filePath);
+                string fullContent = await FileParserService.ReadFileContentForToolAsync(filePath);
                 int totalLines = fullContent.Count(c => c == '\n') + 1;
                 int totalBytes = Encoding.UTF8.GetByteCount(fullContent);
 
@@ -289,13 +290,16 @@ namespace DeepSeek_v4_for_VisualStudio.Services.BuiltInTools
                     ActiveFileTracker?.ObserveRead(filePath, Name, CurrentRound);
 
                     // 缓存完整内容
-                    _fileReadCache.TryAdd(filePath,
-                        new FileReadCacheEntry
-                        {
-                            FullContent = fullContent,
-                            ReadRanges = new List<(int, int)> { (1, totalLines) },
-                            LastReadRound = CurrentRound
-                        });
+                    if (cacheable)
+                    {
+                        _fileReadCache.TryAdd(filePath,
+                            new FileReadCacheEntry
+                            {
+                                FullContent = fullContent,
+                                ReadRanges = new List<(int, int)> { (1, totalLines) },
+                                LastReadRound = CurrentRound
+                            });
+                    }
 
                     // ── 契约前缀防碰撞（根修）：内容以 "Error: "/"Timeout: "/"[BLOCKED] " ──
                     // 开头的文件若原样返回，会被 BaseAgent 连续错误检测 / ToolExecutionOutcome.Classify
@@ -307,10 +311,10 @@ namespace DeepSeek_v4_for_VisualStudio.Services.BuiltInTools
                         wrapped.AppendLine($"<file path=\"{filePath}\" total_lines=\"{totalLines}\" shown_lines=\"1-{totalLines}\" truncated=\"false\">");
                         wrapped.Append(fullContent);
                         wrapped.Append("</file>");
-                        return Task.FromResult(wrapped.ToString());
+                        return wrapped.ToString();
                     }
 
-                    return Task.FromResult(fullContent);
+                    return fullContent;
                 }
 
                 // ── 大文件 / 显式范围 → 分页模式 ──
@@ -324,10 +328,10 @@ namespace DeepSeek_v4_for_VisualStudio.Services.BuiltInTools
                 if (shownStart > totalLines)
                 {
                     // 起始行超出文件范围 → 空内容哨兵
-                    return Task.FromResult(
+                    return
                         $"<file path=\"{filePath}\" total_lines=\"{totalLines}\" shown_lines=\"none\" truncated=\"false\">\n" +
                         $"\n[NO CONTENT] start_line {shownStart} is beyond total_lines {totalLines}.\n" +
-                        $"</file>");
+                        $"</file>";
                 }
 
                 // 提取行范围内容（带行号前缀）
@@ -379,24 +383,35 @@ namespace DeepSeek_v4_for_VisualStudio.Services.BuiltInTools
 
                 // ── 缓存完整内容 + 已读范围 ──
                 // 注意：缓存存储的是完整文件内容（无行号前缀），而非分页内容
-                _fileReadCache.TryAdd(filePath,
-                    new FileReadCacheEntry
-                    {
-                        FullContent = fullContent,
-                        ReadRanges = new List<(int, int)> { (shownStart, shownEnd) },
-                        LastReadRound = CurrentRound
-                    });
+                if (cacheable)
+                {
+                    _fileReadCache.TryAdd(filePath,
+                        new FileReadCacheEntry
+                        {
+                            FullContent = fullContent,
+                            ReadRanges = new List<(int, int)> { (shownStart, shownEnd) },
+                            LastReadRound = CurrentRound
+                        });
+                }
 
                 // 注册活跃文件访问
                 ActiveFileTracker?.ObserveRead(filePath, Name, CurrentRound);
 
-                return Task.FromResult(result);
+                return result;
             }
             catch (Exception ex)
             {
-                return Task.FromResult(LocalizationService.Instance.Format("tool.readFile.failed", ex.Message));
+                return LocalizationService.Instance.Format("tool.readFile.failed", ex.Message);
             }
         }
+
+        /// <summary>
+        /// 文档、PDF、表格和图片需要通过 FileParserService 提取文本。
+        /// 这类文件不进入基于纯文本内容比较的页缓存，每次读取都按原始文件重新解析。
+        /// </summary>
+        private static bool RequiresStructuredParsing(string filePath)
+            => FileParserService.IsSupportedFormat(filePath)
+               && !FileParserService.IsTextFormat(filePath);
 
         /// <summary>
         /// 从完整文件内容中提取指定行范围，并添加行号前缀。

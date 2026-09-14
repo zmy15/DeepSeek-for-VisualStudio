@@ -273,8 +273,9 @@ namespace DeepSeek_v4_for_VisualStudio.Services.Agents
             result.Plan = plan;
             result.FileChanges = plan.ChangedFiles;
 
-            // ── 确定 Handoff 目标（AI 动态移交优先于程序化移交）──
-            result.Handoff = ResolveHandoff(plan);
+            // ── 确定 Handoff 目标（取消后不再启动后续 Agent）──
+            bool cancelled = plan.IsCancelled || context.CancellationToken.IsCancellationRequested;
+            result.Handoff = cancelled ? null : ResolveHandoff(plan);
 
             // ── 传递累积累的推理内容供 UI 渲染思考面板 ──
             if (!string.IsNullOrEmpty(_accumulatedReasoning))
@@ -695,6 +696,7 @@ namespace DeepSeek_v4_for_VisualStudio.Services.Agents
             List<ChatApiMessage>? messages = null;
             int stepPromptIndex = 0; // 步骤 prompt 在消息列表中的位置（重试时插入点）
             int stepToolLoopStart = 0; // 当前步骤工具循环新增消息的起点（排除转发/历史消息）
+            bool explicitlyNoChanges = false;
 
             for (int retry = 0; retry <= maxFormatRetries; retry++)
             {
@@ -735,7 +737,6 @@ namespace DeepSeek_v4_for_VisualStudio.Services.Agents
                     messages,
                     workspaceRoot,
                     ct,
-                    maxTokens: 8192,
                     toolWhitelist: stepToolWhitelist,
                     onThinking: (thinking) =>
                     {
@@ -764,6 +765,7 @@ namespace DeepSeek_v4_for_VisualStudio.Services.Agents
                 // ── 检测 AI 是否明确表示没有要更改的内容 ──
                 if (IsNoChangesResponse(result))
                 {
+                    explicitlyNoChanges = true;
                     // ── 但如果本轮有工具调用完成了编辑，则不视为空响应 ──
                     if (!HasToolMadeEdits(GetStepToolLoopMessages(messages!, stepToolLoopStart)))
                     {
@@ -838,9 +840,15 @@ namespace DeepSeek_v4_for_VisualStudio.Services.Agents
             // ── AI 明确表示没有要更改的内容 且 工具也未编辑文件 → 跳过编辑执行 ──
             if (string.IsNullOrWhiteSpace(result) && !hasToolEdits)
             {
-                step.ResultSummary = LocalizationService.Instance["agent.log.editNoChangesConfirmed"];
-                AddLog("INFO", LocalizationService.Instance["agent.log.editNoChange"]);
-                return;
+                if (explicitlyNoChanges)
+                {
+                    step.ResultSummary = LocalizationService.Instance["agent.log.editNoChangesConfirmed"];
+                    AddLog("INFO", LocalizationService.Instance["agent.log.editNoChange"]);
+                    return;
+                }
+
+                throw new InvalidOperationException(
+                    LocalizationService.Instance["agent.log.editNoEditsProduced"]);
             }
 
             // ── 初始化编辑工具（懒加载，使用当前 workspaceRoot）──
@@ -1089,7 +1097,6 @@ namespace DeepSeek_v4_for_VisualStudio.Services.Agents
                     verifyMessages,
                     workspaceRoot,
                     ct,
-                    maxTokens: 8192,
                     toolWhitelist: verifyToolWhitelist,
                     onToolCall: (toolSummary) =>
                     {
@@ -1937,12 +1944,13 @@ namespace DeepSeek_v4_for_VisualStudio.Services.Agents
         /// 检测 AI 输出是否包含任何有效的编辑格式。
         /// </summary>
         /// <summary>
-        /// 检测 AI 是否明确表示没有需要更改的内容（空响应、或明确说明无需修改）。
-        /// 用于格式重试循环中，让 AI 可以选择"输出空"来表示该步骤已无变更。
+        /// 检测 AI 是否明确表示没有需要更改的内容。
+        /// 只有明确的文字确认才算"无需修改"；空响应可能是 token 截断，
+        /// 不能据此跳过整个编辑步骤。
         /// </summary>
         private static bool IsNoChangesResponse(string aiResult)
         {
-            if (string.IsNullOrWhiteSpace(aiResult)) return true;
+            if (string.IsNullOrWhiteSpace(aiResult)) return false;
 
             // 去除 DSML/XML 标签后再判断
             string clean = System.Text.RegularExpressions.Regex.Replace(aiResult,
@@ -1961,12 +1969,11 @@ namespace DeepSeek_v4_for_VisualStudio.Services.Agents
             clean = System.Text.RegularExpressions.Regex.Replace(clean,
                 @"\s*think\s*", string.Empty, System.Text.RegularExpressions.RegexOptions.IgnoreCase);
 
-            if (string.IsNullOrWhiteSpace(clean)) return true;
+            if (string.IsNullOrWhiteSpace(clean)) return false;
 
             // 检测常见的"无需修改"短语（中英文）
             var noChangesPatterns = new[]
             {
-                @"^[。.！!]*\s*$",                             // 只有标点符号
                 @"不需要修改|无需修改|没有需要更改|无变更|已完成",
                 @"无需.*(?:修改|更改|变更|编辑)",
                 @"已经.*(?:完成|好了|修改好)",
@@ -2385,6 +2392,22 @@ namespace DeepSeek_v4_for_VisualStudio.Services.Agents
             return true; // 默认按代码步骤处理
         }
 
+        private static bool IsServiceStartupStep(AgentStep step)
+        {
+            string text = ((step.Title ?? string.Empty) + " " + (step.Description ?? string.Empty)).Trim();
+            if (text.Length == 0)
+                return false;
+
+            bool hasService = text.Contains("服务", StringComparison.OrdinalIgnoreCase)
+                || text.Contains("api", StringComparison.OrdinalIgnoreCase)
+                || text.Contains("refitter", StringComparison.OrdinalIgnoreCase);
+            bool hasStartup = text.Contains("启动", StringComparison.OrdinalIgnoreCase)
+                || text.Contains("运行", StringComparison.OrdinalIgnoreCase)
+                || text.Contains("refitter", StringComparison.OrdinalIgnoreCase);
+
+            return hasService && hasStartup;
+        }
+
         private string BuildStepPrompt(AgentStep step, AgentTaskPlan plan,
             AgentContext context, bool isCodeStep)
         {
@@ -2426,6 +2449,15 @@ namespace DeepSeek_v4_for_VisualStudio.Services.Agents
                 sb.AppendLine("## 代码修改步骤");
                 sb.AppendLine("- 按系统提示中的编辑格式和项目文件规则执行修改。");
                 sb.AppendLine("- 完成修改后直接结束本步骤，系统会自动执行编译验证与移交。");
+                if (IsServiceStartupStep(step))
+                {
+                    sb.AppendLine();
+                    sb.AppendLine("## 服务启动与接口验证");
+                    sb.AppendLine("- 启动 API、Web 服务或其他长驻进程必须使用 `run_in_terminal` 的 `detached` 模式；该模式会立即返回 PID 和日志路径，不会等待进程退出。");
+                    sb.AppendLine("- 服务端口就绪后执行本步骤要求的生成或验证命令，例如 `refitter`。");
+                    sb.AppendLine("- 一旦目标命令返回 0，且目标文件已更新或接口已验证，立即结束本步骤。");
+                    sb.AppendLine("- 不要反复检查端口、进程或日志；失败时只读取一次相关日志并说明阻塞原因。");
+                }
                 sb.AppendLine();
             }
 
@@ -2551,9 +2583,8 @@ namespace DeepSeek_v4_for_VisualStudio.Services.Agents
             // ── 用户附加的文件上下文 ──
             if (!string.IsNullOrEmpty(context.FileContext))
             {
-                sb.AppendLine("## 用户上传的文件内容");
-                // RAG-MARK: no-truncate — 不再截断用户上传的文件内容
-                // RAG-SOURCE: file-read 用户上传的附件文件内容（EditAgent 上下文）
+                sb.AppendLine("## 用户上传的文件引用");
+                // 附件正文由 read_file 按需读取，避免在每次步骤请求中重复携带全文。
                 sb.AppendLine(context.FileContext);
                 sb.AppendLine();
             }
@@ -2996,7 +3027,6 @@ namespace DeepSeek_v4_for_VisualStudio.Services.Agents
                 messages,
                 workspaceRoot,
                 ct,
-                maxTokens: 8192,
                 toolWhitelist: new List<string>(ReadOnlyExecutionTools),
                 onThinking: thinking =>
                 {
@@ -3101,19 +3131,19 @@ namespace DeepSeek_v4_for_VisualStudio.Services.Agents
                 if (plan.IsCancelled)
                 {
                     toastService.Show(
-                        "DeepSeek V4",
+                        "DeepSeek",
                         string.Format(LocalizationService.Instance["toast.taskCancelled"], completed, total));
                 }
                 else if (plan.IsCompleted && failed == 0)
                 {
                     toastService.Show(
-                        "DeepSeek V4",
+                        "DeepSeek",
                         string.Format(LocalizationService.Instance["toast.taskComplete"], completed, total));
                 }
                 else if (plan.IsCompleted && failed > 0)
                 {
                     toastService.Show(
-                        "DeepSeek V4",
+                        "DeepSeek",
                         string.Format(LocalizationService.Instance["toast.taskPartialComplete"], completed, total, failed));
                 }
             }

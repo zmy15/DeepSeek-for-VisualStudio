@@ -151,4 +151,22 @@ public class StagedEditWorkspaceBackupTests : IDisposable
         CountBackupFiles(_backupRoot).Should().Be(0, "ConfirmAll 应清理已确认的磁盘备份");
         File.ReadAllText(file).Should().Be("KEPT");
     }
+
+    [Fact]
+    public async Task WriteFile_RetriesTransientFileLock()
+    {
+        var file = WriteSourceFile("locked.txt", "FIRST");
+        var ws = new StagedEditWorkspace();
+        ws.WriteFile(file, "FIRST");
+
+        var lockStream = new FileStream(
+            file, FileMode.Open, FileAccess.ReadWrite, FileShare.None);
+        Task writeTask = Task.Run(() => ws.WriteFile(file, "SECOND"));
+
+        await Task.Delay(120);
+        lockStream.Dispose();
+        await writeTask;
+
+        File.ReadAllText(file).Should().Be("SECOND");
+    }
 }

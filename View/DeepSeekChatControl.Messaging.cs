@@ -85,9 +85,11 @@ namespace DeepSeek_v4_for_VisualStudio.View
                 return;
             }
 
+            CancellationTokenSource streamingCts;
             lock (_lock)
             {
                 if (_isGenerating) return;
+                streamingCts = CreateNewStreamingCts();
                 _isGenerating = true;
             }
 
@@ -100,6 +102,9 @@ namespace DeepSeek_v4_for_VisualStudio.View
             if (!string.IsNullOrEmpty(userText) && userText.StartsWith("/"))
             {
                 directSkillCommand = await ResolveSlashCommandAsync(userText);
+                if (TryCompleteCancelledGeneration(streamingCts))
+                    return;
+
                 if (directSkillCommand == null)
                 {
                     lock (_lock) { _isGenerating = false; }
@@ -177,6 +182,10 @@ namespace DeepSeek_v4_for_VisualStudio.View
                     .Cast<string>()
                     .ToList();
 
+                // 附件只传路径引用，正文由模型按需调用 read_file 获取。
+                parseResults = FileParserService.CreateFileReferences(_attachedFilePaths);
+                fileContext = FileParserService.FormatParseResultsForContext(parseResults);
+
                 if (visionModelSelected && !ocrExplicitlyRequested)
                 {
                     var directImagePaths = _attachedFilePaths
@@ -185,16 +194,13 @@ namespace DeepSeek_v4_for_VisualStudio.View
                     var directPdfPaths = _attachedFilePaths
                         .Where(IsPdfFile)
                         .ToList();
-                    var parsedPaths = _attachedFilePaths
-                        .Where(path => !directImagePaths.Contains(path, StringComparer.OrdinalIgnoreCase)
-                                    && !directPdfPaths.Contains(path, StringComparer.OrdinalIgnoreCase))
-                        .ToList();
-
                     var visionParts = new List<ChatContentPart>();
-                    var failedPdfPaths = new List<string>();
 
                     await Task.Run(async () =>
                     {
+                        if (streamingCts.IsCancellationRequested)
+                            return;
+
                         // 图片直传视觉模型
                         var imageParts = BuildVisionContent(directImagePaths);
                         if (imageParts != null)
@@ -203,34 +209,25 @@ namespace DeepSeek_v4_for_VisualStudio.View
                         // PDF 逐页渲染为图片后直传视觉模型
                         foreach (string pdf in directPdfPaths)
                         {
-                            var pdfParts = await PdfRenderService.BuildPdfVisionPartsAsync(pdf);
+                            if (streamingCts.IsCancellationRequested)
+                                break;
+
+                            var pdfParts = await PdfRenderService.BuildPdfVisionPartsAsync(
+                                pdf, streamingCts.Token);
                             if (pdfParts is { Count: > 0 })
                                 visionParts.AddRange(pdfParts);
-                            else
-                                failedPdfPaths.Add(pdf);
                         }
                     });
 
-                    // PDF 渲染失败时回退到 PdfPig 文本解析，避免内容完全丢失
-                    if (failedPdfPaths.Count > 0)
-                        parsedPaths.AddRange(failedPdfPaths);
-
                     visionContent = visionParts.Count > 0 ? visionParts : null;
-                    parseResults = parsedPaths.Count > 0
-                        ? await FileParserService.ParseFilesAsync(parsedPaths)
-                        : new List<FileParseResult>();
-
-                    int directPdfCount = directPdfPaths.Count - failedPdfPaths.Count;
-                    Logger.Info($"[Vision] 直传图片 {directImagePaths.Count} 张，直传 PDF {directPdfCount}/{directPdfPaths.Count} 个，解析其他文件 {parsedPaths.Count} 个");
-                }
-                else
-                {
-                    parseResults = await FileParserService.ParseFilesAsync(_attachedFilePaths);
+                    Logger.Info($"[Vision] 直传图片 {directImagePaths.Count} 张，直传 PDF {directPdfPaths.Count} 个；其余文件按路径引用");
                 }
 
-                fileContext = FileParserService.FormatParseResultsForContext(parseResults);
+                if (TryCompleteCancelledGeneration(streamingCts))
+                    return;
+
                 if (!string.IsNullOrEmpty(fileContext))
-                    Logger.Info($"文件解析完成: {attachedFileNames.Count} 个文件");
+                    Logger.Info($"附件路径引用已生成: {attachedFileNames.Count} 个文件");
             }
 
             List<string> attachedImageDataUris = new();
@@ -345,9 +342,13 @@ namespace DeepSeek_v4_for_VisualStudio.View
             if (!string.IsNullOrWhiteSpace(userText)
                 && !userText.StartsWith("/", StringComparison.Ordinal)
                 && !hasExplicitAgentSkill
+                && IsAutoSkillRoutingEnabled()
                 && !string.IsNullOrWhiteSpace(autoRouteContent))
             {
-                autoSkillInstructions = await RouteSkillAsync(autoRouteContent);
+                autoSkillInstructions = await RouteSkillAsync(
+                    autoRouteContent, streamingCts.Token);
+                if (TryCompleteCancelledGeneration(streamingCts))
+                    return;
             }
 
             lock (_lock)
@@ -419,6 +420,8 @@ namespace DeepSeek_v4_for_VisualStudio.View
                 {
                     // ── 确保系统提示词已初始化（新会话时 _fixedSystemPrompt 为 null）──
                     await EnsureSystemPromptInitializedAsync();
+                    if (TryCompleteCancelledGeneration(streamingCts))
+                        return;
 
                     // ── 预分类任务规模，Large 任务提前路由到 Plan Agent ──
                     var taskSize = Services.Agents.EditAgent.ClassifyTaskSize(effectiveUserText);
@@ -462,9 +465,6 @@ namespace DeepSeek_v4_for_VisualStudio.View
                         var capturedRoute = routing;
                         var capturedMsgIdx = capturedUserMsgIndex;
                         var capturedCurrentUserContent = fullUserContent;
-
-                        // ── 创建 Agent 路径的 CancellationTokenSource（停止按钮依赖此 CTS）──
-                        var agentCts = CreateNewStreamingCts();
 
                         _ = Task.Run(async () =>
                         {
@@ -803,15 +803,6 @@ namespace DeepSeek_v4_for_VisualStudio.View
                 Logger.Info($"时间词语解析: \"{query}\" → \"{result}\"");
 
             return result;
-        }
-
-        /// <summary>
-        /// 截断文本到指定长度，超出部分用 "..." 替代。
-        /// </summary>
-        private static string TruncateText(string text, int maxLength)
-        {
-            if (string.IsNullOrEmpty(text) || text.Length <= maxLength) return text;
-            return text.Substring(0, maxLength) + "...";
         }
 
         /// <summary>

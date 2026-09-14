@@ -45,6 +45,7 @@ namespace DeepSeek_v4_for_VisualStudio.Services
                     {
                         _markdownPipeline = new MarkdownPipelineBuilder()
                             .UseAdvancedExtensions()
+                            .UseSoftlineBreakAsHardlineBreak()
                             .DisableHtml()
                             .Build();
                     }
@@ -140,6 +141,19 @@ namespace DeepSeek_v4_for_VisualStudio.Services
             return sb.ToString();
         }
 
+        /// <summary>
+        /// 合并 Agent 执行时间线与最终答复，使工具调用、中间文本和最终结果在同一个气泡中按顺序显示。
+        /// </summary>
+        internal static string BuildAssistantDisplayContent(string? timelineContent, string? finalContent)
+        {
+            string timeline = (timelineContent ?? string.Empty).Trim();
+            string final = (finalContent ?? string.Empty).Trim();
+
+            if (timeline.Length == 0) return final;
+            if (final.Length == 0) return timeline;
+            return timeline + "\n" + final;
+        }
+
         #region 高性能流式消息（PostWebMessageAsString 非阻塞通道）
 
         /// <summary>
@@ -183,9 +197,11 @@ namespace DeepSeek_v4_for_VisualStudio.Services
         /// 注意：Markdown 渲染在 C# 侧完成（Markdig），JS 侧直接 innerHTML。
         /// </summary>
         public static string BuildStreamEndJson(int messageIndex, string fullContent,
-            string reasoningContent, string? extraFooterHtml = null)
+            string reasoningContent, string? extraFooterHtml = null,
+            string? timelineContent = null)
         {
-            string bodyHtml = RenderMarkdownToHtml(fullContent ?? string.Empty);
+            string displayContent = BuildAssistantDisplayContent(timelineContent, fullContent);
+            string bodyHtml = RenderMarkdownToHtml(displayContent);
             string reasoningHtml = string.IsNullOrWhiteSpace(reasoningContent)
                 ? string.Empty
                 : RenderReasoningContentHtml(reasoningContent);
@@ -207,7 +223,7 @@ namespace DeepSeek_v4_for_VisualStudio.Services
             }
             // 原始内容（供复制按钮读取，避免复制渲染后的 HTML 文本）
             sb.Append(",\"rawContent\":");
-            AppendJsonString(sb, fullContent ?? string.Empty);
+            AppendJsonString(sb, displayContent);
             // 本地化按钮文本
             sb.Append(",\"retryLabel\":");
             AppendJsonString(sb, L["chat.html.retryButton"]);
@@ -635,7 +651,7 @@ namespace DeepSeek_v4_for_VisualStudio.Services
             foreach (var file in attachedFiles)
             {
                 string escapedFileName = System.Net.WebUtility.HtmlEncode(file.FileName);
-                if (!file.Success || string.IsNullOrEmpty(file.Content))
+                if (!file.Success)
                 {
                     string errorMsg = System.Net.WebUtility.HtmlEncode(file.Error ?? L["chat.html.fileParseFailed"]);
                     blocks.Append("<div style='display:inline-block;background:#5c1a1a;color:#e07878;padding:2px 8px;border-radius:3px;font-size:10px;margin:2px'> ");
@@ -646,6 +662,14 @@ namespace DeepSeek_v4_for_VisualStudio.Services
 
                 bool isImage = IsImageExtension(file.FileExtension);
                 bool isPdf = string.Equals(file.FileExtension, ".pdf", StringComparison.OrdinalIgnoreCase);
+                if (string.IsNullOrEmpty(file.Content))
+                {
+                    string referenceIcon = isImage ? "🖼️" : isPdf ? "📄" : "📎";
+                    string escapedPath = System.Net.WebUtility.HtmlEncode(file.FilePath ?? string.Empty);
+                    blocks.Append($"<span class='file-attachment-reference' data-path=\"{escapedPath}\" title=\"{escapedPath}\" onclick=\"window.__openAttachment(this.getAttribute('data-path'))\" style='display:inline-block;cursor:pointer;background:#1f2937;color:#9cdcfe;border:1px solid #4b5563;border-radius:4px;padding:3px 8px;font-size:11px;margin:2px'>{referenceIcon} {escapedFileName} <span style='color:#9ca3af;font-size:9px'>({System.Net.WebUtility.HtmlEncode(L["chat.html.fileReadOnDemand"])})</span></span>");
+                    continue;
+                }
+
                 string lang = isImage ? string.Empty : GetLanguageFromExtension(file.FileExtension);
                 string borderColor = isImage ? "#6b3fa0" : isPdf ? "#8b4513" : "#3a5a3a";
                 string bgColor = isImage ? "#1a1a2e" : isPdf ? "#1e150a" : "#1a2e1a";
@@ -701,15 +725,16 @@ namespace DeepSeek_v4_for_VisualStudio.Services
 
         private static void AppendAssistantMessageHtml(StringBuilder sb, ChatMessage msg, int idx)
         {
+            string displayContent = BuildAssistantDisplayContent(msg.TimelineContent, msg.Content);
             string bodyHtml;
             bool isStreaming = msg.IsStreaming;
 
-            if (!string.IsNullOrEmpty(msg.Content))
+            if (!string.IsNullOrEmpty(displayContent))
             {
-                if (msg.IsHtml)
+                if (msg.IsHtml && string.IsNullOrWhiteSpace(msg.TimelineContent))
                     bodyHtml = msg.Content;
                 else
-                    bodyHtml = RenderMarkdownToHtml(msg.Content);
+                    bodyHtml = RenderMarkdownToHtml(displayContent);
             }
             else if (isStreaming)
             {
@@ -733,7 +758,7 @@ namespace DeepSeek_v4_for_VisualStudio.Services
                 ? $"<button id='retry-btn-{idx}' class='msg-action-btn retry-btn' onclick='window.__retryMessage({idx})' title='{L["chat.html.retryButtonTitle"]}'>{EscapeHtml(L["chat.html.retryButton"])}</button>"
                 : "";
 
-            string copyBtnHtml = !isStreaming && !string.IsNullOrEmpty(msg.Content)
+            string copyBtnHtml = !isStreaming && !string.IsNullOrEmpty(displayContent)
                 ? $"<button id='copy-btn-{idx}' class='msg-action-btn copy-msg-btn' onclick='window.__copyMessage({idx})' title='{L["chat.html.copyButtonTitle"]}' data-copy-label='{EscapeHtml(L["chat.html.copyButton"])}' data-copied-label='{EscapeHtml(L["chat.html.copySuccessButton"])}'>{EscapeHtml(L["chat.html.copyButton"])}</button>"
                 : "";
 
@@ -746,7 +771,7 @@ namespace DeepSeek_v4_for_VisualStudio.Services
             sb.Append($"<div class='msg-role-label ai'>DeepSeek{streamingDots}</div>");
             sb.Append(reasoningHtml);
             // ── 内嵌原始 Markdown 内容（`data-raw-content`），供复制按钮读取 ──
-            string encodedRawContent = System.Net.WebUtility.HtmlEncode(msg.Content ?? string.Empty);
+            string encodedRawContent = System.Net.WebUtility.HtmlEncode(displayContent);
             sb.Append($"<div class='msg-content' id='msg-body-{idx}' data-raw-content='{encodedRawContent}'>{bodyHtml}</div>");
             sb.Append(streamingCursor);
             // ── 缓存命中率统计卡片（放在操作按钮之前，消息内容下方）──

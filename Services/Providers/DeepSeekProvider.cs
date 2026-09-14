@@ -54,6 +54,15 @@ namespace DeepSeek_v4_for_VisualStudio.Services.Providers
         public bool IsDeepSeekEndpoint
             => string.Equals(BaseUrl.TrimEnd('/'), DefaultBaseUrl, StringComparison.OrdinalIgnoreCase);
 
+        /// <summary>
+        /// DeepSeek 原生模型支持 JSON Output。自定义聚合端点上的非 DeepSeek
+        /// 模型无法可靠判断，因此不发送可能不被上游接受的 response_format。
+        /// </summary>
+        protected override bool SupportsJsonObjectResponseFormat(string model)
+            => IsDeepSeekEndpoint
+                || (!string.IsNullOrWhiteSpace(model)
+                    && model.Contains("deepseek", StringComparison.OrdinalIgnoreCase));
+
         /// <summary>账户币种（"CNY" 国内 / "USD" 国际）。</summary>
         public string AccountCurrency => _accountCurrency;
 
@@ -71,7 +80,7 @@ namespace DeepSeek_v4_for_VisualStudio.Services.Providers
         }
 
         /// <summary>
-        /// DeepSeek V4 官方定价，按"国内/国际（币种）× 模型（Flash/Pro）× 时段（高峰/空闲）"分档。
+        /// DeepSeek 官方定价，按"国内/国际（币种）× 模型（Flash/Pro）× 时段（高峰/空闲）"分档。
         /// 高峰时段为北京时间周一至周五 9:00-12:00、14:00-18:00；周六、周日全天为空闲时段。
         ///   国内（¥/百万 tokens）：
         ///     输入（缓存命中）:   空闲 Flash ¥0.02  / Pro ¥0.15  ；高峰 Flash ¥0.04  / Pro ¥0.30

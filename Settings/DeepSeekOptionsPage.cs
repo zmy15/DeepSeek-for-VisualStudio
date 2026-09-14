@@ -25,6 +25,7 @@ namespace DeepSeek_v4_for_VisualStudio.Settings
         internal const int MinWebView2ZoomPercent = 50;
         internal const int MaxWebView2ZoomPercent = 300;
         internal const int DefaultWebView2ZoomPercent = 100;
+        internal const bool DefaultEnableAutoSkillRouting = false;
 
         /// <summary>
         /// 静态构造：订阅语言变更，刷新属性描述符缓存。
@@ -641,7 +642,7 @@ namespace DeepSeek_v4_for_VisualStudio.Settings
         public bool AutoCompleteContinueAfterAccept { get; set; } = true;
 
         // ═══════════════════════════════════════════════
-        //  上下文管理设置（DeepSeek V4 1M 上下文窗口）
+        //  上下文管理设置（DeepSeek 1M 上下文窗口）
         // ═══════════════════════════════════════════════
 
         [LocalizedCategory("settings.category.context")]
@@ -755,6 +756,12 @@ namespace DeepSeek_v4_for_VisualStudio.Settings
         public int AgentMaxWallTimeSeconds { get; set; } = 0;
 
         [LocalizedCategory("settings.category.agent")]
+        [LocalizedDisplayName("settings.agentSubagentTimeoutSeconds.displayName")]
+        [LocalizedDescription("settings.agentSubagentTimeoutSeconds.description")]
+        [DesignerSerializationVisibility(DesignerSerializationVisibility.Visible)]
+        public int AgentSubagentTimeoutSeconds { get; set; } = 900;
+
+        [LocalizedCategory("settings.category.agent")]
         [LocalizedDisplayName("settings.agentMaxTotalTokens.displayName")]
         [LocalizedDescription("settings.agentMaxTotalTokens.description")]
         [DesignerSerializationVisibility(DesignerSerializationVisibility.Visible)]
@@ -783,6 +790,12 @@ namespace DeepSeek_v4_for_VisualStudio.Settings
         [LocalizedDescription("settings.enableAutoBuild.description")]
         [DesignerSerializationVisibility(DesignerSerializationVisibility.Visible)]
         public bool EnableAutoBuild { get; set; } = true;
+
+        [LocalizedCategory("settings.category.agent")]
+        [LocalizedDisplayName("settings.enableAutoSkillRouting.displayName")]
+        [LocalizedDescription("settings.enableAutoSkillRouting.description")]
+        [DesignerSerializationVisibility(DesignerSerializationVisibility.Visible)]
+        public bool EnableAutoSkillRouting { get; set; } = DefaultEnableAutoSkillRouting;
 
         // ═══════════════════════════════════════════════
         //  审批模式设置

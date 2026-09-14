@@ -63,6 +63,25 @@ public class RuntimeSettingsSnapshotTests
         changes.OcrChanged.Should().BeFalse();
     }
 
+    [Fact]
+    public void AutoSkillRoutingChange_RefreshesOnlySkillRouting()
+    {
+        var previous = CreateSnapshot();
+        var current = previous with { EnableAutoSkillRouting = true };
+
+        var changes = RuntimeSettingsChangeSet.Between(previous, current);
+
+        changes.AutoSkillRoutingChanged.Should().BeTrue();
+        changes.HasChanges.Should().BeTrue();
+        changes.EndpointChanged.Should().BeFalse();
+        changes.ModelControlsChanged.Should().BeFalse();
+        changes.ThinkingChanged.Should().BeFalse();
+        changes.ApprovalChanged.Should().BeFalse();
+        changes.OcrChanged.Should().BeFalse();
+        changes.WebSearchChanged.Should().BeFalse();
+        changes.LayoutChanged.Should().BeFalse();
+    }
+
     private static RuntimeSettingsSnapshot CreateSnapshot()
         => new(
             ApiKey: "official-key",
@@ -81,6 +100,7 @@ public class RuntimeSettingsSnapshotTests
             BaiduApiKey: string.Empty,
             BingApiKey: string.Empty,
             ApprovalMode: "SmartBlock",
+            EnableAutoSkillRouting: false,
             InputBoxHeight: 50,
             BottomAreaScalePercent: 100,
             WebView2ZoomPercent: 100);

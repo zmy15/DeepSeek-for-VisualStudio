@@ -14,7 +14,7 @@ namespace DeepSeek_v4_for_VisualStudio.Services
     /// 
     /// 核心职责：
     /// 1. 单一数据源：所有 API 调用所需的对话历史由此类统一管理
-    /// 2. reasoning_content 回传规则（严格遵守 DeepSeek V4 思考模式协议）：
+    /// 2. reasoning_content 回传规则（严格遵守 DeepSeek 思考模式协议）：
     ///    - 无工具调用的 assistant 消息 → reasoning_content 不需要回传（API 会忽略）
     ///    - 有工具调用的 assistant 消息 → reasoning_content 必须完整回传（否则 400 错误）
     /// 3. Token 预算估算与自动压缩（不再直接截断/删除旧消息）
@@ -22,7 +22,7 @@ namespace DeepSeek_v4_for_VisualStudio.Services
     /// 5. RAG 上下文注入点
     /// 6. 上下文统计与使用率监控
     /// 
-    /// DeepSeek V4 最大上下文窗口: 1M tokens（1,000,000）
+    /// DeepSeek 最大上下文窗口: 1M tokens（1,000,000）
     /// 默认预算: 900K tokens（留 100K 给模型输出）
     /// 
     /// 参考：
@@ -40,7 +40,7 @@ namespace DeepSeek_v4_for_VisualStudio.Services
         /// <summary>
         /// 已冻结的系统提示词（session 初始化时由 SetFixedSystemPrompt() 设置）。
         /// 一旦冻结，整个会话期间不再改变，保障 messages[0] 前缀稳定性，
-        /// 使 DeepSeek V4 的自动前缀缓存可以持续命中。
+        /// 使 DeepSeek 的自动前缀缓存可以持续命中。
         /// </summary>
         private string? _fixedSystemPrompt;
 
@@ -113,7 +113,7 @@ namespace DeepSeek_v4_for_VisualStudio.Services
         /// <summary>完整工具结果存储（按 tool_call_id 索引，保留原始结果备查）</summary>
         private readonly Dictionary<string, string> _fullToolResultStore = new();
 
-        /// <summary>Token 预算上限（默认 900K，DeepSeek V4 上下文窗口为 1M，留 100K 给输出）</summary>
+        /// <summary>Token 预算上限（默认 900K，DeepSeek 上下文窗口为 1M，留 100K 给输出）</summary>
         public int TokenBudget { get; set; } = 900_000;
 
         /// <summary>当超过 Token 预算时自动压缩的最旧轮次数（此值在压缩模式下仅作用为最小保留轮次）</summary>
@@ -280,7 +280,7 @@ namespace DeepSeek_v4_for_VisualStudio.Services
         /// <summary>
         /// 设置系统提示词。
         /// 如果已通过 FreezeSystemPrompt() 冻结，则忽略此次调用并记录警告，
-        /// 防止意外覆盖不可变前缀导致 DeepSeek V4 缓存失效。
+        /// 防止意外覆盖不可变前缀导致 DeepSeek 缓存失效。
         /// </summary>
         public void SetSystemPrompt(string? prompt)
         {
@@ -595,7 +595,7 @@ namespace DeepSeek_v4_for_VisualStudio.Services
         /// 应在会话初始化时调用一次。冻结后整个会话期间不应再调用 SetSystemPrompt()。
         /// 
         /// 这是前缀缓存优化的核心：messages[0] 的内容在冻结后永远不会改变，
-        /// 确保 DeepSeek V4 的自动前缀缓存在每次请求时都能命中。
+        /// 确保 DeepSeek 的自动前缀缓存在每次请求时都能命中。
         /// 
         /// 冻结内容 = systemPrompt + skillContext（若存在则以换行连接）
         /// </summary>
@@ -783,6 +783,19 @@ namespace DeepSeek_v4_for_VisualStudio.Services
         public List<ChatApiMessage> BuildApiMessages()
         {
             return BuildApiMessagesCore(0);
+        }
+
+        /// <summary>
+        /// 构建仅包含稳定缓存前缀的 API 消息列表（固定 system prompt + 动态上下文块）。
+        /// 不包含任何对话历史，供需要隔离历史的 Agent 阶段复用同一前缀，避免缓存失效。
+        /// </summary>
+        public List<ChatApiMessage> BuildContextPrefix()
+        {
+            string? dynamicBlock = _cachedDynamicBlock ?? BuildDynamicContextBlock();
+            return BuildApiMessagesSnapshot(
+                startEntryIdx: 0,
+                dynamicBlock,
+                entryLimitOverride: 0);
         }
 
         /// <summary>
@@ -982,10 +995,7 @@ namespace DeepSeek_v4_for_VisualStudio.Services
             var messages = new List<ChatApiMessage>();
 
             // ── [0] 稳定系统提示词（共享前缀 + 固定提示词）──
-            string sharedPrefix = AiPrompts.SharedImmutablePrefix;
-            string? fixedPrompt = _fixedSystemPrompt
-                ?? (string.IsNullOrWhiteSpace(_systemPrompt) && string.IsNullOrWhiteSpace(_skillContext) ? null : BuildFinalSystemPrompt());
-            string stableSystemPrompt = CombineSystemParts(fixedPrompt, sharedPrefix);
+            string stableSystemPrompt = BuildStableSystemPrompt();
             if (!string.IsNullOrWhiteSpace(stableSystemPrompt))
                 messages.Add(new ChatApiMessage { Role = "system", Content = stableSystemPrompt });
 
@@ -2111,6 +2121,20 @@ namespace DeepSeek_v4_for_VisualStudio.Services
         #endregion
 
         #region Internal Helpers
+
+        /// <summary>
+        /// 构建完整稳定 system prompt（冻结的用户/Skill 提示词 + 共享前缀）。
+        /// 所有 API 构建路径必须通过此方法获取 messages[0]，避免前缀漂移。
+        /// </summary>
+        private string BuildStableSystemPrompt()
+        {
+            string sharedPrefix = AiPrompts.SharedImmutablePrefix;
+            string? fixedPrompt = _fixedSystemPrompt
+                ?? (string.IsNullOrWhiteSpace(_systemPrompt) && string.IsNullOrWhiteSpace(_skillContext)
+                    ? null
+                    : BuildFinalSystemPrompt());
+            return CombineSystemParts(fixedPrompt, sharedPrefix) ?? string.Empty;
+        }
 
         /// <summary>
         /// 组装最终的系统提示词（用户自定义 + Skill 上下文）。
