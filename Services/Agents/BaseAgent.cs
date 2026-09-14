@@ -867,6 +867,10 @@ namespace DeepSeek_v4_for_VisualStudio.Services.Agents
         /// <param name="onToolCall">工具调用回调（用于 UI 通知）</param>
         /// <param name="maxToolRounds">本次工具循环的最大轮数（null = 仅使用全局安全上限）</param>
         /// <param name="maxAskQuestionsCalls">本次工具循环最多允许执行的 askQuestions 次数（null = 不限制）</param>
+        /// <param name="responseFormat">响应格式（例如 json_object）</param>
+        /// <param name="temperature">采样温度</param>
+        /// <param name="toolChoiceOverride">覆盖本轮工具选择策略（例如 auto / none）</param>
+        /// <param name="noToolsReminderAfterFirstToolRound">首次完成工具调用后追加的“禁止继续调用工具”提示</param>
         /// <returns>AI 最终生成的文本内容</returns>
         protected async Task<string> CallAiWithToolLoopAsync(
             List<ChatApiMessage> messages,
@@ -878,7 +882,11 @@ namespace DeepSeek_v4_for_VisualStudio.Services.Agents
             Action<string>? onContent = null,
             Action<string>? onToolCall = null,
             int? maxToolRounds = null,
-            int? maxAskQuestionsCalls = null)
+            int? maxAskQuestionsCalls = null,
+            string? responseFormat = null,
+            double? temperature = null,
+            string? toolChoiceOverride = null,
+            string? noToolsReminderAfterFirstToolRound = null)
         {
             var reasoningBuilder = new StringBuilder();
             var contentBuilder = new StringBuilder();
@@ -903,6 +911,7 @@ namespace DeepSeek_v4_for_VisualStudio.Services.Agents
             int rejectedToolRounds = 0;
             int consecutiveErrorRounds = 0;
             int askQuestionsCallCount = 0;
+            bool noToolsReminderAppended = false;
             int maxRepeatedSameCall = Settings.DeepSeekOptionsPage.Instance?.MaxRepeatedSameCall ?? 5;
             if (maxRepeatedSameCall < 1) maxRepeatedSameCall = 5;
             int maxConsecutiveErrors = Settings.DeepSeekOptionsPage.Instance?.MaxConsecutiveErrors ?? 5;
@@ -1057,6 +1066,10 @@ namespace DeepSeek_v4_for_VisualStudio.Services.Agents
                     {
                         toolChoice = "none";
                     }
+                    else if (!string.IsNullOrWhiteSpace(toolChoiceOverride))
+                    {
+                        toolChoice = toolChoiceOverride;
+                    }
 
                     Logger.Info($"[Agent:{Definition.Name}] 本轮携带 {toolDefs.Count} 个工具定义(完整集)" +
                         (toolWhitelist != null ? $", 白名单={effectiveWhitelist?.Count ?? 0}个" : "") +
@@ -1110,7 +1123,12 @@ namespace DeepSeek_v4_for_VisualStudio.Services.Agents
 
                             // 使用 resume 消息而不是原始消息
                             reasoningGuard.Reset();
-                            await foreach (var chunk in _apiService.ChatStreamAsync(resumeMessages, toolDefs, ct, toolChoice: toolChoice))
+                            await foreach (var chunk in _apiService.ChatStreamAsync(
+                                resumeMessages, toolDefs, ct,
+                                maxTokens: maxTokens,
+                                toolChoice: toolChoice,
+                                temperature: temperature,
+                                responseFormat: responseFormat))
                             {
                                 ThrowIfReasoningLoopDetected(chunk, reasoningGuard);
                                 ProcessStreamChunk(chunk, reasoningBuilder, contentBuilder, toolCallAccumulator, onThinking, onContent);
@@ -1119,7 +1137,12 @@ namespace DeepSeek_v4_for_VisualStudio.Services.Agents
                         else
                         {
                             reasoningGuard.Reset();
-                            await foreach (var chunk in _apiService.ChatStreamAsync(messages, toolDefs, ct, toolChoice: toolChoice))
+                            await foreach (var chunk in _apiService.ChatStreamAsync(
+                                messages, toolDefs, ct,
+                                maxTokens: maxTokens,
+                                toolChoice: toolChoice,
+                                temperature: temperature,
+                                responseFormat: responseFormat))
                             {
                                 ThrowIfReasoningLoopDetected(chunk, reasoningGuard);
                                 ProcessStreamChunk(chunk, reasoningBuilder, contentBuilder, toolCallAccumulator, onThinking, onContent);
@@ -1629,6 +1652,19 @@ namespace DeepSeek_v4_for_VisualStudio.Services.Agents
                         }
 
                         Logger.Info($"[Agent:{Definition.Name}] 工具 {tc.Function.Name} 返回: {(toolResult.Length > 200 ? toolResult.Substring(0, 200) + "..." : toolResult)}");
+                    }
+
+                    if (!noToolsReminderAppended
+                        && !string.IsNullOrWhiteSpace(noToolsReminderAfterFirstToolRound))
+                    {
+                        messages.Insert(toolInsertPos, new ChatApiMessage
+                        {
+                            Role = "system",
+                            Content = noToolsReminderAfterFirstToolRound
+                        });
+                        toolInsertPos++;
+                        noToolsReminderAppended = true;
+                        Logger.Info($"[Agent:{Definition.Name}] 首次工具调用已处理，已追加禁止继续调用工具的提示");
                     }
 
                     // ── 工具结果写回后立即检查：同一用户请求内超限也触发压缩。──
