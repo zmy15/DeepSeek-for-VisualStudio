@@ -4707,7 +4707,12 @@ Instruction: <user instruction>
 
 ```text
 [系统指令] 检测到你刚才的思考在原地打转。不要重复已经分析过的内容。只总结已经确认的事实、当前最重要的下一步，然后直接继续完成用户任务。
+
+原始用户提问：
+<original user question>
 ```
+
+运行时会读取当前轮最后一条 `user` 消息，并将提问原文直接追加到上述提示词末尾。
 
 #### Reasoning Loop Final Stop Message
 

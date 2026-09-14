@@ -896,6 +896,9 @@ namespace DeepSeek_v4_for_VisualStudio.Services.Agents
             string? toolChoiceOverride = null,
             string? noToolsReminderAfterFirstToolRound = null)
         {
+            string? originalUserQuestion = messages
+                .LastOrDefault(m => string.Equals(m.Role, "user", StringComparison.OrdinalIgnoreCase))
+                ?.Content;
             var reasoningBuilder = new StringBuilder();
             var contentBuilder = new StringBuilder();
             var toolCallAccumulator = new Dictionary<int, Models.ToolCallAccumulator>();
@@ -1115,7 +1118,7 @@ namespace DeepSeek_v4_for_VisualStudio.Services.Agents
                                 ? "…(截断)…" + savedPartialContent.Substring(savedPartialContent.Length - 300)
                                 : savedPartialContent;
                             string resumeInstruction = reasoningLoopRetryPending
-                                ? "[系统指令] 检测到你刚才的思考在原地打转。不要重复已经分析过的内容。只总结已经确认的事实、当前最重要的下一步，然后直接继续完成用户任务。"
+                                ? BuildReasoningLoopRetryPrompt(originalUserQuestion)
                                 : $"[系统指令] 你之前的回复因网络中断被截断。以下是已发送的末尾内容：\n```\n{tailContent}\n```\n请从截断处**精确**继续，不要重复任何已发送的内容，不要道歉或解释中断。直接继续未完成的句子或代码块。";
                             resumeMessages.Add(new ChatApiMessage
                             {
@@ -1927,6 +1930,17 @@ namespace DeepSeek_v4_for_VisualStudio.Services.Agents
             LogTotalCacheHitRate(round);
 
             return contentBuilder.ToString().Trim();
+        }
+
+        internal static string BuildReasoningLoopRetryPrompt(string? originalUserQuestion)
+        {
+            const string instruction =
+                "[系统指令] 检测到你刚才的思考在原地打转。不要重复已经分析过的内容。只总结已经确认的事实、当前最重要的下一步，然后直接继续完成用户任务。";
+
+            if (string.IsNullOrWhiteSpace(originalUserQuestion))
+                return instruction;
+
+            return $"{instruction}\n\n原始用户提问：\n{originalUserQuestion}";
         }
 
         /// <summary>

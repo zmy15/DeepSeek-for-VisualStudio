@@ -53,6 +53,18 @@ public class BaseAgentTests
     }
 
     [Fact]
+    public void BuildReasoningLoopRetryPrompt_AppendsOriginalUserQuestionVerbatim()
+    {
+        const string originalUserQuestion = "第一行提问\n第二行提问：保留空格 和 *Markdown*";
+
+        string prompt = BaseAgent.BuildReasoningLoopRetryPrompt(originalUserQuestion);
+
+        prompt.Should().EndWith($"原始用户提问：\n{originalUserQuestion}");
+        prompt.Should().Contain("不要重复已经分析过的内容");
+        prompt.Should().NotContain("复述");
+    }
+
+    [Fact]
     public async Task ExplorePermissionRequest_IsRoutedThroughParentAgent()
     {
         var parent = new AskAgent(new DeepSeekApiService("test-api-key"));
