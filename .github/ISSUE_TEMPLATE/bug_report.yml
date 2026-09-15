@@ -42,6 +42,14 @@ body:
       required: true
 
   - type: input
+    id: os-version
+    attributes:
+      label: 操作系统版本 / Operating System Version
+      placeholder: 例如 Windows 10 22H2 / Windows 11 23H2
+    validations:
+      required: true
+
+  - type: input
     id: visual-studio-version
     attributes:
       label: Visual Studio 版本 / Visual Studio Version
