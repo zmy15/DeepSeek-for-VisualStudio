@@ -7,6 +7,8 @@
              mc:Ignorable="d"
              d:DesignHeight="450" d:DesignWidth="600">
     <UserControl.Resources>
+        <!-- Win10 不含 Segoe Fluent Icons：回退到系统自带的 Segoe MDL2 Assets，避免图标显示为方框 -->
+        <FontFamily x:Key="IconFontFamily">Segoe Fluent Icons, Segoe MDL2 Assets</FontFamily>
         <!-- ═══ 深色主题样式 ═══ -->
         <!-- ComboBox 深色样式（VS 2022 风格） -->
         <Style TargetType="ComboBox">
@@ -235,7 +237,7 @@
                             Click="HistoryToggleButton_Click"
                             Style="{StaticResource TransparentButton}"
                             ToolTip="历史对话"
-                            FontFamily="Segoe Fluent Icons"
+                            FontFamily="{StaticResource IconFontFamily}"
                             FontSize="13" Padding="4,0"
                             Foreground="#888888"
                             Cursor="Hand"
@@ -256,7 +258,7 @@
                             Margin="0,0,6,0" FontSize="12"
                             Foreground="#4EC9B0" />
                     <Button x:Name="DeleteSessionButton"
-                            Content="&#xE711;" FontFamily="Segoe Fluent Icons"
+                            Content="&#xE711;" FontFamily="{StaticResource IconFontFamily}"
                             ToolTip="删除当前对话"
                             Click="DeleteSessionButton_Click"
                             Background="Transparent"
@@ -323,7 +325,7 @@
                                 </StackPanel>
                                 <Button Grid.Column="1"
                                         Content="&#xE74D;"
-                                        FontFamily="Segoe Fluent Icons"
+                                        FontFamily="{StaticResource IconFontFamily}"
                                         FontSize="11"
                                         Foreground="#888888"
                                         Background="Transparent"
@@ -782,7 +784,7 @@
                                             Tag="{Binding FilePath}"
                                             ToolTip="{Binding FileName}">
                                         <Grid Width="38" Height="38">
-                                            <TextBlock Text="&#xE7C3;" FontFamily="Segoe Fluent Icons"
+                                            <TextBlock Text="&#xE7C3;" FontFamily="{StaticResource IconFontFamily}"
                                                        FontSize="20"
                                                        Foreground="#C8C8C8"
                                                        HorizontalAlignment="Center"
@@ -797,7 +799,7 @@
                                                Foreground="#D4D4D4"
                                                FontSize="11"
                                                VerticalAlignment="Center" />
-                                    <Button Content="&#xE711;" FontFamily="Segoe Fluent Icons"
+                                    <Button Content="&#xE711;" FontFamily="{StaticResource IconFontFamily}"
                                             Foreground="#888888"
                                             FontSize="10"
                                             Style="{StaticResource TransparentButton}"
@@ -823,7 +825,7 @@
                         <Button x:Name="AddContextButton" Content="&#xE710;"
                                 Click="AddContextButton_Click"
                                 Style="{StaticResource TransparentButton}"
-                                FontFamily="Segoe Fluent Icons"
+                                FontFamily="{StaticResource IconFontFamily}"
                                 ToolTip="添加上下文（活动文档 / 项目文件 / 全部文件 / 选中代码 / 调试输出）"
                                 FontSize="12" Padding="6,0" Margin="0,0,4,0"
                                 Foreground="#6CAFD9" />
@@ -832,7 +834,7 @@
                             Click="UploadButton_Click"
                             Style="{StaticResource TransparentButton}"
                             ToolTip="上传文件 (支持 .txt .doc .xls .py .c 等)"
-                            FontFamily="Segoe Fluent Icons"
+                            FontFamily="{StaticResource IconFontFamily}"
                             FontSize="13" Padding="6,0" Margin="0,0,2,0"
                             Foreground="#CE9178" />
                         <ComboBox x:Name="ModelComboBox"
@@ -865,7 +867,7 @@
                                 FontSize="14" Padding="4,0" Margin="0,0,8,0"
                                 Foreground="#888888">
                             <Button.Content>
-                                <TextBlock Text="&#xE774;" FontSize="13" FontFamily="Segoe Fluent Icons" />
+                                <TextBlock Text="&#xE774;" FontSize="13" FontFamily="{StaticResource IconFontFamily}" />
                             </Button.Content>
                         </Button>
                         <Button x:Name="McpConfigButton"
@@ -875,7 +877,7 @@
                                 FontSize="14" Padding="4,0" Margin="0,0,2,0"
                                 Foreground="#888888">
                             <Button.Content>
-                                <TextBlock Text="&#xE713;" FontSize="13" FontFamily="Segoe Fluent Icons" />
+                                <TextBlock Text="&#xE713;" FontSize="13" FontFamily="{StaticResource IconFontFamily}" />
                             </Button.Content>
                         </Button>
                         <!-- 清空按钮：置于左侧设置组末尾，与发送保持远距离防误触 -->
@@ -891,13 +893,13 @@
 
                     <!-- 右侧: 仅发送控制（清空已移至左侧组，防误触）-->
                     <StackPanel Grid.Column="1" Orientation="Horizontal" VerticalAlignment="Center">
-                        <Button x:Name="StopButton" Content="&#xE71A;" FontFamily="Segoe Fluent Icons"
+                        <Button x:Name="StopButton" Content="&#xE71A;" FontFamily="{StaticResource IconFontFamily}"
                                 Click="StopButton_Click"
                                 Style="{StaticResource AccentButton}"
                                 FontSize="13"
                                 Visibility="Collapsed"
                                 ToolTip="停止生成 (Esc)" />
-                        <Button x:Name="SendButton" Content="&#xE724;" FontFamily="Segoe Fluent Icons"
+                        <Button x:Name="SendButton" Content="&#xE724;" FontFamily="{StaticResource IconFontFamily}"
                                 Click="SendButton_Click"
                                 Style="{StaticResource AccentButton}"
                                 FontSize="13"
