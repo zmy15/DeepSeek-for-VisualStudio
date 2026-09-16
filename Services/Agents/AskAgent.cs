@@ -100,6 +100,11 @@ namespace DeepSeek_v4_for_VisualStudio.Services.Agents
                 return await ExecuteSummaryAsync(userMessage, context);
             }
 
+            if (context.IsSummaryOnlyHandoff)
+            {
+                return await ExecuteSummaryOnlyAsync(userMessage, context);
+            }
+
             AddLog("INFO", string.Format(LocalizationService.Instance["agent.log.askStarted"], userMessage));
 
             var result = new AgentResult
@@ -163,6 +168,66 @@ namespace DeepSeek_v4_for_VisualStudio.Services.Agents
                     result.Content = aiResponse;
                 }
 
+                AddLog("INFO", string.Format(LocalizationService.Instance["agent.log.askDone"], aiResponse.Length));
+                result.Logs.AddRange(_logs);
+            }
+            catch (OperationCanceledException)
+            {
+                result.Success = false;
+                result.ErrorMessage = LocalizationService.Instance["agent.log.askCancelled"];
+                AddLog("WARN", LocalizationService.Instance["agent.log.askCancelled"]);
+            }
+            catch (Exception ex)
+            {
+                result.Success = false;
+                result.ErrorMessage = ex.Message;
+                AddLog("ERROR", string.Format(LocalizationService.Instance["agent.log.askFailed"], ex.Message));
+            }
+
+            return result;
+        }
+
+        /// <summary>
+        /// 执行不可继续移交的终态总结。工具被完全禁用，避免 Build→Ask 在总结阶段
+        /// 再次把任务交回 Build 而形成跨 Agent 循环。
+        /// </summary>
+        private async Task<AgentResult> ExecuteSummaryOnlyAsync(string userMessage, AgentContext context)
+        {
+            AddLog("INFO", string.Format(LocalizationService.Instance["agent.log.askStarted"], userMessage));
+
+            var result = new AgentResult
+            {
+                Success = true,
+            };
+
+            try
+            {
+                var messages = BuildContextAwareMessages(
+                    Definition.SystemPrompt,
+                    userMessage,
+                    maxRecentTurns: int.MaxValue);
+
+                var thinkingBuilder = new StringBuilder();
+                string aiResponse = await CallAiWithToolLoopAsync(
+                    messages,
+                    GetWorkspaceRoot(context),
+                    context.CancellationToken,
+                    toolWhitelist: new List<string>(),
+                    toolChoiceOverride: "none",
+                    onThinking: (thinking) =>
+                    {
+                        thinkingBuilder.Append(thinking);
+                        context.OnThinkingChunk?.Invoke(thinking);
+                    },
+                    onContent: (content) =>
+                    {
+                        context.OnContentChunk?.Invoke(content);
+                    });
+
+                if (thinkingBuilder.Length > 0)
+                    result.ReasoningContent = thinkingBuilder.ToString();
+
+                result.Content = aiResponse;
                 AddLog("INFO", string.Format(LocalizationService.Instance["agent.log.askDone"], aiResponse.Length));
                 result.Logs.AddRange(_logs);
             }

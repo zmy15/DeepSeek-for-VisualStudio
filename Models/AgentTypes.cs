@@ -75,6 +75,11 @@ namespace DeepSeek_v4_for_VisualStudio.Models
         public bool ShowContinueOn { get; set; } = true;
 
         /// <summary>
+        /// 是否为只读终态总结移交。目标 Agent 只能生成最终回复，不能调用工具或再次移交。
+        /// </summary>
+        public bool IsSummaryOnly { get; set; }
+
+        /// <summary>
         /// 源 Agent 在当前 Handoff 前实际缓存的消息前缀。
         /// 仅在同一进程内的 Handoff 链/按钮执行时使用，不随 HandoffJson 持久化。
         /// </summary>
@@ -211,6 +216,13 @@ namespace DeepSeek_v4_for_VisualStudio.Models
         /// </summary>
         [JsonIgnore]
         public List<ChatApiMessage>? ConsumedForwardedMessages { get; set; }
+
+        /// <summary>
+        /// 当前 Handoff 是否只允许目标 Agent 生成终态总结。
+        /// 用于阻止 Build→Ask 总结阶段再次反向 Handoff，形成跨 Agent 循环。
+        /// </summary>
+        [JsonIgnore]
+        public bool IsSummaryOnlyHandoff { get; set; }
 
         /// <summary>
         /// UI 层已写入 ContextManager 的当前轮原始 user 内容。

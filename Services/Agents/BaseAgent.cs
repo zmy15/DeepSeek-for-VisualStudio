@@ -1696,6 +1696,14 @@ namespace DeepSeek_v4_for_VisualStudio.Services.Agents
                             int resultIndex = buildResultIndices[0];
                             contentBuilder.Clear();
                             contentBuilder.Append(toolResults[resultIndex]);
+                            // 成功构建会直接结束工具循环，之后不会再有 API 请求更新
+                            // _apiService.LastSentMessages。如果后续程序化 Handoff 仍从最近
+                            // 请求快照取上下文，就会丢失本次 build_solution 的 tool result。
+                            // 因此显式保存当前完整消息列表，确保 Handoff 能看到最终构建结果。
+                            if (Context != null)
+                            {
+                                Context.ForwardedMessages = CloneApiMessages(messages);
+                            }
                             Logger.Info($"[Agent:{Definition.Name}] build_solution 已成功完成，终止工具循环并返回结果。");
                             metrics?.MarkTerminated("build_success");
                             break;
@@ -2690,6 +2698,7 @@ namespace DeepSeek_v4_for_VisualStudio.Services.Agents
                 throw new InvalidOperationException("AgentFactory 引用为空，无法获取目标 Agent");
 
             targetAgent.Context = context;
+            context.IsSummaryOnlyHandoff = handoff.IsSummaryOnly;
 
             // 如果热链路上尚未消费 ForwardedMessages，优先使用 Handoff 中携带的快照。
             if (context.ForwardedMessages == null && handoff.ForwardedMessages != null)
