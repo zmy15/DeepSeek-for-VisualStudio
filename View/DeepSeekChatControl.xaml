@@ -258,7 +258,7 @@
                             Margin="0,0,6,0" FontSize="12"
                             Foreground="#4EC9B0" />
                     <Button x:Name="DeleteSessionButton"
-                            Content="&#xE711;" FontFamily="{StaticResource IconFontFamily}"
+                            Content="&#xE74D;" FontFamily="{StaticResource IconFontFamily}"
                             ToolTip="删除当前对话"
                             Click="DeleteSessionButton_Click"
                             Background="Transparent"
