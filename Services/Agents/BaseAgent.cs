@@ -2663,6 +2663,39 @@ namespace DeepSeek_v4_for_VisualStudio.Services.Agents
                 Prompt = prompt,
                 AutoSend = request.AutoSend,
                 ShowContinueOn = !request.AutoSend,
+                EditSteps = request.EditSteps,   // ★ 新增：透传移交携带的编辑步骤
+            };
+        }
+
+        /// <summary>
+        /// 根据移交携带的步骤构造轻量执行计划（不生成 plan.md、不落 JSON、不创建任务面板）。
+        /// </summary>
+        /// <param name="handoff">移交定义（EditSteps 非空，调用方已保证）</param>
+        internal static AgentTaskPlan BuildLightweightPlanFromHandoff(AgentHandoff handoff)
+        {
+            var steps = new List<AgentStep>();
+            foreach (var s in handoff.EditSteps!.Take(4))     // 双重保护：工具层已截断，这里兜底
+            {
+                steps.Add(new AgentStep
+                {
+                    Index = steps.Count + 1,                                                       // 顺序重排
+                    Title = s.Title,
+                    Description = string.IsNullOrWhiteSpace(s.Description) ? s.Title : s.Description,  // 空描述回退标题
+                    Status = AgentStepStatus.Pending,
+                    RequiresApproval = false,
+                });
+            }
+
+            return new AgentTaskPlan
+            {
+                Intent = AgentIntent.CodeChange,
+                Title = LocalizationService.Instance["plan.lightweightTitle"],
+                Steps = steps,
+                Source = PlanSource.None,      // 不创建任务面板，仅思考气泡/执行时间线
+                IsCompleted = false,
+                IsCancelled = false,
+                PlanFilePath = null,           // 无 plan.md；ExecuteHandoffAsync 的 File.Exists 判定会自动跳过
+                // 严禁设置 IsFromPlanAgent = true —— setter 副作用会把 Source 提升为 PlanAgent
             };
         }
 
@@ -2682,6 +2715,15 @@ namespace DeepSeek_v4_for_VisualStudio.Services.Agents
             AgentFactory? agentFactory = null)
         {
             Logger.Info($"[{Definition.Name}] Handoff: → {handoff.TargetAgent} ({handoff.Label})");
+
+            // ── 计算有效计划：原计划非空且未完成时优先；否则按移交携带的 EditSteps 构造轻量计划 ──
+            AgentTaskPlan? effectivePlan = activePlan;
+            if (handoff.TargetAgent == AgentType.Edit
+                && handoff.EditSteps != null && handoff.EditSteps.Count > 0
+                && (effectivePlan == null || effectivePlan.IsCompleted))
+            {
+                effectivePlan = BuildLightweightPlanFromHandoff(handoff);
+            }
 
             BaseAgent targetAgent;
             if (agentFactory != null)
@@ -2710,14 +2752,14 @@ namespace DeepSeek_v4_for_VisualStudio.Services.Agents
             sb.AppendLine(AiPrompts.HandoffContextPrompt);
             sb.AppendLine();
 
-            if (activePlan != null)
+            if (effectivePlan != null)
             {
                 sb.AppendLine();
-                sb.AppendLine(string.Format(LocalizationService.Instance["plan.format.title"], activePlan.Title));
-                sb.AppendLine(string.Format(LocalizationService.Instance["plan.format.stepCount"], activePlan.Steps.Count));
+                sb.AppendLine(string.Format(LocalizationService.Instance["plan.format.title"], effectivePlan.Title));
+                sb.AppendLine(string.Format(LocalizationService.Instance["plan.format.stepCount"], effectivePlan.Steps.Count));
                 sb.AppendLine();
 
-                foreach (var s in activePlan.Steps)
+                foreach (var s in effectivePlan.Steps)
                 {
                     sb.AppendLine(string.Format(LocalizationService.Instance["plan.format.stepItem"], s.Index, s.Title));
                     sb.AppendLine(s.Description);
@@ -2727,7 +2769,7 @@ namespace DeepSeek_v4_for_VisualStudio.Services.Agents
 
             // ── 注入 plan.md 概述（仅开头部分，避免完整文档占用过多 token）──
             //     完整步骤详情已通过上方结构化列表提供，无需重复注入全部 plan.md
-            string? planFilePath = context.PlanFilePath ?? activePlan?.PlanFilePath;
+            string? planFilePath = context.PlanFilePath ?? effectivePlan?.PlanFilePath;
             if (!string.IsNullOrEmpty(planFilePath) && File.Exists(planFilePath))
             {
                 try
@@ -2768,7 +2810,7 @@ namespace DeepSeek_v4_for_VisualStudio.Services.Agents
 
             string handoffMessage = sb.ToString();
             // ── 保留 context 中已有的 ActivePlan，仅在非 null 时覆盖 ──
-            context.ActivePlan = activePlan ?? context.ActivePlan;
+            context.ActivePlan = effectivePlan ?? context.ActivePlan;
             // ── 刷新 ConversationHistory ──
             if (context.ContextManager != null)
                 context.ConversationHistory = context.ContextManager.GetConversationHistory();

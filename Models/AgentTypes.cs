@@ -75,6 +75,12 @@ namespace DeepSeek_v4_for_VisualStudio.Models
         public bool ShowContinueOn { get; set; } = true;
 
         /// <summary>
+        /// 移交 Edit Agent 时携带的规划步骤（≤4 步），仅 TargetAgent == AgentType.Edit 时生效。
+        /// 用于 Edit 执行时按「执行步骤 x/y: 标题」显示进度；不生成 JSON 计划与 plan.md。
+        /// </summary>
+        public List<AgentStep>? EditSteps { get; set; }
+
+        /// <summary>
         /// 源 Agent 在当前 Handoff 前实际缓存的消息前缀。
         /// 仅在同一进程内的 Handoff 链/按钮执行时使用，不随 HandoffJson 持久化。
         /// </summary>
@@ -315,5 +321,11 @@ namespace DeepSeek_v4_for_VisualStudio.Models
 
         /// <summary>是否自动执行（不等待用户确认）</summary>
         public bool AutoSend { get; set; }
+
+        /// <summary>
+        /// 移交 Edit Agent 时携带的规划步骤（≤4 步），仅 TargetAgent == AgentType.Edit 时生效。
+        /// 用于 Edit 执行时按「执行步骤 x/y: 标题」显示进度；不生成 JSON 计划与 plan.md。
+        /// </summary>
+        public List<AgentStep>? EditSteps { get; set; }
     }
 }
