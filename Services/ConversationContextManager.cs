@@ -387,7 +387,7 @@ namespace DeepSeek_v4_for_VisualStudio.Services
         /// <summary>
         /// <summary>
         /// 设置记忆上下文（注入为 system 消息）。
-        /// 会话初始化时由 ChatControl 调用，包含用户记忆和仓库记忆。
+        /// 会话初始化时由 ChatControl 调用，包含用户记忆。
         /// </summary>
         public void SetMemoryContext(string? memoryContext)
         {

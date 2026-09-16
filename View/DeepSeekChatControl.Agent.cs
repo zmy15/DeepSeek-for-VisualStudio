@@ -181,13 +181,7 @@ namespace DeepSeek_v4_for_VisualStudio.View
                 if (_memoryService != null)
                 {
                     string userMemory = _memoryService.GetMemoryContext(MemoryScope.User);
-                    string repoMemory = _memoryService.GetMemoryContext(MemoryScope.Repo, solutionPath: _solutionPath);
-                    var memoryContext = new StringBuilder();
-                    if (!string.IsNullOrWhiteSpace(userMemory))
-                        memoryContext.AppendLine(userMemory);
-                    if (!string.IsNullOrWhiteSpace(repoMemory))
-                        memoryContext.AppendLine(repoMemory);
-                    string combined = memoryContext.ToString().Trim();
+                    string combined = userMemory?.Trim() ?? string.Empty;
                     _contextManager.SetMemoryContext(string.IsNullOrWhiteSpace(combined) ? null : combined);
                 }
             }
