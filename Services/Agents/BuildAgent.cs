@@ -188,27 +188,17 @@ namespace DeepSeek_v4_for_VisualStudio.Services.Agents
                     result.FileChanges = context.ActivePlan.ChangedFiles;
 
                     // ── 构建详细的 Handoff Prompt（包含文件变更统计、步骤详情）──
-                    string summaryPrompt = BuildAskHandoffPrompt(context.ActivePlan);
-                    result.Handoff = new AgentHandoff
-                    {
-                        Label = L["agent.edit.handoffAskLabel"],
-                        TargetAgent = AgentType.Ask,
-                        Prompt = summaryPrompt,
-                        AutoSend = true,
-                        ShowContinueOn = false,
-                    };
+                    string summaryPrompt = AppendBuildResult(
+                        BuildAskHandoffPrompt(context.ActivePlan), aiResponse);
+                    result.Handoff = CreateAskSummaryHandoff(summaryPrompt);
                 }
                 else
                 {
                     // ── 无计划上下文时也移交 Ask 生成总结 ──
-                    result.Handoff = new AgentHandoff
-                    {
-                        Label = L["agent.edit.handoffAskLabel"],
-                        TargetAgent = AgentType.Ask,
-                        Prompt = L["agent.build.handoffAskPrompt"] ?? "请总结以上构建结果。",
-                        AutoSend = true,
-                        ShowContinueOn = false,
-                    };
+                    string summaryPrompt = AppendBuildResult(
+                        L["agent.build.handoffAskPrompt"] ?? "请总结以上构建结果。",
+                        aiResponse);
+                    result.Handoff = CreateAskSummaryHandoff(summaryPrompt);
                 }
 
                 result.Logs.AddRange(_logs);
@@ -232,6 +222,29 @@ namespace DeepSeek_v4_for_VisualStudio.Services.Agents
         #endregion
 
         #region Helpers
+
+        internal static AgentHandoff CreateAskSummaryHandoff(string prompt)
+        {
+            return new AgentHandoff
+            {
+                Label = LocalizationService.Instance["agent.edit.handoffAskLabel"],
+                TargetAgent = AgentType.Ask,
+                Prompt = prompt,
+                AutoSend = true,
+                ShowContinueOn = false,
+                IsSummaryOnly = true,
+            };
+        }
+
+        internal static string AppendBuildResult(string prompt, string? buildResult)
+        {
+            if (string.IsNullOrWhiteSpace(buildResult))
+                return prompt;
+
+            return prompt.TrimEnd()
+                + "\n\n## 本次构建结果\n\n"
+                + buildResult!.Trim();
+        }
 
         /// <summary>
         /// 构建增强用户消息：附加当前编译错误上下文和变更文件信息。

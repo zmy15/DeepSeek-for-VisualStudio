@@ -59,7 +59,7 @@ The extension combines a native-grade WebView2 chat experience with five coopera
 
 ## Installation
 
-Download the latest `.vsix` from [Releases](https://github.com/zmy15/DeepSeek-v4-for-VisualStudio/releases), close Visual Studio, and install it.
+Download the latest `.vsix` from [Releases](https://github.com/zmy15/DeepSeek-for-VisualStudio/releases), close Visual Studio, and install it.
 
 - **Full package**: x64 only, includes local OCR.
 - **No-Local-OCR package**: x64 and ARM64; local OCR is removed and other features remain available.
@@ -67,7 +67,7 @@ Download the latest `.vsix` from [Releases](https://github.com/zmy15/DeepSeek-v4
 To build from source, install the **.NET Framework 4.7.2 SDK** and the **Visual Studio extension development** workload:
 
 ```powershell
-git clone https://github.com/zmy15/DeepSeek-v4-for-VisualStudio.git
+git clone https://github.com/zmy15/DeepSeek-for-VisualStudio.git
 ```
 
 Open `.slnx` in Visual Studio, build the solution, and press `F5` to launch the experimental instance.
@@ -122,22 +122,22 @@ Use `@ask`, `@plan`, `@edit`, or `@build` to select an agent explicitly, or let 
 
 ## Support
 
-- **Usage questions and discussions**: [Discussions](https://github.com/zmy15/DeepSeek-v4-for-VisualStudio/discussions)
-- **Bug reports and feature requests**: [Issues](https://github.com/zmy15/DeepSeek-v4-for-VisualStudio/issues)
+- **Usage questions and discussions**: [Discussions](https://github.com/zmy15/DeepSeek-for-VisualStudio/discussions)
+- **Bug reports and feature requests**: [Issues](https://github.com/zmy15/DeepSeek-for-VisualStudio/issues)
 
 ## Contributors
 
-<a href="https://github.com/zmy15/DeepSeek-v4-for-VisualStudio/graphs/contributors">
-  <img src="https://contrib.rocks/image?repo=zmy15/DeepSeek-v4-for-VisualStudio" />
+<a href="https://github.com/zmy15/DeepSeek-for-VisualStudio/graphs/contributors">
+  <img src="https://contrib.rocks/image?repo=zmy15/DeepSeek-for-VisualStudio" />
 </a>
 
 ## Star History
 
-<a href="https://www.star-history.com/?type=date&repos=zmy15%2FDeepSeek-v4-for-VisualStudio">
+<a href="https://www.star-history.com/?type=date&repos=zmy15%2FDeepSeek-for-VisualStudio">
   <picture>
-    <source media="(prefers-color-scheme: dark)" srcset="https://api.star-history.com/chart?repos=zmy15/DeepSeek-v4-for-VisualStudio&type=date&theme=dark&legend=top-left" />
-    <source media="(prefers-color-scheme: light)" srcset="https://api.star-history.com/chart?repos=zmy15/DeepSeek-v4-for-VisualStudio&type=date&theme=light&legend=top-left" />
-    <img alt="Star History Chart" src="https://api.star-history.com/chart?repos=zmy15/DeepSeek-v4-for-VisualStudio&type=date&legend=top-left" />
+    <source media="(prefers-color-scheme: dark)" srcset="https://api.star-history.com/chart?repos=zmy15/DeepSeek-for-VisualStudio&type=date&theme=dark&legend=top-left" />
+    <source media="(prefers-color-scheme: light)" srcset="https://api.star-history.com/chart?repos=zmy15/DeepSeek-for-VisualStudio&type=date&theme=light&legend=top-left" />
+    <img alt="Star History Chart" src="https://api.star-history.com/chart?repos=zmy15/DeepSeek-for-VisualStudio&type=date&legend=top-left" />
   </picture>
 </a>
 

@@ -543,32 +543,9 @@ namespace DeepSeek_v4_for_VisualStudio.Services.Agents
             return string.Join("\n\n", answers);
         }
 
-        private static List<string> CreateTextPhaseToolWhitelist()
-        {
-            return new List<string>
-            {
-                "runSubagent",
-                "read_file",
-                "grep_search",
-                "file_search",
-                "list_dir",
-                "memory",
-            };
-        }
-
         #endregion
 
         #region Plan Creation
-
-        /// <summary>
-        /// 剥离 DeepSeek 泄露到 content 中的 DSML/工具调用 XML 标签。
-        /// 当 toolChoice=none 时，DeepSeek 仍可能在 content 中输出工具调用意图的 XML 片段。
-        /// 此方法移除所有已知的 DSML 标签及其内容，保留纯文本/JSON。
-        /// </summary>
-        private new static string StripDsmlContent(string text)
-        {
-            return BaseAgent.StripDsmlContent(text);
-        }
 
         /// <summary>
         /// 使用 AI 创建实现计划（JSON 格式）。
@@ -631,7 +608,7 @@ namespace DeepSeek_v4_for_VisualStudio.Services.Agents
                 messages,
                 context.SolutionPath,
                 ct,
-                toolWhitelist: CreateTextPhaseToolWhitelist(),
+                toolWhitelist: CreateReadOnlyTextPhaseToolWhitelist(),
                 temperature: 0.0,
                 responseFormat: "json_object",
                 toolChoiceOverride: "auto",
@@ -1205,7 +1182,7 @@ namespace DeepSeek_v4_for_VisualStudio.Services.Agents
                 mdMessages,
                 context.SolutionPath,
                 ct,
-                toolWhitelist: CreateTextPhaseToolWhitelist(),
+                toolWhitelist: CreateReadOnlyTextPhaseToolWhitelist(),
                 toolChoiceOverride: "auto",
                 noToolsReminderAfterFirstToolRound: L["agent.plan.noMoreToolsAfterToolRound"]);
             AddLog("INFO", L["agent.log.planMdGenerated"]);
