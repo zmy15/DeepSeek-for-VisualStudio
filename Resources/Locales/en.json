@@ -825,6 +825,8 @@
     "agent.plan.discoveryFirstExplore": "If the current context is insufficient for planning (e.g., unfamiliar project structure or code), use runSubagent to explore. First browse top-level structure, then dive into relevant areas.",
     "agent.plan.discoveryUnifiedTail": "If exploration was performed, summarize key findings when done. Whether or not you explored, reply with just DONE (all caps, plain text) when ready — no other output.",
  "agent.plan.discoveryNoExploreNeeded": "## Sufficient Context — No Exploration Needed\n\nThe following information is already available for planning. Reply DONE to proceed to alignment:\n- The user\u0027s original request is listed above\n- If file attachments are included, relevant code is already available\n- If conversation history contains prior exploration results, they can be reused\n\n If you determine existing information is sufficient for planning, **do NOT call any tools** — reply DONE directly.",
+ "agent.summaryOnlySystemPrompt": "You are in the terminal summary phase. Do not call any tools and do not output DSML, XML, pseudo-tool calls, or tool-call syntax; if an accidental call occurs, the system will return its result and continue. Based on the existing context, directly produce the complete final summary and do not hand off the task.",
+ "agent.summaryOnlyNoMoreToolsAfterToolRound": "The tool result has been returned. Do not call any more tools and do not output DSML, XML, pseudo-tool calls, or tool-call syntax; output the final summary directly.",
  "agent.plan.fileContextHeader": "## Uploaded file references",
     "agent.plan.truncatedSuffix": "... (truncated)",
     "plan.md.userTask": "## User\u0027s Original Requirement",

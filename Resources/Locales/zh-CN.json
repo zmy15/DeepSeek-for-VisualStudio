@@ -819,6 +819,8 @@
     "agent.plan.discoveryFirstExplore": "如果当前上下文不足以制定计划（例如不知道项目结构、不熟悉相关代码），请使用 runSubagent 探索项目。先快速浏览顶层结构，再深入相关区域。",
     "agent.plan.discoveryUnifiedTail": "如果进行了探索，请在完成后总结关键发现。无论是否探索，完成后只需回复 DONE（全部大写，纯文本），不要输出其他内容。",
  "agent.plan.discoveryNoExploreNeeded": "## 上下文充足，无需探索\n\n以下信息已可用于制定计划，请直接回复 DONE 进入对齐阶段：\n- 用户的原始需求已在上面给出\n- 如附加了文件上下文，已包含相关代码\n- 如对话历史中包含之前的探索结果，可直接复用\n\n 如果你判断现有信息足以制定实现计划，**不要调用任何工具**，直接回复 DONE。",
+ "agent.summaryOnlySystemPrompt": "你当前处于终态总结阶段。禁止调用任何工具，也不要输出 DSML、XML、伪工具调用或工具调用语法；系统如检测到误调用会返回工具结果并继续。请基于已有上下文直接输出完整、可交付的最终总结，不要移交任务。",
+ "agent.summaryOnlyNoMoreToolsAfterToolRound": "工具结果已经返回。后续禁止再调用任何工具，也不要输出 DSML、XML、伪工具调用或工具调用语法；请直接输出最终总结。",
  "agent.plan.fileContextHeader": "## 用户上传的文件引用",
     "agent.plan.truncatedSuffix": "... (已截断)",
     "plan.md.userTask": "## 用户原始需求",

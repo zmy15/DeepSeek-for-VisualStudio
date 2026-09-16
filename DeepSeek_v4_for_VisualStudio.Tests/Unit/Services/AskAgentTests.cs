@@ -67,6 +67,7 @@ public class AskAgentTests
     {
         var handoffPrompt = global::DeepSeek_v4_for_VisualStudio.Services.LocalizationService.Instance["agent.edit.handoffAskPrompt"];
         var polishPrompt = global::DeepSeek_v4_for_VisualStudio.Services.AiPrompts.SummaryPolishSystemPrompt;
+        var summaryOnlyPrompt = global::DeepSeek_v4_for_VisualStudio.Services.LocalizationService.Instance["agent.summaryOnlySystemPrompt"];
 
         handoffPrompt.Should().Contain("Markdown");
         handoffPrompt.Should().Contain("Mermaid");
@@ -77,6 +78,29 @@ public class AskAgentTests
         polishPrompt.Should().Contain("Mermaid");
         polishPrompt.Should().Contain("LaTeX");
         polishPrompt.Should().Contain("不要求固定结构");
+
+        summaryOnlyPrompt.Should().Contain("禁止调用任何工具");
+        summaryOnlyPrompt.Should().Contain("DSML");
+        summaryOnlyPrompt.Should().Contain("系统如检测到误调用会返回工具结果并继续");
+    }
+
+    [Fact]
+    public void StripToolCallMarkers_RemovesFullWidthDsmlToolCall()
+    {
+        const string prefix = "最终总结：构建成功，1 个项目通过。";
+        const string bars = "\uFF5C\uFF5C";
+        string input = prefix
+            + $"\n\n<{bars}DSML{bars} calls>"
+            + $"\n<{bars}DSML{bars} invoke name=\"read_file\">"
+            + $"\n<{bars}DSML{bars} parameter name=\"path\" string=\"true\">"
+            + @"F:\VSCode\DeepSeek_v4_for_VisualStudio\DeepSeek_v4_for_VisualStudio.slnx"
+            + $"</{bars}DSML{bars} parameter>"
+            + $"\n</{bars}DSML{bars} invoke>"
+            + $"\n</{bars}DSML{bars} calls>";
+
+        string result = StripToolCallMarkersPublic(input);
+
+        result.Should().Be(prefix);
     }
 
     [Fact]
@@ -569,5 +593,12 @@ const y = 2;
         var method = typeof(BaseAgent).GetMethod("ParseCodeChangesFromResult",
             System.Reflection.BindingFlags.NonPublic | System.Reflection.BindingFlags.Static);
         return (List<FileChangeSummary>)method!.Invoke(null, new object[] { aiResult })!;
+    }
+
+    private static string StripToolCallMarkersPublic(string text)
+    {
+        var method = typeof(AskAgent).GetMethod("StripToolCallMarkers",
+            System.Reflection.BindingFlags.NonPublic | System.Reflection.BindingFlags.Static);
+        return (string)method!.Invoke(null, new object[] { text })!;
     }
 }

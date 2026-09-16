@@ -165,6 +165,8 @@ namespace DeepSeek_v4_for_VisualStudio.Services
                 "semantic_search" => true,
                 "grep_search" => true,
                 "file_search" => true,
+                "run_in_terminal" => true,
+                "get_terminal_output" => true,
                 _ => false,
             };
         }

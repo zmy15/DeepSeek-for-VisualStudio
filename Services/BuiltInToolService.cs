@@ -248,6 +248,7 @@ namespace DeepSeek_v4_for_VisualStudio.Services
             _buildService = buildService;
             _memoryService = memoryService;
             _skillService = skillService ?? SkillService.Instance;
+            ToolResultCompactor ??= new ToolResultCompactor();
 
             // ── 注册所有内置工具 ──
             RegisterAllTools();

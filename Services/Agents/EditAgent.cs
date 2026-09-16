@@ -1953,10 +1953,8 @@ namespace DeepSeek_v4_for_VisualStudio.Services.Agents
         {
             if (string.IsNullOrWhiteSpace(aiResult)) return false;
 
-            // 去除 DSML/XML 标签后再判断
-            string clean = System.Text.RegularExpressions.Regex.Replace(aiResult,
-                @"<\|DSML\|[^>]*>.*?</\|DSML\|>", string.Empty,
-                System.Text.RegularExpressions.RegexOptions.Singleline);
+            // 去除 DSML/XML 标签后再判断，复用统一的格式兼容逻辑。
+            string clean = StripDsmlContent(aiResult, removeResidualAttributes: false);
 
             // 去掉 markdown 代码块内容（可能包含示例代码被误判）
             clean = System.Text.RegularExpressions.Regex.Replace(clean,
