@@ -68,6 +68,30 @@ namespace DeepSeek_v4_for_VisualStudio.Services.BuiltInTools
                             {
                                 type = "string",
                                 description = LocalizationService.Instance["tool.requestHandoff.param.taskDescription"]
+                            },
+                            editSteps = new
+                            {
+                                type = "array",
+                                maxItems = 4,
+                                description = LocalizationService.Instance["tool.requestHandoff.param.editSteps"],
+                                items = new
+                                {
+                                    type = "object",
+                                    properties = new
+                                    {
+                                        title = new
+                                        {
+                                            type = "string",
+                                            description = LocalizationService.Instance["tool.requestHandoff.param.editSteps.item.title"]
+                                        },
+                                        description = new
+                                        {
+                                            type = "string",
+                                            description = LocalizationService.Instance["tool.requestHandoff.param.editSteps.item.description"]
+                                        }
+                                    },
+                                    required = new[] { "title" }
+                                }
                             }
                         },
                         required = new[] { "targetAgent", "reason", "taskDescription" }
@@ -87,6 +111,34 @@ namespace DeepSeek_v4_for_VisualStudio.Services.BuiltInTools
             if (string.IsNullOrWhiteSpace(taskDescription))
                 return "Error: request_handoff: 缺少 taskDescription 参数。请描述目标 Agent 需要执行的任务。";
 
+            // ── 解析可选 editSteps → List<AgentStep>?（防御式：非法项跳过、空标题过滤、超限截断）──
+            List<AgentStep>? editSteps = null;
+            if (args.TryGetValue("editSteps", out var editStepsNode) && editStepsNode.ValueKind == JsonValueKind.Array)
+            {
+                var parsedSteps = new List<AgentStep>();
+                foreach (var item in editStepsNode.EnumerateArray())
+                {
+                    if (item.ValueKind != JsonValueKind.Object) continue;
+                    string stepTitle = item.TryGetProperty("title", out var titleNode) && titleNode.ValueKind == JsonValueKind.String
+                        ? (titleNode.GetString() ?? string.Empty).Trim()
+                        : string.Empty;
+                    if (string.IsNullOrEmpty(stepTitle)) continue;   // 空白标题项跳过
+                    string stepDesc = item.TryGetProperty("description", out var descNode) && descNode.ValueKind == JsonValueKind.String
+                        ? (descNode.GetString() ?? string.Empty).Trim()
+                        : string.Empty;
+                    parsedSteps.Add(new AgentStep
+                    {
+                        Index = parsedSteps.Count + 1,               // 顺序重排（从 1 开始）
+                        Title = stepTitle,
+                        Description = stepDesc,
+                        Status = AgentStepStatus.Pending,
+                        RequiresApproval = false,
+                    });
+                    if (parsedSteps.Count >= 4) break;               // 防御性截断：超出 4 步不报错
+                }
+                if (parsedSteps.Count > 0) editSteps = parsedSteps;  // 无有效步骤 → 保持 null
+            }
+
             // 解析目标 Agent 类型
             AgentType targetAgent = targetAgentStr.ToLowerInvariant() switch
             {
@@ -104,7 +156,8 @@ namespace DeepSeek_v4_for_VisualStudio.Services.BuiltInTools
                 TargetAgent = targetAgent,
                 Reason = reason,
                 TaskDescription = taskDescription,
-                AutoSend = true
+                AutoSend = true,
+                EditSteps = editSteps
             };
 
             Logger.Info($"[RequestHandoff] {targetAgentStr} ← {reason.Truncate(80)}");

@@ -41,6 +41,23 @@ namespace DeepSeek_v4_for_VisualStudio.Services.Agents
             "git", "memory"
         };
 
+        /// <summary>
+        /// 文本生成阶段的只读工具白名单。Plan 与 Ask 的总结阶段共用。
+        /// 提示词会要求模型不要主动调用工具，但误调用时仍可通过这些只读工具正常收尾。
+        /// </summary>
+        protected static List<string> CreateReadOnlyTextPhaseToolWhitelist()
+        {
+            return new List<string>
+            {
+                "runSubagent",
+                "read_file",
+                "grep_search",
+                "file_search",
+                "list_dir",
+                "memory",
+            };
+        }
+
         /// <summary>读类 MCP 工具名前缀/关键词（分配给 ExploreAgent）</summary>
         private static readonly string[] ReadMcpPatterns =
         {
@@ -1354,7 +1371,7 @@ namespace DeepSeek_v4_for_VisualStudio.Services.Agents
 
                 if (toolCalls.Count == 0 && contentBuilder.Length > 0)
                 {
-                    var contentText = contentBuilder.ToString();
+                    var contentText = NormalizeDsmlMarkers(contentBuilder.ToString());
                     
                     // Parse leaked DSML / XML format
                     var xmlMatches = Regex.Matches(contentText, @"(?:<｜｜DSML｜｜|<)invoke\s+name=""([^""]+)""[^>]*>(.*?)(?:</｜｜DSML｜｜|</)invoke>", RegexOptions.Singleline | RegexOptions.IgnoreCase);
@@ -1696,6 +1713,14 @@ namespace DeepSeek_v4_for_VisualStudio.Services.Agents
                             int resultIndex = buildResultIndices[0];
                             contentBuilder.Clear();
                             contentBuilder.Append(toolResults[resultIndex]);
+                            // 成功构建会直接结束工具循环，之后不会再有 API 请求更新
+                            // _apiService.LastSentMessages。如果后续程序化 Handoff 仍从最近
+                            // 请求快照取上下文，就会丢失本次 build_solution 的 tool result。
+                            // 因此显式保存当前完整消息列表，确保 Handoff 能看到最终构建结果。
+                            if (Context != null)
+                            {
+                                Context.ForwardedMessages = CloneApiMessages(messages);
+                            }
                             Logger.Info($"[Agent:{Definition.Name}] build_solution 已成功完成，终止工具循环并返回结果。");
                             metrics?.MarkTerminated("build_success");
                             break;
@@ -2663,6 +2688,39 @@ namespace DeepSeek_v4_for_VisualStudio.Services.Agents
                 Prompt = prompt,
                 AutoSend = request.AutoSend,
                 ShowContinueOn = !request.AutoSend,
+                EditSteps = request.EditSteps,   // ★ 新增：透传移交携带的编辑步骤
+            };
+        }
+
+        /// <summary>
+        /// 根据移交携带的步骤构造轻量执行计划（不生成 plan.md、不落 JSON、不创建任务面板）。
+        /// </summary>
+        /// <param name="handoff">移交定义（EditSteps 非空，调用方已保证）</param>
+        internal static AgentTaskPlan BuildLightweightPlanFromHandoff(AgentHandoff handoff)
+        {
+            var steps = new List<AgentStep>();
+            foreach (var s in handoff.EditSteps!.Take(4))     // 双重保护：工具层已截断，这里兜底
+            {
+                steps.Add(new AgentStep
+                {
+                    Index = steps.Count + 1,                                                       // 顺序重排
+                    Title = s.Title,
+                    Description = string.IsNullOrWhiteSpace(s.Description) ? s.Title : s.Description,  // 空描述回退标题
+                    Status = AgentStepStatus.Pending,
+                    RequiresApproval = false,
+                });
+            }
+
+            return new AgentTaskPlan
+            {
+                Intent = AgentIntent.CodeChange,
+                Title = LocalizationService.Instance["plan.lightweightTitle"],
+                Steps = steps,
+                Source = PlanSource.None,      // 不创建任务面板，仅思考气泡/执行时间线
+                IsCompleted = false,
+                IsCancelled = false,
+                PlanFilePath = null,           // 无 plan.md；ExecuteHandoffAsync 的 File.Exists 判定会自动跳过
+                // 严禁设置 IsFromPlanAgent = true —— setter 副作用会把 Source 提升为 PlanAgent
             };
         }
 
@@ -2683,6 +2741,15 @@ namespace DeepSeek_v4_for_VisualStudio.Services.Agents
         {
             Logger.Info($"[{Definition.Name}] Handoff: → {handoff.TargetAgent} ({handoff.Label})");
 
+            // ── 计算有效计划：原计划非空且未完成时优先；否则按移交携带的 EditSteps 构造轻量计划 ──
+            AgentTaskPlan? effectivePlan = activePlan;
+            if (handoff.TargetAgent == AgentType.Edit
+                && handoff.EditSteps != null && handoff.EditSteps.Count > 0
+                && (effectivePlan == null || effectivePlan.IsCompleted))
+            {
+                effectivePlan = BuildLightweightPlanFromHandoff(handoff);
+            }
+
             BaseAgent targetAgent;
             if (agentFactory != null)
                 targetAgent = agentFactory.GetAgent(handoff.TargetAgent);
@@ -2690,6 +2757,7 @@ namespace DeepSeek_v4_for_VisualStudio.Services.Agents
                 throw new InvalidOperationException("AgentFactory 引用为空，无法获取目标 Agent");
 
             targetAgent.Context = context;
+            context.IsSummaryOnlyHandoff = handoff.IsSummaryOnly;
 
             // 如果热链路上尚未消费 ForwardedMessages，优先使用 Handoff 中携带的快照。
             if (context.ForwardedMessages == null && handoff.ForwardedMessages != null)
@@ -2710,14 +2778,14 @@ namespace DeepSeek_v4_for_VisualStudio.Services.Agents
             sb.AppendLine(AiPrompts.HandoffContextPrompt);
             sb.AppendLine();
 
-            if (activePlan != null)
+            if (effectivePlan != null)
             {
                 sb.AppendLine();
-                sb.AppendLine(string.Format(LocalizationService.Instance["plan.format.title"], activePlan.Title));
-                sb.AppendLine(string.Format(LocalizationService.Instance["plan.format.stepCount"], activePlan.Steps.Count));
+                sb.AppendLine(string.Format(LocalizationService.Instance["plan.format.title"], effectivePlan.Title));
+                sb.AppendLine(string.Format(LocalizationService.Instance["plan.format.stepCount"], effectivePlan.Steps.Count));
                 sb.AppendLine();
 
-                foreach (var s in activePlan.Steps)
+                foreach (var s in effectivePlan.Steps)
                 {
                     sb.AppendLine(string.Format(LocalizationService.Instance["plan.format.stepItem"], s.Index, s.Title));
                     sb.AppendLine(s.Description);
@@ -2727,7 +2795,7 @@ namespace DeepSeek_v4_for_VisualStudio.Services.Agents
 
             // ── 注入 plan.md 概述（仅开头部分，避免完整文档占用过多 token）──
             //     完整步骤详情已通过上方结构化列表提供，无需重复注入全部 plan.md
-            string? planFilePath = context.PlanFilePath ?? activePlan?.PlanFilePath;
+            string? planFilePath = context.PlanFilePath ?? effectivePlan?.PlanFilePath;
             if (!string.IsNullOrEmpty(planFilePath) && File.Exists(planFilePath))
             {
                 try
@@ -2768,7 +2836,7 @@ namespace DeepSeek_v4_for_VisualStudio.Services.Agents
 
             string handoffMessage = sb.ToString();
             // ── 保留 context 中已有的 ActivePlan，仅在非 null 时覆盖 ──
-            context.ActivePlan = activePlan ?? context.ActivePlan;
+            context.ActivePlan = effectivePlan ?? context.ActivePlan;
             // ── 刷新 ConversationHistory ──
             if (context.ContextManager != null)
                 context.ConversationHistory = context.ContextManager.GetConversationHistory();
@@ -2975,7 +3043,32 @@ namespace DeepSeek_v4_for_VisualStudio.Services.Agents
         /// 剥离 DeepSeek 泄露到 content 中的 DSML/工具调用 XML 标签。
         /// PlanAgent / BaseAgent 共享使用。
         /// </summary>
-        protected static string StripDsmlContent(string text)
+        protected static string NormalizeDsmlMarkers(string text)
+        {
+            if (string.IsNullOrEmpty(text)) return text;
+
+            // 模型/网关可能返回全角竖线，而不是 ASCII '|'。
+            var normalized = text
+                .Replace('\uFF5C', '|')
+                .Replace('\uFE15', '|')
+                .Replace('\u2502', '|');
+
+            // 同时兼容 <||DSML|| invoke> 与 <|DSML| invoke>。
+            normalized = Regex.Replace(
+                normalized,
+                @"<\s*\|{1,2}\s*DSML\s*\|{1,2}\s*",
+                "<",
+                RegexOptions.IgnoreCase);
+            normalized = Regex.Replace(
+                normalized,
+                @"</\s*\|{1,2}\s*DSML\s*\|{1,2}\s*",
+                "</",
+                RegexOptions.IgnoreCase);
+
+            return normalized;
+        }
+
+        protected static string StripDsmlContent(string text, bool removeResidualAttributes = true)
         {
             if (string.IsNullOrWhiteSpace(text)) return text;
 
@@ -2984,7 +3077,7 @@ namespace DeepSeek_v4_for_VisualStudio.Services.Agents
             //   1. 标准 XML: <tagname>...</tagname>
             //   2. DeepSeek 管道分隔: <|tagname|>...</|tagname|>
             string[] blockTags = {
-                "DSML", "function_calls?", "tool_calls?", "invoke", "parameter",
+                "DSML", "calls", "function_calls?", "tool_calls?", "invoke", "parameter",
                 "VisualStudio_askQuestions", "runSubagent", "tool_result",
                 "file_search", "grep_search", "list_dir", "read_file",
                 "semantic_search", "fetch_webpage", "run_in_terminal",
@@ -2994,7 +3087,7 @@ namespace DeepSeek_v4_for_VisualStudio.Services.Agents
                 "response", "result", "output", "answer"
             };
 
-            string result = text;
+            string result = NormalizeDsmlMarkers(text);
             foreach (var tag in blockTags)
             {
                 // ── 格式1：标准 XML 自闭合标签 <tag ... /> ──
@@ -3029,7 +3122,7 @@ namespace DeepSeek_v4_for_VisualStudio.Services.Agents
             // ── 移除残留的独立开标签/闭标签（标准 XML）──
             result = System.Text.RegularExpressions.Regex.Replace(
                 result,
-                @"</?\s*(?:DSML|function_calls?|tool_calls?|invoke|parameter|VisualStudio_askQuestions|runSubagent|tool_result|response|result|output|answer)[^>]*>",
+                @"</?\s*(?:DSML|calls|function_calls?|tool_calls?|invoke|parameter|VisualStudio_askQuestions|runSubagent|tool_result|response|result|output|answer)[^>]*>",
                 "",
                 System.Text.RegularExpressions.RegexOptions.IgnoreCase);
 
@@ -3042,7 +3135,7 @@ namespace DeepSeek_v4_for_VisualStudio.Services.Agents
             // 更精确的管道分隔残留标签
             result = System.Text.RegularExpressions.Regex.Replace(
                 result,
-                @"<\|?\s*(?:DSML|function_calls?|tool_calls?|invoke|parameter|response|result|output|answer)[^>]*\|?>",
+                @"<\|?\s*(?:DSML|calls|function_calls?|tool_calls?|invoke|parameter|response|result|output|answer)[^>]*\|?>",
                 "",
                 System.Text.RegularExpressions.RegexOptions.IgnoreCase);
 
@@ -3059,13 +3152,16 @@ namespace DeepSeek_v4_for_VisualStudio.Services.Agents
                 "",
                 System.Text.RegularExpressions.RegexOptions.IgnoreCase);
 
-            // ── 额外清理：移除 DSML 属性格式的标签残留 ──
-            // 例如: name="tool_name" 或 type="function" 孤立属性
-            result = System.Text.RegularExpressions.Regex.Replace(
-                result,
-                @"\b(?:name|type|arguments|function)\s*=\s*""[^""]*""",
-                "",
-                System.Text.RegularExpressions.RegexOptions.IgnoreCase);
+            if (removeResidualAttributes)
+            {
+                // ── 额外清理：移除 DSML 属性格式的标签残留 ──
+                // 例如: name="tool_name" 或 type="function" 孤立属性
+                result = System.Text.RegularExpressions.Regex.Replace(
+                    result,
+                    @"\b(?:name|type|arguments|function)\s*=\s*""[^""]*""",
+                    "",
+                    System.Text.RegularExpressions.RegexOptions.IgnoreCase);
+            }
 
             return result.Trim();
         }

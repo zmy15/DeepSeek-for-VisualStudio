@@ -26,4 +26,26 @@ public class BuildAgentTests
         agent.Definition.SystemPrompt.Should().NotContain("build_solution is async");
         agent.Definition.SystemPrompt.Should().NotContain("Turn 2");
     }
+
+    [Fact]
+    public void CreateAskSummaryHandoff_MarksSummaryAsTerminal()
+    {
+        var handoff = BuildAgent.CreateAskSummaryHandoff("summary");
+
+        handoff.TargetAgent.Should().Be(AgentType.Ask);
+        handoff.IsSummaryOnly.Should().BeTrue();
+        handoff.AutoSend.Should().BeTrue();
+        handoff.ShowContinueOn.Should().BeFalse();
+        handoff.Prompt.Should().Be("summary");
+    }
+
+    [Fact]
+    public void AppendBuildResult_IncludesFinalToolResult()
+    {
+        var prompt = BuildAgent.AppendBuildResult("summary", "Build succeeded");
+
+        prompt.Should().Contain("summary");
+        prompt.Should().Contain("本次构建结果");
+        prompt.Should().Contain("Build succeeded");
+    }
 }

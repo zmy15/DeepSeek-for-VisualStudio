@@ -134,6 +134,7 @@ namespace DeepSeek_v4_for_VisualStudio.Services.Agents
             "runSubagent",
             "git",
             "run_in_terminal",
+            "get_terminal_output",
             // 编辑工具 — 允许步骤内增量编辑
             "replace_string_in_file",
             "multi_replace_string_in_file",
@@ -694,8 +695,7 @@ namespace DeepSeek_v4_for_VisualStudio.Services.Agents
             // 避免重复读取文件、重复搜索目录等浪费。
             var retryOutputs = new List<string>();
             List<ChatApiMessage>? messages = null;
-            int stepPromptIndex = 0; // 步骤 prompt 在消息列表中的位置（重试时插入点）
-            int stepToolLoopStart = 0; // 当前步骤工具循环新增消息的起点（排除转发/历史消息）
+            int stepToolLoopStart = 0;
             bool explicitlyNoChanges = false;
 
             for (int retry = 0; retry <= maxFormatRetries; retry++)
@@ -706,21 +706,18 @@ namespace DeepSeek_v4_for_VisualStudio.Services.Agents
                 {
                     // 首次尝试：创建全新的消息列表
                     messages = BuildContextAwareMessages(Definition.SystemPrompt, stepPrompt);
-                    stepPromptIndex = messages.Count - 1; // 步骤 prompt 始终是最后一条
-                    // 工具循环会把 assistant/tool 消息插入到末尾 agent 提示与用户消息之前。
-                    // 因此基线必须指向 agent 提示之前，而不是消息列表末尾。
-                    stepToolLoopStart = Math.Max(0, messages.Count - 2);
                 }
                 else
                 {
                     // 重试：在步骤 prompt 之后、工具消息之前插入格式修正指令
                     // 这样 sys→history→step 前缀保持完整，DeepSeek 可缓存命中的 KV 不变
-                    messages!.Insert(stepPromptIndex + 1, new ChatApiMessage
+                    int retryInsertIndex = ResolveFormatRetryInsertIndex(messages!);
+                    messages!.Insert(retryInsertIndex, new ChatApiMessage
                     {
                         Role = "assistant",
                         Content = result // 上次的（格式错误）输出，作为对话上下文
                     });
-                    messages.Insert(stepPromptIndex + 2, new ChatApiMessage
+                    messages.Insert(retryInsertIndex + 1, new ChatApiMessage
                     {
                         Role = "user",
                         Content = AiPrompts.EditFormatRecoveryPrompt
@@ -751,6 +748,10 @@ namespace DeepSeek_v4_for_VisualStudio.Services.Agents
                     {
                         AddLog("TOOL", toolSummary);
                     });
+
+                stepToolLoopStart = Math.Max(
+                    0,
+                    Context?.ToolHistoryInsertIndex ?? Math.Max(0, messages.Count - 2));
 
                 // ── 累积推理内容（累加所有步骤和重试轮次的思考过程）──
                 if (thinkingBuilder.Length > 0)
@@ -1952,10 +1953,8 @@ namespace DeepSeek_v4_for_VisualStudio.Services.Agents
         {
             if (string.IsNullOrWhiteSpace(aiResult)) return false;
 
-            // 去除 DSML/XML 标签后再判断
-            string clean = System.Text.RegularExpressions.Regex.Replace(aiResult,
-                @"<\|DSML\|[^>]*>.*?</\|DSML\|>", string.Empty,
-                System.Text.RegularExpressions.RegexOptions.Singleline);
+            // 去除 DSML/XML 标签后再判断，复用统一的格式兼容逻辑。
+            string clean = StripDsmlContent(aiResult, removeResidualAttributes: false);
 
             // 去掉 markdown 代码块内容（可能包含示例代码被误判）
             clean = System.Text.RegularExpressions.Regex.Replace(clean,
@@ -2070,6 +2069,19 @@ namespace DeepSeek_v4_for_VisualStudio.Services.Agents
         #endregion
 
         #region Tool-Made Edit Detection (v1.1.10)
+
+        /// <summary>
+        /// 计算格式重试消息的插入位置。工具循环可能压缩并删除旧消息，
+        /// 因此不能复用首次调用前保存的绝对索引；每次重试都应基于当前列表重新计算，
+        /// 并保持末尾的 Agent/路由 system 提示仍位于最后。
+        /// </summary>
+        internal static int ResolveFormatRetryInsertIndex(List<ChatApiMessage> messages)
+        {
+            int index = messages.Count;
+            while (index > 0 && messages[index - 1].Role == "system")
+                index--;
+            return index;
+        }
 
         /// <summary>
         /// 检测本轮消息中是否包含编辑类工具调用（replace_string_in_file / create_file 等）。

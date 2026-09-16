@@ -100,6 +100,11 @@ namespace DeepSeek_v4_for_VisualStudio.Services.Agents
                 return await ExecuteSummaryAsync(userMessage, context);
             }
 
+            if (context.IsSummaryOnlyHandoff)
+            {
+                return await ExecuteSummaryOnlyAsync(userMessage, context);
+            }
+
             AddLog("INFO", string.Format(LocalizationService.Instance["agent.log.askStarted"], userMessage));
 
             var result = new AgentResult
@@ -164,6 +169,70 @@ namespace DeepSeek_v4_for_VisualStudio.Services.Agents
                 }
 
                 AddLog("INFO", string.Format(LocalizationService.Instance["agent.log.askDone"], aiResponse.Length));
+                result.Logs.AddRange(_logs);
+            }
+            catch (OperationCanceledException)
+            {
+                result.Success = false;
+                result.ErrorMessage = LocalizationService.Instance["agent.log.askCancelled"];
+                AddLog("WARN", LocalizationService.Instance["agent.log.askCancelled"]);
+            }
+            catch (Exception ex)
+            {
+                result.Success = false;
+                result.ErrorMessage = ex.Message;
+                AddLog("ERROR", string.Format(LocalizationService.Instance["agent.log.askFailed"], ex.Message));
+            }
+
+            return result;
+        }
+
+        /// <summary>
+        /// 执行不可继续移交的终态总结。工具被完全禁用，避免 Build→Ask 在总结阶段
+        /// 再次把任务交回 Build 而形成跨 Agent 循环。
+        /// </summary>
+        private async Task<AgentResult> ExecuteSummaryOnlyAsync(string userMessage, AgentContext context)
+        {
+            var L = LocalizationService.Instance;
+            AddLog("INFO", string.Format(L["agent.log.askStarted"], userMessage));
+
+            var result = new AgentResult
+            {
+                Success = true,
+            };
+
+            try
+            {
+                var messages = BuildContextAwareMessages(
+                    L["agent.summaryOnlySystemPrompt"],
+                    userMessage,
+                    maxRecentTurns: int.MaxValue);
+
+                var thinkingBuilder = new StringBuilder();
+                string aiResponse = await CallAiWithToolLoopAsync(
+                    messages,
+                    GetWorkspaceRoot(context),
+                    context.CancellationToken,
+                    toolWhitelist: CreateReadOnlyTextPhaseToolWhitelist(),
+                    toolChoiceOverride: "auto",
+                    noToolsReminderAfterFirstToolRound: L["agent.summaryOnlyNoMoreToolsAfterToolRound"],
+                    onThinking: (thinking) =>
+                    {
+                        thinkingBuilder.Append(thinking);
+                        context.OnThinkingChunk?.Invoke(thinking);
+                    },
+                    onContent: (content) =>
+                    {
+                        context.OnContentChunk?.Invoke(content);
+                    },
+                    onToolCall: (toolSummary) => AddLog("TOOL", toolSummary));
+
+                if (thinkingBuilder.Length > 0)
+                    result.ReasoningContent = thinkingBuilder.ToString();
+
+                aiResponse = StripToolCallMarkers(aiResponse);
+                result.Content = aiResponse;
+                AddLog("INFO", string.Format(L["agent.log.askDone"], aiResponse.Length));
                 result.Logs.AddRange(_logs);
             }
             catch (OperationCanceledException)
@@ -664,34 +733,14 @@ namespace DeepSeek_v4_for_VisualStudio.Services.Agents
         {
             if (string.IsNullOrWhiteSpace(text)) return text;
 
-            // 移除 <invoke name="...">...</invoke> DSML 格式工具调用块
-            text = System.Text.RegularExpressions.Regex.Replace(
-                text, @"<\s*invoke\s+name=""[^""]+""[^>]*>.*?</\s*invoke\s*>",
-                string.Empty, System.Text.RegularExpressions.RegexOptions.Singleline | System.Text.RegularExpressions.RegexOptions.IgnoreCase);
+            // 统一的 DSML/工具调用块清理。总结正文不应删除普通属性文本，
+            // 因此关闭 BaseAgent 的“孤立属性”兜底清理。
+            text = StripDsmlContent(text, removeResidualAttributes: false);
 
-            // 移除 <parameter name="...">...</parameter> 残留片段
+            // 移除未实际调用工具时残留的中文意图前缀。
             text = System.Text.RegularExpressions.Regex.Replace(
-                text, @"<\s*parameter\s+name=""[^""]+""[^>]*>.*?</\s*parameter\s*>",
-                string.Empty, System.Text.RegularExpressions.RegexOptions.Singleline | System.Text.RegularExpressions.RegexOptions.IgnoreCase);
-
-            // 移除残留的 invoke/parameter 开/闭标签
-            text = System.Text.RegularExpressions.Regex.Replace(
-                text, @"</?\s*(?:invoke|parameter)\s*[^>]*>",
-                string.Empty, System.Text.RegularExpressions.RegexOptions.IgnoreCase);
-
-            // 移除 <|tool_calls|>...</|tool_calls|> XML 片段
-            text = System.Text.RegularExpressions.Regex.Replace(
-                text, @"<\|[^>]*tool_calls?[^>]*\|>.*?</\|[^>]*tool_calls?[^>]*\|>",
-                string.Empty, System.Text.RegularExpressions.RegexOptions.Singleline | System.Text.RegularExpressions.RegexOptions.IgnoreCase);
-
-            // 移除单个工具调用标签
-            text = System.Text.RegularExpressions.Regex.Replace(
-                text, @"</?\|[^>]*tool_calls?[^>]*\|>",
-                string.Empty, System.Text.RegularExpressions.RegexOptions.IgnoreCase);
-
-            // 移除思考前缀（"让我先查看..."等，AI 思考但没有真正调用工具）
-            text = System.Text.RegularExpressions.Regex.Replace(
-                text, @"^(让我(先)?查看|让我检查|我需要先|我先用|让我读取|我需要读取).*?[。\n]",
+                text,
+                @"^\s*(?:让我(?:先)?(?:查看|检查|读取|确认)|我先(?:查看|检查|读取|确认|核实)|我需要(?:先)?(?:查看|检查|读取|确认|核实)).*?[。.!?\n]",
                 string.Empty, System.Text.RegularExpressions.RegexOptions.Singleline);
 
             return text.Trim();

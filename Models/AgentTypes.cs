@@ -1,4 +1,4 @@
-using System;
+﻿using System;
 using System.Collections.Generic;
 using System.Text.Json.Serialization;
 using System.Threading;
@@ -73,6 +73,17 @@ namespace DeepSeek_v4_for_VisualStudio.Models
 
         /// <summary>是否显示"继续"按钮</summary>
         public bool ShowContinueOn { get; set; } = true;
+
+        /// <summary>
+        /// 移交 Edit Agent 时携带的规划步骤（≤4 步），仅 TargetAgent == AgentType.Edit 时生效。
+        /// 用于 Edit 执行时按「执行步骤 x/y: 标题」显示进度；不生成 JSON 计划与 plan.md。
+        /// </summary>
+        public List<AgentStep>? EditSteps { get; set; }
+
+        /// <summary>
+        /// 是否为只读终态总结移交。目标 Agent 只能生成最终回复，不能调用工具或再次移交。
+        /// </summary>
+        public bool IsSummaryOnly { get; set; }
 
         /// <summary>
         /// 源 Agent 在当前 Handoff 前实际缓存的消息前缀。
@@ -213,6 +224,13 @@ namespace DeepSeek_v4_for_VisualStudio.Models
         public List<ChatApiMessage>? ConsumedForwardedMessages { get; set; }
 
         /// <summary>
+        /// 当前 Handoff 是否只允许目标 Agent 生成终态总结。
+        /// 用于阻止 Build→Ask 总结阶段再次反向 Handoff，形成跨 Agent 循环。
+        /// </summary>
+        [JsonIgnore]
+        public bool IsSummaryOnlyHandoff { get; set; }
+
+        /// <summary>
         /// UI 层已写入 ContextManager 的当前轮原始 user 内容。
         /// Agent 构建请求时用它确认当前 user 已在标准多轮历史中，避免重复包装。
         /// </summary>
@@ -315,5 +333,11 @@ namespace DeepSeek_v4_for_VisualStudio.Models
 
         /// <summary>是否自动执行（不等待用户确认）</summary>
         public bool AutoSend { get; set; }
+
+        /// <summary>
+        /// 移交 Edit Agent 时携带的规划步骤（≤4 步），仅 TargetAgent == AgentType.Edit 时生效。
+        /// 用于 Edit 执行时按「执行步骤 x/y: 标题」显示进度；不生成 JSON 计划与 plan.md。
+        /// </summary>
+        public List<AgentStep>? EditSteps { get; set; }
     }
 }

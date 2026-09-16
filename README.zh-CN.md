@@ -59,7 +59,7 @@ DeepSeek for Visual Studio 将 AI 聊天、代码编辑、解决方案工具、�
 
 ## 安装
 
-从 [Releases](https://github.com/zmy15/DeepSeek-v4-for-VisualStudio/releases) 下载最新 `.vsix`，关闭 Visual Studio 后安装。
+从 [Releases](https://github.com/zmy15/DeepSeek-for-VisualStudio/releases) 下载最新 `.vsix`，关闭 Visual Studio 后安装。
 
 - **完整版**：仅 x64，包含本地 OCR。
 - **No-Local-OCR 版**：x64 和 ARM64；不包含本地 OCR，其余功能可用。
@@ -67,7 +67,7 @@ DeepSeek for Visual Studio 将 AI 聊天、代码编辑、解决方案工具、�
 从源码编译时，请安装 **.NET Framework 4.7.2 SDK** 和 **Visual Studio 扩展开发** 工作负载：
 
 ```powershell
-git clone https://github.com/zmy15/DeepSeek-v4-for-VisualStudio.git
+git clone https://github.com/zmy15/DeepSeek-for-VisualStudio.git
 ```
 
 用 Visual Studio 打开 `.slnx`，编译解决方案后按 `F5` 启动实验实例。
@@ -122,22 +122,22 @@ git clone https://github.com/zmy15/DeepSeek-v4-for-VisualStudio.git
 
 ## 支持
 
-- **使用方法和讨论**：[Discussions](https://github.com/zmy15/DeepSeek-v4-for-VisualStudio/discussions)
-- **Bug 和功能建议**：[Issues](https://github.com/zmy15/DeepSeek-v4-for-VisualStudio/issues)
+- **使用方法和讨论**：[Discussions](https://github.com/zmy15/DeepSeek-for-VisualStudio/discussions)
+- **Bug 和功能建议**：[Issues](https://github.com/zmy15/DeepSeek-for-VisualStudio/issues)
 
 ## 贡献者
 
-<a href="https://github.com/zmy15/DeepSeek-v4-for-VisualStudio/graphs/contributors">
-  <img src="https://contrib.rocks/image?repo=zmy15/DeepSeek-v4-for-VisualStudio" />
+<a href="https://github.com/zmy15/DeepSeek-for-VisualStudio/graphs/contributors">
+  <img src="https://contrib.rocks/image?repo=zmy15/DeepSeek-for-VisualStudio" />
 </a>
 
 ## Star 趋势
 
-<a href="https://www.star-history.com/?type=date&repos=zmy15%2FDeepSeek-v4-for-VisualStudio">
+<a href="https://www.star-history.com/?type=date&repos=zmy15%2FDeepSeek-for-VisualStudio">
   <picture>
-    <source media="(prefers-color-scheme: dark)" srcset="https://api.star-history.com/chart?repos=zmy15/DeepSeek-v4-for-VisualStudio&type=date&theme=dark&legend=top-left" />
-    <source media="(prefers-color-scheme: light)" srcset="https://api.star-history.com/chart?repos=zmy15/DeepSeek-v4-for-VisualStudio&type=date&theme=light&legend=top-left" />
-    <img alt="Star History Chart" src="https://api.star-history.com/chart?repos=zmy15/DeepSeek-v4-for-VisualStudio&type=date&legend=top-left" />
+    <source media="(prefers-color-scheme: dark)" srcset="https://api.star-history.com/chart?repos=zmy15/DeepSeek-for-VisualStudio&type=date&theme=dark&legend=top-left" />
+    <source media="(prefers-color-scheme: light)" srcset="https://api.star-history.com/chart?repos=zmy15/DeepSeek-for-VisualStudio&type=date&theme=light&legend=top-left" />
+    <img alt="Star History Chart" src="https://api.star-history.com/chart?repos=zmy15/DeepSeek-for-VisualStudio&type=date&legend=top-left" />
   </picture>
 </a>
 

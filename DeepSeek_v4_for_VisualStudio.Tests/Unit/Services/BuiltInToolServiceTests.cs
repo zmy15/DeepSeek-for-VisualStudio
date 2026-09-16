@@ -25,6 +25,14 @@ public class BuiltInToolServiceTests
     }
 
     [Fact]
+    public void Constructor_InitializesToolResultCompactor()
+    {
+        var service = new BuiltInToolService();
+
+        service.ToolResultCompactor.Should().NotBeNull();
+    }
+
+    [Fact]
     public void GetFilteredToolDefinitions_WithWhitelist_ReturnsOnlyAllowed()
     {
         var service = new BuiltInToolService();

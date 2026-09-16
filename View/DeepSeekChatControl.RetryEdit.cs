@@ -500,6 +500,9 @@ namespace DeepSeek_v4_for_VisualStudio.View
                 // RunAgentWorkflowAsync 有相同的调用，ExecuteAgentHandoffAsync 此前缺失。
                 await SyncAgentResponseToTreeAndContextAsync();
 
+                // ── 一次 Handoff 执行结束后根据需要自动记录 memory（此前该路径缺失）──
+                TryScheduleAutoMemoryRecord();
+
                 // ── 刷新右下角余额/Token 显示 ──
                 RefreshConsumptionDisplay();
             }

@@ -248,6 +248,7 @@ public class EditAgentTests
         tools.Should().Contain("symbol_search");
         tools.Should().Contain("list_dir");
         tools.Should().Contain("run_in_terminal");
+        tools.Should().Contain("get_terminal_output");
         tools.Should().Contain("VisualStudio_askQuestions");
         tools.Should().NotContain("build_solution");
         tools.Should().NotContain("request_handoff");
@@ -297,6 +298,33 @@ public class EditAgentTests
         tools.Should().NotContain("create_directory");
         tools.Should().NotContain("build_solution");
         tools.Should().Contain("git");
+    }
+
+    [Fact]
+    public void ResolveFormatRetryInsertIndex_UsesCurrentListAfterCompression()
+    {
+        var messages = new List<ChatApiMessage>
+        {
+            new() { Role = "system", Content = "shared prefix" },
+            new() { Role = "user", Content = "execute step" },
+            new() { Role = "system", Content = "edit prompt" },
+            new() { Role = "system", Content = "explicit route" },
+        };
+
+        int staleIndex = messages.Count - 1;
+        messages.RemoveAt(0); // 模拟工具循环压缩删除旧消息
+
+        int retryInsertIndex = EditAgent.ResolveFormatRetryInsertIndex(messages);
+
+        retryInsertIndex.Should().Be(1);
+        retryInsertIndex.Should().BeLessThanOrEqualTo(messages.Count);
+        (staleIndex + 1).Should().BeGreaterThan(messages.Count);
+        Action insert = () => messages.Insert(retryInsertIndex, new ChatApiMessage
+        {
+            Role = "assistant",
+            Content = "invalid format",
+        });
+        insert.Should().NotThrow();
     }
 
     [Fact]
