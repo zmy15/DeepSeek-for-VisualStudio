@@ -1,4 +1,4 @@
-﻿using DeepSeek_v4_for_VisualStudio.Models;
+using DeepSeek_v4_for_VisualStudio.Models;
 using DeepSeek_v4_for_VisualStudio.Services;
 using DeepSeek_v4_for_VisualStudio.Services.Agents;
 using DeepSeek_v4_for_VisualStudio.Services.EditTools;

@@ -1,4 +1,4 @@
-﻿using DeepSeek_v4_for_VisualStudio.Services;
+using DeepSeek_v4_for_VisualStudio.Services;
 using DeepSeek_v4_for_VisualStudio.Utils;
 using Microsoft.VisualStudio.Text;
 using Microsoft.VisualStudio.Text.Editor;
