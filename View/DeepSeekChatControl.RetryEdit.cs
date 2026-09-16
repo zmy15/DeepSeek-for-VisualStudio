@@ -1,4 +1,4 @@
-using DeepSeek_v4_for_VisualStudio.Models;
+﻿using DeepSeek_v4_for_VisualStudio.Models;
 using DeepSeek_v4_for_VisualStudio.Services;
 using DeepSeek_v4_for_VisualStudio.Services.Agents;
 using DeepSeek_v4_for_VisualStudio.Services.EditTools;
@@ -499,6 +499,9 @@ namespace DeepSeek_v4_for_VisualStudio.View
                 // 修复 Plan→Edit 切换后变更总结和 Token 统计丢失的问题。
                 // RunAgentWorkflowAsync 有相同的调用，ExecuteAgentHandoffAsync 此前缺失。
                 await SyncAgentResponseToTreeAndContextAsync();
+
+                // ── 一次 Handoff 执行结束后根据需要自动记录 memory（此前该路径缺失）──
+                TryScheduleAutoMemoryRecord();
 
                 // ── 刷新右下角余额/Token 显示 ──
                 RefreshConsumptionDisplay();

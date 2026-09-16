@@ -1118,39 +1118,8 @@ namespace DeepSeek_v4_for_VisualStudio.View
             // ── 记录 Cache 命中率 ──
             LogCacheHitRate();
 
-            // ── 一次回答结束后根据需要自动记录 memory ──
-            _ = Task.Run(async () =>
-            {
-                try
-                {
-                    string? lastUserMsg = null;
-                    string? lastAssistantMsg = null;
-                    lock (_lock)
-                    {
-                        if (_agentStreamingMsgIndex >= 0 && _agentStreamingMsgIndex < _messages.Count)
-                        {
-                            lastAssistantMsg = _messages[_agentStreamingMsgIndex].Content;
-                        }
-                        // 向前查找最近的用户消息
-                        for (int i = _agentStreamingMsgIndex - 1; i >= 0; i--)
-                        {
-                            if (_messages[i].Role == "user" && !string.IsNullOrEmpty(_messages[i].Content))
-                            {
-                                lastUserMsg = _messages[i].Content;
-                                break;
-                            }
-                        }
-                    }
-                    if (!string.IsNullOrEmpty(lastUserMsg) && !string.IsNullOrEmpty(lastAssistantMsg))
-                    {
-                        await AutoRecordMemoryAsync(lastUserMsg, lastAssistantMsg);
-                    }
-                }
-                catch (Exception ex)
-                {
-                    Logger.Warn($"[Memory] 自动记忆记录异常: {ex.Message}");
-                }
-            });
+            // ── 一次回答结束后根据需要自动记录 memory（与 Handoff 路径共用）──
+            TryScheduleAutoMemoryRecord();
         }
 
         /// <summary>
@@ -1351,6 +1320,50 @@ namespace DeepSeek_v4_for_VisualStudio.View
                 }
             }
             return false;
+        }
+
+        /// <summary>
+        /// 一次回答结束后调度自动记忆：后台读取本轮问答（最近一条 user 消息 + 当前回答正文），
+        /// 交给 AutoRecordMemoryAsync 判断是否需要持久化。常规工作流与按钮触发的 Handoff 收尾共用。
+        /// </summary>
+        private void TryScheduleAutoMemoryRecord()
+        {
+            // ── 一次回答结束后根据需要自动记录 memory ──
+            _ = Task.Run(async () =>
+            {
+                try
+                {
+                    string? lastUserMsg = null;
+                    string? lastAssistantMsg = null;
+                    lock (_lock)
+                    {
+                        if (_agentStreamingMsgIndex >= 0 && _agentStreamingMsgIndex < _messages.Count)
+                        {
+                            lastAssistantMsg = _messages[_agentStreamingMsgIndex].Content;
+                        }
+                        // 向前查找最近的用户消息：只按 Role 判断、找到即停。
+                        // 纯图片/附件轮次的 user 消息 Content 为空，若按非空过滤会跳到更早的旧消息，
+                        // 造成"旧问题 + 新回答"错配记录，故不能用 Content 非空作为继续条件。
+                        for (int i = _agentStreamingMsgIndex - 1; i >= 0; i--)
+                        {
+                            if (_messages[i].Role == "user")
+                            {
+                                lastUserMsg = _messages[i].Content;
+                                break;
+                            }
+                        }
+                    }
+                    // 最近 user 消息无文本（纯图片轮次）或无回答内容时跳过本次记录，避免错配
+                    if (!string.IsNullOrEmpty(lastUserMsg) && !string.IsNullOrEmpty(lastAssistantMsg))
+                    {
+                        await AutoRecordMemoryAsync(lastUserMsg, lastAssistantMsg);
+                    }
+                }
+                catch (Exception ex)
+                {
+                    Logger.Warn($"[Memory] 自动记忆记录异常: {ex.Message}");
+                }
+            });
         }
 
         /// <summary>
