@@ -28,6 +28,16 @@ public class BuildAgentTests
     }
 
     [Fact]
+    public void SystemPrompt_ContainsNoRebuildRule()
+    {
+        var agent = new BuildAgent(new DeepSeekApiService("test-api-key"));
+
+        agent.Definition.SystemPrompt.Should().Contain(
+            global::DeepSeek_v4_for_VisualStudio.Services.LocalizationService.Instance[
+                "system.agent.buildNoRebuildRule"]);
+    }
+
+    [Fact]
     public void CreateAskSummaryHandoff_MarksSummaryAsTerminal()
     {
         var handoff = BuildAgent.CreateAskSummaryHandoff("summary");
@@ -47,5 +57,17 @@ public class BuildAgentTests
         prompt.Should().Contain("summary");
         prompt.Should().Contain("本次构建结果");
         prompt.Should().Contain("Build succeeded");
+    }
+
+    [Fact]
+    public void AppendBuildResult_TruncatesLongOutput()
+    {
+        string longOutput = new string('E', 10000);
+        var prompt = BuildAgent.AppendBuildResult("summary", longOutput);
+
+        prompt.Should().Contain("summary");
+        prompt.Should().Contain("本次构建结果");
+        prompt.Should().Contain("已截断");
+        prompt.Length.Should().BeLessThan(5000);
     }
 }
