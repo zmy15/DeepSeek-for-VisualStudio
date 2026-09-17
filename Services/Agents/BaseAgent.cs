@@ -2719,6 +2719,7 @@ namespace DeepSeek_v4_for_VisualStudio.Services.Agents
                 Intent = AgentIntent.CodeChange,
                 Title = LocalizationService.Instance["plan.lightweightTitle"],
                 Steps = steps,
+                TaskDescription = handoff.Prompt, // 保留完整任务内容，Edit 步骤提示中再注入
                 Source = PlanSource.None,      // 不创建任务面板，仅思考气泡/执行时间线
                 IsCompleted = false,
                 IsCancelled = false,

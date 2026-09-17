@@ -42,6 +42,8 @@ namespace DeepSeek_v4_for_VisualStudio.Services.BuiltInTools
                         Arguments = "--version",
                         RedirectStandardOutput = true,
                         RedirectStandardError = true,
+                        StandardOutputEncoding = Encoding.UTF8,
+                        StandardErrorEncoding = Encoding.UTF8,
                         UseShellExecute = false,
                         CreateNoWindow = true,
                     }
@@ -541,6 +543,8 @@ namespace DeepSeek_v4_for_VisualStudio.Services.BuiltInTools
                 Arguments = gitArgs,
                 RedirectStandardOutput = true,
                 RedirectStandardError = true,
+                StandardOutputEncoding = Encoding.UTF8,
+                StandardErrorEncoding = Encoding.UTF8,
                 UseShellExecute = false,
                 CreateNoWindow = true,
                 WorkingDirectory = workingDir,

@@ -2441,6 +2441,15 @@ namespace DeepSeek_v4_for_VisualStudio.Services.Agents
             sb.AppendLine(string.Format(AiPrompts.EditStepPromptPrefix, plan.Title));
             sb.AppendLine();
 
+            // ── Handoff 携带的完整任务描述：轻量计划仅有步骤标题，必须保留原始任务内容 ──
+            if (!string.IsNullOrWhiteSpace(plan.TaskDescription))
+            {
+                sb.AppendLine("## 任务描述（Handoff 携带，必须严格按此执行）");
+                sb.AppendLine("如果任务描述中给出了文件的完整目标内容（例如「完整内容如下，请照此创建」），必须原样创建，不得自行改写、优化或重新生成该文件内容。");
+                sb.AppendLine(plan.TaskDescription);
+                sb.AppendLine();
+            }
+
             // 第2层：代码记忆（跨步骤持久化，包含未读文件与已修改文件的最新快照）
             if (!string.IsNullOrEmpty(context.CodeMemory))
             {
