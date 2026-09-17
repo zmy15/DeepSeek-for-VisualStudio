@@ -53,6 +53,21 @@ namespace DeepSeek_v4_for_VisualStudio.View
         }
 
         /// <summary>
+        /// 清空仅属于当前会话的编辑瞬态状态。
+        /// _fileChangeHistory 以消息索引为键，切换/新建/清空会话后索引会被复用；
+        /// 不清空会让新会话在重试/编辑消息时误弹上一轮的文件回退提示。
+        /// 方法内部自行加锁，调用方无需先持有 _lock。
+        /// </summary>
+        private void ClearEditTransientState()
+        {
+            lock (_lock)
+            {
+                _fileChangeHistory.Clear();
+                _pendingEditMsgIndex = -1;
+            }
+        }
+
+        /// <summary>
         /// 从 _pendingAgentFileChanges 中消费并记录最近一次 Agent 的文件变更。
         /// </summary>
         private void RecordAgentFileChanges(int userMsgIndex)

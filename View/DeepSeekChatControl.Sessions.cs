@@ -288,6 +288,7 @@ namespace DeepSeek_v4_for_VisualStudio.View
                     _contextManager.Clear();
                     _messagesHtml.Clear();
                     _lastRenderedMessagesLength = 0;
+                    ClearEditTransientState();
                 }
 
                 // ── 切换会话时重置并恢复累计 Token/费用统计 ──
@@ -596,6 +597,7 @@ namespace DeepSeek_v4_for_VisualStudio.View
                     _contextManager.Clear();
                     _messagesHtml.Clear();
                     _lastRenderedMessagesLength = 0;
+                    ClearEditTransientState();
                 }
 
                 var welcomeMsg = new ChatMessage
@@ -687,6 +689,7 @@ namespace DeepSeek_v4_for_VisualStudio.View
                     _contextManager.Clear();
                     _messagesHtml.Clear();
                     _lastRenderedMessagesLength = 0;
+                    ClearEditTransientState();
                 }
 
                 if (_activeSession != null)
@@ -793,6 +796,7 @@ namespace DeepSeek_v4_for_VisualStudio.View
                     _contextManager.Clear();
                     _messagesHtml.Clear();
                     _lastRenderedMessagesLength = 0;
+                    ClearEditTransientState();
                 }
 
                 if (_activeSession != null)

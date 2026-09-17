@@ -1012,6 +1012,7 @@ namespace DeepSeek_v4_for_VisualStudio.View
             // 加载活跃会话的消息
             _messages.Clear();
             _contextManager.Clear();
+            ClearEditTransientState();
 
             bool hasData = _activeSession.ApiHistory.Count > 0
                         || !string.IsNullOrWhiteSpace(_activeSession.TreeDataJson);
