@@ -41,6 +41,13 @@ namespace DeepSeek_v4_for_VisualStudio.Services.BuiltInTools
         /// <summary>同步模式最大等待时间（防止进程僵死导致 Agent 永久卡住）</summary>
         private static readonly TimeSpan SyncTimeout = TimeSpan.FromMinutes(10);
 
+        /// <summary>
+        /// PowerShell 命令前置片断：把控制台输出编码统一为 UTF-8，
+        /// 与下方 StandardOutputEncoding = Encoding.UTF8 配套，避免
+        /// git/dotnet 等工具输出被按 GBK 解码产生乱码。
+        /// </summary>
+        private const string PowerShellUtf8Prefix = "$OutputEncoding = [Console]::OutputEncoding = [Text.Encoding]::UTF8; ";
+
         private static readonly string[] LongRunningCommandFragments =
         {
             "dotnet run",
@@ -833,10 +840,8 @@ namespace DeepSeek_v4_for_VisualStudio.Services.BuiltInTools
 
             // ── Python 环境提示（python / py / pip 命令附加可用性信息）──
             string? pythonHint = null;
-            bool useUtf8Output = false;
             if (IsPythonCommand(command))
             {
-                useUtf8Output = true;
                 var pythonEnv = PythonEnvironmentLazy.Value;
                 if (pythonEnv != null)
                     pythonHint = LocalizationService.Instance.Format(
@@ -871,15 +876,16 @@ namespace DeepSeek_v4_for_VisualStudio.Services.BuiltInTools
                 // 与 BuildService.BuildCmakeWithCommandLineAsync 行为对齐
                 if (isCmakeBuild && vcvarsPath != null)
                 {
-                    string cmdArgs = $"/c \"call \"{vcvarsPath}\" >nul 2>&1 && {command}\"";
+                    // chcp 65001 与下方 UTF-8 解码配套，保证 cmd 路径下中文输出不乱码
+                    string cmdArgs = $"/c \"chcp 65001 >nul & call \"{vcvarsPath}\" >nul 2>&1 && {command}\"";
                     psi = new ProcessStartInfo
                     {
                         FileName = "cmd.exe",
                         Arguments = cmdArgs,
                         RedirectStandardOutput = true,
                         RedirectStandardError = true,
-                        StandardOutputEncoding = useUtf8Output ? Encoding.UTF8 : null,
-                        StandardErrorEncoding = useUtf8Output ? Encoding.UTF8 : null,
+                        StandardOutputEncoding = Encoding.UTF8,
+                        StandardErrorEncoding = Encoding.UTF8,
                         UseShellExecute = false,
                         CreateNoWindow = true,
                         WorkingDirectory = workspaceRoot ?? Directory.GetCurrentDirectory(),
@@ -890,15 +896,15 @@ namespace DeepSeek_v4_for_VisualStudio.Services.BuiltInTools
                 {
                     // ── 命令本身以 cmd /c 开头：直接通过 cmd.exe 执行，避免 PowerShell 嵌套引号问题 ──
                     // 提取 cmd 的参数部分（去掉 "cmd " 或 "cmd.exe " 前缀）
-                    string cmdArgs = command.Substring(command.IndexOf(' ') + 1).Trim();
+                    string cmdArgs = "chcp 65001 >nul & " + command.Substring(command.IndexOf(' ') + 1).Trim();
                     psi = new ProcessStartInfo
                     {
                         FileName = "cmd.exe",
                         Arguments = cmdArgs,
                         RedirectStandardOutput = true,
                         RedirectStandardError = true,
-                        StandardOutputEncoding = useUtf8Output ? Encoding.UTF8 : null,
-                        StandardErrorEncoding = useUtf8Output ? Encoding.UTF8 : null,
+                        StandardOutputEncoding = Encoding.UTF8,
+                        StandardErrorEncoding = Encoding.UTF8,
                         UseShellExecute = false,
                         CreateNoWindow = true,
                         WorkingDirectory = workspaceRoot ?? Directory.GetCurrentDirectory(),
@@ -912,11 +918,11 @@ namespace DeepSeek_v4_for_VisualStudio.Services.BuiltInTools
                     psi = new ProcessStartInfo
                     {
                         FileName = "powershell.exe",
-                        Arguments = $"-NoProfile -Command \"{escapedCommand}\"",
+                        Arguments = $"-NoProfile -Command \"{PowerShellUtf8Prefix}{escapedCommand}\"",
                         RedirectStandardOutput = true,
                         RedirectStandardError = true,
-                        StandardOutputEncoding = useUtf8Output ? Encoding.UTF8 : null,
-                        StandardErrorEncoding = useUtf8Output ? Encoding.UTF8 : null,
+                        StandardOutputEncoding = Encoding.UTF8,
+                        StandardErrorEncoding = Encoding.UTF8,
                         UseShellExecute = false,
                         CreateNoWindow = true,
                         WorkingDirectory = Directory.GetCurrentDirectory(),
@@ -1334,7 +1340,7 @@ namespace DeepSeek_v4_for_VisualStudio.Services.BuiltInTools
         /// 将常见 Unix 风格命令修正为 Windows PowerShell 等价命令。
         /// 此方法是安全网——AI 应通过 system prompt 直接输出 PowerShell 命令。
         /// </summary>
-        private static string NormalizeUnixToPowerShell(string command)
+        internal static string NormalizeUnixToPowerShell(string command)
         {
             if (string.IsNullOrWhiteSpace(command)) return command;
 
@@ -1381,18 +1387,16 @@ namespace DeepSeek_v4_for_VisualStudio.Services.BuiltInTools
                 result = ReplaceCommandWord(result, kvp.Key + " ", kvp.Value + " ");
             }
 
-            // 路径分隔符 `/` → `\`（仅对已知路径模式，避免破坏 URL 等）
-            // 匹配类似 ./path/to/file 或 /absolute/path 的模式
+            // 路径分隔符 `/` → `\`（仅对已知路径模式，避免破坏 URL 等）：
+            // - 相对路径令牌：./script、../lib/x、./a/b/c —— 整个令牌一起转换
+            // - 绝对路径令牌：至少含两级（/usr/bin），避免误改 cmd /c、cmd /k
+            // 前一个字符为字母/数字/:/()/@/\ 时视为 URL、协议或 Windows 路径，保持原样。
             result = System.Text.RegularExpressions.Regex.Replace(
-                result, @"(?<![a-zA-Z])(\./)([^\s;|]+)", @".\$2");
-            //  至少匹配 2 层路径（如 /usr/bin），避免误改 cmd /c、cmd /k 等 Windows 开关
+                result, @"(?<![a-zA-Z0-9_:\)\(/@\\])(\.\.?/[^\s;|]+)",
+                m => m.Groups[1].Value.Replace('/', '\\'));
             result = System.Text.RegularExpressions.Regex.Replace(
-                result, @"(?<![a-zA-Z:\)\(])(/[a-zA-Z0-9_\-\.]+){2,}", m =>
-                    m.Value.Replace('/', '\\'));
-
-            // `./script` → `.\script`
-            result = System.Text.RegularExpressions.Regex.Replace(
-                result, @"(?<![a-zA-Z\\])\./([^\s;|]+)", @".\$1");
+                result, @"(?<![a-zA-Z0-9_:\)\(/@\\])(/[a-zA-Z0-9_\-\.]+/[^\s;|]*)",
+                m => m.Groups[1].Value.Replace('/', '\\'));
 
             return result;
         }

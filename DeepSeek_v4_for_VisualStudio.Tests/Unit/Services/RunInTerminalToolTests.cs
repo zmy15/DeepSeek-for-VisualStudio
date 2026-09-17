@@ -34,6 +34,25 @@ public class RunInTerminalToolTests
     }
 
     [Theory]
+    [InlineData("git remote set-url origin https://github.com/zmy15/DeepSeek-for-VisualStudio.git; git remote -v")]
+    [InlineData("git clone https://github.com/zmy15/DeepSeek-for-VisualStudio.git")]
+    [InlineData("Invoke-WebRequest https://example.com/a/./b -OutFile out.bin")]
+    [InlineData("git remote set-url origin git@github.com:zmy15/DeepSeek-for-VisualStudio.git")]
+    public void NormalizeUnixToPowerShell_KeepsUrlsIntact(string command)
+    {
+        RunInTerminalTool.NormalizeUnixToPowerShell(command).Should().Be(command);
+    }
+
+    [Theory]
+    [InlineData("./scripts/build.sh", ".\\scripts\\build.sh")]
+    [InlineData("/usr/bin/env python3", "\\usr\\bin\\env python3")]
+    [InlineData("python ./tests/run.py", "python .\\tests\\run.py")]
+    public void NormalizeUnixToPowerShell_ConvertsUnixPaths(string command, string expected)
+    {
+        RunInTerminalTool.NormalizeUnixToPowerShell(command).Should().Be(expected);
+    }
+
+    [Theory]
     [InlineData("format C:", DangerousCommandKind.SystemDestruction)]
     [InlineData("diskpart clean", DangerousCommandKind.SystemDestruction)]
     [InlineData("shutdown /s", DangerousCommandKind.Shutdown)]

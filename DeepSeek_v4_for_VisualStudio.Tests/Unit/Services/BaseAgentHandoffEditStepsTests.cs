@@ -134,6 +134,7 @@ public class BaseAgentHandoffEditStepsTests
         var handoff = new AgentHandoff
         {
             TargetAgent = AgentType.Edit,
+            Prompt = "完整任务描述（含目标文件完整内容，请照此创建）",
             EditSteps = new List<AgentStep>
             {
                 new() { Title = "步骤一", Description = "" },
@@ -153,6 +154,7 @@ public class BaseAgentHandoffEditStepsTests
         plan.IsCancelled.Should().BeFalse();
         plan.PlanFilePath.Should().BeNull();
         plan.IsFromPlanAgent.Should().BeFalse();
+        plan.TaskDescription.Should().Be(handoff.Prompt);
 
         plan.Steps.Should().HaveCount(4);
         plan.Steps.Select(s => s.Index).Should().Equal(1, 2, 3, 4);
@@ -190,6 +192,7 @@ public class BaseAgentHandoffEditStepsTests
         injected.Steps.Select(s => s.Index).Should().Equal(1, 2);
         injected.Steps[0].Description.Should().Be("步骤一");
         injected.Title.Should().Be(LocalizationService.Instance["plan.lightweightTitle"]);
+        injected.TaskDescription.Should().Be(handoff.Prompt);
         context.IsPlanningMode.Should().BeTrue();
     }
 
