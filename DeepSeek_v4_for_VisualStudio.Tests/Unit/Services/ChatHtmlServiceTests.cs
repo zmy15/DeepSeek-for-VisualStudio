@@ -1,3 +1,4 @@
+using System.Collections.Generic;
 using System.Reflection;
 using DeepSeek_v4_for_VisualStudio.Models;
 
@@ -85,5 +86,74 @@ public class ChatHtmlServiceTests
         var result = (string?)method!.Invoke(null, new object[] { "a\"b\nc中文" });
 
         result.Should().Be("\"a\\\"b\\nc中文\"");
+    }
+
+    [Fact]
+    public void BuildInitialPage_EditFork_RendersBranchNavInsideAssistantActionsRow()
+    {
+        var messages = new List<ChatMessage>
+        {
+            new ChatMessage
+            {
+                Role = "user",
+                Content = "帮我修改代码",
+                NodeId = "user-1",
+                SiblingCount = 2,
+                SiblingIndex = 1,
+                ForkReason = "edit",
+            },
+            new ChatMessage
+            {
+                Role = "assistant",
+                Content = "已修改完成",
+                NodeId = "assistant-1",
+            },
+        };
+
+        string html = ChatHtmlService.BuildInitialPage(messages);
+
+        CountOccurrences(html, "<div class='branch-nav'>").Should().Be(1);
+        int actionsRowIdx = html.IndexOf("<div class='msg-actions-row'>", StringComparison.Ordinal);
+        int branchNavIdx = html.IndexOf("<div class='branch-nav'>", StringComparison.Ordinal);
+        actionsRowIdx.Should().BeGreaterThanOrEqualTo(0);
+        branchNavIdx.Should().BeGreaterThan(actionsRowIdx);
+    }
+
+    [Fact]
+    public void BuildInitialPage_RetryFork_RendersBranchNavInsideAssistantActionsRow()
+    {
+        var messages = new List<ChatMessage>
+        {
+            new ChatMessage { Role = "user", Content = "请重新回答", NodeId = "user-1" },
+            new ChatMessage
+            {
+                Role = "assistant",
+                Content = "第一版回答",
+                NodeId = "assistant-1",
+                SiblingCount = 2,
+                SiblingIndex = 1,
+                ForkReason = "retry",
+            },
+        };
+
+        string html = ChatHtmlService.BuildInitialPage(messages);
+
+        CountOccurrences(html, "<div class='branch-nav'>").Should().Be(1);
+        int actionsRowIdx = html.IndexOf("<div class='msg-actions-row'>", StringComparison.Ordinal);
+        int branchNavIdx = html.IndexOf("<div class='branch-nav'>", StringComparison.Ordinal);
+        actionsRowIdx.Should().BeGreaterThanOrEqualTo(0);
+        branchNavIdx.Should().BeGreaterThan(actionsRowIdx);
+    }
+
+    private static int CountOccurrences(string haystack, string needle)
+    {
+        int count = 0;
+        int idx = 0;
+        while ((idx = haystack.IndexOf(needle, idx, StringComparison.Ordinal)) >= 0)
+        {
+            count++;
+            idx += needle.Length;
+        }
+        return count;
     }
 }

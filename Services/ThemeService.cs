@@ -433,7 +433,7 @@ table{border-collapse:collapse;margin:8px 0;width:100%}th,td{border:1px solid #4
 @keyframes blink{0%,100%{opacity:1}50%{opacity:0}}@keyframes fadeIn{from{opacity:0;transform:translateY(8px)}to{opacity:1;transform:translateY(0)}}.streaming-cursor{display:inline-block;width:1px;height:14px;background:#4fc1ff;margin-left:2px;animation:blink 1s infinite;vertical-align:text-bottom}
 .branch-nav{display:flex;align-items:center;gap:6px;margin-top:6px;font-size:11px;color:#888}
 .branch-nav-btn{background:transparent;border:1px solid #555;color:#aaa;cursor:pointer;font-size:11px;padding:2px 8px;border-radius:3px}
-.branch-nav-btn:hover:not(:disabled){background:#3c3c3c;color:#e0e0e0}.branch-nav-btn:disabled{opacity:.3;cursor:default}.branch-nav-label{color:#aaa;min-width:40px;text-align:center}
+.branch-nav-btn:hover:not(:disabled){background:#3c3c3c;color:#e0e0e0}.branch-nav-btn:disabled{opacity:.3;cursor:default}.branch-nav-label{color:#aaa;min-width:40px;text-align:center}.msg-actions-row .branch-nav{margin-top:0}
 .tool-call-section{border-left:2px solid #4fc1ff;padding-left:12px;margin:8px 0;font-size:12px;line-height:1.6}
 .tool-call-section p{margin:2px 0}
 .tool-call-section ul{padding-left:16px;margin:4px 0}
@@ -543,7 +543,7 @@ table{border-collapse:collapse;margin:8px 0;width:100%}th,td{border:1px solid #d
 @keyframes blink{0%,100%{opacity:1}50%{opacity:0}}@keyframes fadeIn{from{opacity:0;transform:translateY(8px)}to{opacity:1;transform:translateY(0)}}.streaming-cursor{display:inline-block;width:1px;height:14px;background:#0078d4;margin-left:2px;animation:blink 1s infinite;vertical-align:text-bottom}
 .branch-nav{display:flex;align-items:center;gap:6px;margin-top:6px;font-size:11px;color:#888}
 .branch-nav-btn{background:transparent;border:1px solid #ccc;color:#555;cursor:pointer;font-size:11px;padding:2px 8px;border-radius:3px}
-.branch-nav-btn:hover:not(:disabled){background:#e8e8e8;color:#333}.branch-nav-btn:disabled{opacity:.3;cursor:default}.branch-nav-label{color:#555;min-width:40px;text-align:center}
+.branch-nav-btn:hover:not(:disabled){background:#e8e8e8;color:#333}.branch-nav-btn:disabled{opacity:.3;cursor:default}.branch-nav-label{color:#555;min-width:40px;text-align:center}.msg-actions-row .branch-nav{margin-top:0}
 .tool-call-section{border-left:2px solid #0078d4;padding-left:12px;margin:8px 0;font-size:12px;line-height:1.6}
 .tool-call-section p{margin:2px 0}
 .tool-call-section ul{padding-left:16px;margin:4px 0}
