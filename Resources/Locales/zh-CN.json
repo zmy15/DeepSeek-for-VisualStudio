@@ -547,6 +547,7 @@
     "status.context.selectionAttached": "已添加选中代码块 ({0} 字符, {1})",
     "status.clipboardImagePasted": "已从剪贴板粘贴图像: {0}",
     "status.clipboardPasteFailed": "粘贴图像失败: {0}",
+    "status.paste.largeTextAttached": "长文本已转存为附件 ({0} 字符, {1})",
  "status.addDocFailed": "Error: 添加活动文档失败: {0}",
  "status.addAllFilesFailed": "Error: 添加项目全部文件失败: {0}",
  "status.filesAddedToContext": "已添加 {0} 个文件到上下文",

@@ -554,6 +554,7 @@
     "status.context.selectionAttached": "Selection attached ({0} chars, {1})",
     "status.clipboardImagePasted": "Clipboard image pasted: {0}",
     "status.clipboardPasteFailed": "Paste image failed: {0}",
+    "status.paste.largeTextAttached": "Long pasted text converted to attachment ({0} chars, {1})",
  "status.addDocFailed": "Error: Failed to add active document: {0}",
  "status.addAllFilesFailed": "Error: Failed to add all project files: {0}",
  "status.filesAddedToContext": "Added {0} file(s) to context",
