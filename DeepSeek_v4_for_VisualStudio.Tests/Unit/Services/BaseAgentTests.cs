@@ -21,6 +21,57 @@ public class BaseAgentTests
         BaseAgent.NormalizeToolName(input).Should().Be(expected);
     }
 
+    [Fact]
+    public void ApplyCurrentUserQuestionPrefix_PrefixesOnlyLastUser()
+    {
+        var messages = new List<ChatApiMessage>
+        {
+            new() { Role = "system", Content = "shared prefix" },
+            new() { Role = "user", Content = "旧问题" },
+            new() { Role = "assistant", Content = "旧回答" },
+            new() { Role = "user", Content = "当前问题" },
+            new() { Role = "system", Content = "agent rules" },
+        };
+
+        BaseAgent.ApplyCurrentUserQuestionPrefix(messages);
+
+        messages[3].Content.Should().StartWith("[当前用户提问]");
+        messages[3].Content.Should().EndWith("当前问题");
+        messages[1].Content.Should().Be("旧问题");
+    }
+
+    [Fact]
+    public void ApplyCurrentUserQuestionPrefix_DoesNotDoublePrefix()
+    {
+        var messages = new List<ChatApiMessage>
+        {
+            new() { Role = "user", Content = "[当前用户提问] 已标记" },
+        };
+
+        BaseAgent.ApplyCurrentUserQuestionPrefix(messages);
+
+        messages[0].Content.Should().Be("[当前用户提问] 已标记");
+    }
+
+    [Fact]
+    public void ApplyCurrentUserQuestionPrefix_PrefixesMultimodalTextPart()
+    {
+        var parts = new List<ChatContentPart>
+        {
+            new() { Type = "text", Text = "看图回答问题" },
+            new() { Type = "image_url", ImageUrl = new ChatImageUrl { Url = "data:image/png;base64,xxx" } },
+        };
+        var messages = new List<ChatApiMessage>
+        {
+            new() { Role = "user", MultimodalContent = parts },
+        };
+
+        BaseAgent.ApplyCurrentUserQuestionPrefix(messages);
+
+        parts[0].Text.Should().StartWith("[当前用户提问]");
+        parts[0].Text.Should().EndWith("看图回答问题");
+    }
+
     [Theory]
     [InlineData(200, null, 200)]
     [InlineData(200, 50, 50)]
