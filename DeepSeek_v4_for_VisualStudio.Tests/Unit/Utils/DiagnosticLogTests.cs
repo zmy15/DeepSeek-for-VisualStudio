@@ -1,3 +1,4 @@
+﻿using System.IO;
 using System.Reflection;
 using DeepSeek_v4_for_VisualStudio.Utils;
 
