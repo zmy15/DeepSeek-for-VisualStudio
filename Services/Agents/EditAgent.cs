@@ -3233,12 +3233,13 @@ namespace DeepSeek_v4_for_VisualStudio.Services.Agents
             if (PendingHandoffRequest != null)
                 return ConvertHandoffRequestToHandoff(PendingHandoffRequest);
 
-            // ── 纯只读/终端任务（未产生文件变更且无构建警告）：不再移交 Ask 生成“变更总结”──
+            // ── 纯只读/输出任务（QandA 意图、未产生文件变更且无构建警告）：不再移交 Ask ──
             // 直接返回 Edit Agent 的最终回复作为结果（例如用户要求运行命令并输出内容）。
-            // 这样最终回复是实际内容，而不是被「文件变更总结」覆盖。
-            if (plan.ChangedFiles.Count == 0 && !HasBuildWarningsInLogs())
+            // 其余任务（包括仅执行 git/终端写操作、无文件变更的 Edit 任务）仍移交 Ask 出总结，
+            // AskAgent 已支持基于步骤摘要为空变更场景生成执行结果总结。
+            if (ShouldSkipAskSummaryHandoff(plan, HasBuildWarningsInLogs()))
             {
-                AddLog("INFO", LocalizationService.Instance["agent.log.editNoChangesConfirmed"]);
+                AddLog("INFO", LocalizationService.Instance["agent.log.editReadOnlyOutputSkippedAsk"]);
                 return null;
             }
 
@@ -3258,6 +3259,19 @@ namespace DeepSeek_v4_for_VisualStudio.Services.Agents
 
             // ── 默认 → Ask Agent 生成总结 ──
             return BuildSummaryHandoff(plan);
+        }
+
+        /// <summary>
+        /// 判断是否应跳过移交 Ask 生成总结。
+        /// 只跳过“纯只读/输出执行任务”（QandA 意图、无文件变更、无构建警告）；
+        /// 普通代码修改任务即使因 Git/终端操作导致 ChangedFiles 为空，也必须移交 Ask 出总结。
+        /// </summary>
+        internal static bool ShouldSkipAskSummaryHandoff(AgentTaskPlan plan, bool hasBuildWarnings)
+        {
+            return plan != null
+                && plan.ChangedFiles.Count == 0
+                && !hasBuildWarnings
+                && plan.Intent == AgentIntent.QandA;
         }
 
         /// <summary>

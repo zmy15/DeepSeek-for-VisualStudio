@@ -1398,6 +1398,7 @@
     "agent.log.editStepPermissionDenied": "User denied execution",
  "agent.log.editFormatRetryNotice": "\u003e  Attempt {0} (previous format invalid, auto-retrying)",
  "agent.log.editNoChangesConfirmed": "No changes needed (AI confirmed nothing to modify)",
+    "agent.log.editReadOnlyOutputSkippedAsk": "Read-only/output task (no file changes, no build warnings): skipping Ask summary and returning the execution result directly",
     "agent.log.editFilesModified": "Modified {0} files (format: {1})",
     "agent.log.editNoFilesChanged": "No file changes detected (format: {0}, attempted to match and apply edits)",
  "agent.log.editBraceParenWarningHeader": "\n\n##  Post-edit Sanity Check — Brace/Paren Mismatch\n\n{0}\n\n",

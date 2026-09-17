@@ -86,6 +86,62 @@ public class EditAgentTests
         EditAgent.BuildPlanProgressSnapshot(new AgentTaskPlan()).Should().BeEmpty();
     }
 
+    [Fact]
+    public void ShouldSkipAskSummaryHandoff_CodeChangeWithoutChanges_ReturnsFalse()
+    {
+        // 普通代码修改任务即使没有追踪到文件变更（如纯 Git/终端操作），仍必须移交 Ask 出总结。
+        var plan = new AgentTaskPlan
+        {
+            Intent = AgentIntent.CodeChange,
+            Steps = new List<AgentStep>
+            {
+                new() { Index = 1, Title = "提交合并", Status = AgentStepStatus.Completed },
+            },
+        };
+
+        EditAgent.ShouldSkipAskSummaryHandoff(plan, hasBuildWarnings: false).Should().BeFalse();
+    }
+
+    [Fact]
+    public void ShouldSkipAskSummaryHandoff_ReadOnlyOutputWithoutChanges_ReturnsTrue()
+    {
+        var plan = new AgentTaskPlan
+        {
+            Intent = AgentIntent.QandA,
+            Steps = new List<AgentStep>
+            {
+                new() { Index = 1, Title = "执行只读命令", Status = AgentStepStatus.Completed },
+            },
+        };
+
+        EditAgent.ShouldSkipAskSummaryHandoff(plan, hasBuildWarnings: false).Should().BeTrue();
+    }
+
+    [Theory]
+    [InlineData(true)]  // 有变更 → 不跳过
+    [InlineData(false)] // 有构建警告 → 不跳过
+    public void ShouldSkipAskSummaryHandoff_ChangesOrWarnings_ReturnsFalse(bool withChanges)
+    {
+        var plan = new AgentTaskPlan
+        {
+            Intent = AgentIntent.QandA,
+            Steps = new List<AgentStep>
+            {
+                new() { Index = 1, Title = "任务", Status = AgentStepStatus.Completed },
+            },
+        };
+        if (withChanges)
+        {
+            plan.ChangedFiles.Add(new FileChangeSummary
+            {
+                FilePath = "F:\\repo\\Program.cs",
+                LinesAdded = 1,
+            });
+        }
+
+        EditAgent.ShouldSkipAskSummaryHandoff(plan, hasBuildWarnings: !withChanges).Should().BeFalse();
+    }
+
     #endregion
 
     [Theory]
