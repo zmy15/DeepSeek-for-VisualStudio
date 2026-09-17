@@ -1,4 +1,4 @@
-using DeepSeek_v4_for_VisualStudio.Models;
+﻿using DeepSeek_v4_for_VisualStudio.Models;
 using DeepSeek_v4_for_VisualStudio.Services;
 using DeepSeek_v4_for_VisualStudio.Services.Agents;
 using DeepSeek_v4_for_VisualStudio.Utils;
@@ -77,8 +77,8 @@ namespace DeepSeek_v4_for_VisualStudio.View
             {
                 if (string.IsNullOrEmpty(userText))
                 {
-                    _pendingEditMsgIndex = -1;
-                    StatusLabel.Text = LocalizationService.Instance["status.ready"];
+                    // 编辑状态下输入框为空时提交：视为取消编辑（正确移除上方内联编辑区 UI）
+                    await HandleEditCancelAsync(_pendingEditMsgIndex);
                     return;
                 }
                 await HandleEditResendAsync(_pendingEditMsgIndex, userText);
