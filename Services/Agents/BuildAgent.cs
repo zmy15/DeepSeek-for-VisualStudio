@@ -85,7 +85,8 @@ namespace DeepSeek_v4_for_VisualStudio.Services.Agents
             return LocalizationService.Instance["system.agent.buildPrompt"]
                 + LocalizationService.Instance["system.agent.buildTrustRule"]
                 + AiPrompts.BuildAgentMcpFragment
-                + AiPrompts.AgentConclusionStopRule;
+                + AiPrompts.AgentConclusionStopRule
+                + "\n\n" + LocalizationService.Instance["system.agent.buildNoRebuildRule"];
         }
 
         #endregion
@@ -241,9 +242,20 @@ namespace DeepSeek_v4_for_VisualStudio.Services.Agents
             if (string.IsNullOrWhiteSpace(buildResult))
                 return prompt;
 
+            const int maxChars = 4000;
+            string trimmed = buildResult!.Trim();
+            if (trimmed.Length > maxChars)
+            {
+                const int headChars = 1500;
+                int tailChars = maxChars - headChars;
+                trimmed = trimmed.Substring(0, headChars)
+                    + "\n\n...(构建输出过长，已截断，完整内容请查看 VS 构建输出 / Error List)...\n\n"
+                    + trimmed.Substring(trimmed.Length - tailChars);
+            }
+
             return prompt.TrimEnd()
                 + "\n\n## 本次构建结果\n\n"
-                + buildResult!.Trim();
+                + trimmed;
         }
 
         /// <summary>

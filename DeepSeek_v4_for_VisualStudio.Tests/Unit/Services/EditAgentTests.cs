@@ -87,6 +87,34 @@ public class EditAgentTests
     }
 
     [Fact]
+    public void TruncateBuildResultForHandoff_ShortKeepsFull()
+    {
+        var result = EditAgent.TruncateBuildResultForHandoff("构建成功，0 个错误");
+        result.Should().Be("构建成功，0 个错误");
+    }
+
+    [Fact]
+    public void TruncateBuildResultForHandoff_LongKeepsHeadTailAndNote()
+    {
+        string longOutput = new string('E', 10000);
+        var result = EditAgent.TruncateBuildResultForHandoff(longOutput);
+
+        result.Should().Contain("已截断");
+        result.Should().StartWith(new string('E', 3000));
+        result.Should().EndWith(new string('E', 5000));
+        result.Length.Should().BeLessThan(9000);
+    }
+
+    [Theory]
+    [InlineData(true, false, true)]   // 有编译问题且未禁用自动构建 → 显示“正在修复”
+    [InlineData(false, false, false)] // 无编译问题 → 正常完成
+    [InlineData(true, true, false)]   // 用户/设置禁用自动构建 → 正常完成
+    public void RequiresBuildRepairToast_MatchesHandoffToBuild(bool hasBuildWarnings, bool skipAutoBuild, bool expected)
+    {
+        EditAgent.RequiresBuildRepairToast(hasBuildWarnings, skipAutoBuild).Should().Be(expected);
+    }
+
+    [Fact]
     public void ShouldSkipAskSummaryHandoff_CodeChangeWithoutChanges_ReturnsFalse()
     {
         // 普通代码修改任务即使没有追踪到文件变更（如纯 Git/终端操作），仍必须移交 Ask 出总结。

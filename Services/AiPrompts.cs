@@ -346,8 +346,12 @@ namespace DeepSeek_v4_for_VisualStudio.Services
 
         #region Agent-Specific System Prompt Fragments
 
-        /// <summary>所有 Agent 专属提示词共用的结论停止规则</summary>
-        public static string AgentConclusionStopRule => L["system.agent.conclusionStopRule"];
+        /// <summary>工具调用输出规则 — 调用工具前用一句话预告工具结束后的下一步。</summary>
+        public static string ToolCallOutputRule => L["system.agent.toolCallOutputRule"];
+
+        /// <summary>所有 Agent 专属提示词共用的结论停止规则（含工具调用输出规则）</summary>
+        public static string AgentConclusionStopRule =>
+            L["system.agent.conclusionStopRule"] + "\n\n" + ToolCallOutputRule;
 
         /// <summary>Ask Agent — 代码库探索策略 + 记忆系统 + 移交规则</summary>
         public static string AskAgentPromptFragment => L["system.agent.askPromptFragment"];

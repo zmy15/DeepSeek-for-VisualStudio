@@ -202,7 +202,9 @@ public class AskAgentTests
             new object[] { "AskAgent system prompt", string.Empty, int.MaxValue, true })!;
 
         messages.Count(m => m.Role == "user").Should().Be(1);
-        messages.Last(m => m.Role == "user").Content.Should().Be("你好");
+        string prefix = DeepSeek_v4_for_VisualStudio.Services.LocalizationService.Instance[
+            "system.agent.currentUserQuestionPrefix"];
+        messages.Last(m => m.Role == "user").Content.Should().Be(prefix + "你好");
         messages.Last().Role.Should().Be("system");
         messages.Last().Content.Should().Be("AskAgent system prompt");
         messages.Count(m => m.Role == "system" && m.Content!.Contains("文件读取规则"))

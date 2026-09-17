@@ -958,36 +958,6 @@ namespace DeepSeek_v4_for_VisualStudio.View
             }
         }
 
-        /// <summary>
-        /// 记录跨所有工具调用轮次的累计 Cache 命中率到日志。
-        /// 在所有轮次结束后调用，输出逐轮明细 + 汇总总计。
-        /// </summary>
-        private void LogTotalCacheHitRate(int finalRound, long totalHit, long totalMiss,
-            long totalPrompt, long totalCompletion)
-        {
-            try
-            {
-                long totalCacheable = totalHit + totalMiss;
-                if (totalCacheable == 0) return;
-
-                double aggregateRate = (double)totalHit / totalCacheable;
-                string level = aggregateRate >= 0.90 ? "🟢" : aggregateRate >= 0.50 ? "🟡" : aggregateRate >= 0.20 ? "🟠" : "🔴";
-
-                Logger.Info($"[Cache] ═══════════════════════════════════════");
-                Logger.Info($"[Cache] {level} 累计汇总 ({finalRound} 轮)");
-                Logger.Info($"[Cache]   总 Cache 命中率: {aggregateRate * 100:F1}%");
-                Logger.Info($"[Cache]   累计命中: {totalHit:N0} tokens");
-                Logger.Info($"[Cache]   累计未命中: {totalMiss:N0} tokens");
-                Logger.Info($"[Cache]   累计 Prompt: {totalPrompt:N0} tokens");
-                Logger.Info($"[Cache]   累计 Completion: {totalCompletion:N0} tokens");
-                Logger.Info($"[Cache] ═══════════════════════════════════════");
-            }
-            catch (Exception ex)
-            {
-                Logger.Warn($"[Cache] 记录汇总命中率异常: {ex.Message}");
-            }
-        }
-
         #endregion
 
         /// <summary>

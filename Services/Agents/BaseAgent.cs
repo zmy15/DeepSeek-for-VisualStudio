@@ -804,7 +804,49 @@ namespace DeepSeek_v4_for_VisualStudio.Services.Agents
                 messages.Add(new ChatApiMessage { Role = "system", Content = systemPrompt });
             AppendExplicitRouteInstruction(messages);
 
+            // ── 标记当前用户提问：Ask 主流程（deduplicateCurrentUser=true）的
+            //    当前 user 已在历史中，给最后一条 user 消息加显式前缀，
+            //    避免长上下文/工具链中模型把中间内容误当用户需求而跑偏。 ──
+            if (deduplicateCurrentUser)
+                ApplyCurrentUserQuestionPrefix(messages);
+
             return messages;
+        }
+
+        /// <summary>
+        /// 给“当前用户提问”消息加显式前缀。
+        /// 仅作用于本次请求的消息副本（BuildApiMessagesRecentTurns 已克隆历史），
+        /// 不修改持久化上下文；已有前缀时不重复添加。
+        /// </summary>
+        internal static void ApplyCurrentUserQuestionPrefix(List<ChatApiMessage> messages)
+        {
+            if (messages == null || messages.Count == 0) return;
+
+            string prefix = LocalizationService.Instance["system.agent.currentUserQuestionPrefix"];
+            if (string.IsNullOrWhiteSpace(prefix)) return;
+
+            // 从末尾向前找最后一条 user 消息（跳过尾部 system/工具历史）
+            for (int i = messages.Count - 1; i >= 0; i--)
+            {
+                var m = messages[i];
+                if (m.Role != "user") continue;
+
+                if (m.MultimodalContent is { Count: > 0 })
+                {
+                    var firstText = m.MultimodalContent.FirstOrDefault(p => p.Type == "text");
+                    if (firstText != null
+                        && !firstText.Text.StartsWith(prefix, StringComparison.Ordinal))
+                    {
+                        firstText.Text = prefix + firstText.Text;
+                    }
+                }
+                else if (!string.IsNullOrEmpty(m.Content))
+                {
+                    if (!m.Content!.StartsWith(prefix, StringComparison.Ordinal))
+                        m.Content = prefix + m.Content;
+                }
+                return;
+            }
         }
 
         /// <summary>

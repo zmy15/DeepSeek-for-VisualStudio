@@ -613,8 +613,11 @@ namespace DeepSeek_v4_for_VisualStudio.Services.Agents
                 // ── 直接构建：计划中的构建/运行/测试步骤统一走 build_solution ──
                 string buildResult = await ExecuteDirectBuildAsync(
                     step.Title, context.SolutionPath, ct);
-                step.AiResponse = buildResult;
-                step.ResultSummary = buildResult;
+                // 只保留一句简短结论，避免把完整构建输出写进步骤摘要/UI/Ask 总结。
+                step.ResultSummary = IsSuccessfulBuildResult(buildResult)
+                    ? LocalizationService.Instance["agent.log.editBuildStepPassed"]
+                    : LocalizationService.Instance["agent.log.editBuildStepFailed"];
+                step.AiResponse = step.ResultSummary;
 
                 // ── 记录构建结果到日志，使 HasBuildWarningsInLogs() 能检测到步骤级构建失败 ──
                 LogDirectBuildResult(buildResult);
@@ -2372,17 +2375,25 @@ namespace DeepSeek_v4_for_VisualStudio.Services.Agents
             string oneLine = buildResult.Split(new[] { '\r', '\n' },
                 StringSplitOptions.RemoveEmptyEntries).FirstOrDefault() ?? buildResult;
 
-            bool success = DeepSeek_v4_for_VisualStudio.Services.BuiltInTools.BuildSolutionTool
+            bool success = IsSuccessfulBuildResult(buildResult);
+            if (success)
+                AddLog("INFO", string.Format(LocalizationService.Instance["agent.log.editFinalBuildOk"], oneLine));
+            else
+                AddLog("WARN", string.Format(LocalizationService.Instance["agent.log.editFinalBuildWarn"], oneLine));
+        }
+
+        /// <summary>
+        /// 判断构建结果是否为成功。
+        /// </summary>
+        private static bool IsSuccessfulBuildResult(string buildResult)
+        {
+            return DeepSeek_v4_for_VisualStudio.Services.BuiltInTools.BuildSolutionTool
                     .IsSuccessResult(buildResult)
                 || buildResult.Contains("构建通过")
                 || buildResult.Contains("0 个错误")
                 || buildResult.Contains("0 errors")
                 || buildResult.Contains("0 失败")
                 || buildResult.Contains("0 failed");
-            if (success)
-                AddLog("INFO", string.Format(LocalizationService.Instance["agent.log.editFinalBuildOk"], oneLine));
-            else
-                AddLog("WARN", string.Format(LocalizationService.Instance["agent.log.editFinalBuildWarn"], oneLine));
         }
 
         #endregion
@@ -3203,8 +3214,20 @@ namespace DeepSeek_v4_for_VisualStudio.Services.Agents
                     toastService.Show(
                         "DeepSeek",
                         string.Format(LocalizationService.Instance["toast.taskCancelled"], completed, total));
+                    return;
                 }
-                else if (plan.IsCompleted && failed == 0)
+
+                // ── 编译存在问题且即将移交 Build 修复：本阶段不通知 ──
+                // 完成通知统一由 Ask Agent 在最终总结生成后弹出，避免“任务完成”的误提示。
+                if (RequiresBuildRepairToast(HasBuildWarningsInLogs(), ShouldSkipAutoBuild()))
+                    return;
+
+                // ── 普通代码任务会继续移交 Ask 出总结：这里不提前通知 ──
+                // 只有无 Ask 移交的只读/输出任务（QandA）才在此通知执行结果。
+                if (plan.Intent != AgentIntent.QandA)
+                    return;
+
+                if (plan.IsCompleted && failed == 0)
                 {
                     toastService.Show(
                         "DeepSeek",
@@ -3221,6 +3244,15 @@ namespace DeepSeek_v4_for_VisualStudio.Services.Agents
             {
                 // Toast 通知失败不应影响主流程
             }
+        }
+
+        /// <summary>
+        /// 判断是否应推迟“任务完成”通知：最终构建存在编译问题且即将移交 Build 修复时，
+        /// 只提示“正在修复”，避免给用户已完成的错觉。
+        /// </summary>
+        internal static bool RequiresBuildRepairToast(bool hasBuildWarnings, bool skipAutoBuild)
+        {
+            return hasBuildWarnings && !skipAutoBuild;
         }
 
         /// <summary>
@@ -3287,7 +3319,7 @@ namespace DeepSeek_v4_for_VisualStudio.Services.Agents
             {
                 prompt.AppendLine();
                 prompt.AppendLine(L["agent.edit.handoffBuildResultHeader"]);
-                prompt.AppendLine(_lastDirectBuildResult!.Trim());
+                prompt.AppendLine(TruncateBuildResultForHandoff(_lastDirectBuildResult!));
                 prompt.AppendLine();
                 prompt.AppendLine(L["agent.edit.handoffBuildNoRebuildRule"]);
             }
@@ -3300,6 +3332,25 @@ namespace DeepSeek_v4_for_VisualStudio.Services.Agents
                 AutoSend = true,
                 ShowContinueOn = false,
             };
+        }
+
+        /// <summary>
+        /// 截断过长的构建输出，仅保留首尾关键片段，避免把海量编译日志
+        /// 写入 Handoff/Ask 总结或 UI。完整输出请查看 VS 构建输出 / Error List。
+        /// </summary>
+        internal static string TruncateBuildResultForHandoff(string buildResult, int maxChars = 8000)
+        {
+            string trimmed = buildResult?.Trim() ?? string.Empty;
+            if (trimmed.Length <= maxChars)
+                return trimmed;
+
+            const int headChars = 3000;
+            int tailChars = Math.Max(0, maxChars - headChars);
+            string head = trimmed.Substring(0, Math.Min(headChars, trimmed.Length));
+            string tail = trimmed.Substring(trimmed.Length - Math.Min(tailChars, trimmed.Length));
+            return head
+                + "\n\n...(构建输出过长，已截断，完整内容请查看 VS 构建输出 / Error List)...\n\n"
+                + tail;
         }
 
         /// <summary>

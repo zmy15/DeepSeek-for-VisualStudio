@@ -180,8 +180,9 @@ namespace DeepSeek_v4_for_VisualStudio.Services.BuiltInTools
         }
 
         /// <summary>
-        /// 追加 Error List 实时结构化条目（SVsErrorList → IVsTaskList 全量枚举，上限 30 行）。
+        /// 追加 Error List 实时结构化条目（SVsErrorList → IVsTaskList 全量枚举）。
         /// 与构建输出互补：覆盖 IDE 分析器诊断与未触发构建场景。
+        /// 条数上限与 BuildService.MaxErrorsToReturn 一致，避免并行编译大量错误被截成 30 条。
         /// </summary>
         private async Task<StringBuilder> AppendLiveErrorList(StringBuilder sb)
         {
@@ -189,19 +190,24 @@ namespace DeepSeek_v4_for_VisualStudio.Services.BuiltInTools
             try
             {
                 var items = await _buildService.GetAllErrorsAsync(CancellationToken.None);
-                var errors = items.Where(i => i.Category != "warning").Take(30).ToList();
+                var errors = items.Where(i => i.Category != "warning").ToList();
                 if (errors.Count == 0) return sb;
 
                 sb.AppendLine("--- Live Error List (structured) ---");
-                foreach (var e in errors)
+                var shown = errors.Count > BuildService.MaxErrorsToReturn
+                    ? errors.Take(BuildService.MaxErrorsToReturn).ToList()
+                    : errors;
+                foreach (var e in shown)
                 {
                     string file = Path.GetFileName(e.FileName ?? "");
                     string loc = e.Line > 0 ? $":{e.Line}" : "";
                     string code = string.IsNullOrEmpty(e.ErrorCode) ? "" : $" [{e.ErrorCode}]";
                     sb.AppendLine($"- {(string.IsNullOrEmpty(file) ? "(no file)" : file + loc)}{code}: {e.Description}");
                 }
-                if (items.Count > errors.Count)
-                    sb.AppendLine($"(+{items.Count - errors.Count} warnings/others omitted)");
+                if (errors.Count > shown.Count)
+                    sb.AppendLine($"(共 {errors.Count} 条错误，已显示前 {shown.Count} 条)");
+                else if (items.Count > errors.Count)
+                    sb.AppendLine($"(已过滤 {items.Count - errors.Count} 条 warnings/others)");
             }
             catch (Exception ex)
             {
