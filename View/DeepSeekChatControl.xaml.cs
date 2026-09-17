@@ -80,7 +80,6 @@ namespace DeepSeek_v4_for_VisualStudio.View
         /// 2026-05-21 调优：字符阈值 200→100，时间阈值 120→80ms，提升流式输出响应速度。
         /// </summary>
         private const int StreamRenderInterval = 100;
-        private const int StreamRenderMinIntervalMs = 80;
 
         #endregion
 
@@ -1806,7 +1805,7 @@ namespace DeepSeek_v4_for_VisualStudio.View
         private readonly Dictionary<int, StreamBatchState> _streamBatchStates = new();
         private readonly object _streamBatchLock = new();
 
-        private const long StreamBatchMinIntervalTicks = 60_0000; // 60ms (Stopwatch ticks, 配合 StreamRenderMinIntervalMs=80ms)
+        private const long StreamBatchMinIntervalTicks = 60_0000; // 60ms (Stopwatch ticks)
 
         /// <summary>
         /// 空闲超时定时器：每次 BatchStreamingUpdate 调用后重置 300ms，
@@ -1927,30 +1926,6 @@ namespace DeepSeek_v4_for_VisualStudio.View
                     _flushIdleTimer?.Start();
                 }
             }
-        }
-
-        /// <summary>
-        /// 强制刷新指定消息的批处理缓冲区。
-        /// </summary>
-        private void FlushBatchStream(int messageIndex)
-        {
-            StreamBatchState? state;
-            lock (_streamBatchLock)
-            {
-                if (!_streamBatchStates.TryGetValue(messageIndex, out state))
-                    return;
-                state.LastFlushTicks = 0;
-            }
-            BatchStreamingUpdate(messageIndex);
-        }
-
-        /// <summary>
-        /// 清除指定消息的批处理状态。
-        /// </summary>
-        private void ClearBatchStream(int messageIndex)
-        {
-            lock (_streamBatchLock)
-                _streamBatchStates.Remove(messageIndex);
         }
 
         internal sealed class AttachedFileItem
