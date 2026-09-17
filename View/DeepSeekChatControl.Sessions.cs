@@ -1,4 +1,4 @@
-using DeepSeek_v4_for_VisualStudio.Models;
+﻿using DeepSeek_v4_for_VisualStudio.Models;
 using DeepSeek_v4_for_VisualStudio.Services;
 using DeepSeek_v4_for_VisualStudio.Utils;
 using Microsoft.VisualStudio.Shell;
@@ -44,6 +44,38 @@ namespace DeepSeek_v4_for_VisualStudio.View
                 CreatedAt = DateTime.Now,
                 LastActiveAt = DateTime.Now,
             };
+        }
+
+        /// <summary>
+        /// 将当前活跃会话上下文同步到内置工具服务。
+        /// MemoryTool 依赖 CurrentSessionId 定位会话记忆目录；漏同步会导致写入 session\_default 共享桶。
+        /// </summary>
+        private void SyncActiveSessionToBuiltInTools()
+        {
+            if (_builtInToolService == null) return;
+            _builtInToolService.CurrentSessionId = _activeSession?.Id;
+            _builtInToolService.CurrentSolutionPath = _solutionPath;
+            _builtInToolService.ResetConversationState();
+        }
+
+        /// <summary>
+        /// 删除指定会话的记忆目录（session\{sessionId}\）。异步执行、异常全部捕获。
+        /// </summary>
+        private void TryDeleteSessionMemory(string? sessionId)
+        {
+            var memoryService = _memoryService;
+            if (memoryService == null || string.IsNullOrWhiteSpace(sessionId)) return;
+            _ = Task.Run(async () =>
+            {
+                try
+                {
+                    // path 传空字符串 → 删除整个 session\{sessionId}\ 目录（MemoryService.DeleteAsync 递归删除）
+                    await memoryService.DeleteAsync(MemoryScope.Session, "", sessionId, _solutionPath);
+                    Logger.Info($"[Memory] 已删除会话记忆: {sessionId}");
+                }
+                catch (System.IO.FileNotFoundException) { /* 无记忆目录，属正常 */ }
+                catch (Exception ex) { Logger.Warn($"[Memory] 删除会话记忆失败: {ex.Message}"); }
+            });
         }
 
         /// <summary>
@@ -271,13 +303,8 @@ namespace DeepSeek_v4_for_VisualStudio.View
                         _sessionsContainer.ActiveSessionId = _activeSession.Id;
                     ResetActiveAgentToAsk();
 
-                    // ── 同步当前会话 ID 到内置工具服务（MemoryTool 需要）──
-                    if (_builtInToolService != null)
-                    {
-                        _builtInToolService.CurrentSessionId = _activeSession.Id;
-                        _builtInToolService.CurrentSolutionPath = _solutionPath;
-                        _builtInToolService.ResetConversationState();
-                    }
+                    // ── 同步当前会话上下文到内置工具服务（MemoryTool 需要）──
+                    SyncActiveSessionToBuiltInTools();
 
                     // ── 重置 AI 标题生成状态（切换到的会话可能已有标题） ──
                     _pendingAiTitle = false;
@@ -544,7 +571,11 @@ namespace DeepSeek_v4_for_VisualStudio.View
             if (_sessionsContainer != null)
             {
                 var target = _sessionsContainer.Sessions.FirstOrDefault(s => s.Id == id);
-                if (target != null) _sessionsContainer.Sessions.Remove(target);
+                if (target != null)
+                {
+                    _sessionsContainer.Sessions.Remove(target);
+                    TryDeleteSessionMemory(target.Id);   // 新增：清理会话记忆
+                }
                 ChatPersistenceService.SaveSessions(_solutionPath, _sessionsContainer);
             }
             RefreshHistoryUI();
@@ -581,13 +612,8 @@ namespace DeepSeek_v4_for_VisualStudio.View
                 _sessionsContainer.Sessions.Add(_activeSession);
                 _sessionsContainer.ActiveSessionId = _activeSession.Id;
 
-                // ── 同步当前会话 ID 到内置工具服务 ──
-                if (_builtInToolService != null)
-                {
-                    _builtInToolService.CurrentSessionId = _activeSession.Id;
-                    _builtInToolService.CurrentSolutionPath = _solutionPath;
-                    _builtInToolService.ResetConversationState();
-                }
+                // ── 同步当前会话上下文到内置工具服务 ──
+                SyncActiveSessionToBuiltInTools();
 
                 lock (_lock)
                 {
@@ -671,14 +697,16 @@ namespace DeepSeek_v4_for_VisualStudio.View
                 UpdateButtonsState();
 
                 string deletedTitle = _activeSession.Title;
+                string deletedSessionId = _activeSession.Id;
                 _sessionsContainer.Sessions.Remove(_activeSession);
+                TryDeleteSessionMemory(deletedSessionId);
 
                 // 切换到第一个会话
                 _activeSession = _sessionsContainer.Sessions.FirstOrDefault();
                 _sessionsContainer.ActiveSessionId = _activeSession?.Id;
 
                 ResetActiveAgentToAsk();
-                _builtInToolService?.ResetConversationState();
+                SyncActiveSessionToBuiltInTools();
 
                 lock (_lock)
                 {
