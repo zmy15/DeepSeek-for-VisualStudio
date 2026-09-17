@@ -1890,9 +1890,14 @@ namespace DeepSeek_v4_for_VisualStudio.View
                         && state.Reasoning.Length - state.LastFlushedReasoningLength >= 50)
                     || state.ReasoningDelta.Length >= 50;
                 bool timeElapsed = elapsed >= StreamBatchMinIntervalTicks;
+                // 思考增量只写入 ReasoningDelta（不写 Content/Reasoning），
+                // 时间兜底必须覆盖它，否则慢速思考要攒满 50 字符才推送一次，流式观感很差。
+                bool hasAnyPending = state.Content.Length > 0
+                    || state.Reasoning.Length > 0
+                    || state.ReasoningDelta.Length > 0;
 
                 if (state.IsComplete || contentChanged || reasoningChanged
-                    || (timeElapsed && (state.Content.Length > 0 || state.Reasoning.Length > 0)))
+                    || (timeElapsed && hasAnyPending))
                 {
                     state.LastFlushTicks = now;
                     state.LastFlushedReasoningLength = state.Reasoning.Length;
@@ -1915,7 +1920,7 @@ namespace DeepSeek_v4_for_VisualStudio.View
                 }
 
                 // ── 有任意内容且未完成：重置空闲超时定时器（300ms 无新输入则强制刷新）──
-                if (!state.IsComplete && (state.Content.Length > 0 || state.Reasoning.Length > 0))
+                if (!state.IsComplete && hasAnyPending)
                 {
                     EnsureFlushIdleTimer();
                     _flushIdleTimer?.Stop();
