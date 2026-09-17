@@ -87,6 +87,40 @@ public class BaseAgentHandoffEditStepsTests
         parsed[1].Description.Should().Be("描述二");
     }
 
+    /// <summary>HandoffRequest.GitState 原样透传到 AgentHandoff.GitState。</summary>
+    [Fact]
+    public void ConvertHandoffRequestToHandoff_TransfersGitState()
+    {
+        var agent = CreateAgent();
+        var request = new HandoffRequest
+        {
+            SourceAgent = AgentType.Ask,
+            TargetAgent = AgentType.Edit,
+            Reason = "测试原因",
+            TaskDescription = "测试任务",
+            GitState = new AgentGitStateSnapshot
+            {
+                Branch = "master",
+                HeadSha = "4c22e6e",
+                IsClean = true,
+                Refs = new Dictionary<string, string>
+                {
+                    ["origin/master"] = "4c22e6e",
+                },
+            },
+        };
+
+        var handoff = agent.ExposeConvert(request);
+
+        var gitState = handoff.GitState;
+        gitState.Should().NotBeNull();
+        gitState!.Branch.Should().Be("master");
+        gitState.HeadSha.Should().Be("4c22e6e");
+        gitState.IsClean.Should().BeTrue();
+        gitState.Refs.Should().HaveCount(1);
+        gitState.Refs!["origin/master"].Should().Be("4c22e6e");
+    }
+
     #endregion
 
     #region BuildLightweightPlanFromHandoff

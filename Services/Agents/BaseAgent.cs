@@ -2691,6 +2691,7 @@ namespace DeepSeek_v4_for_VisualStudio.Services.Agents
                 AutoSend = request.AutoSend,
                 ShowContinueOn = !request.AutoSend,
                 EditSteps = request.EditSteps,   // ★ 新增：透传移交携带的编辑步骤
+                GitState = request.GitState,      // 透传移交携带的 Git 状态快照
             };
         }
 
@@ -2834,6 +2835,33 @@ namespace DeepSeek_v4_for_VisualStudio.Services.Agents
                 sb.AppendLine();
                 sb.AppendLine("##  代码记忆（跨步骤持久化）");
                 sb.AppendLine(context.CodeMemory);
+            }
+
+            // ── 注入移交方已核实的 Git 状态（结构化契约，避免目标 Agent 重复核实）──
+            if (handoff.GitState != null)
+            {
+                sb.AppendLine();
+                sb.AppendLine(LocalizationService.Instance["handoff.gitState.header"]);
+                if (!string.IsNullOrWhiteSpace(handoff.GitState.Branch))
+                    sb.AppendLine(string.Format(
+                        LocalizationService.Instance["handoff.gitState.branch"],
+                        handoff.GitState.Branch));
+                if (!string.IsNullOrWhiteSpace(handoff.GitState.HeadSha))
+                    sb.AppendLine(string.Format(
+                        LocalizationService.Instance["handoff.gitState.head"],
+                        handoff.GitState.HeadSha));
+                sb.AppendLine(handoff.GitState.IsClean
+                    ? LocalizationService.Instance["handoff.gitState.clean"]
+                    : LocalizationService.Instance["handoff.gitState.dirty"]);
+                if (handoff.GitState.Refs is { Count: > 0 })
+                {
+                    string refs = string.Join(", ", handoff.GitState.Refs
+                        .OrderBy(kv => kv.Key, StringComparer.OrdinalIgnoreCase)
+                        .Select(kv => $"{kv.Key}={kv.Value}"));
+                    sb.AppendLine(string.Format(
+                        LocalizationService.Instance["handoff.gitState.refs"], refs));
+                }
+                sb.AppendLine(LocalizationService.Instance["handoff.gitState.trustRule"]);
             }
 
             string handoffMessage = sb.ToString();

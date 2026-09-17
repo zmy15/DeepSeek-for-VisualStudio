@@ -205,7 +205,8 @@ namespace DeepSeek_v4_for_VisualStudio.Services.Agents
                 + LocalizationService.Instance["system.agent.editBuildTrustRule"]
                 + LocalizationService.Instance["system.agent.editPhaseToolOverride"]
                 + AiPrompts.AgentConclusionStopRule
-                + AiPrompts.EditToolCallRule;
+                + AiPrompts.EditToolCallRule
+                + "\n\n" + AiPrompts.EditTrustHandoffGitStateRule;
         }
 
         #endregion
