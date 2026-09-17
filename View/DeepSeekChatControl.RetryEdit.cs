@@ -1,4 +1,4 @@
-using DeepSeek_v4_for_VisualStudio.Models;
+﻿using DeepSeek_v4_for_VisualStudio.Models;
 using DeepSeek_v4_for_VisualStudio.Services;
 using DeepSeek_v4_for_VisualStudio.Services.Agents;
 using DeepSeek_v4_for_VisualStudio.Services.EditTools;
@@ -881,10 +881,7 @@ namespace DeepSeek_v4_for_VisualStudio.View
 
             _pendingEditMsgIndex = userMsgIndex;
 
-            // ── 将原始文本填入输入框，方便用户在输入框中编辑 ──
-            InputTextBox.Text = originalContent ?? string.Empty;
-            InputTextBox.CaretIndex = InputTextBox.Text.Length;
-            InputTextBox.Focus();
+            // ── 编辑仅在上方内联编辑区进行，不同步填充下方输入框 ──
 
             StatusLabel.Text = LocalizationService.Instance["status.editMessageHint"];
         }
@@ -1331,9 +1328,6 @@ namespace DeepSeek_v4_for_VisualStudio.View
         private async Task HandleEditCancelAsync(int userMsgIndex)
         {
             _pendingEditMsgIndex = -1;
-
-            // ── 清空输入框 ──
-            InputTextBox.Text = string.Empty;
 
             // 恢复消息正文为原始内容
             string? originalText = null;
