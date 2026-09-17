@@ -3214,14 +3214,24 @@ namespace DeepSeek_v4_for_VisualStudio.Services.Agents
                     toastService.Show(
                         "DeepSeek",
                         string.Format(LocalizationService.Instance["toast.taskCancelled"], completed, total));
+                    return;
                 }
-                else if (plan.IsCompleted && failed == 0)
+
+                // ── 编译存在问题且即将移交 Build 修复：本阶段不通知 ──
+                // 完成通知统一由 Ask Agent 在最终总结生成后弹出，避免“任务完成”的误提示。
+                if (RequiresBuildRepairToast(HasBuildWarningsInLogs(), ShouldSkipAutoBuild()))
+                    return;
+
+                // ── 普通代码任务会继续移交 Ask 出总结：这里不提前通知 ──
+                // 只有无 Ask 移交的只读/输出任务（QandA）才在此通知执行结果。
+                if (plan.Intent != AgentIntent.QandA)
+                    return;
+
+                if (plan.IsCompleted && failed == 0)
                 {
                     toastService.Show(
                         "DeepSeek",
-                        RequiresBuildRepairToast(HasBuildWarningsInLogs(), ShouldSkipAutoBuild())
-                            ? LocalizationService.Instance["toast.taskBuildRepairPending"]
-                            : string.Format(LocalizationService.Instance["toast.taskComplete"], completed, total));
+                        string.Format(LocalizationService.Instance["toast.taskComplete"], completed, total));
                 }
                 else if (plan.IsCompleted && failed > 0)
                 {

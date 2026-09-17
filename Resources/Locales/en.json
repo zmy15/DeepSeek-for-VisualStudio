@@ -782,7 +782,6 @@
     "toast.taskCancelled": "Task cancelled — {0}/{1} steps completed",
  "toast.taskComplete": "Task complete — {0}/{1} steps all succeeded",
  "toast.taskPartialComplete": "Task complete — {0}/{1} steps succeeded, {2} failed",
-    "toast.taskBuildRepairPending": "Code changes complete, but the build has issues; handing off to Build for repair…",
     "agent.edit.insertEditModifyProject": "InsertEdit modify project file: {0}",
     "agent.edit.projectConfigChange": "Make necessary configuration changes to `{0}`",
     "agent.edit.editPoints": "{0} edit points",

@@ -776,7 +776,6 @@
     "toast.taskCancelled": "任务已取消 — 已完成 {0}/{1} 个步骤",
  "toast.taskComplete": "任务完成 — {0}/{1} 个步骤全部成功",
  "toast.taskPartialComplete": "任务完成 — {0}/{1} 个步骤成功，{2} 个失败",
-    "toast.taskBuildRepairPending": "代码修改完成，但编译存在问题，正在自动移交 Build 修复…",
     "agent.edit.insertEditModifyProject": "InsertEdit 修改项目文件: {0}",
     "agent.edit.projectConfigChange": "对 `{0}` 进行必要的配置变更",
     "agent.edit.editPoints": "{0} 个编辑点",
