@@ -206,6 +206,7 @@ namespace DeepSeek_v4_for_VisualStudio.Services.Agents
                 + LocalizationService.Instance["system.agent.editPhaseToolOverride"]
                 + AiPrompts.AgentConclusionStopRule
                 + AiPrompts.EditToolCallRule
+                + "\n\n" + LocalizationService.Instance["system.agent.editVerificationPrecedenceRule"]
                 + "\n\n" + AiPrompts.EditTrustHandoffGitStateRule;
         }
 
@@ -2430,6 +2431,36 @@ namespace DeepSeek_v4_for_VisualStudio.Services.Agents
             return hasService && hasStartup;
         }
 
+        /// <summary>
+        /// 生成计划进度快照（已完成/当前/待执行步骤列表）。
+        /// 工具循环中消息历史会保留旧的“当前步骤”提示，明确列出进度可避免模型误读。
+        /// </summary>
+        internal static string BuildPlanProgressSnapshot(AgentTaskPlan plan)
+        {
+            if (plan == null || plan.Steps.Count == 0)
+                return string.Empty;
+
+            var sb = new StringBuilder();
+            sb.AppendLine("## 计划进度");
+            int current = Math.Max(1, Math.Min(plan.CurrentStepIndex, plan.Steps.Count));
+            foreach (var s in plan.Steps)
+            {
+                string state = (s.Index == current)
+                    ? "▶ 当前"
+                    : s.Status switch
+                    {
+                        AgentStepStatus.Completed => "✓ 已完成",
+                        AgentStepStatus.Skipped => "– 已跳过",
+                        AgentStepStatus.Failed => "✗ 失败",
+                        _ => "○ 待执行",
+                    };
+                sb.AppendLine($"- {state} 步骤 {s.Index}: {s.Title}");
+            }
+            sb.AppendLine();
+            sb.AppendLine("> 如果你在当前步骤内顺带完成后继步骤，系统会在本步骤结束时自动同步状态并推进进度；不要等待新的步骤提示，直接完成并在回复末尾声明。");
+            return sb.ToString();
+        }
+
         private string BuildStepPrompt(AgentStep step, AgentTaskPlan plan,
             AgentContext context, bool isCodeStep)
         {
@@ -2474,6 +2505,14 @@ namespace DeepSeek_v4_for_VisualStudio.Services.Agents
             sb.AppendLine(string.Format(LocalizationService.Instance["agent.step.currentStepPrompt"], step.Index, plan.Steps.Count, step.Title));
             sb.AppendLine($"步骤详情: {step.Description}");
             sb.AppendLine();
+
+            // ── 计划进度快照：避免模型把历史中的“当前步骤”提示误认为新指令 ──
+            string progressSnapshot = BuildPlanProgressSnapshot(plan);
+            if (!string.IsNullOrEmpty(progressSnapshot))
+            {
+                sb.AppendLine(progressSnapshot);
+                sb.AppendLine();
+            }
 
             if (isCodeStep)
             {

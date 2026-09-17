@@ -1,4 +1,5 @@
 using DeepSeek_v4_for_VisualStudio.Services.Agents;
+using System.Collections.Generic;
 using System.Text;
 
 namespace DeepSeek_v4_for_VisualStudio.Tests.Unit.Services;
@@ -52,6 +53,37 @@ public class EditAgentTests
         bool result = (bool)method!.Invoke(null, new object[] { response })!;
 
         result.Should().Be(expected);
+    }
+
+    [Fact]
+    public void BuildPlanProgressSnapshot_ListsStepsAndMarksCurrent()
+    {
+        var plan = new AgentTaskPlan
+        {
+            CurrentStepIndex = 2,
+            Steps = new List<AgentStep>
+            {
+                new() { Index = 1, Title = "提交修复", Status = AgentStepStatus.Completed },
+                new() { Index = 2, Title = "合并到 dev", Status = AgentStepStatus.InProgress },
+                new() { Index = 3, Title = "验证报告", Status = AgentStepStatus.Pending },
+            },
+        };
+
+        var snapshot = EditAgent.BuildPlanProgressSnapshot(plan);
+
+        snapshot.Should().Contain("## 计划进度");
+        snapshot.Should().Contain("步骤 1: 提交修复");
+        snapshot.Should().Contain("已完成");
+        snapshot.Should().Contain("步骤 2: 合并到 dev");
+        snapshot.Should().Contain("▶ 当前");
+        snapshot.Should().Contain("步骤 3: 验证报告");
+        snapshot.Should().Contain("待执行");
+    }
+
+    [Fact]
+    public void BuildPlanProgressSnapshot_EmptyPlan_ReturnsEmpty()
+    {
+        EditAgent.BuildPlanProgressSnapshot(new AgentTaskPlan()).Should().BeEmpty();
     }
 
     #endregion
