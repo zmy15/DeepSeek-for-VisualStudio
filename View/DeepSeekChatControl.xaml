@@ -1,4 +1,4 @@
-<UserControl x:Class="DeepSeek_v4_for_VisualStudio.View.DeepSeekChatControl"
+﻿<UserControl x:Class="DeepSeek_v4_for_VisualStudio.View.DeepSeekChatControl"
              xmlns="http://schemas.microsoft.com/winfx/2006/xaml/presentation"
              xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
              xmlns:mc="http://schemas.openxmlformats.org/markup-compatibility/2006"
@@ -556,6 +556,7 @@
                          VerticalContentAlignment="Top"
                          Padding="10,8,8,4"
                          PreviewKeyDown="InputTextBox_PreviewKeyDown"
+                         DataObject.Pasting="InputTextBox_Pasting"
                          TextChanged="InputTextBox_TextChanged"
                          GotFocus="InputTextBox_GotFocus"
                          LostFocus="InputTextBox_LostFocus" />

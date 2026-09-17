@@ -1,8 +1,9 @@
-using DeepSeek_v4_for_VisualStudio.Services;
+﻿using DeepSeek_v4_for_VisualStudio.Services;
 using DeepSeek_v4_for_VisualStudio.Utils;
 using System;
 using System.Collections.Generic;
 using System.Linq;
+using System.Text;
 using System.Windows;
 using System.Windows.Input;
 using System.Windows.Media.Imaging;
@@ -22,6 +23,12 @@ namespace DeepSeek_v4_for_VisualStudio.View
         private static readonly string ClipboardTempDir = System.IO.Path.Combine(
             Environment.GetFolderPath(Environment.SpecialFolder.LocalApplicationData),
             "DeepSeekVS", "temp", "clipboard");
+
+        /// <summary>
+        /// 粘贴文本转存阈值：长度 ≥ 该值（含换行，按 UTF-16 string.Length 计数）的粘贴文本
+        /// 将转存为临时文件并添加为附件，而不是插入输入框。
+        /// </summary>
+        internal const int PasteTextToFileThreshold = 5000;
 
         #endregion
 
@@ -129,6 +136,64 @@ namespace DeepSeek_v4_for_VisualStudio.View
                 StatusLabel.Text = string.Format(LocalizationService.Instance["status.clipboardPasteFailed"], ex.Message);
                 return false;
             }
+        }
+
+        /// <summary>
+        /// 将粘贴文本写入目标目录下的临时文件（UTF-8 无 BOM）。
+        /// </summary>
+        /// <param name="text">要保存的文本内容（非空由调用方保证）。</param>
+        /// <param name="targetDir">目标目录；不存在时自动创建。</param>
+        /// <returns>成功返回临时文件的完整路径；失败记录日志并返回 null。</returns>
+        internal static string? SavePastedTextToFile(string text, string targetDir)
+        {
+            try
+            {
+                System.IO.Directory.CreateDirectory(targetDir);
+                string tempPath = System.IO.Path.Combine(targetDir, $"paste_{DateTime.Now:yyyyMMdd_HHmmss_fff}.txt");
+                System.IO.File.WriteAllText(tempPath, text, new UTF8Encoding(false));
+                Logger.Info($"SavePastedTextToFile: 粘贴文本已写入临时文件 - {tempPath}, 长度={text.Length}");
+                return tempPath;
+            }
+            catch (Exception ex)
+            {
+                Logger.Error($"SavePastedTextToFile: 大文本转存失败 - {ex.Message}", ex);
+                return null;
+            }
+        }
+
+        /// <summary>
+        /// 检测并处理“粘贴文本过长”场景：超过阈值时转存为临时文件并添加为附件。
+        /// </summary>
+        /// <param name="text">剪贴板文本；为空或未达阈值时直接返回 false。</param>
+        /// <returns>true 表示已转存并添加为附件（调用方应取消默认粘贴）；false 表示放行默认粘贴。</returns>
+        private bool TryPasteLargeTextAsAttachment(string? text)
+        {
+            if (string.IsNullOrEmpty(text) || text.Length < PasteTextToFileThreshold)
+                return false;
+
+            // 与“选中代码/调试输出”等既有功能共用临时上下文目录，关窗时随 CleanupTempContextFiles 自动清理
+            string tempDir = System.IO.Path.Combine(
+                Environment.GetFolderPath(Environment.SpecialFolder.LocalApplicationData),
+                "DeepSeekVS", "temp", "context");
+            string? tempPath = SavePastedTextToFile(text, tempDir);
+            if (tempPath == null)
+                return false; // 写入失败回退，由调用方放行默认粘贴
+
+            if (!_attachedFilePaths.Contains(tempPath, StringComparer.OrdinalIgnoreCase))
+            {
+                _attachedFilePaths.Add(tempPath);
+                RefreshAttachedFilesUI();
+                StatusLabel.Text = string.Format(
+                    LocalizationService.Instance["status.paste.largeTextAttached"],
+                    text.Length, System.IO.Path.GetFileName(tempPath));
+                Logger.Info($"TryPasteLargeTextAsAttachment: 粘贴文本已转存为附件 - {tempPath}, 长度={text.Length}");
+            }
+            else
+            {
+                Logger.Info($"TryPasteLargeTextAsAttachment: 文件已存在于附件列表 - {tempPath}");
+            }
+
+            return true;
         }
 
         /// <summary>
