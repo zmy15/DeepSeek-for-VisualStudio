@@ -662,15 +662,19 @@ namespace DeepSeek_v4_for_VisualStudio.Services
                             line.Contains("error", StringComparison.OrdinalIgnoreCase)
                             && !line.Contains("0 Error", StringComparison.OrdinalIgnoreCase)
                             && !line.Contains("0 错误", StringComparison.OrdinalIgnoreCase))
-                        .Take(30)
                         .Select(line => line.Trim())
                         .ToList();
 
                     if (errorLines.Count > 0)
                     {
                         sb.AppendLine("### 构建输出 (Output Window)");
-                        foreach (var line in errorLines)
+                        var shown = errorLines.Count > MaxErrorsToReturn
+                            ? errorLines.Take(MaxErrorsToReturn).ToList()
+                            : errorLines;
+                        foreach (var line in shown)
                             sb.AppendLine($"- {line}");
+                        if (errorLines.Count > shown.Count)
+                            sb.AppendLine($"(共 {errorLines.Count} 行错误，已显示前 {shown.Count} 行)");
                         sb.AppendLine();
                     }
                 }
@@ -803,15 +807,19 @@ namespace DeepSeek_v4_for_VisualStudio.Services
                 Logger.Warn($"[BuildService] 枚举全部错误项失败: {ex.Message}");
             }
 
-            if (results.Count > MaxAllErrorsToReturn)
+            if (results.Count > MaxErrorsToReturn)
             {
-                results = results.GetRange(0, MaxAllErrorsToReturn);
+                results = results.GetRange(0, MaxErrorsToReturn);
             }
             return results;
         }
 
-        /// <summary>GetAllErrorsAsync 返回上限（防异常海量条目刷爆上下文）。</summary>
-        private const int MaxAllErrorsToReturn = 200;
+        /// <summary>
+        /// 错误项返回上限。MSBuild 并行编译可能一次性产生上百条错误，
+        /// 过小（如 30）会导致 AI 只看到前几条、误以为错误已修完。
+        /// 仍保留合理上限，防止异常海量条目刷爆上下文。
+        /// </summary>
+        internal const int MaxErrorsToReturn = 500;
 
         /// <summary>
         /// 从 IVsEnumTaskItems 枚举器中收集所有错误项的结构化信息。

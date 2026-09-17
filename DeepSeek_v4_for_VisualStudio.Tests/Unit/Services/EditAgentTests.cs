@@ -1,4 +1,5 @@
 using DeepSeek_v4_for_VisualStudio.Services.Agents;
+using System.Collections.Generic;
 using System.Text;
 
 namespace DeepSeek_v4_for_VisualStudio.Tests.Unit.Services;
@@ -52,6 +53,121 @@ public class EditAgentTests
         bool result = (bool)method!.Invoke(null, new object[] { response })!;
 
         result.Should().Be(expected);
+    }
+
+    [Fact]
+    public void BuildPlanProgressSnapshot_ListsStepsAndMarksCurrent()
+    {
+        var plan = new AgentTaskPlan
+        {
+            CurrentStepIndex = 2,
+            Steps = new List<AgentStep>
+            {
+                new() { Index = 1, Title = "提交修复", Status = AgentStepStatus.Completed },
+                new() { Index = 2, Title = "合并到 dev", Status = AgentStepStatus.InProgress },
+                new() { Index = 3, Title = "验证报告", Status = AgentStepStatus.Pending },
+            },
+        };
+
+        var snapshot = EditAgent.BuildPlanProgressSnapshot(plan);
+
+        snapshot.Should().Contain("## 计划进度");
+        snapshot.Should().Contain("步骤 1: 提交修复");
+        snapshot.Should().Contain("已完成");
+        snapshot.Should().Contain("步骤 2: 合并到 dev");
+        snapshot.Should().Contain("▶ 当前");
+        snapshot.Should().Contain("步骤 3: 验证报告");
+        snapshot.Should().Contain("待执行");
+    }
+
+    [Fact]
+    public void BuildPlanProgressSnapshot_EmptyPlan_ReturnsEmpty()
+    {
+        EditAgent.BuildPlanProgressSnapshot(new AgentTaskPlan()).Should().BeEmpty();
+    }
+
+    [Fact]
+    public void TruncateBuildResultForHandoff_ShortKeepsFull()
+    {
+        var result = EditAgent.TruncateBuildResultForHandoff("构建成功，0 个错误");
+        result.Should().Be("构建成功，0 个错误");
+    }
+
+    [Fact]
+    public void TruncateBuildResultForHandoff_LongKeepsHeadTailAndNote()
+    {
+        string longOutput = new string('E', 10000);
+        var result = EditAgent.TruncateBuildResultForHandoff(longOutput);
+
+        result.Should().Contain("已截断");
+        result.Should().StartWith(new string('E', 3000));
+        result.Should().EndWith(new string('E', 5000));
+        result.Length.Should().BeLessThan(9000);
+    }
+
+    [Theory]
+    [InlineData(true, false, true)]   // 有编译问题且未禁用自动构建 → 显示“正在修复”
+    [InlineData(false, false, false)] // 无编译问题 → 正常完成
+    [InlineData(true, true, false)]   // 用户/设置禁用自动构建 → 正常完成
+    public void RequiresBuildRepairToast_MatchesHandoffToBuild(bool hasBuildWarnings, bool skipAutoBuild, bool expected)
+    {
+        EditAgent.RequiresBuildRepairToast(hasBuildWarnings, skipAutoBuild).Should().Be(expected);
+    }
+
+    [Fact]
+    public void ShouldSkipAskSummaryHandoff_CodeChangeWithoutChanges_ReturnsFalse()
+    {
+        // 普通代码修改任务即使没有追踪到文件变更（如纯 Git/终端操作），仍必须移交 Ask 出总结。
+        var plan = new AgentTaskPlan
+        {
+            Intent = AgentIntent.CodeChange,
+            Steps = new List<AgentStep>
+            {
+                new() { Index = 1, Title = "提交合并", Status = AgentStepStatus.Completed },
+            },
+        };
+
+        EditAgent.ShouldSkipAskSummaryHandoff(plan, hasBuildWarnings: false).Should().BeFalse();
+    }
+
+    [Fact]
+    public void ShouldSkipAskSummaryHandoff_ReadOnlyOutputWithoutChanges_ReturnsTrue()
+    {
+        var plan = new AgentTaskPlan
+        {
+            Intent = AgentIntent.QandA,
+            Steps = new List<AgentStep>
+            {
+                new() { Index = 1, Title = "执行只读命令", Status = AgentStepStatus.Completed },
+            },
+        };
+
+        EditAgent.ShouldSkipAskSummaryHandoff(plan, hasBuildWarnings: false).Should().BeTrue();
+    }
+
+    [Theory]
+    [InlineData(true)]  // 有变更 → 不跳过
+    [InlineData(false)] // 有构建警告 → 不跳过
+    public void ShouldSkipAskSummaryHandoff_ChangesOrWarnings_ReturnsFalse(bool withChanges)
+    {
+        var plan = new AgentTaskPlan
+        {
+            Intent = AgentIntent.QandA,
+            Steps = new List<AgentStep>
+            {
+                new() { Index = 1, Title = "任务", Status = AgentStepStatus.Completed },
+            },
+        };
+        if (withChanges)
+        {
+            plan.ChangedFiles.Add(new FileChangeSummary
+            {
+                FilePath = "F:\\repo\\Program.cs",
+                LinesAdded = 1,
+            });
+        }
+
+        EditAgent.ShouldSkipAskSummaryHandoff(plan, hasBuildWarnings: !withChanges).Should().BeFalse();
     }
 
     #endregion

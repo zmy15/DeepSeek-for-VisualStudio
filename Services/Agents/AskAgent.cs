@@ -75,7 +75,9 @@ namespace DeepSeek_v4_for_VisualStudio.Services.Agents
             return LocalizationService.Instance["agent.ask.systemPromptFragment"]
                 + AiPrompts.AskAgentPromptFragment
                 + "\n\n" + AiPrompts.AskGitInstructions
+                + "\n\n" + AiPrompts.AskGitHandoffFirstRule
                 + "\n\n" + AiPrompts.AskTerminalInstructions
+                + "\n\n" + AiPrompts.AskTerminalNoRepeatRule
                 + AiPrompts.AgentConclusionStopRule;
         }
 
@@ -312,6 +314,10 @@ namespace DeepSeek_v4_for_VisualStudio.Services.Agents
                 // ── 构建最终 Markdown 总结（总是使用 BuildSummaryMarkdown，它有内置回退）──
                 result.Content = BuildSummaryMarkdown(plan, aiSummary);
 
+                // ── 整条任务（Edit/Build/Ask 链）真正完成时再通知用户 ──
+                if (plan.IsCompleted && !plan.IsCancelled)
+                    NotifyTaskCompletedToast(plan);
+
                 AddLog("INFO", string.Format(L["agent.log.askSummaryDone"], result.Content.Length));
                 result.Logs.AddRange(_logs);
             }
@@ -329,6 +335,32 @@ namespace DeepSeek_v4_for_VisualStudio.Services.Agents
             }
 
             return result;
+        }
+
+        /// <summary>
+        /// 在最终总结生成后弹出任务完成通知（此前 Edit/Build 阶段保持静默）。
+        /// </summary>
+        private static void NotifyTaskCompletedToast(AgentTaskPlan plan)
+        {
+            try
+            {
+                var toastService = CompositionRoot.GetServiceOrDefault<ToastNotificationService>();
+                if (toastService == null)
+                    return;
+
+                int completed = plan.Steps.Count(s => s.Status == AgentStepStatus.Completed);
+                int failed = plan.Steps.Count(s => s.Status == AgentStepStatus.Failed);
+                int total = plan.Steps.Count;
+
+                string text = failed > 0
+                    ? string.Format(LocalizationService.Instance["toast.taskPartialComplete"], completed, total, failed)
+                    : string.Format(LocalizationService.Instance["toast.taskComplete"], completed, total);
+                toastService.Show("DeepSeek", text);
+            }
+            catch
+            {
+                // 通知失败不应影响总结结果
+            }
         }
 
         /// <summary>

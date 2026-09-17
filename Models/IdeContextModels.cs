@@ -328,4 +328,31 @@ namespace DeepSeek_v4_for_VisualStudio.Models
             return word.Length >= MinSymbolLength ? word : null;
         }
     }
+
+    /// <summary>
+    /// 当前 Git 仓库状态快照（P1-A 扩展）。
+    /// 用户提问时与 IDE 活动文本一同注入：当前分支、最新提交；非 Git 仓库时明确标注。
+    /// </summary>
+    public sealed class GitContextSnapshot
+    {
+        /// <summary>是否为 Git 仓库（false = 工作区根目录向上找不到 .git）</summary>
+        public bool IsRepository { get; set; }
+
+        /// <summary>工作区根目录路径（.sln 所在目录或打开的文件夹）</summary>
+        public string? RootPath { get; set; }
+
+        /// <summary>当前分支（detached HEAD 时为 "detached HEAD at &lt;sha&gt;"）</summary>
+        public string? Branch { get; set; }
+
+        /// <summary>最新提交摘要（短 SHA + 首行消息；无提交时为 null）</summary>
+        public string? HeadSummary { get; set; }
+
+        /// <summary>捕获时间</summary>
+        public DateTime CapturedAt { get; set; }
+
+        public bool HasContent =>
+            !IsRepository
+            || !string.IsNullOrWhiteSpace(Branch)
+            || !string.IsNullOrWhiteSpace(HeadSummary);
+    }
 }

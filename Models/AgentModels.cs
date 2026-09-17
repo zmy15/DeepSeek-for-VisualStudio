@@ -121,6 +121,13 @@ namespace DeepSeek_v4_for_VisualStudio.Models
         /// <summary>任务总标题</summary>
         public string Title { get; set; } = string.Empty;
 
+        /// <summary>
+        /// 移交方携带的完整任务描述（request_handoff 的 taskDescription + reason）。
+        /// 轻量计划（BuildLightweightPlanFromHandoff）执行时必须原样透传给 Edit Agent，
+        /// 避免 Edit 只看到步骤标题而自行改写计划中给出的完整文件内容。
+        /// </summary>
+        public string? TaskDescription { get; set; }
+
         /// <summary>分解后的步骤列表</summary>
         public List<AgentStep> Steps { get; set; } = new();
 

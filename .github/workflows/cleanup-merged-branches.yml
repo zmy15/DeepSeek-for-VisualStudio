@@ -1,0 +1,111 @@
+﻿name: Cleanup Merged Branches
+
+# 自动清理已合并到 master/dev 的远程分支：
+# 1) PR 合并后即时删除源分支（覆盖 squash/rebase 合并场景）
+# 2) 每周定时兜底扫描（覆盖本地 merge 后直接 push 等非 PR 合并场景）
+# 3) 支持手动触发
+on:
+  pull_request:
+    types: [ closed ]
+  schedule:
+    # 每周日 UTC 18:00（北京时间周一 02:00）
+    - cron: '0 18 * * 0'
+  workflow_dispatch:
+
+# 删除分支引用需要写权限
+permissions:
+  contents: write
+
+jobs:
+  # ── 1) PR 合并后即时删除源分支 ──────────────────────────────
+  delete-pr-branch:
+    if: >
+      github.event_name == 'pull_request' &&
+      github.event.pull_request.merged == true &&
+      (github.event.pull_request.base.ref == 'master' || github.event.pull_request.base.ref == 'dev')
+    runs-on: ubuntu-latest
+    steps:
+      - name: Delete merged branch
+        uses: actions/github-script@v7
+        with:
+          script: |
+            const protectedBranches = ['master', 'dev', 'no-local-paddleocr'];
+            const pr = context.payload.pull_request;
+            const branch = pr.head.ref;
+
+            // fork 仓库的分支不在本仓库内，无法也不应删除
+            if (!pr.head.repo || pr.head.repo.full_name !== `${context.repo.owner}/${context.repo.repo}`) {
+              console.log(`跳过：${branch} 来自 fork 仓库或源仓库不存在`);
+              return;
+            }
+            if (protectedBranches.includes(branch)) {
+              console.log(`跳过：${branch} 是保护分支`);
+              return;
+            }
+
+            try {
+              await github.rest.git.deleteRef({
+                owner: context.repo.owner,
+                repo: context.repo.repo,
+                ref: `heads/${branch}`
+              });
+              console.log(`已删除已合并分支：${branch}`);
+            } catch (err) {
+              // 分支可能已被 GitHub 自动删除（仓库设置）、已不存在或被保护规则拒绝
+              console.log(`删除 ${branch} 失败（忽略）：${err.message}`);
+            }
+
+  # ── 2) 定时/手动兜底：扫描删除所有已合并分支 ────────────────
+  cleanup-scheduled:
+    if: github.event_name == 'schedule' || github.event_name == 'workflow_dispatch'
+    runs-on: ubuntu-latest
+    concurrency:
+      group: cleanup-merged-branches
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: Delete branches merged into master/dev
+        env:
+          BASE_BRANCHES: master dev
+          PROTECTED_BRANCHES: master dev no-local-paddleocr
+        run: |
+          set -euo pipefail
+
+          # 刷新全部远程分支引用
+          git fetch --prune origin '+refs/heads/*:refs/remotes/origin/*'
+
+          # 收集已合并到任一 base 分支的远程分支（去重）
+          MERGED_LIST="$(mktemp)"
+          for base in $BASE_BRANCHES; do
+            git branch -r --merged "origin/$base" \
+              | sed 's/^[[:space:]]*//' \
+              | grep -v -- '->' \
+              | grep '^origin/' \
+              | sed 's|^origin/||' >> "$MERGED_LIST" || true
+          done
+          sort -u "$MERGED_LIST" -o "$MERGED_LIST"
+
+          if [ ! -s "$MERGED_LIST" ]; then
+            echo "没有检测到已合并分支"
+            exit 0
+          fi
+
+          echo "== 检测到以下已合并分支 =="
+          cat "$MERGED_LIST"
+
+          # 逐个删除（跳过保护分支）
+          while IFS= read -r branch; do
+            if [ -z "$branch" ]; then
+              continue
+            fi
+            if echo " $PROTECTED_BRANCHES " | grep -q " $branch "; then
+              echo "跳过保护分支：$branch"
+              continue
+            fi
+            echo "删除已合并分支：$branch"
+            git push origin --delete "$branch" \
+              || echo "删除 $branch 失败（可能已被删除或受保护规则限制）"
+          done < "$MERGED_LIST"

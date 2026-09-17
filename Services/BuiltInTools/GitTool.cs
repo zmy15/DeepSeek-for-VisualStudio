@@ -42,6 +42,8 @@ namespace DeepSeek_v4_for_VisualStudio.Services.BuiltInTools
                         Arguments = "--version",
                         RedirectStandardOutput = true,
                         RedirectStandardError = true,
+                        StandardOutputEncoding = Encoding.UTF8,
+                        StandardErrorEncoding = Encoding.UTF8,
                         UseShellExecute = false,
                         CreateNoWindow = true,
                     }
@@ -80,7 +82,7 @@ namespace DeepSeek_v4_for_VisualStudio.Services.BuiltInTools
         /// <summary>写操作 — 需要审批</summary>
         private static readonly HashSet<string> WriteOps = new(StringComparer.OrdinalIgnoreCase)
         {
-            "add", "commit", "branch", "checkout", "pull", "stash", "reset",
+            "add", "commit", "branch", "checkout", "merge", "pull", "stash", "reset",
         };
 
         /// <summary>危险操作 — 需要审批 + 额外警告</summary>
@@ -94,7 +96,7 @@ namespace DeepSeek_v4_for_VisualStudio.Services.BuiltInTools
         {
             "status", "diff", "log", "show", "describe", "tag",
             "rev-parse", "reflog", "ls-files",
-            "add", "commit", "branch", "checkout", "pull", "push", "stash", "reset",
+            "add", "commit", "branch", "checkout", "merge", "pull", "push", "stash", "reset",
         };
 
         /// <summary>同步模式超时</summary>
@@ -156,7 +158,7 @@ namespace DeepSeek_v4_for_VisualStudio.Services.BuiltInTools
                                 {
                                     "status", "diff", "log", "show", "describe", "tag",
                                     "rev-parse", "reflog", "ls-files",
-                                    "add", "commit", "branch", "checkout", "pull", "push", "stash", "reset"
+                                    "add", "commit", "branch", "checkout", "merge", "pull", "push", "stash", "reset"
                                 }
                             },
                             path = new { type = "string", description = L["tool.git.param.path"] },
@@ -202,6 +204,7 @@ namespace DeepSeek_v4_for_VisualStudio.Services.BuiltInTools
                 "commit" => L["tool.git.displayCommit"],
                 "branch" => L["tool.git.displayBranch"],
                 "checkout" => L["tool.git.displayCheckout"],
+                "merge" => L["tool.git.displayMerge"],
                 "pull" => L["tool.git.displayPull"],
                 "push" => L["tool.git.displayPush"],
                 "stash" => L["tool.git.displayStash"],
@@ -285,7 +288,7 @@ namespace DeepSeek_v4_for_VisualStudio.Services.BuiltInTools
         /// 根据操作类型和参数构建安全的 git 命令。
         /// 返回以 "[BLOCKED] " 开头的字符串表示操作被硬拒绝。
         /// </summary>
-        private string BuildGitCommand(string operation, Dictionary<string, JsonElement> args, string repoDir)
+        internal string BuildGitCommand(string operation, Dictionary<string, JsonElement> args, string repoDir)
         {
             switch (operation)
             {
@@ -448,6 +451,22 @@ namespace DeepSeek_v4_for_VisualStudio.Services.BuiltInTools
                         return $"checkout \"{EscapeArg(branch)}\"";
                     }
 
+                case "merge":
+                    {
+                        string branch = GetStringArg(args, "branch");
+                        if (string.IsNullOrEmpty(branch))
+                            return "[BLOCKED] " + L["tool.git.mergeNoBranch"];
+
+                        string mode = GetStringArg(args, "mode").ToLowerInvariant().Trim();
+                        return mode switch
+                        {
+                            "ff-only" => $"merge --ff-only \"{EscapeArg(branch)}\"",
+                            "no-ff" => $"merge --no-ff \"{EscapeArg(branch)}\"",
+                            "squash" => $"merge --squash \"{EscapeArg(branch)}\"",
+                            _ => $"merge \"{EscapeArg(branch)}\"",
+                        };
+                    }
+
                 case "pull":
                     {
                         string remote = GetStringArg(args, "remote");
@@ -541,6 +560,8 @@ namespace DeepSeek_v4_for_VisualStudio.Services.BuiltInTools
                 Arguments = gitArgs,
                 RedirectStandardOutput = true,
                 RedirectStandardError = true,
+                StandardOutputEncoding = Encoding.UTF8,
+                StandardErrorEncoding = Encoding.UTF8,
                 UseShellExecute = false,
                 CreateNoWindow = true,
                 WorkingDirectory = workingDir,

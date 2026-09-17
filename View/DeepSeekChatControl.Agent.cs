@@ -329,6 +329,7 @@ namespace DeepSeek_v4_for_VisualStudio.View
         /// </summary>
         /// <summary>IDE 实时态追踪器（P1-A，惰性创建；仅 UI 线程使用）</summary>
         private Services.IdeContext.IdeContextTracker? _ideContextTracker;
+        private readonly Services.IdeContext.GitContextProvider _gitContextProvider = new();
 
         /// <summary>
         /// 构建会话开始时的上下文构成快照（P2 Context Debugger 数据面）。
@@ -408,8 +409,8 @@ namespace DeepSeek_v4_for_VisualStudio.View
                 {
                     _ideContextTracker ??= new Services.IdeContext.IdeContextTracker();
                     _ideContextTracker.CaptureFromActiveView();
-                    _contextManager.SetIdeContext(
-                        _ideContextTracker.Current?.ToPromptBlock(_solutionPath));
+                    string? ideBlock = _ideContextTracker.Current?.ToPromptBlock(_solutionPath);
+                    _contextManager.SetIdeContext(MergeGitContext(ideBlock, _solutionPath));
                     if (_ideContextTracker.Current != null)
                         Logger.Info($"[IdeContext] 已注入: {_ideContextTracker.Current.FilePath} " +
                                     $"(选区={_ideContextTracker.Current.HasSelection}, " +
@@ -444,6 +445,28 @@ namespace DeepSeek_v4_for_VisualStudio.View
                             "{\"type\":\"contextDebug\",\"d\":" + ctxJson + "}");
                 }
                 catch { }
+            }
+        }
+
+        /// <summary>
+        /// 将当前 Git 状态（分支 / 最新提交 / 仓库不存在）合并进 IDE 活动文本注入块。
+        /// Git 采集失败时静默降级，只注入 IDE 文本；两者都无内容时返回 null。
+        /// </summary>
+        private string? MergeGitContext(string? ideBlock, string? solutionPath)
+        {
+            try
+            {
+                string? gitBlock = _gitContextProvider.BuildPromptBlock(
+                    _gitContextProvider.Capture(solutionPath));
+
+                if (string.IsNullOrWhiteSpace(ideBlock)) return gitBlock;
+                if (string.IsNullOrWhiteSpace(gitBlock)) return ideBlock;
+                return ideBlock + Environment.NewLine + Environment.NewLine + gitBlock;
+            }
+            catch (Exception ex)
+            {
+                Logger.Warn($"[IdeContext] Git 上下文注入失败: {ex.Message}");
+                return ideBlock;
             }
         }
 

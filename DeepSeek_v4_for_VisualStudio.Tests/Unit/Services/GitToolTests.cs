@@ -134,7 +134,7 @@ public class GitToolTests
         var operations = new[]
         {
             "status", "diff", "log", "show", "describe", "tag", "rev-parse", "reflog", "ls-files",
-            "add", "commit", "branch", "checkout", "pull", "push", "stash", "reset",
+            "add", "commit", "branch", "checkout", "merge", "pull", "push", "stash", "reset",
         };
         var tool = new GitTool();
         foreach (var op in operations)
@@ -216,6 +216,46 @@ public class GitToolTests
         var result = await new GitTool().ExecuteAsync(args, "Z:\\NonExistent\\Path");
         // Should fail with either no-repo or directory-not-found error
         result.Should().ContainAny("Error: ", "git");
+    }
+
+    #endregion
+
+    #region Merge
+
+    [Fact]
+    public void GitTool_Definition_OperationEnum_ContainsMerge()
+    {
+        var json = JsonSerializer.Serialize(new GitTool().GetDefinition().Function.Parameters);
+        json.Should().Contain("\"merge\"");
+    }
+
+    [Fact]
+    public void GitTool_IsReadOnlyOperation_Merge_IsFalse()
+    {
+        GitTool.IsReadOnlyOperation("merge", "dev", "", "", false).Should().BeFalse();
+    }
+
+    [Theory]
+    [InlineData("{\"operation\": \"merge\", \"branch\": \"feature/x\"}", "merge \"feature/x\"")]
+    [InlineData("{\"operation\": \"merge\", \"branch\": \"feature/x\", \"mode\": \"ff-only\"}", "merge --ff-only \"feature/x\"")]
+    [InlineData("{\"operation\": \"merge\", \"branch\": \"feature/x\", \"mode\": \"no-ff\"}", "merge --no-ff \"feature/x\"")]
+    [InlineData("{\"operation\": \"merge\", \"branch\": \"feature/x\", \"mode\": \"squash\"}", "merge --squash \"feature/x\"")]
+    public void BuildGitCommand_Merge_BuildsSafeCommand(string argsJson, string expected)
+    {
+        var args = ParseArgs(argsJson);
+        var command = new GitTool().BuildGitCommand("merge", args, "C:\\repo");
+        command.Should().Be(expected);
+    }
+
+    [Fact]
+    public async Task ExecuteAsync_MergeWithoutBranch_Blocked()
+    {
+        var root = GetProjectRoot();
+        if (root == null || !GitTool.IsGitAvailable) return;
+
+        var args = ParseArgs("{\"operation\": \"merge\"}");
+        var result = await new GitTool().ExecuteAsync(args, root);
+        result.Should().Contain("[BLOCKED] ");
     }
 
     #endregion

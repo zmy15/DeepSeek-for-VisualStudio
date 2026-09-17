@@ -346,8 +346,12 @@ namespace DeepSeek_v4_for_VisualStudio.Services
 
         #region Agent-Specific System Prompt Fragments
 
-        /// <summary>所有 Agent 专属提示词共用的结论停止规则</summary>
-        public static string AgentConclusionStopRule => L["system.agent.conclusionStopRule"];
+        /// <summary>工具调用输出规则 — 调用工具前用一句话预告工具结束后的下一步。</summary>
+        public static string ToolCallOutputRule => L["system.agent.toolCallOutputRule"];
+
+        /// <summary>所有 Agent 专属提示词共用的结论停止规则（含工具调用输出规则）</summary>
+        public static string AgentConclusionStopRule =>
+            L["system.agent.conclusionStopRule"] + "\n\n" + ToolCallOutputRule;
 
         /// <summary>Ask Agent — 代码库探索策略 + 记忆系统 + 移交规则</summary>
         public static string AskAgentPromptFragment => L["system.agent.askPromptFragment"];
@@ -357,6 +361,15 @@ namespace DeepSeek_v4_for_VisualStudio.Services
 
         /// <summary>Ask Agent — 终端只读规则（不修改文件的命令）</summary>
         public static string AskTerminalInstructions => L["system.agent.askTerminalInstructions"];
+
+        /// <summary>Ask Agent — Git/终端写任务先移交、移交前不预核实的规则</summary>
+        public static string AskGitHandoffFirstRule => L["system.agent.askGitHandoffFirstRule"];
+
+        /// <summary>Ask Agent — 移交前禁止用终端重复核实的规则</summary>
+        public static string AskTerminalNoRepeatRule => L["system.agent.askTerminalNoRepeatRule"];
+
+        /// <summary>Edit Agent — 信任 Handoff 携带的 Git 状态快照的规则</summary>
+        public static string EditTrustHandoffGitStateRule => L["system.agent.editTrustHandoffGitStateRule"];
 
         /// <summary>Explore Agent — 深度检索模式完整系统提示</summary>
         public static string ExploreAgentSystemPrompt =>

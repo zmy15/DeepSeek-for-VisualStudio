@@ -80,6 +80,7 @@ namespace DeepSeek_v4_for_VisualStudio.Services
         /// </summary>
         public static string BuildInitialPage(IReadOnlyList<ChatMessage> messages)
         {
+            var branchNavByAssistantIndex = BuildBranchNavByAssistantIndex(messages);
             var sb = new StringBuilder();
             for (int i = 0; i < messages.Count; i++)
             {
@@ -94,18 +95,67 @@ namespace DeepSeek_v4_for_VisualStudio.Services
                         msg.AttachedImageDataUris,
                         msg.AttachedImageFileNames,
                         msg.AttachedImagePaths);
-                    // ── 分支导航（始终在用户气泡正下方）──
-                    // 场景1：编辑用户消息产生分支 → 用户消息的 SiblingCount > 1
-                    // 场景2：重试助手回复产生分支 → 下一个助手消息的 SiblingCount > 1
-                    AppendBranchNavForUserMessage(sb, messages, i);
+
+                    // ── 分支导航兜底：仅当编辑分叉的用户消息还没有后续助手回复时，
+                    //    仍在用户气泡下方渲染；否则统一挂到下方助手消息的操作行。──
+                    if (msg.SiblingCount > 1 &&
+                        (i + 1 >= messages.Count || messages[i + 1]?.Role != "assistant"))
+                    {
+                        sb.Append(BuildBranchNavHtml(msg, i));
+                    }
                 }
                 else if (msg.Role == "assistant")
                 {
-                    AppendAssistantMessageHtml(sb, msg, i);
+                    string branchNavHtml = branchNavByAssistantIndex.TryGetValue(i, out var nav)
+                        ? nav
+                        : BuildBranchNavHtml(msg, i);
+                    AppendAssistantMessageHtml(sb, msg, i, branchNavHtml);
                 }
             }
 
             return WrapFullPage(sb.ToString(), hasStreamingMessage: true);
+        }
+
+        /// <summary>
+        /// 计算每个助手消息应显示的分支导航（键为助手消息的索引）。
+        /// 场景1：编辑分叉 → 用户消息自身有兄弟，导航挂到其后的助手消息。
+        /// 场景2：重试分叉 → 下一个助手消息自身有兄弟，导航挂到该助手消息。
+        /// </summary>
+        private static Dictionary<int, string> BuildBranchNavByAssistantIndex(
+            IReadOnlyList<ChatMessage> messages)
+        {
+            var result = new Dictionary<int, string>();
+
+            for (int i = 0; i < messages.Count; i++)
+            {
+                var msg = messages[i];
+                if (msg?.Role != "user") continue;
+
+                // ── 场景1：编辑分叉 ──
+                if (msg.SiblingCount > 1)
+                {
+                    int assistantIdx = i + 1;
+                    if (assistantIdx < messages.Count &&
+                        messages[assistantIdx]?.Role == "assistant")
+                    {
+                        result[assistantIdx] = BuildBranchNavHtml(msg, i);
+                    }
+                    continue;
+                }
+
+                // ── 场景2：重试分叉 ──
+                int nextIdx = i + 1;
+                if (nextIdx < messages.Count)
+                {
+                    var nextMsg = messages[nextIdx];
+                    if (nextMsg?.Role == "assistant" && nextMsg.SiblingCount > 1)
+                    {
+                        result[nextIdx] = BuildBranchNavHtml(nextMsg, nextIdx);
+                    }
+                }
+            }
+
+            return result;
         }
 
         /// <summary>
@@ -723,7 +773,8 @@ namespace DeepSeek_v4_for_VisualStudio.Services
                 $"</div>";
         }
 
-        private static void AppendAssistantMessageHtml(StringBuilder sb, ChatMessage msg, int idx)
+        private static void AppendAssistantMessageHtml(
+            StringBuilder sb, ChatMessage msg, int idx, string branchNavHtml = "")
         {
             string displayContent = BuildAssistantDisplayContent(msg.TimelineContent, msg.Content);
             string bodyHtml;
@@ -762,7 +813,7 @@ namespace DeepSeek_v4_for_VisualStudio.Services
                 ? $"<button id='copy-btn-{idx}' class='msg-action-btn copy-msg-btn' onclick='window.__copyMessage({idx})' title='{L["chat.html.copyButtonTitle"]}' data-copy-label='{EscapeHtml(L["chat.html.copyButton"])}' data-copied-label='{EscapeHtml(L["chat.html.copySuccessButton"])}'>{EscapeHtml(L["chat.html.copyButton"])}</button>"
                 : "";
 
-            // ── 分支导航统一放在用户气泡下方，不在此处渲染 ──
+            // ── 分支导航随助手消息的操作行渲染（与复制/重试按钮同一行）──
 
             // Copilot Chat 风格：左对齐，AI 标签
             sb.Append($"<div id='msg-{idx}' class='msg-wrapper ai'>");
@@ -780,44 +831,16 @@ namespace DeepSeek_v4_for_VisualStudio.Services
                 sb.Append(msg.CacheFooterHtml);
             }
             // ── 统一 action 行：flex 容器保证重来/复制按钮水平对齐、尺寸一致 ──
-            if (retryBtnHtml.Length > 0 || copyBtnHtml.Length > 0)
+            if (retryBtnHtml.Length > 0 || copyBtnHtml.Length > 0 || branchNavHtml.Length > 0)
             {
                 sb.Append("<div class='msg-actions-row'>");
+                sb.Append(branchNavHtml);
                 sb.Append(retryBtnHtml);
                 sb.Append(copyBtnHtml);
                 sb.Append("</div>");
             }
             sb.Append("</div>");  // closes msg-bubble
             sb.Append("</div>");  // closes msg-wrapper
-        }
-
-        /// <summary>
-        /// 在用户消息气泡正下方追加分支导航 HTML。
-        /// 统一处理两种分叉场景：
-        /// - 编辑分叉（ForkReason="edit"）：当前用户消息有兄弟节点
-        /// - 重试分叉（ForkReason="retry"）：下一个助手消息有兄弟节点
-        /// </summary>
-        private static void AppendBranchNavForUserMessage(StringBuilder sb, IReadOnlyList<ChatMessage> messages, int userMsgIndex)
-        {
-            var userMsg = messages[userMsgIndex];
-
-            // ── 场景1：编辑分叉 ── 用户消息自身有兄弟
-            if (userMsg.SiblingCount > 1)
-            {
-                sb.Append(BuildBranchNavHtml(userMsg, userMsgIndex));
-                return;
-            }
-
-            // ── 场景2：重试分叉 ── 下一个消息是助手且有兄弟（重试产生）
-            int nextIdx = userMsgIndex + 1;
-            if (nextIdx < messages.Count)
-            {
-                var nextMsg = messages[nextIdx];
-                if (nextMsg.Role == "assistant" && nextMsg.SiblingCount > 1)
-                {
-                    sb.Append(BuildBranchNavHtml(nextMsg, nextIdx));
-                }
-            }
         }
 
         /// <summary>

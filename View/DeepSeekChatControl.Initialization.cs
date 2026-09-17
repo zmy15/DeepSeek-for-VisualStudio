@@ -1,4 +1,4 @@
-using DeepSeek_v4_for_VisualStudio.Models;
+﻿using DeepSeek_v4_for_VisualStudio.Models;
 using DeepSeek_v4_for_VisualStudio.Services;
 using DeepSeek_v4_for_VisualStudio.Services.Agents;
 using DeepSeek_v4_for_VisualStudio.Settings;
@@ -1009,9 +1009,13 @@ namespace DeepSeek_v4_for_VisualStudio.View
                 _sessionsContainer.ActiveSessionId = _activeSession.Id;
             }
 
+            // ── 修复：启动恢复/解决方案切换后同步会话上下文，避免记忆写入 session\_default ──
+            SyncActiveSessionToBuiltInTools();
+
             // 加载活跃会话的消息
             _messages.Clear();
             _contextManager.Clear();
+            ClearEditTransientState();
 
             bool hasData = _activeSession.ApiHistory.Count > 0
                         || !string.IsNullOrWhiteSpace(_activeSession.TreeDataJson);

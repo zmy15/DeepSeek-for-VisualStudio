@@ -804,7 +804,49 @@ namespace DeepSeek_v4_for_VisualStudio.Services.Agents
                 messages.Add(new ChatApiMessage { Role = "system", Content = systemPrompt });
             AppendExplicitRouteInstruction(messages);
 
+            // ── 标记当前用户提问：Ask 主流程（deduplicateCurrentUser=true）的
+            //    当前 user 已在历史中，给最后一条 user 消息加显式前缀，
+            //    避免长上下文/工具链中模型把中间内容误当用户需求而跑偏。 ──
+            if (deduplicateCurrentUser)
+                ApplyCurrentUserQuestionPrefix(messages);
+
             return messages;
+        }
+
+        /// <summary>
+        /// 给“当前用户提问”消息加显式前缀。
+        /// 仅作用于本次请求的消息副本（BuildApiMessagesRecentTurns 已克隆历史），
+        /// 不修改持久化上下文；已有前缀时不重复添加。
+        /// </summary>
+        internal static void ApplyCurrentUserQuestionPrefix(List<ChatApiMessage> messages)
+        {
+            if (messages == null || messages.Count == 0) return;
+
+            string prefix = LocalizationService.Instance["system.agent.currentUserQuestionPrefix"];
+            if (string.IsNullOrWhiteSpace(prefix)) return;
+
+            // 从末尾向前找最后一条 user 消息（跳过尾部 system/工具历史）
+            for (int i = messages.Count - 1; i >= 0; i--)
+            {
+                var m = messages[i];
+                if (m.Role != "user") continue;
+
+                if (m.MultimodalContent is { Count: > 0 })
+                {
+                    var firstText = m.MultimodalContent.FirstOrDefault(p => p.Type == "text");
+                    if (firstText != null
+                        && !firstText.Text.StartsWith(prefix, StringComparison.Ordinal))
+                    {
+                        firstText.Text = prefix + firstText.Text;
+                    }
+                }
+                else if (!string.IsNullOrEmpty(m.Content))
+                {
+                    if (!m.Content!.StartsWith(prefix, StringComparison.Ordinal))
+                        m.Content = prefix + m.Content;
+                }
+                return;
+            }
         }
 
         /// <summary>
@@ -848,6 +890,8 @@ namespace DeepSeek_v4_for_VisualStudio.Services.Agents
                 };
                 parts.AddRange(visionParts);
                 message.MultimodalContent = parts;
+                // 一次性消费：历史消息已带原图，避免 Handoff / 步骤重试把同一批图片重复注入。
+                Context.VisionContent = null;
             }
 
             return message;
@@ -2689,6 +2733,7 @@ namespace DeepSeek_v4_for_VisualStudio.Services.Agents
                 AutoSend = request.AutoSend,
                 ShowContinueOn = !request.AutoSend,
                 EditSteps = request.EditSteps,   // ★ 新增：透传移交携带的编辑步骤
+                GitState = request.GitState,      // 透传移交携带的 Git 状态快照
             };
         }
 
@@ -2716,6 +2761,7 @@ namespace DeepSeek_v4_for_VisualStudio.Services.Agents
                 Intent = AgentIntent.CodeChange,
                 Title = LocalizationService.Instance["plan.lightweightTitle"],
                 Steps = steps,
+                TaskDescription = handoff.Prompt, // 保留完整任务内容，Edit 步骤提示中再注入
                 Source = PlanSource.None,      // 不创建任务面板，仅思考气泡/执行时间线
                 IsCompleted = false,
                 IsCancelled = false,
@@ -2832,6 +2878,33 @@ namespace DeepSeek_v4_for_VisualStudio.Services.Agents
                 sb.AppendLine();
                 sb.AppendLine("##  代码记忆（跨步骤持久化）");
                 sb.AppendLine(context.CodeMemory);
+            }
+
+            // ── 注入移交方已核实的 Git 状态（结构化契约，避免目标 Agent 重复核实）──
+            if (handoff.GitState != null)
+            {
+                sb.AppendLine();
+                sb.AppendLine(LocalizationService.Instance["handoff.gitState.header"]);
+                if (!string.IsNullOrWhiteSpace(handoff.GitState.Branch))
+                    sb.AppendLine(string.Format(
+                        LocalizationService.Instance["handoff.gitState.branch"],
+                        handoff.GitState.Branch));
+                if (!string.IsNullOrWhiteSpace(handoff.GitState.HeadSha))
+                    sb.AppendLine(string.Format(
+                        LocalizationService.Instance["handoff.gitState.head"],
+                        handoff.GitState.HeadSha));
+                sb.AppendLine(handoff.GitState.IsClean
+                    ? LocalizationService.Instance["handoff.gitState.clean"]
+                    : LocalizationService.Instance["handoff.gitState.dirty"]);
+                if (handoff.GitState.Refs is { Count: > 0 })
+                {
+                    string refs = string.Join(", ", handoff.GitState.Refs
+                        .OrderBy(kv => kv.Key, StringComparer.OrdinalIgnoreCase)
+                        .Select(kv => $"{kv.Key}={kv.Value}"));
+                    sb.AppendLine(string.Format(
+                        LocalizationService.Instance["handoff.gitState.refs"], refs));
+                }
+                sb.AppendLine(LocalizationService.Instance["handoff.gitState.trustRule"]);
             }
 
             string handoffMessage = sb.ToString();

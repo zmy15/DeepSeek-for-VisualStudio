@@ -1,4 +1,4 @@
-using DeepSeek_v4_for_VisualStudio.Models;
+﻿using DeepSeek_v4_for_VisualStudio.Models;
 using DeepSeek_v4_for_VisualStudio.Services;
 using DeepSeek_v4_for_VisualStudio.Services.Agents;
 using DeepSeek_v4_for_VisualStudio.Settings;
@@ -170,6 +170,37 @@ namespace DeepSeek_v4_for_VisualStudio.View
                 // 普通 Enter: 发送消息
                 e.Handled = true;
                 SendMessage();
+            }
+        }
+
+        /// <summary>
+        /// 输入框粘贴事件（DataObject.Pasting 附加事件）：覆盖 Ctrl+V、右键菜单、Shift+Insert 等全部粘贴来源。
+        /// 粘贴文本长度达到阈值时转存为临时文件并添加为附件，并取消默认的文本插入。
+        /// </summary>
+        private void InputTextBox_Pasting(object sender, DataObjectPastingEventArgs e)
+        {
+            try
+            {
+                // 仅处理纯文本粘贴；图片粘贴由 PreviewKeyDown / CommandBinding 路径处理
+                string? text = null;
+                if (e.SourceDataObject.GetDataPresent(DataFormats.UnicodeText, true))
+                {
+                    text = e.SourceDataObject.GetData(DataFormats.UnicodeText) as string;
+                }
+                else if (e.SourceDataObject.GetDataPresent(DataFormats.Text, true))
+                {
+                    text = e.SourceDataObject.GetData(DataFormats.Text) as string;
+                }
+
+                if (TryPasteLargeTextAsAttachment(text))
+                {
+                    e.CancelCommand(); // 取消默认粘贴，避免超长文本插入输入框
+                    Logger.Info("InputTextBox_Pasting: 超长文本已转存为附件，取消默认粘贴。");
+                }
+            }
+            catch (Exception ex)
+            {
+                Logger.Error($"InputTextBox_Pasting 失败: {ex.Message}", ex);
             }
         }
 

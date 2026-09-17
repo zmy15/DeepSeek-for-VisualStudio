@@ -92,6 +92,23 @@ namespace DeepSeek_v4_for_VisualStudio.Services.BuiltInTools
                                     },
                                     required = new[] { "title" }
                                 }
+                            },
+                            gitState = new
+                            {
+                                type = "object",
+                                description = LocalizationService.Instance["tool.requestHandoff.param.gitState"],
+                                properties = new
+                                {
+                                    branch = new { type = "string", description = LocalizationService.Instance["tool.requestHandoff.param.gitState.branch"] },
+                                    headSha = new { type = "string", description = LocalizationService.Instance["tool.requestHandoff.param.gitState.headSha"] },
+                                    isClean = new { type = "boolean", description = LocalizationService.Instance["tool.requestHandoff.param.gitState.isClean"] },
+                                    refs = new
+                                    {
+                                        type = "object",
+                                        additionalProperties = new { type = "string" },
+                                        description = LocalizationService.Instance["tool.requestHandoff.param.gitState.refs"]
+                                    }
+                                }
                             }
                         },
                         required = new[] { "targetAgent", "reason", "taskDescription" }
@@ -139,6 +156,43 @@ namespace DeepSeek_v4_for_VisualStudio.Services.BuiltInTools
                 if (parsedSteps.Count > 0) editSteps = parsedSteps;  // 无有效步骤 → 保持 null
             }
 
+            // ── 解析可选 gitState → AgentGitStateSnapshot?（移交方已核实的 Git 状态）──
+            AgentGitStateSnapshot? gitState = null;
+            if (args.TryGetValue("gitState", out var gitNode) && gitNode.ValueKind == JsonValueKind.Object)
+            {
+                gitState = new AgentGitStateSnapshot
+                {
+                    Branch = GetStringFromNode(gitNode, "branch"),
+                    HeadSha = GetStringFromNode(gitNode, "headSha"),
+                    IsClean = gitNode.TryGetProperty("isClean", out var cleanNode)
+                        && cleanNode.ValueKind == JsonValueKind.True,
+                    CapturedAtUtc = DateTime.UtcNow,
+                };
+
+                if (gitNode.TryGetProperty("refs", out var refsNode) && refsNode.ValueKind == JsonValueKind.Object)
+                {
+                    var refs = new Dictionary<string, string>(StringComparer.Ordinal);
+                    foreach (var prop in refsNode.EnumerateObject())
+                    {
+                        if (prop.Value.ValueKind == JsonValueKind.String)
+                        {
+                            string? value = prop.Value.GetString();
+                            if (!string.IsNullOrWhiteSpace(value))
+                                refs[prop.Name] = value!;
+                        }
+                    }
+                    if (refs.Count > 0) gitState.Refs = refs;
+                }
+
+                // 全空快照视为未提供，避免目标 Agent 收到无意义的状态块。
+                if (string.IsNullOrWhiteSpace(gitState.Branch)
+                    && string.IsNullOrWhiteSpace(gitState.HeadSha)
+                    && (gitState.Refs == null || gitState.Refs.Count == 0))
+                {
+                    gitState = null;
+                }
+            }
+
             // 解析目标 Agent 类型
             AgentType targetAgent = targetAgentStr.ToLowerInvariant() switch
             {
@@ -157,7 +211,8 @@ namespace DeepSeek_v4_for_VisualStudio.Services.BuiltInTools
                 Reason = reason,
                 TaskDescription = taskDescription,
                 AutoSend = true,
-                EditSteps = editSteps
+                EditSteps = editSteps,
+                GitState = gitState,
             };
 
             Logger.Info($"[RequestHandoff] {targetAgentStr} ← {reason.Truncate(80)}");
@@ -165,6 +220,19 @@ namespace DeepSeek_v4_for_VisualStudio.Services.BuiltInTools
             await _handoffHandler(request);
 
             return LocalizationService.Instance.Format("tool.requestHandoff.handoffRequested", targetAgentStr, reason);
+        }
+
+        private static string GetStringFromNode(JsonElement node, string key)
+        {
+            if (node.TryGetProperty(key, out var element))
+            {
+                if (element.ValueKind == JsonValueKind.String)
+                    return element.GetString() ?? string.Empty;
+                if (element.ValueKind == JsonValueKind.Null)
+                    return string.Empty;
+                return element.ToString();
+            }
+            return string.Empty;
         }
 
         public override string GetDisplayText(Dictionary<string, JsonElement> args)

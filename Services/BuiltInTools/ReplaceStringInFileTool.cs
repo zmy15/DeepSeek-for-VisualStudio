@@ -203,6 +203,37 @@ namespace DeepSeek_v4_for_VisualStudio.Services.BuiltInTools
             return ExpectedContentVerifier.BuildCurrentStateMessage(actualContent);
         }
 
+        /// <summary>
+        /// 将文件恢复到批量编辑前的原始内容（批量失败时原子回滚）。
+        /// Workspace 模式写回 Workspace；磁盘模式走与替换相同的 buffer/落盘路径。
+        /// </summary>
+        internal async Task RestoreFileContentAsync(string filePath, string originalContent)
+        {
+            string normalized = (originalContent ?? string.Empty)
+                .Replace("\r\n", "\n").Replace("\r", "\n").Replace("\n", "\r\n");
+
+            if (Workspace != null)
+            {
+                Workspace.WriteFile(filePath, normalized);
+                return;
+            }
+
+            string? backupPath = BackupService.CreateBackup(filePath);
+            bool writtenViaBuffer = false;
+            try
+            {
+                writtenViaBuffer = await EditBufferApplier.TryWriteOpenDocumentAsync(filePath, normalized);
+            }
+            catch (Exception ex)
+            {
+                Logger.Warn($"[ReplaceString] 回滚 buffer 写入失败，回退磁盘: {Path.GetFileName(filePath)} — {ex.Message}");
+            }
+
+            if (!writtenViaBuffer)
+                File.WriteAllText(filePath, normalized, Encoding.UTF8);
+            BackupService.CleanupBackup(backupPath);
+        }
+
         private async Task<string> VerifyWrittenContentAsync(
             string expectedText,
             string filePath)

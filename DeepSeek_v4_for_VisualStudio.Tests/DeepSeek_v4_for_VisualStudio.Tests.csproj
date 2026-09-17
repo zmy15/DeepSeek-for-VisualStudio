@@ -1,4 +1,4 @@
-<Project Sdk="Microsoft.NET.Sdk">
+﻿<Project Sdk="Microsoft.NET.Sdk">
 
   <PropertyGroup>
     <TargetFramework>net472</TargetFramework>
@@ -8,6 +8,8 @@
     <IsPackable>false</IsPackable>
     <IsTestProject>true</IsTestProject>
     <RootNamespace>DeepSeek_v4_for_VisualStudio.Tests</RootNamespace>
+    <!-- 测试 DeepSeekChatControl（WPF UserControl 派生类）的静态逻辑需解析 WPF 基类链 -->
+    <UseWPF>true</UseWPF>
   </PropertyGroup>
 
   <ItemGroup>

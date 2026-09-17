@@ -1,4 +1,4 @@
-using DeepSeek_v4_for_VisualStudio.Models;
+﻿using DeepSeek_v4_for_VisualStudio.Models;
 using DeepSeek_v4_for_VisualStudio.Services;
 using DeepSeek_v4_for_VisualStudio.Services.Agents;
 using DeepSeek_v4_for_VisualStudio.Services.EditTools;
@@ -49,6 +49,21 @@ namespace DeepSeek_v4_for_VisualStudio.View
 
                 _fileChangeHistory[userMsgIndex] = merged;
                 Logger.Info($"[FileHistory] 记录第 {userMsgIndex} 轮文件变更: {merged.Count} 个文件");
+            }
+        }
+
+        /// <summary>
+        /// 清空仅属于当前会话的编辑瞬态状态。
+        /// _fileChangeHistory 以消息索引为键，切换/新建/清空会话后索引会被复用；
+        /// 不清空会让新会话在重试/编辑消息时误弹上一轮的文件回退提示。
+        /// 方法内部自行加锁，调用方无需先持有 _lock。
+        /// </summary>
+        private void ClearEditTransientState()
+        {
+            lock (_lock)
+            {
+                _fileChangeHistory.Clear();
+                _pendingEditMsgIndex = -1;
             }
         }
 
@@ -881,10 +896,7 @@ namespace DeepSeek_v4_for_VisualStudio.View
 
             _pendingEditMsgIndex = userMsgIndex;
 
-            // ── 将原始文本填入输入框，方便用户在输入框中编辑 ──
-            InputTextBox.Text = originalContent ?? string.Empty;
-            InputTextBox.CaretIndex = InputTextBox.Text.Length;
-            InputTextBox.Focus();
+            // ── 编辑仅在上方内联编辑区进行，不同步填充下方输入框 ──
 
             StatusLabel.Text = LocalizationService.Instance["status.editMessageHint"];
         }
@@ -1331,9 +1343,6 @@ namespace DeepSeek_v4_for_VisualStudio.View
         private async Task HandleEditCancelAsync(int userMsgIndex)
         {
             _pendingEditMsgIndex = -1;
-
-            // ── 清空输入框 ──
-            InputTextBox.Text = string.Empty;
 
             // 恢复消息正文为原始内容
             string? originalText = null;
