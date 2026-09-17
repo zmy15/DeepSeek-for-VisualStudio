@@ -81,6 +81,12 @@ namespace DeepSeek_v4_for_VisualStudio.Models
         public List<AgentStep>? EditSteps { get; set; }
 
         /// <summary>
+        /// 移交方已核实的 Git 状态快照（可选）。携带时目标 Agent 直接信任使用，
+        /// 仅在有 fetch 等刷新远端引用的需求时才重新核实。
+        /// </summary>
+        public AgentGitStateSnapshot? GitState { get; set; }
+
+        /// <summary>
         /// 是否为只读终态总结移交。目标 Agent 只能生成最终回复，不能调用工具或再次移交。
         /// </summary>
         public bool IsSummaryOnly { get; set; }
@@ -91,6 +97,28 @@ namespace DeepSeek_v4_for_VisualStudio.Models
         /// </summary>
         [System.Text.Json.Serialization.JsonIgnore]
         public List<ChatApiMessage>? ForwardedMessages { get; set; }
+    }
+
+    /// <summary>
+    /// 移交方已核实的 Git 状态快照。
+    /// 目标 Agent 可直接信任该状态，避免为同一仓库状态重复执行 status/branch/log/rev-parse。
+    /// </summary>
+    public class AgentGitStateSnapshot
+    {
+        /// <summary>当前分支（detached HEAD 等无分支场景可为 null）</summary>
+        public string? Branch { get; set; }
+
+        /// <summary>HEAD 提交 SHA（建议使用短 SHA）</summary>
+        public string? HeadSha { get; set; }
+
+        /// <summary>工作区 / 暂存区是否干净</summary>
+        public bool IsClean { get; set; } = true;
+
+        /// <summary>相关 ref（如 master、origin/master、fix/xxx）→ SHA 快照</summary>
+        public Dictionary<string, string>? Refs { get; set; }
+
+        /// <summary>快照时间（UTC）</summary>
+        public DateTime? CapturedAtUtc { get; set; }
     }
 
     /// <summary>
@@ -339,5 +367,8 @@ namespace DeepSeek_v4_for_VisualStudio.Models
         /// 用于 Edit 执行时按「执行步骤 x/y: 标题」显示进度；不生成 JSON 计划与 plan.md。
         /// </summary>
         public List<AgentStep>? EditSteps { get; set; }
+
+        /// <summary>移交方已核实的 Git 状态快照（可选，透传到 AgentHandoff.GitState）。</summary>
+        public AgentGitStateSnapshot? GitState { get; set; }
     }
 }

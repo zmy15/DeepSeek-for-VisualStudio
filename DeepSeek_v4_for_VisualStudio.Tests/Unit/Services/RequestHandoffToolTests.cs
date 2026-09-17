@@ -18,7 +18,9 @@ public class RequestHandoffToolTests
     /// <summary>
     /// 构造一次完整的工具调用参数；传入 editSteps 时附加该键（否则模拟未传）。
     /// </summary>
-    private static Dictionary<string, JsonElement> BuildArgs(JsonElement? editSteps = null)
+    private static Dictionary<string, JsonElement> BuildArgs(
+        JsonElement? editSteps = null,
+        JsonElement? gitState = null)
     {
         var args = new Dictionary<string, JsonElement>
         {
@@ -29,6 +31,9 @@ public class RequestHandoffToolTests
 
         if (editSteps.HasValue)
             args["editSteps"] = editSteps.Value;
+
+        if (gitState.HasValue)
+            args["gitState"] = gitState.Value;
 
         return args;
     }
@@ -136,6 +141,63 @@ public class RequestHandoffToolTests
 
     #endregion
 
+    #region Execute — gitState 解析
+
+    /// <summary>gitState 完整快照解析：分支、HEAD、干净状态与 refs 映射透传到 HandoffRequest。</summary>
+    [Fact]
+    public async Task Execute_WithGitState_ParsesSnapshot()
+    {
+        var gitState = JsonSerializer.SerializeToElement(new
+        {
+            branch = "master",
+            headSha = "4c22e6e",
+            isClean = true,
+            refs = new Dictionary<string, string>
+            {
+                ["master"] = "4c22e6e",
+                ["origin/master"] = "4c22e6e",
+                ["fix/agent-request-redundancy"] = "157f7fa",
+            },
+        });
+        var args = BuildArgs(gitState: gitState);
+
+        var request = await RunExecuteAsync(args);
+
+        var snapshot = request.GitState;
+        snapshot.Should().NotBeNull();
+        snapshot!.Branch.Should().Be("master");
+        snapshot.HeadSha.Should().Be("4c22e6e");
+        snapshot.IsClean.Should().BeTrue();
+        snapshot.CapturedAtUtc.Should().NotBeNull();
+        snapshot.Refs.Should().HaveCount(3);
+        snapshot.Refs!["origin/master"].Should().Be("4c22e6e");
+        snapshot.Refs!["fix/agent-request-redundancy"].Should().Be("157f7fa");
+    }
+
+    /// <summary>gitState 为空对象时视为未提供，保持 null，避免目标 Agent 收到空状态。</summary>
+    [Fact]
+    public async Task Execute_WithEmptyGitState_LeavesNull()
+    {
+        var args = BuildArgs(gitState: JsonSerializer.SerializeToElement(new { }));
+
+        var request = await RunExecuteAsync(args);
+
+        request.GitState.Should().BeNull();
+    }
+
+    /// <summary>未传 gitState 时保持 null（既有调用方行为不变）。</summary>
+    [Fact]
+    public async Task Execute_WithoutGitState_LeavesNull()
+    {
+        var args = BuildArgs();
+
+        var request = await RunExecuteAsync(args);
+
+        request.GitState.Should().BeNull();
+    }
+
+    #endregion
+
     #region Schema
 
     /// <summary>工具定义 schema 中包含 editSteps 数组参数（maxItems=4、items.required=[title]）。</summary>
@@ -151,6 +213,20 @@ public class RequestHandoffToolTests
         editSteps.GetProperty("type").GetString().Should().Be("array");
         editSteps.GetProperty("maxItems").GetInt32().Should().Be(4);
         editSteps.GetProperty("items").GetProperty("required")[0].GetString().Should().Be("title");
+    }
+
+    /// <summary>工具定义 schema 中包含可选 gitState 对象参数。</summary>
+    [Fact]
+    public void GetDefinition_IncludesGitStateSchema()
+    {
+        var tool = new RequestHandoffTool(_ => Task.CompletedTask);
+
+        var schema = JsonSerializer.SerializeToElement(tool.GetDefinition().Function.Parameters);
+
+        schema.TryGetProperty("properties", out var properties).Should().BeTrue();
+        properties.TryGetProperty("gitState", out var gitState).Should().BeTrue();
+        gitState.GetProperty("type").GetString().Should().Be("object");
+        gitState.GetProperty("properties").TryGetProperty("refs", out _).Should().BeTrue();
     }
 
     #endregion

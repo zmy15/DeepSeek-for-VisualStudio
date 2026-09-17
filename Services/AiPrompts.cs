@@ -358,6 +358,15 @@ namespace DeepSeek_v4_for_VisualStudio.Services
         /// <summary>Ask Agent — 终端只读规则（不修改文件的命令）</summary>
         public static string AskTerminalInstructions => L["system.agent.askTerminalInstructions"];
 
+        /// <summary>Ask Agent — Git/终端写任务先移交、移交前不预核实的规则</summary>
+        public static string AskGitHandoffFirstRule => L["system.agent.askGitHandoffFirstRule"];
+
+        /// <summary>Ask Agent — 移交前禁止用终端重复核实的规则</summary>
+        public static string AskTerminalNoRepeatRule => L["system.agent.askTerminalNoRepeatRule"];
+
+        /// <summary>Edit Agent — 信任 Handoff 携带的 Git 状态快照的规则</summary>
+        public static string EditTrustHandoffGitStateRule => L["system.agent.editTrustHandoffGitStateRule"];
+
         /// <summary>Explore Agent — 深度检索模式完整系统提示</summary>
         public static string ExploreAgentSystemPrompt =>
             L["system.agent.explorePrompt"] + "\n\n" + ExploreMemoryInstructions + AgentConclusionStopRule;
