@@ -102,15 +102,18 @@ namespace DeepSeek_v4_for_VisualStudio.Services.BuiltInTools
                 element.ValueKind != JsonValueKind.Array)
                 return LocalizationService.Instance["tool.multiReplace.missingReplacements"];
 
-            var results = new List<string>();
-            int successCount = 0;
-            int failCount = 0;
-            string? verificationFile = null;
-
+            // 预校验全部替换项指向同一文件；校验通过前不做任何写入，
+            // 避免多文件调用在应用中途被拒绝后留下“改了一半”的状态。
+            var pending = new List<(string FilePath, Dictionary<string, JsonElement> Args)>();
+            int invalidCount = 0;
+            string? targetFile = null;
             foreach (var item in element.EnumerateArray())
             {
                 if (item.ValueKind != JsonValueKind.Object)
+                {
+                    invalidCount++;
                     continue;
+                }
 
                 var singleArgs = new Dictionary<string, JsonElement>();
                 foreach (var prop in item.EnumerateObject())
@@ -121,21 +124,35 @@ namespace DeepSeek_v4_for_VisualStudio.Services.BuiltInTools
 
                 if (string.IsNullOrEmpty(filePath) || string.IsNullOrEmpty(oldStr))
                 {
-                    failCount++;
+                    invalidCount++;
                     continue;
                 }
 
                 string resolvedPath = ResolvePath(filePath, workspaceRoot);
-                if (verificationFile == null)
+                if (targetFile == null)
                 {
-                    verificationFile = resolvedPath;
+                    targetFile = resolvedPath;
                 }
                 else if (!string.Equals(
-                    verificationFile, resolvedPath, StringComparison.OrdinalIgnoreCase))
+                    targetFile, resolvedPath, StringComparison.OrdinalIgnoreCase))
                 {
                     return LocalizationService.Instance["tool.editVerify.verificationSingleTarget"];
                 }
 
+                pending.Add((resolvedPath, singleArgs));
+            }
+
+            var results = new List<string>();
+            int successCount = 0;
+            int failCount = invalidCount;
+
+            // 捕获批量前快照，任一条替换失败时整体回滚，让 AI 面对的是确定状态而非部分生效。
+            string? before = targetFile == null
+                ? null
+                : await _singleReplacer.ReadCurrentContentAsync(targetFile);
+
+            foreach (var (filePath, singleArgs) in pending)
+            {
                 string result = await _singleReplacer.ApplyReplacementAsync(
                     singleArgs, workspaceRoot, expectedText: null, verifyAfterWrite: false);
                 results.Add($"{Path.GetFileName(filePath)}: {result}");
@@ -146,18 +163,28 @@ namespace DeepSeek_v4_for_VisualStudio.Services.BuiltInTools
             string summary = $"multi_replace_string_in_file: success {successCount}, fail {failCount}";
             string detail = summary + "\n" + string.Join("\n", results);
 
-            if (failCount > 0 || verificationFile == null)
+            if (failCount > 0 || targetFile == null)
             {
-                if (verificationFile != null)
+                if (targetFile != null && before != null)
                 {
-                    detail += "\n" + await _singleReplacer.BuildCurrentStateSnapshotAsync(verificationFile);
+                    try
+                    {
+                        await _singleReplacer.RestoreFileContentAsync(targetFile, before);
+                    }
+                    catch (Exception ex)
+                    {
+                        detail += "\n" + $"Rollback failed: {ex.Message}";
+                    }
                 }
+
+                if (targetFile != null)
+                    detail += "\n" + await _singleReplacer.BuildCurrentStateSnapshotAsync(targetFile);
                 return detail;
             }
 
-            string? actualContent = await _singleReplacer.ReadCurrentContentAsync(verificationFile);
+            string? actualContent = await _singleReplacer.ReadCurrentContentAsync(targetFile!);
             string verification = ExpectedContentVerifier.VerifyExpectedFragment(
-                expectedText, actualContent, verificationFile);
+                expectedText, actualContent, targetFile!);
             return detail + "\n" + verification;
         }
     }

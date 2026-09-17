@@ -44,6 +44,9 @@ namespace DeepSeek_v4_for_VisualStudio.Services.Agents
         // ── 用户原始消息（用于检测跳过构建的意图）──
         private string? _lastUserMessage;
 
+        // ── 最近一次直接构建结果（随 Handoff 交给 Build Agent，避免重复构建）──
+        private string? _lastDirectBuildResult;
+
         // ── 本轮已修改文件追踪（用于步骤间重读提示）──
         private readonly HashSet<string> _lastModifiedFiles = new(StringComparer.OrdinalIgnoreCase);
 
@@ -2345,13 +2348,17 @@ namespace DeepSeek_v4_for_VisualStudio.Services.Agents
                 }
 
                 string buildResult = result ?? LocalizationService.Instance["agent.log.editBuildToolNoResult"];
+                _lastDirectBuildResult = buildResult;
                 Logger.Info($"[EditAgent] 构建完成: {(buildResult.Length > 200 ? buildResult.Substring(0, 200) + "..." : buildResult)}");
                 return buildResult;
             }
             catch (Exception ex)
             {
                 Logger.Warn($"[EditAgent] 构建异常: {ex.Message}");
-                return string.Format(LocalizationService.Instance["agent.log.editBuildFailed"], ex.Message);
+                string errorResult = string.Format(
+                    LocalizationService.Instance["agent.log.editBuildFailed"], ex.Message);
+                _lastDirectBuildResult = errorResult;
+                return errorResult;
             }
         }
 
@@ -2363,11 +2370,13 @@ namespace DeepSeek_v4_for_VisualStudio.Services.Agents
             string oneLine = buildResult.Split(new[] { '\r', '\n' },
                 StringSplitOptions.RemoveEmptyEntries).FirstOrDefault() ?? buildResult;
 
-            bool success = buildResult.Contains("构建成功")
+            bool success = DeepSeek_v4_for_VisualStudio.Services.BuiltInTools.BuildSolutionTool
+                    .IsSuccessResult(buildResult)
                 || buildResult.Contains("构建通过")
-                || buildResult.Contains("build succeeded")
                 || buildResult.Contains("0 个错误")
-                || buildResult.Contains("0 errors");
+                || buildResult.Contains("0 errors")
+                || buildResult.Contains("0 失败")
+                || buildResult.Contains("0 failed");
             if (success)
                 AddLog("INFO", string.Format(LocalizationService.Instance["agent.log.editFinalBuildOk"], oneLine));
             else
@@ -3208,11 +3217,23 @@ namespace DeepSeek_v4_for_VisualStudio.Services.Agents
         private AgentHandoff BuildBuildHandoff()
         {
             var L = LocalizationService.Instance;
+            var prompt = new StringBuilder();
+            prompt.AppendLine(L["agent.edit.handoffBuildPrompt"]);
+
+            if (!string.IsNullOrWhiteSpace(_lastDirectBuildResult))
+            {
+                prompt.AppendLine();
+                prompt.AppendLine(L["agent.edit.handoffBuildResultHeader"]);
+                prompt.AppendLine(_lastDirectBuildResult!.Trim());
+                prompt.AppendLine();
+                prompt.AppendLine(L["agent.edit.handoffBuildNoRebuildRule"]);
+            }
+
             return new AgentHandoff
             {
                 Label = L["agent.edit.handoffBuildLabel"],
                 TargetAgent = AgentType.Build,
-                Prompt = L["agent.edit.handoffBuildPrompt"],
+                Prompt = prompt.ToString().TrimEnd(),
                 AutoSend = true,
                 ShowContinueOn = false,
             };
@@ -3690,11 +3711,11 @@ namespace DeepSeek_v4_for_VisualStudio.Services.Agents
                     return true;
 
                 // ── 最终编译验证的警告日志（中/英文 locale）──
-                if (msg.Contains(" 最终编译") || msg.Contains("Final build has issues")
-                    || (msg.IndexOf("final build", StringComparison.OrdinalIgnoreCase) >= 0
-                        && (msg.IndexOf("failed", StringComparison.OrdinalIgnoreCase) >= 0
-                            || msg.IndexOf("issues", StringComparison.OrdinalIgnoreCase) >= 0
-                            || msg.IndexOf("error", StringComparison.OrdinalIgnoreCase) >= 0)))
+                if (msg.Contains("最终编译存在问题") || msg.Contains("最终编译异常")
+                    || msg.Contains("最终编译失败")
+                    || msg.Contains("Final build has issues")
+                    || msg.Contains("Final build exception")
+                    || msg.Contains("Final build failed"))
                     return true;
             }
             return false;

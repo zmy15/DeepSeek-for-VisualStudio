@@ -848,6 +848,8 @@ namespace DeepSeek_v4_for_VisualStudio.Services.Agents
                 };
                 parts.AddRange(visionParts);
                 message.MultimodalContent = parts;
+                // 一次性消费：历史消息已带原图，避免 Handoff / 步骤重试把同一批图片重复注入。
+                Context.VisionContent = null;
             }
 
             return message;
