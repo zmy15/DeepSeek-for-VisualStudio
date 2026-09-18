@@ -56,35 +56,6 @@ public class EditAgentTests
     }
 
     [Fact]
-    public void DetectOperationType_PlainGitSummary_ReturnsNull()
-    {
-        var method = typeof(EditAgent).GetMethod(
-            "DetectOperationType",
-            System.Reflection.BindingFlags.NonPublic | System.Reflection.BindingFlags.Static);
-        method.Should().NotBeNull();
-
-        var result = method!.Invoke(null, new object[]
-        {
-            "拉取已成功完成（快进合并，无冲突）。为报告新增提交明细，我执行一次 git log 查看本次拉取的提交列表。"
-        });
-
-        result.Should().BeNull();
-    }
-
-    [Fact]
-    public void DetectOperationType_DeleteFormat_ReturnsDeleteFile()
-    {
-        var method = typeof(EditAgent).GetMethod(
-            "DetectOperationType",
-            System.Reflection.BindingFlags.NonPublic | System.Reflection.BindingFlags.Static);
-        method.Should().NotBeNull();
-
-        var result = method!.Invoke(null, new object[] { "delete: src/obsolete.cs" });
-
-        result.Should().Be(EditOperationType.DeleteFile);
-    }
-
-    [Fact]
     public void BuildPlanProgressSnapshot_ListsStepsAndMarksCurrent()
     {
         var plan = new AgentTaskPlan
@@ -362,11 +333,10 @@ public class EditAgentTests
         agent.Definition.SystemPrompt.Should().Contain(
             global::DeepSeek_v4_for_VisualStudio.Services.AiPrompts.EditToolCallRule);
         global::DeepSeek_v4_for_VisualStudio.Services.AiPrompts.EditSystemPromptFragment
-            .Should().NotContain("不要作为工具调用")
-            .And.NotContain("not a tool call");
-        global::DeepSeek_v4_for_VisualStudio.Services.AiPrompts.EditFormatRecoveryPrompt
             .Should().Contain("apply_patch")
-            .And.Contain("replace_string_in_file");
+            .And.Contain("replace_string_in_file")
+            .And.Contain("delete_file")
+            .And.NotContain("```file:");
         global::DeepSeek_v4_for_VisualStudio.Services.AiPrompts.EditToolCallRule
             .Should().Contain("终态")
             .And.Contain("不要再次读取");
@@ -487,33 +457,6 @@ public class EditAgentTests
         tools.Should().NotContain("create_directory");
         tools.Should().NotContain("build_solution");
         tools.Should().Contain("git");
-    }
-
-    [Fact]
-    public void ResolveFormatRetryInsertIndex_UsesCurrentListAfterCompression()
-    {
-        var messages = new List<ChatApiMessage>
-        {
-            new() { Role = "system", Content = "shared prefix" },
-            new() { Role = "user", Content = "execute step" },
-            new() { Role = "system", Content = "edit prompt" },
-            new() { Role = "system", Content = "explicit route" },
-        };
-
-        int staleIndex = messages.Count - 1;
-        messages.RemoveAt(0); // 模拟工具循环压缩删除旧消息
-
-        int retryInsertIndex = EditAgent.ResolveFormatRetryInsertIndex(messages);
-
-        retryInsertIndex.Should().Be(1);
-        retryInsertIndex.Should().BeLessThanOrEqualTo(messages.Count);
-        (staleIndex + 1).Should().BeGreaterThan(messages.Count);
-        Action insert = () => messages.Insert(retryInsertIndex, new ChatApiMessage
-        {
-            Role = "assistant",
-            Content = "invalid format",
-        });
-        insert.Should().NotThrow();
     }
 
     [Fact]

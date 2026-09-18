@@ -137,6 +137,25 @@ public class StagedEditWorkspaceBackupTests : IDisposable
     }
 
     [Fact]
+    public void GetOperation_ReportsTrackedFileOperation()
+    {
+        var existingFile = WriteSourceFile("existing.txt", "ORIGINAL");
+        var newFile = Path.Combine(_tempRoot, "new.txt");
+        var deletedFile = WriteSourceFile("deleted.txt", "DELETE ME");
+
+        var ws = new StagedEditWorkspace();
+
+        ws.GetOperation(existingFile).Should().BeNull();
+        ws.WriteFile(existingFile, "MODIFIED");
+        ws.WriteFile(newFile, "NEW");
+        ws.DeleteFile(deletedFile);
+
+        ws.GetOperation(existingFile).Should().Be(ProposedFileOperation.Modify);
+        ws.GetOperation(newFile).Should().Be(ProposedFileOperation.Add);
+        ws.GetOperation(deletedFile).Should().Be(ProposedFileOperation.Delete);
+    }
+
+    [Fact]
     public void ConfirmAll_CleansUpDiskBackups()
     {
         var file = WriteSourceFile("a.txt", "ORIGINAL");

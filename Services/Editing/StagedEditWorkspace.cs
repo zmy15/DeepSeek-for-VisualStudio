@@ -60,6 +60,23 @@ namespace DeepSeek_v4_for_VisualStudio.Services.Editing
         }
 
         /// <summary>
+        /// 获取文件在当前工作区中的变更类型；未跟踪时返回 null。
+        /// </summary>
+        public ProposedFileOperation? GetOperation(string filePath)
+        {
+            if (string.IsNullOrWhiteSpace(filePath))
+                return null;
+
+            var normalizedPath = NormalizePath(filePath);
+            lock (_lock)
+            {
+                return _trackedFiles.TryGetValue(normalizedPath, out var file)
+                    ? file.Operation
+                    : null;
+            }
+        }
+
+        /// <summary>
         /// 读取文件内容。直接读取磁盘（内容已落盘）。
         /// </summary>
         public string ReadFile(string filePath)
