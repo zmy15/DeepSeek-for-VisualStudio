@@ -539,7 +539,7 @@ namespace DeepSeek_v4_for_VisualStudio.View
             return string.Equals(Path.GetExtension(filePath), ".pdf", StringComparison.OrdinalIgnoreCase);
         }
 
-        private static bool IsOcrExplicitlyRequested(string? userText, string? effectiveUserText)
+        internal static bool IsOcrExplicitlyRequested(string? userText, string? effectiveUserText)
         {
             string text = ((effectiveUserText ?? string.Empty) + "\n" + (userText ?? string.Empty))
                 .ToLowerInvariant();
@@ -551,6 +551,12 @@ namespace DeepSeek_v4_for_VisualStudio.View
                 || text.Contains("提取图片文字")
                 || text.Contains("读取图片文字")
                 || text.Contains("图片文字");
+        }
+
+        internal static bool IsOcrToolName(string toolName)
+        {
+            var ocrKeywords = new[] { "ocr", "recognize_text", "paddle_ocr", "ocr_image", "image_to_text", "read_text" };
+            return ocrKeywords.Any(k => toolName.IndexOf(k, StringComparison.OrdinalIgnoreCase) >= 0);
         }
 
         private static List<ChatContentPart>? BuildVisionContent(List<string> imagePaths)
@@ -1002,9 +1008,7 @@ namespace DeepSeek_v4_for_VisualStudio.View
         /// </summary>
         internal static string SanitizeOcrToolArguments(string toolName, string argumentsJson)
         {
-            var ocrKeywords = new[] { "ocr", "recognize_text", "paddle_ocr", "ocr_image", "image_to_text", "read_text" };
-            bool isOcrTool = ocrKeywords.Any(k => toolName.IndexOf(k, StringComparison.OrdinalIgnoreCase) >= 0);
-            if (!isOcrTool)
+            if (!IsOcrToolName(toolName))
                 return argumentsJson;
 
             // ── OCR 参数格式提醒 ──

@@ -134,6 +134,9 @@ namespace DeepSeek_v4_for_VisualStudio.Services.Agents
         ///  双重合并：优先通过 BuiltInToolService 获取（已合并内置+MCP），
         ///    同时兜底直接查询 McpManager 确保 MCP 工具不遗漏。
         /// </summary>
+        internal static bool ShouldSuppressOcrTools(bool isVisionModel, string? userMessage)
+            => isVisionModel && !DeepSeekChatControl.IsOcrExplicitlyRequested(userMessage, null);
+
         protected List<ToolDefinition> BuildFullToolSet()
         {
             var fullSet = new List<ToolDefinition>();
@@ -144,10 +147,17 @@ namespace DeepSeek_v4_for_VisualStudio.Services.Agents
                 var defs = BuiltInTools.GetFullToolDefinitions();
                 bool autoSkillRoutingEnabled =
                     Settings.DeepSeekOptionsPage.Instance?.EnableAutoSkillRouting == true;
+                bool suppressOcrTools = ShouldSuppressOcrTools(
+                    _apiService?.CurrentIsVision == true,
+                    Context?.CurrentUserContent);
                 foreach (var def in defs)
                 {
                     if (!autoSkillRoutingEnabled &&
                         string.Equals(def.Function.Name, "load_skill", StringComparison.OrdinalIgnoreCase))
+                    {
+                        continue;
+                    }
+                    if (suppressOcrTools && DeepSeekChatControl.IsOcrToolName(def.Function.Name))
                     {
                         continue;
                     }

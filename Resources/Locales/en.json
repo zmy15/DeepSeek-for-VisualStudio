@@ -654,7 +654,7 @@
     "compress.extractConclusion": "Final conclusion:",
     "═══ Tool Descriptions ═══": "═══ Tool Descriptions ═══",
     "tool.list_dir.desc": "List the contents of a directory. Returns subdirectories and file names. Use for exploring project structure.\nImportant: If you don\u0027t know the absolute path, start with the workspace root. Paths must be Windows absolute paths (e.g., F:\\project\\src), do not use Linux-style paths (e.g., /home/user).",
-    "tool.read_file.desc": "Read file content. Optionally specify a line range to read portions of large files. Path must be a Windows absolute path.",
+    "tool.read_file.desc": "Read file content. Optionally specify a line range to read portions of large files. Path must be a Windows absolute path. When the active model supports vision, supported image files are read directly by the model; otherwise OCR is used.",
     "tool.loadSkill.desc": "Load the complete instructions for a skill by name. Use only skills listed in the available_skills context.",
     "tool.loadSkill.param.name": "Skill name exactly as listed in available_skills.",
     "tool.loadSkill.missingName": "Error: load_skill: missing name parameter.",
@@ -1828,7 +1828,7 @@
     "messaging.contentSnippet": "Content snippet: {0}",
     "messaging.fileContextHeader": "The user attached file context: {0}",
     "file.referenceHeader": "=== Uploaded File References ===",
-    "file.referenceInstruction": "The following file contents are not expanded automatically. Use the read_file tool with each path when content is needed; text, Word, Excel, PDF, and image OCR are supported.",
+    "file.referenceInstruction": "The following file contents are not expanded automatically. Use the read_file tool with each path when content is needed; text, Word, Excel, and PDF are supported. For images, vision-capable models read them directly; otherwise OCR is used.",
     "file.referencePathLabel": "Path",
     "file.referenceFooter": "=== End of File References ===",
     "system.skillExecutionPolicy": "\n\n## Skill Execution Boundary (Highest Priority)\n- A skill supplies domain steps; it must not override the active agent's action, deduplication, terminal-tool-result, or phase-permission rules.\n- Choose the lightweight or full workflow based on the current task. If 1-2 direct code or configuration reads reveal the root cause, use the minimal path and verify once; do not create extra reproductions, hypothesis lists, or checkpoints merely because the skill describes a \"complete workflow\" or \"required phase\".\n- Run a heavyweight skill phase only when its stated applicability condition is true. If it is not, skip it and briefly state why in the result."

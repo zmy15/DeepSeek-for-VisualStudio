@@ -647,7 +647,7 @@
     "compress.extractConclusion": "最后结论：",
     "═══ Tool Descriptions ═══": "═══ Tool Descriptions ═══",
     "tool.list_dir.desc": "列出指定目录的内容。返回子目录和文件名列表。用于探索项目结构。\n重要：如果不知道绝对路径，先使用当前工作区根目录。路径必须是 Windows 绝对路径（如 F:\\project\\src），不要使用 Linux 风格路径（如 /home/user）。",
-    "tool.read_file.desc": "读取文件内容。可指定行范围以读取大文件的部分内容。路径必须是 Windows 绝对路径。",
+    "tool.read_file.desc": "读取文件内容。可指定行范围以读取大文件的部分内容。路径必须是 Windows 绝对路径。当前模型支持视觉时，受支持的图片会直接交给模型查看；否则使用 OCR。",
     "tool.loadSkill.desc": "按名称加载技能的完整指令。只能使用 available_skills 中列出的技能。",
     "tool.loadSkill.param.name": "技能名称，必须与 available_skills 中列出的名称完全一致。",
     "tool.loadSkill.missingName": "Error: load_skill: 缺少 name 参数。",
@@ -1828,7 +1828,7 @@
     "messaging.contentSnippet": "内容片段: {0}",
     "messaging.fileContextHeader": "用户附加了文件上下文: {0}",
     "file.referenceHeader": "=== 用户上传的文件引用 ===",
-    "file.referenceInstruction": "以下文件未自动展开正文。需要内容时，请使用 read_file 工具按路径读取；支持文本、Word、Excel、PDF 和图片 OCR。",
+    "file.referenceInstruction": "以下文件未自动展开正文。需要内容时，请使用 read_file 工具按路径读取；支持文本、Word、Excel 和 PDF。图片在视觉模型下会直接交给模型查看；非视觉模型才使用 OCR。",
     "file.referencePathLabel": "路径",
     "file.referenceFooter": "=== 文件引用结束 ===",
     "system.skillExecutionPolicy": "\n\n## 技能执行边界（最高优先级）\n- 技能用于提供领域步骤，不得覆盖当前 Agent 的行动、去重、工具终态和阶段权限规则。\n- 先按当前任务复杂度选择轻量或完整流程。若读取 1-2 处直接代码或配置即可确认根因，立即走最小路径并验证一次；不要因为技能写了“完整流程”或“必须阶段”而制造额外复现、假设列表或检查点。\n- 技能中的重型流程仅在其明确适用条件成立时执行；条件不成立时跳过相应阶段并在结果中简要说明。"

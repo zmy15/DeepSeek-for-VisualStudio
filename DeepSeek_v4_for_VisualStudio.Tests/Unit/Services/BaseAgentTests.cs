@@ -21,6 +21,32 @@ public class BaseAgentTests
         BaseAgent.NormalizeToolName(input).Should().Be(expected);
     }
 
+    [Theory]
+    [InlineData("paddleocr_vl", true)]
+    [InlineData("ocr_image", true)]
+    [InlineData("read_file", false)]
+    [InlineData("capture_window", false)]
+    public void IsOcrToolName_IdentifiesOcrTools(string toolName, bool expected)
+    {
+        DeepSeek_v4_for_VisualStudio.View.DeepSeekChatControl
+            .IsOcrToolName(toolName)
+            .Should()
+            .Be(expected);
+    }
+
+    [Theory]
+    [InlineData(true, "分析这些截图", true)]
+    [InlineData(true, "请 OCR 这些图片", false)]
+    [InlineData(true, "识别图片文字", false)]
+    [InlineData(false, "分析这些截图", false)]
+    public void ShouldSuppressOcrTools_OnlyForVisionWithoutExplicitOcr(
+        bool isVisionModel,
+        string userMessage,
+        bool expected)
+    {
+        BaseAgent.ShouldSuppressOcrTools(isVisionModel, userMessage).Should().Be(expected);
+    }
+
     [Fact]
     public void ApplyCurrentUserQuestionPrefix_PrefixesOnlyLastUser()
     {
