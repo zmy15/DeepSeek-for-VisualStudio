@@ -742,6 +742,69 @@ namespace DeepSeek_v4_for_VisualStudio.View
         }
 
         /// <summary>
+        /// 将指定索引的助手消息标记为「未完成」（用户停止/异常中断），
+        /// 并同步对话树中对应节点（树为权威源），随后触发会话持久化。
+        /// 末尾未完成轮的重试/编辑据此走原地路径（不产生分支）。
+        /// </summary>
+        /// <param name="msgIndex">_messages 集合中的消息索引；越界/非助手消息时静默忽略。</param>
+        private void MarkAssistantMessageIncomplete(int msgIndex)
+        {
+            ChatMessage? msg = null;
+            lock (_lock)
+            {
+                if (msgIndex >= 0 && msgIndex < _messages.Count)
+                    msg = _messages[msgIndex];
+            }
+            if (msg == null || msg.Role != "assistant") return;
+
+            msg.IsIncomplete = true;
+
+            // 树为权威源：按 NodeId 定位节点；若节点消息与列表对象非同一引用则补偿同步
+            var node = string.IsNullOrEmpty(msg.NodeId) ? null : EnsureTree().FindNode(msg.NodeId);
+            if (node?.Message != null && !ReferenceEquals(node.Message, msg))
+                node.Message.IsIncomplete = true;
+
+            // 触发会话持久化，确保标记随 TreeDataJson 落盘（重启/切会话后仍生效）
+            try { SaveCurrentSession(); }
+            catch (Exception ex) { Logger.Warn($"[Incomplete] 保存未完成标记失败: {ex.Message}"); }
+        }
+
+        /// <summary>
+        /// 清除指定索引助手消息的「未完成」标记（正常完成或原地重发成功后调用）。
+        /// </summary>
+        /// <param name="msgIndex">_messages 集合中的消息索引；越界/非助手消息时静默忽略。</param>
+        private void ClearAssistantMessageIncomplete(int msgIndex)
+        {
+            ChatMessage? msg = null;
+            lock (_lock)
+            {
+                if (msgIndex >= 0 && msgIndex < _messages.Count)
+                    msg = _messages[msgIndex];
+            }
+            if (msg == null || msg.Role != "assistant") return;
+
+            msg.IsIncomplete = false;
+            var node = string.IsNullOrEmpty(msg.NodeId) ? null : EnsureTree().FindNode(msg.NodeId);
+            if (node?.Message != null && !ReferenceEquals(node.Message, msg))
+                node.Message.IsIncomplete = false;
+        }
+
+        /// <summary>
+        /// 按内容级信号判定助手消息是否以「非正常完成」收尾：
+        /// 用户取消（BaseAgent 流取消 catch 写入）、推理循环自动停止、流断点续传彻底失败。
+        /// 哨兵文案与 BaseAgent 侧集中维护，改动其一必须同步另一处。
+        /// </summary>
+        /// <param name="content">助手消息最终正文。</param>
+        /// <returns>true 表示该消息应被标记为未完成。</returns>
+        private static bool LooksInterrupted(string? content)
+        {
+            if (string.IsNullOrEmpty(content)) return false;
+            return content.Contains("操作已被取消")
+                || content.Contains("已自动停止本轮生成")
+                || (content.Contains("网络连接在") && content.Contains("次重试后仍未恢复"));
+        }
+
+        /// <summary>
         /// 重试某个助手消息：EditAgent 原地替换，其他 Agent 产生分叉。
         /// </summary>
         private async Task RetryMessageAsync(int assistantMsgIndex)
@@ -798,14 +861,17 @@ namespace DeepSeek_v4_for_VisualStudio.View
                 bool canProceed = await CheckAndRevertFileChangesAsync(userMsgIndex);
                 if (!canProceed) return;
 
-                // ── 判断是否为 EditAgent：是则移除旧节点后重新生成，否则树状分叉 ──
+                // ── 原地路径门控：EditAgent（原有行为）或「活跃路径末尾的未完成轮」（未完成轮改造新增）──
+                // 二者都走「移除节点后重新生成」，不调用 ForkAt、不写 ForkReason、不产生分支。
                 bool isEditAgent = assistantMsg.AgentType == AgentType.Edit;
+                bool useInPlace = isEditAgent || tree.IsTrailingIncompleteTurn(assistantNode);
 
-                if (isEditAgent)
+                if (useInPlace)
                 {
-                    // ── EditAgent：移除旧助手节点及其后代，重置到用户节点，重新生成 ──
+                    // ── 原地路径：移除旧助手节点及其后代，重置到用户节点，重新生成 ──
+                    tree.ClearIncomplete(assistantNode); // 防御：清除即将移除节点的残留标记
                     tree.RemoveNodeFromTree(assistantNode);
-                    Logger.Info($"[EditAgent] 重试消息：移除旧助手节点 (nodeId={assistantNode.Id})，不产生分支");
+                    Logger.Info($"[{(isEditAgent ? "EditAgent" : "IncompleteRetry")}] 重试消息：移除旧助手节点 (nodeId={assistantNode.Id})，不产生分支");
                 }
                 else
                 {
@@ -986,11 +1052,22 @@ namespace DeepSeek_v4_for_VisualStudio.View
                     AgentType = originalUserMsg?.AgentType, // 保留原 Agent 类型
                 };
 
-                // 编辑重发永远新增一个 user 轮次并建立分支，
-                // 保留原始提问，形成标准的多轮对话历史。
-                editedUserMsg.ForkReason = "edit";
-                tree.ForkAt(userNode, editedUserMsg, "edit");
-                Logger.Info($"[Tree] 编辑消息：新增用户分支 (nodeId={userNode.Id})");
+                // ── 编辑重发门控：末尾未完成轮原地替换（不产生分支），其余保持原有分支行为 ──
+                if (tree.IsTrailingIncompleteUserTurn(userNode))
+                {
+                    // 末尾未完成轮：原地替换用户消息。
+                    // ReplaceInPlace 会剪枝该节点下所有子节点（含未完成助手回复），
+                    // 并将 ForkReason 置 null（分支导航不渲染）。
+                    tree.ReplaceInPlace(userNode, editedUserMsg);
+                    Logger.Info($"[Tree] 编辑消息：末尾未完成轮原地替换 (nodeId={userNode.Id})");
+                }
+                else
+                {
+                    // 新增一个 user 轮次并建立分支，保留原始提问，形成标准的多轮对话历史。
+                    editedUserMsg.ForkReason = "edit";
+                    tree.ForkAt(userNode, editedUserMsg, "edit");
+                    Logger.Info($"[Tree] 编辑消息：新增用户分支 (nodeId={userNode.Id})");
+                }
 
                 // ── 同步消息列表并重建上下文 ──
                 RebuildFromTree();
@@ -1246,6 +1323,7 @@ namespace DeepSeek_v4_for_VisualStudio.View
                     assistantMsg.IsStreaming = false;
                     BatchStreamingUpdate(newAssistantIdx, assistantMsg.Content, assistantMsg.ReasoningContent, isComplete: true);
                     PostStreamEnd(newAssistantIdx, assistantMsg.Content, assistantMsg.ReasoningContent);
+                    MarkAssistantMessageIncomplete(newAssistantIdx); // 标记未完成：后续重试/编辑走原地路径
                 }
             }
             catch (ObjectDisposedException) when (retryCts?.IsCancellationRequested == true)
@@ -1258,6 +1336,7 @@ namespace DeepSeek_v4_for_VisualStudio.View
                     assistantMsg.IsStreaming = false;
                     BatchStreamingUpdate(newAssistantIdx, assistantMsg.Content, assistantMsg.ReasoningContent, isComplete: true);
                     PostStreamEnd(newAssistantIdx, assistantMsg.Content, assistantMsg.ReasoningContent);
+                    MarkAssistantMessageIncomplete(newAssistantIdx); // 标记未完成：后续重试/编辑走原地路径
                 }
             }
             catch (Exception ex)
@@ -1270,6 +1349,7 @@ namespace DeepSeek_v4_for_VisualStudio.View
                     BatchStreamingUpdate(newAssistantIdx, assistantMsg.Content, assistantMsg.ReasoningContent, isComplete: true);
                     PostStreamEnd(newAssistantIdx,
                         assistantMsg.Content, assistantMsg.ReasoningContent);
+                    MarkAssistantMessageIncomplete(newAssistantIdx); // 标记未完成：后续重试/编辑走原地路径
                 }
             }
             finally

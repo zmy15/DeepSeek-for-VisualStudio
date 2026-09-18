@@ -714,6 +714,10 @@ namespace DeepSeek_v4_for_VisualStudio.View
                 UpdateButtonsState();
                 StatusLabel.Text = LocalizationService.Instance["status.stopped"];
 
+                // ── 标记未完成：本轮被用户停止，末尾未完成轮的重试/编辑将走原地路径（不产生分支）──
+                if (streamingIdx >= 0)
+                    MarkAssistantMessageIncomplete(streamingIdx);
+
                 // ── 发送 streamEnd 以渲染 Markdown 并注入重试按钮 ──
                 if (streamingIdx >= 0 && !string.IsNullOrEmpty(partialContent))
                 {
