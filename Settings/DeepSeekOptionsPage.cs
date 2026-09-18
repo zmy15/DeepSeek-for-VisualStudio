@@ -1136,26 +1136,39 @@ namespace DeepSeek_v4_for_VisualStudio.Settings
         {
             if (value is string text)
             {
-                if (string.Equals(
-                    text,
-                    LocalizationService.Instance["settings.appendMessageMode.guidance"],
-                    StringComparison.OrdinalIgnoreCase)
+                if (MatchesLocalizedValue(text, "settings.appendMessageMode.guidance")
                     || string.Equals(text, nameof(AppendMessageMode.Guidance), StringComparison.OrdinalIgnoreCase))
                 {
                     return AppendMessageMode.Guidance;
                 }
 
-                if (string.Equals(
-                    text,
-                    LocalizationService.Instance["settings.appendMessageMode.queue"],
-                    StringComparison.OrdinalIgnoreCase)
+                if (MatchesLocalizedValue(text, "settings.appendMessageMode.queue")
                     || string.Equals(text, nameof(AppendMessageMode.Queue), StringComparison.OrdinalIgnoreCase))
                 {
                     return AppendMessageMode.Queue;
                 }
+
+                // 兼容旧版本/其他语言写入的本地化文本，避免语言切换时设置页崩溃。
+                return DeepSeekOptionsPage.DefaultAppendMessageMode;
             }
 
             return base.ConvertFrom(context, culture, value);
+        }
+
+        private static bool MatchesLocalizedValue(string text, string resourceKey)
+        {
+            return string.Equals(
+                       text,
+                       LocalizationService.Instance[resourceKey],
+                       StringComparison.OrdinalIgnoreCase)
+                   || string.Equals(
+                       text,
+                       LocalizationService.Instance.GetValueForLocale(resourceKey, "zh-CN"),
+                       StringComparison.OrdinalIgnoreCase)
+                   || string.Equals(
+                       text,
+                       LocalizationService.Instance.GetValueForLocale(resourceKey, "en"),
+                       StringComparison.OrdinalIgnoreCase);
         }
     }
 
@@ -1216,9 +1229,9 @@ namespace DeepSeek_v4_for_VisualStudio.Settings
         private static string GetLocalizedValue(string storedValue)
             => LocalizationService.Instance[storedValue switch
             {
-                "BlockAll" => "chat.approval.blockAll",
-                "AllowAll" => "chat.approval.allowAll",
-                _ => "chat.approval.smartBlock",
+                "BlockAll" => "approval.blockAll",
+                "AllowAll" => "approval.allowAll",
+                _ => "approval.smartBlock",
             }];
     }
 }

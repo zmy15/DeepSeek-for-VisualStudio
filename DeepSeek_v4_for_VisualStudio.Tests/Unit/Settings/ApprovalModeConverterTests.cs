@@ -11,10 +11,13 @@ public class ApprovalModeConverterTests
     {
         var converter = new ApprovalModeConverter();
 
-        converter.GetStandardValues(null)!.Cast<string>().Should().Equal(
-            LocalizationService.Instance["chat.approval.blockAll"],
-            LocalizationService.Instance["chat.approval.allowAll"],
-            LocalizationService.Instance["chat.approval.smartBlock"]);
+        var values = converter.GetStandardValues(null)!.Cast<string>().ToArray();
+
+        values.Should().Equal(
+            LocalizationService.Instance["approval.blockAll"],
+            LocalizationService.Instance["approval.allowAll"],
+            LocalizationService.Instance["approval.smartBlock"]);
+        values.Should().OnlyContain(value => !value.Contains("chat.approval", StringComparison.Ordinal));
     }
 
     [Fact]
@@ -27,7 +30,8 @@ public class ApprovalModeConverterTests
             "AllowAll",
             typeof(string))!.ToString()!;
 
-        localized.Should().Be(LocalizationService.Instance["chat.approval.allowAll"]);
+        localized.Should().Be(LocalizationService.Instance["approval.allowAll"]);
+        localized.Should().NotContain("[");
         converter.ConvertFrom(null, CultureInfo.CurrentCulture, localized)
             .Should().Be("AllowAll");
         converter.ConvertFrom(null, CultureInfo.CurrentCulture, "SmartBlock")

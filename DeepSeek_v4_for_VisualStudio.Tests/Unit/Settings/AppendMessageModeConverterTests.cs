@@ -33,4 +33,35 @@ public class AppendMessageModeConverterTests
         converter.ConvertFrom(null, CultureInfo.CurrentCulture, "Guidance")
             .Should().Be(AppendMessageMode.Guidance);
     }
+
+    [Theory]
+    [InlineData("zh-CN", "settings.appendMessageMode.queue", AppendMessageMode.Queue)]
+    [InlineData("zh-CN", "settings.appendMessageMode.guidance", AppendMessageMode.Guidance)]
+    [InlineData("en", "settings.appendMessageMode.queue", AppendMessageMode.Queue)]
+    [InlineData("en", "settings.appendMessageMode.guidance", AppendMessageMode.Guidance)]
+    public void ConvertFrom_AcceptsLocalizedTextFromAnySupportedLanguage(
+        string locale,
+        string resourceKey,
+        AppendMessageMode expected)
+    {
+        var converter = new AppendMessageModeConverter();
+        string localized = LocalizationService.Instance.GetValueForLocale(resourceKey, locale);
+
+        object? result = converter.ConvertFrom(null, CultureInfo.CurrentCulture, localized);
+
+        result.Should().Be(expected);
+    }
+
+    [Fact]
+    public void ConvertFrom_UnknownPersistedText_FallsBackToDefault()
+    {
+        var converter = new AppendMessageModeConverter();
+
+        object? result = converter.ConvertFrom(
+            null,
+            CultureInfo.CurrentCulture,
+            "legacy-localized-value");
+
+        result.Should().Be(DeepSeekOptionsPage.DefaultAppendMessageMode);
+    }
 }
