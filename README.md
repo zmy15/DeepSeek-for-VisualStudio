@@ -25,17 +25,20 @@ The extension combines a native-grade WebView2 chat experience with five coopera
 
 ## Screenshots
 
-<p align="center">
-  <img src="docs/images/1.png" width="720" alt="DeepSeek Chat panel" />
-  <br />
-  <sub>Chat panel — model selection, Deep Think, approval mode, and MCP status</sub>
-</p>
-
-<p align="center">
-  <img src="docs/images/3.png" width="720" alt="Thinking process and tool calls" />
-  <br />
-  <sub>Deep reasoning, tool calls, and live session context usage</sub>
-</p>
+<table align="center">
+  <tr>
+    <td align="center" valign="top" width="50%">
+      <img src="docs/images/1.png" width="360" alt="DeepSeek Chat panel" />
+      <br />
+      <sub>Chat panel — model selection, Deep Think, approval mode, and MCP status</sub>
+    </td>
+    <td align="center" valign="top" width="50%">
+      <img src="docs/images/3.png" width="360" alt="Thinking process and tool calls" />
+      <br />
+      <sub>Deep reasoning, tool calls, and live session context usage</sub>
+    </td>
+  </tr>
+</table>
 
 <p align="center">
   <img src="docs/images/5.png" width="720" alt="Inline AI edit" />

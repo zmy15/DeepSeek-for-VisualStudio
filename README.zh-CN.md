@@ -25,17 +25,20 @@ DeepSeek for Visual Studio 将 AI 聊天、代码编辑、解决方案工具、�
 
 ## 界面截图
 
-<p align="center">
-  <img src="docs/images/2.png" width="720" alt="DeepSeek Chat 聊天面板" />
-  <br />
-  <sub>聊天面板 —— 模型选择、深度思考、审批模式与 MCP 状态</sub>
-</p>
-
-<p align="center">
-  <img src="docs/images/4.png" width="720" alt="思考过程与工具调用" />
-  <br />
-  <sub>深度推理、工具调用与会话上下文用量</sub>
-</p>
+<table align="center">
+  <tr>
+    <td align="center" valign="top" width="50%">
+      <img src="docs/images/2.png" width="360" alt="DeepSeek Chat 聊天面板" />
+      <br />
+      <sub>聊天面板 —— 模型选择、深度思考、审批模式与 MCP 状态</sub>
+    </td>
+    <td align="center" valign="top" width="50%">
+      <img src="docs/images/4.png" width="360" alt="思考过程与工具调用" />
+      <br />
+      <sub>深度推理、工具调用与会话上下文用量</sub>
+    </td>
+  </tr>
+</table>
 
 <p align="center">
   <img src="docs/images/6.png" width="720" alt="内联 AI 编辑" />
