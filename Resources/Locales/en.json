@@ -1270,6 +1270,7 @@
     "tool.readFile.displayText": "Read file `{0}`",
  "tool.readFile.missingParam": "Error: read_file: missing filePath parameter",
  "tool.readFile.readCompleteLines": "Read complete ({0} lines)",
+ "tool.readFile.imageReadComplete": "Image read complete",
  "tool.readFile.fileChanged": "[File changed, re-reading] File `{0}` has been modified since last read:\n\n File: {1} (total {2} lines, showing {3}-{4})\n\n{5}",
  "tool.readFile.expired": "[{0}, allow re-read] File `{1}`",
  "tool.readFile.cached": "[Cached, do not re-read] File `{0}`",

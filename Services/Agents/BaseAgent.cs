@@ -1745,18 +1745,18 @@ namespace DeepSeek_v4_for_VisualStudio.Services.Agents
                         string toolResult = toolResults[i];
 
                         // ── 视觉工具：剥离图片块，视觉模型时提取图片直传给视觉模型 ──
-                        // fetch_webpage 提取网页图片 URL；capture_window 提取窗口截图 data URI。
-                        List<string>? webImageUrls = null;
+                        // fetch_webpage 提取网页图片 URL；capture_window / read_file 提取本地图片 data URI。
+                        List<string>? imageUrls = null;
                         string resultText = toolResult;
                         if (tc.Function.Name == "fetch_webpage")
                         {
-                            var (cleanText, imageUrls) = WebSearchService.ParseWebImagesBlock(toolResult);
+                            var (cleanText, fetchedImageUrls) = WebSearchService.ParseWebImagesBlock(toolResult);
                             resultText = cleanText;
-                            if (imageUrls.Count > 0
+                            if (fetchedImageUrls.Count > 0
                                 && _apiService.CurrentIsVision)
                             {
                                 // ── 过滤视觉模型不支持的图片格式（如 SVG），避免直传导致 HTTP 400 ──
-                                webImageUrls = WebSearchService.FilterVisionImageUrls(imageUrls);
+                                imageUrls = WebSearchService.FilterVisionImageUrls(fetchedImageUrls);
                             }
                         }
                         else if (tc.Function.Name == "capture_window")
@@ -1766,7 +1766,17 @@ namespace DeepSeek_v4_for_VisualStudio.Services.Agents
                             if (imageUris.Count > 0
                                 && _apiService.CurrentIsVision)
                             {
-                                webImageUrls = imageUris;
+                                imageUrls = imageUris;
+                            }
+                        }
+                        else if (tc.Function.Name == "read_file")
+                        {
+                            var (cleanText, imageUris) = ReadFileTool.ParseImageBlock(toolResult);
+                            resultText = cleanText;
+                            if (imageUris.Count > 0
+                                && _apiService.CurrentIsVision)
+                            {
+                                imageUrls = imageUris;
                             }
                         }
 
@@ -1778,13 +1788,13 @@ namespace DeepSeek_v4_for_VisualStudio.Services.Agents
                         if (tc.Function.Name == "runSubagent")
                         {
                             messages.Insert(toolInsertPos,
-                                BuildToolResultMessage(tc.Id, tc.Function.Name, contextResult, webImageUrls));
+                                BuildToolResultMessage(tc.Id, tc.Function.Name, contextResult, imageUrls));
                             toolInsertPos++;
                         }
                         else
                         {
                             messages.Insert(toolInsertPos,
-                                BuildToolResultMessage(tc.Id, tc.Function.Name, contextResult, webImageUrls));
+                                BuildToolResultMessage(tc.Id, tc.Function.Name, contextResult, imageUrls));
                             toolInsertPos++;
                         }
 
@@ -3730,11 +3740,11 @@ namespace DeepSeek_v4_for_VisualStudio.Services.Agents
         }
 
         /// <summary>
-        /// 构建工具结果消息。视觉模型的 fetch_webpage 结果会把图片 URL 作为
-        /// image_url 内容块附加，让视觉模型直读网页图片；否则只返回纯文本。
+        /// 构建工具结果消息。视觉工具（fetch_webpage / capture_window / read_file）
+        /// 会把图片作为 image_url 内容块附加；否则只返回纯文本。
         /// </summary>
         private static ChatApiMessage BuildToolResultMessage(
-            string toolCallId, string toolName, string contextResult, List<string>? webImageUrls)
+            string toolCallId, string toolName, string contextResult, List<string>? imageUrls)
         {
             var message = new ChatApiMessage
             {
@@ -3744,13 +3754,13 @@ namespace DeepSeek_v4_for_VisualStudio.Services.Agents
                 Name = toolName,
             };
 
-            if (webImageUrls is { Count: > 0 })
+            if (imageUrls is { Count: > 0 })
             {
                 var parts = new List<ChatContentPart>
                 {
                     new ChatContentPart { Type = "text", Text = contextResult },
                 };
-                foreach (string u in webImageUrls)
+                foreach (string u in imageUrls)
                 {
                     parts.Add(new ChatContentPart
                     {
