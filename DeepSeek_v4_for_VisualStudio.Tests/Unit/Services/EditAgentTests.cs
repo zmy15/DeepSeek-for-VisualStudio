@@ -56,6 +56,46 @@ public class EditAgentTests
     }
 
     [Fact]
+    public void ExtractToolMadeEdits_ApplyPatch_UsesPatchHeaderPath()
+    {
+        const string patch = "*** Begin Patch\n*** Update File: README.md\n@@\n-old\n+new\n*** End Patch";
+        string arguments = System.Text.Json.JsonSerializer.Serialize(new
+        {
+            patch,
+            expected = "1: new"
+        });
+        var messages = new List<ChatApiMessage>
+        {
+            new()
+            {
+                Role = "assistant",
+                ToolCalls = new List<ToolCall>
+                {
+                    new()
+                    {
+                        Id = "call_apply_patch",
+                        Function = new ToolCallFunction
+                        {
+                            Name = "apply_patch",
+                            Arguments = arguments
+                        }
+                    }
+                }
+            }
+        };
+        var method = typeof(EditAgent).GetMethod(
+            "ExtractToolMadeEdits",
+            System.Reflection.BindingFlags.NonPublic | System.Reflection.BindingFlags.Static);
+
+        var edits = (List<(string FilePath, string ToolName)>)method!.Invoke(
+            null, new object[] { messages })!;
+
+        edits.Should().ContainSingle();
+        edits[0].FilePath.Should().Be("README.md");
+        edits[0].ToolName.Should().Be("apply_patch");
+    }
+
+    [Fact]
     public void BuildPlanProgressSnapshot_ListsStepsAndMarksCurrent()
     {
         var plan = new AgentTaskPlan

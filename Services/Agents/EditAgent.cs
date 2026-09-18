@@ -1407,6 +1407,21 @@ namespace DeepSeek_v4_for_VisualStudio.Services.Agents
                         using var doc = System.Text.Json.JsonDocument.Parse(args);
                         var root = doc.RootElement;
 
+                        if (name == "apply_patch"
+                            && root.TryGetProperty("patch", out var patchElement))
+                        {
+                            string patchText = patchElement.GetString() ?? string.Empty;
+                            foreach (var patch in Services.EditTools.ApplyPatchTool.ParsePatches(patchText))
+                            {
+                                string patchPath = string.IsNullOrWhiteSpace(patch.MoveToPath)
+                                    ? patch.FilePath
+                                    : patch.MoveToPath!;
+                                if (!string.IsNullOrEmpty(patchPath) && seen.Add(patchPath))
+                                    edits.Add((patchPath, name));
+                            }
+                            continue;
+                        }
+
                         if (root.TryGetProperty("filePath", out var fp))
                             filePath = fp.GetString();
                         else if (root.TryGetProperty("path", out var p))
