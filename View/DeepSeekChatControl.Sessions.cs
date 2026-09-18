@@ -286,6 +286,8 @@ namespace DeepSeek_v4_for_VisualStudio.View
                     }
                 }
 
+                _pendingAppendMessages.Clear();
+                RefreshAppendQueuePanel();
                 UpdateButtonsState();
 
                 // 保存当前会话
@@ -601,6 +603,8 @@ namespace DeepSeek_v4_for_VisualStudio.View
                     }
                 }
 
+                _pendingAppendMessages.Clear();
+                RefreshAppendQueuePanel();
                 UpdateButtonsState();
 
                 // 保存当前会话
@@ -696,6 +700,8 @@ namespace DeepSeek_v4_for_VisualStudio.View
                     }
                 }
 
+                _pendingAppendMessages.Clear();
+                RefreshAppendQueuePanel();
                 UpdateButtonsState();
 
                 string deletedTitle = _activeSession.Title;
@@ -808,6 +814,8 @@ namespace DeepSeek_v4_for_VisualStudio.View
                 _discardContextOnNextSend = false;
                 _contextManager.ClearConversationResetNotice();
                 ResetConversationElapsedTimer();
+                _pendingAppendMessages.Clear();
+                RefreshAppendQueuePanel();
                 // ── 重置累计 Token / 费用计数器 ──
                 _apiService?.ResetAccumulatedStats();
 

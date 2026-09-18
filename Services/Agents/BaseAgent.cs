@@ -922,6 +922,40 @@ namespace DeepSeek_v4_for_VisualStudio.Services.Agents
             return messages;
         }
 
+        private async Task<int> ApplyPendingGuidanceMessageAsync(
+            List<ChatApiMessage> messages,
+            int toolInsertPos)
+        {
+            var guidanceItem = Context?.PendingAppendMessages?.TakeNextGuidance();
+            if (guidanceItem == null)
+                return toolInsertPos;
+
+            if (Context?.OnGuidanceTurnRequested != null)
+                await Context.OnGuidanceTurnRequested(guidanceItem).ConfigureAwait(false);
+
+            string guidance = "- " + guidanceItem.Text.Trim()
+                .Replace("\r\n", "\n")
+                .Replace("\n", "\n  ");
+            if (string.IsNullOrWhiteSpace(guidance))
+                return toolInsertPos;
+
+            string guidanceContent = string.Format(
+                LocalizationService.Instance["system.agent.appendGuidance"],
+                guidance);
+            messages.Insert(toolInsertPos, new ChatApiMessage
+            {
+                Role = "user",
+                Content = guidanceContent,
+            });
+            toolInsertPos++;
+            if (Context != null)
+                Context.ToolHistoryInsertIndex = toolInsertPos;
+            Context?.ContextManager?.AddUserMessage(guidanceContent);
+
+            Logger.Info($"[Agent:{Definition.Name}] 已插入 1 条生成中引导消息");
+            return toolInsertPos;
+        }
+
         /// <summary>
         /// 带工具调用的 AI 对话循环（支持多轮工具调用）。
         /// 
@@ -1049,6 +1083,9 @@ namespace DeepSeek_v4_for_VisualStudio.Services.Agents
             while (!loopDetected)
             {
                 round++;
+                toolInsertPos = await ApplyPendingGuidanceMessageAsync(
+                    messages,
+                    toolInsertPos).ConfigureAwait(false);
                 var executionDecision = executionGuard.CheckBeforeStep(round);
                 if (executionDecision.ShouldStop)
                 {
@@ -1492,7 +1529,42 @@ namespace DeepSeek_v4_for_VisualStudio.Services.Agents
                     }
                 }
 
-                if (toolCalls.Count == 0) break;
+                if (toolCalls.Count == 0)
+                {
+                    bool hasInterimAssistant = contentBuilder.Length > 0
+                        || reasoningBuilder.Length > 0;
+                    if (hasInterimAssistant)
+                    {
+                        string interimContent = contentBuilder.ToString();
+                        string interimReasoning = reasoningBuilder.ToString();
+                        messages.Insert(toolInsertPos, new ChatApiMessage
+                        {
+                            Role = "assistant",
+                            Content = string.IsNullOrWhiteSpace(interimContent) ? null : interimContent,
+                            ReasoningContent = string.IsNullOrWhiteSpace(interimReasoning) ? null : interimReasoning,
+                        });
+                        toolInsertPos++;
+                        Context?.ContextManager?.AddAssistantMessage(
+                            string.IsNullOrWhiteSpace(interimContent) ? null : interimContent,
+                            string.IsNullOrWhiteSpace(interimReasoning) ? null : interimReasoning);
+                    }
+
+                    int newToolInsertPos = await ApplyPendingGuidanceMessageAsync(
+                        messages,
+                        toolInsertPos).ConfigureAwait(false);
+                    bool guidanceInserted = newToolInsertPos != toolInsertPos;
+                    toolInsertPos = newToolInsertPos;
+                    if (guidanceInserted)
+                        continue;
+
+                    if (hasInterimAssistant)
+                    {
+                        toolInsertPos--;
+                        messages.RemoveAt(toolInsertPos);
+                        Context?.ContextManager?.RemoveLastAssistantMessage();
+                    }
+                    break;
+                }
 
                 if (toolCalls.Count > 0)
                 {

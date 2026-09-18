@@ -222,6 +222,7 @@
             <RowDefinition Height="Auto" />
             <RowDefinition Height="Auto" />
             <RowDefinition Height="Auto" />
+            <RowDefinition Height="Auto" />
         </Grid.RowDefinitions>
 
         <!-- ═══ 会话选择栏 ═══ -->
@@ -910,8 +911,37 @@
             </Grid>
         </Border>
 
-        <!-- ═══ 审批控制栏 ═══ -->
+        <!-- ═══ 生成中追加消息状态栏 ═══ -->
         <Border Grid.Row="5"
+                x:Name="AppendQueueArea"
+                Background="#243447"
+                BorderBrush="#3F5A78"
+                BorderThickness="0,1,0,1"
+                Padding="10,5"
+                Visibility="Collapsed">
+            <Grid>
+                <Grid.ColumnDefinitions>
+                    <ColumnDefinition Width="Auto" />
+                    <ColumnDefinition Width="*" />
+                </Grid.ColumnDefinitions>
+                <TextBlock x:Name="AppendQueueTitle"
+                           Grid.Column="0"
+                           Foreground="#A8C7E8"
+                           FontSize="11"
+                           FontWeight="SemiBold"
+                           VerticalAlignment="Top"
+                           Margin="0,3,10,0" />
+                <ScrollViewer Grid.Column="1"
+                              MaxHeight="104"
+                              VerticalScrollBarVisibility="Auto"
+                              HorizontalScrollBarVisibility="Disabled">
+                    <StackPanel x:Name="AppendQueuePanel" />
+                </ScrollViewer>
+            </Grid>
+        </Border>
+
+        <!-- ═══ 审批控制栏 ═══ -->
+        <Border Grid.Row="6"
                 x:Name="ApprovalAreaBorder"
                 Background="#2D2D2D"
                 BorderBrush="#3F3F46" BorderThickness="0,1,0,0"

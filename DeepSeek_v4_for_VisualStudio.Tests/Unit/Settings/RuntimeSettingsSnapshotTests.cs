@@ -101,6 +101,7 @@ public class RuntimeSettingsSnapshotTests
             BingApiKey: string.Empty,
             ApprovalMode: "SmartBlock",
             EnableAutoSkillRouting: false,
+            AppendMessageMode: "Queue",
             InputBoxHeight: 50,
             BottomAreaScalePercent: 100,
             WebView2ZoomPercent: 100);

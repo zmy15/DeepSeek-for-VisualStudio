@@ -550,7 +550,8 @@ namespace DeepSeek_v4_for_VisualStudio.View
                 if (handoffCts != null)
                     DisposeStreamingCts(handoffCts);
                 StopConversationElapsedTimer();
-                UpdateButtonsState();
+                if (!TryStartQueuedAppend())
+                    UpdateButtonsState();
             }
 
             // ── 在 finally 清理完毕后，如有新 Handoff 则注入按钮 ──

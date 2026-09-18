@@ -68,6 +68,14 @@ namespace DeepSeek_v4_for_VisualStudio.View
                 => Source == EntrySource.Custom ? Model + _customSuffix : Model;
         }
 
+        /// <summary>
+        /// 当前 Agent 流式输出的可变目标。引导消息插入时可切换到新的助手气泡。
+        /// </summary>
+        private sealed class AgentStreamingTarget
+        {
+            public int MessageIndex { get; set; }
+        }
+
         #region Constants
 
         private static string WelcomeMessage => AiPrompts.WelcomeMessage;
@@ -171,6 +179,7 @@ namespace DeepSeek_v4_for_VisualStudio.View
 
         private readonly List<ChatMessage> _messages = new();
         private readonly ConversationContextManager _contextManager = new();
+        private readonly PendingAppendMessageStore _pendingAppendMessages = new();
 
         // ── 树状对话结构 ──
         private ConversationTree? _tree;
@@ -489,6 +498,7 @@ namespace DeepSeek_v4_for_VisualStudio.View
                     UpdateInputPlaceholder();
                     UpdateAllTooltips();
                     UpdateUiLabels();
+                    RefreshAppendQueuePanel();
                     RefreshBalanceDisplay();
                 });
             };
