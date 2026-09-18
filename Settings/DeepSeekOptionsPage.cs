@@ -26,6 +26,7 @@ namespace DeepSeek_v4_for_VisualStudio.Settings
         internal const int MaxWebView2ZoomPercent = 300;
         internal const int DefaultWebView2ZoomPercent = 100;
         internal const bool DefaultEnableAutoSkillRouting = false;
+        internal const AppendMessageMode DefaultAppendMessageMode = Models.AppendMessageMode.Queue;
 
         /// <summary>
         /// 静态构造：订阅语言变更，刷新属性描述符缓存。
@@ -796,6 +797,12 @@ namespace DeepSeek_v4_for_VisualStudio.Settings
         [LocalizedDescription("settings.enableAutoSkillRouting.description")]
         [DesignerSerializationVisibility(DesignerSerializationVisibility.Visible)]
         public bool EnableAutoSkillRouting { get; set; } = DefaultEnableAutoSkillRouting;
+
+        [LocalizedCategory("settings.category.agent")]
+        [LocalizedDisplayName("settings.appendMessageMode.displayName")]
+        [LocalizedDescription("settings.appendMessageMode.description")]
+        [DesignerSerializationVisibility(DesignerSerializationVisibility.Visible)]
+        public AppendMessageMode AppendMessageMode { get; set; } = DefaultAppendMessageMode;
 
         // ═══════════════════════════════════════════════
         //  审批模式设置

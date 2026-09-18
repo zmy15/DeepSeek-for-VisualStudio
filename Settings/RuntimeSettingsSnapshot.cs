@@ -23,6 +23,7 @@ namespace DeepSeek_v4_for_VisualStudio.Settings
         string BingApiKey,
         string ApprovalMode,
         bool EnableAutoSkillRouting,
+        string AppendMessageMode,
         int InputBoxHeight,
         int BottomAreaScalePercent,
         int WebView2ZoomPercent)
@@ -50,6 +51,7 @@ namespace DeepSeek_v4_for_VisualStudio.Settings
                 options.BingApiKey ?? string.Empty,
                 options.ApprovalMode ?? string.Empty,
                 options.EnableAutoSkillRouting,
+                options.AppendMessageMode.ToString(),
                 options.InputBoxHeight,
                 options.BottomAreaScalePercent,
                 options.WebView2ZoomPercent);
