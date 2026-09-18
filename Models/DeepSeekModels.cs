@@ -602,6 +602,14 @@ namespace DeepSeek_v4_for_VisualStudio.Models
         public string NodeId { get; set; } = string.Empty;
 
         /// <summary>
+        /// 该助手回复对应的用户轮次树节点 ID。
+        /// 重试时直接使用此锚点，避免把引导消息、恢复提示等其它 user 角色误认为原始提问。
+        /// 旧会话没有此字段时，可回退到对话树祖先查找。
+        /// </summary>
+        [DataMember]
+        public string? RetryAnchorNodeId { get; set; }
+
+        /// <summary>
         /// 在兄弟节点中的显示位置（1-based）。
         /// 仅当 SiblingCount > 1 时有意义。
         /// </summary>

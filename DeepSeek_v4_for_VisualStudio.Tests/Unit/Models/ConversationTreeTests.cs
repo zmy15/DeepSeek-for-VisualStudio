@@ -123,6 +123,7 @@ public class ConversationTreeTests
         tree.ActiveLeaf.Should().Be(node);
         tree.Root.Children.Should().Contain(node);
         message.NodeId.Should().Be(node.Id);
+        message.RetryAnchorNodeId.Should().BeNull();
     }
 
     [Fact]
@@ -137,6 +138,8 @@ public class ConversationTreeTests
         tree.Root.Children.Should().HaveCount(1);
         userMsg.Children.Should().HaveCount(1);
         assistantMsg.Children.Should().HaveCount(1);
+        assistantMsg.Message.RetryAnchorNodeId.Should().Be(userMsg.Id);
+        userMsg2.Message.RetryAnchorNodeId.Should().BeNull();
         tree.ActiveLeaf.Should().Be(userMsg2);
     }
 
@@ -196,6 +199,36 @@ public class ConversationTreeTests
     }
 
     [Fact]
+    public void FindNearestUserAncestor_DirectUserParent_ReturnsUserNode()
+    {
+        var tree = new ConversationTree();
+
+        var user = tree.AddChildMessage(new ChatMessage { Role = "user", Content = "问题" });
+        var assistant = tree.AddChildMessage(new ChatMessage { Role = "assistant", Content = "回答" });
+
+        var found = tree.FindNearestUserAncestor(assistant);
+
+        found.Should().Be(user);
+    }
+
+    [Fact]
+    public void FindNearestUserAncestor_AssistantChain_ReturnsNearestUserNode()
+    {
+        var tree = new ConversationTree();
+
+        var user = tree.AddChildMessage(new ChatMessage { Role = "user", Content = "问题" });
+        var firstAssistant = tree.AddChildMessage(new ChatMessage { Role = "assistant", Content = "回答" });
+        var handoffAssistant = tree.AddChildMessage(new ChatMessage { Role = "assistant", Content = "Handoff 执行结果" });
+
+        var found = tree.FindNearestUserAncestor(handoffAssistant);
+
+        found.Should().Be(user);
+        firstAssistant.Parent.Should().Be(user);
+        firstAssistant.Message.RetryAnchorNodeId.Should().Be(user.Id);
+        handoffAssistant.Message.RetryAnchorNodeId.Should().Be(user.Id);
+    }
+
+    [Fact]
     public void ForkAt_Retry_CreatesSiblingWithForkReason()
     {
         var tree = new ConversationTree();
@@ -207,6 +240,7 @@ public class ConversationTreeTests
         var retryNode = tree.ForkAt(originalAssistant, newMessage, "retry");
 
         retryNode.Message.ForkReason.Should().Be("retry");
+        retryNode.Message.RetryAnchorNodeId.Should().NotBeNullOrEmpty();
         originalAssistant.SiblingCount.Should().Be(2);
     }
 

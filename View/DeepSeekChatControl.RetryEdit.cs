@@ -746,6 +746,7 @@ namespace DeepSeek_v4_for_VisualStudio.View
         /// </summary>
         private async Task RetryMessageAsync(int assistantMsgIndex)
         {
+            ChatMessage assistantMsg;
             lock (_lock)
             {
                 if (_isGenerating)
@@ -758,7 +759,7 @@ namespace DeepSeek_v4_for_VisualStudio.View
                     return;
                 }
                 if (assistantMsgIndex < 0 || assistantMsgIndex >= _messages.Count) return;
-                var assistantMsg = _messages[assistantMsgIndex];
+                assistantMsg = _messages[assistantMsgIndex];
                 if (assistantMsg.Role != "assistant") return;
             }
 
@@ -768,31 +769,37 @@ namespace DeepSeek_v4_for_VisualStudio.View
                 ConvNode? assistantNode = GetConvNodeByMessageIndex(assistantMsgIndex);
                 if (assistantNode == null || !assistantNode.IsAssistantMessage) return;
 
-                // ── 找到对应的用户消息索引（用于文件回退检查）──
-                int userMsgIndex = -1;
-                lock (_lock)
+                var tree = EnsureTree();
+
+                // ── 优先使用助手回复创建时记录的用户锚点 ──
+                // Role=="user" 只表示协议角色，不能用来反推 UI 中真正触发本轮的用户消息；
+                // Agent 引导、恢复提示和 Handoff 都可能产生额外的 user 角色消息。
+                ConvNode? retryUserNode = null;
+                if (!string.IsNullOrEmpty(assistantMsg.RetryAnchorNodeId))
                 {
-                    for (int i = assistantMsgIndex - 1; i >= 0; i--)
-                    {
-                        if (_messages[i].Role == "user")
-                        {
-                            userMsgIndex = i;
-                            break;
-                        }
-                    }
+                    var anchorNode = tree.FindNode(assistantMsg.RetryAnchorNodeId);
+                    if (anchorNode != null && anchorNode.IsUserMessage)
+                        retryUserNode = anchorNode;
                 }
 
+                // 兼容旧会话：没有锚点时按树祖先关系回退查找。
+                retryUserNode ??= tree.FindNearestUserAncestor(assistantNode);
+                if (retryUserNode == null)
+                {
+                    Logger.Warn($"[Retry] 无法为助手节点找到所属用户节点 (nodeId={assistantNode.Id})");
+                    return;
+                }
+
+                int userMsgIndex = GetMessageIndexByNodeId(retryUserNode.Id);
+
                 if (userMsgIndex < 0) return;
+                assistantMsg.RetryAnchorNodeId = retryUserNode.Id;
 
                 bool canProceed = await CheckAndRevertFileChangesAsync(userMsgIndex);
                 if (!canProceed) return;
 
                 // ── 判断是否为 EditAgent：是则移除旧节点后重新生成，否则树状分叉 ──
-                ChatMessage? assistantMsg;
-                lock (_lock) { assistantMsg = _messages[assistantMsgIndex]; }
-                bool isEditAgent = assistantMsg?.AgentType == AgentType.Edit;
-
-                var tree = EnsureTree();
+                bool isEditAgent = assistantMsg.AgentType == AgentType.Edit;
 
                 if (isEditAgent)
                 {
@@ -812,7 +819,8 @@ namespace DeepSeek_v4_for_VisualStudio.View
                         IsStreaming = true,
                         IsRendered = false,
                         ForkReason = "retry",
-                        AgentType = assistantMsg?.AgentType,
+                        AgentType = assistantMsg.AgentType,
+                        RetryAnchorNodeId = retryUserNode.Id,
                     };
                     tree.ForkAt(assistantNode, newAssistantMsg, "retry");
                     Logger.Info($"[Tree] 重试消息：树状分叉 (nodeId={assistantNode.Id})");
@@ -828,19 +836,11 @@ namespace DeepSeek_v4_for_VisualStudio.View
 
                 // ── 重新发送用户消息生成新的助手回复 ──
                 ChatMessage? userMsg = null;
-                int newUserMsgIndex = -1;
+                int newUserMsgIndex = GetMessageIndexByNodeId(retryUserNode.Id);
                 lock (_lock)
                 {
-                    // 找到新分支中 fork 点之前的用户消息
-                    for (int i = _messages.Count - 1; i >= 0; i--)
-                    {
-                        if (_messages[i].Role == "user")
-                        {
-                            userMsg = _messages[i];
-                            newUserMsgIndex = i;
-                            break;
-                        }
-                    }
+                    if (newUserMsgIndex >= 0 && newUserMsgIndex < _messages.Count)
+                        userMsg = _messages[newUserMsgIndex];
                 }
 
                 if (userMsg != null)
@@ -852,6 +852,25 @@ namespace DeepSeek_v4_for_VisualStudio.View
                 lock (_lock) { _isGenerating = false; }
                 UpdateButtonsState();
             }
+        }
+
+        /// <summary>
+        /// 按对话树节点 ID 查找当前扁平消息列表中的索引。
+        /// </summary>
+        private int GetMessageIndexByNodeId(string nodeId)
+        {
+            if (string.IsNullOrEmpty(nodeId)) return -1;
+
+            lock (_lock)
+            {
+                for (int i = 0; i < _messages.Count; i++)
+                {
+                    if (string.Equals(_messages[i].NodeId, nodeId, StringComparison.Ordinal))
+                        return i;
+                }
+            }
+
+            return -1;
         }
 
         /// <summary>

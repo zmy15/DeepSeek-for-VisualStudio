@@ -110,6 +110,22 @@ namespace DeepSeek_v4_for_VisualStudio.Models
         }
 
         /// <summary>
+        /// 查找指定节点最近的实际用户提问祖先。
+        /// Agent Handoff 等路径可能产生连续助手节点，因此不能假设助手节点的直接父节点一定是 user。
+        /// </summary>
+        public ConvNode? FindNearestUserAncestor(ConvNode node)
+        {
+            var current = node?.Parent;
+            while (current != null && current != Root)
+            {
+                if (current.IsUserMessage)
+                    return current;
+                current = current.Parent;
+            }
+            return null;
+        }
+
+        /// <summary>
         /// 生成新的节点 ID。
         /// </summary>
         private static string NewNodeId() => Guid.NewGuid().ToString("N");
@@ -134,6 +150,8 @@ namespace DeepSeek_v4_for_VisualStudio.Models
                 Parent = parent,
             };
             message.NodeId = node.Id;
+            if (message.Role == "assistant" && string.IsNullOrEmpty(message.RetryAnchorNodeId))
+                message.RetryAnchorNodeId = FindNearestUserAncestor(node)?.Id;
 
             parent.Children.Add(node);
             RegisterNode(node);
@@ -164,6 +182,11 @@ namespace DeepSeek_v4_for_VisualStudio.Models
                 Parent = parent,
             };
             newMessage.NodeId = newNode.Id;
+            if (newMessage.Role == "assistant" && string.IsNullOrEmpty(newMessage.RetryAnchorNodeId))
+            {
+                newMessage.RetryAnchorNodeId = existingNode.Message.RetryAnchorNodeId
+                    ?? FindNearestUserAncestor(existingNode)?.Id;
+            }
 
             // 插入到 existingNode 之后（保持顺序）
             int existingIndex = parent.Children.IndexOf(existingNode);
@@ -197,6 +220,8 @@ namespace DeepSeek_v4_for_VisualStudio.Models
 
             // ── 原地替换消息 ──
             newMessage.NodeId = existingNode.Id;
+            if (newMessage.Role == "assistant" && string.IsNullOrEmpty(newMessage.RetryAnchorNodeId))
+                newMessage.RetryAnchorNodeId = existingNode.Message.RetryAnchorNodeId;
             newMessage.ForkReason = null; // 不显示分支导航
             newMessage.SiblingIndex = 1;
             newMessage.SiblingCount = 1;
