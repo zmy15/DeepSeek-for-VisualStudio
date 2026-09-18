@@ -57,6 +57,28 @@ public class ReasoningGuardTests
     }
 
     [Fact]
+    public void Inspect_RepeatedBlockAfterRingWrap_DetectsLoop()
+    {
+        var guard = new ReasoningLoopGuard(
+            maxCharacters: 10_000,
+            blockCharacters: 8,
+            repeatThreshold: 3,
+            searchWindowCharacters: 32);
+
+        foreach (char c in "0123456789abcdefghij0123456789abcdefghij")
+            guard.Inspect(c.ToString()).ShouldBreak.Should().BeFalse();
+
+        bool detected = false;
+        foreach (char c in "abcdefghabcdefghabcdefgh")
+        {
+            var result = guard.Inspect(c.ToString());
+            detected |= result.ShouldBreak;
+        }
+
+        detected.Should().BeTrue();
+    }
+
+    [Fact]
     public void Inspect_ExceedsCharacterLimit_Stops()
     {
         var guard = new ReasoningLoopGuard(maxCharacters: 10);
@@ -141,5 +163,19 @@ public class ReasoningGuardTests
 
         json.Should().Contain("\"rd\":\"new thought\"");
         json.Should().NotContain("\"r\":");
+    }
+
+    [Fact]
+    public void BuildStreamUpdateJson_ContentDelta_UsesDeltaField()
+    {
+        string json = ChatHtmlService.BuildStreamUpdateJson(
+            messageIndex: 3,
+            streamingContent: null,
+            reasoningContent: string.Empty,
+            isComplete: false,
+            contentDelta: "next chunk");
+
+        json.Should().Contain("\"cd\":\"next chunk\"");
+        json.Should().NotContain("\"c\":");
     }
 }

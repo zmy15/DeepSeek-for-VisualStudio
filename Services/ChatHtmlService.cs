@@ -208,19 +208,27 @@ namespace DeepSeek_v4_for_VisualStudio.Services
 
         /// <summary>
         /// 构建流式增量更新的 JSON 消息（用于 PostWebMessageAsString）。
-        /// 短键名减少序列化开销：i=msgIndex, c=content, r=reasoning,
-        /// rd=reasoning delta, f=isFinished, s=status
+        /// 短键名减少序列化开销：i=msgIndex, c=content, cd=content delta,
+        /// r=reasoning, rd=reasoning delta, f=isFinished, s=status
         /// </summary>
-        public static string BuildStreamUpdateJson(int messageIndex, string streamingContent,
+        public static string BuildStreamUpdateJson(int messageIndex, string? streamingContent,
             string reasoningContent, bool isComplete, string? statusText = null,
-            string? reasoningDelta = null)
+            string? reasoningDelta = null, string? contentDelta = null)
         {
             // 使用手动拼接 JSON 避免 System.Text.Json 的分配开销（高频调用场景）
             var sb = new StringBuilder(256);
             sb.Append("{\"type\":\"stream\",\"i\":");
             sb.Append(messageIndex);
-            sb.Append(",\"c\":");
-            AppendJsonString(sb, streamingContent ?? string.Empty);
+            if (streamingContent != null)
+            {
+                sb.Append(",\"c\":");
+                AppendJsonString(sb, streamingContent);
+            }
+            if (!string.IsNullOrEmpty(contentDelta))
+            {
+                sb.Append(",\"cd\":");
+                AppendJsonString(sb, contentDelta);
+            }
             if (!string.IsNullOrEmpty(reasoningContent))
             {
                 sb.Append(",\"r\":");

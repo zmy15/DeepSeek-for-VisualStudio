@@ -35,6 +35,7 @@ namespace DeepSeek_v4_for_VisualStudio.Services.Benchmark
             public double AvgToolCalls { get; set; }
             public double AvgTtftMs { get; set; }
             public double AvgDurationMs { get; set; }
+            public double? AvgDecodeTokensPerSecond { get; set; }
             public long TotalInputTokens { get; set; }
             public long TotalOutputTokens { get; set; }
             public double? AvgCacheHitRate { get; set; }
@@ -75,6 +76,8 @@ namespace DeepSeek_v4_for_VisualStudio.Services.Benchmark
 
             long ttftSum = 0; int ttftCount = 0;
             double cacheSum = 0; int cacheCount = 0;
+            long decodeOutputTokens = 0;
+            long decodeDurationMs = 0;
 
             foreach (var s in list)
             {
@@ -102,6 +105,13 @@ namespace DeepSeek_v4_for_VisualStudio.Services.Benchmark
                 a.TotalOutputTokens += s.OutputTokens;
                 if (s.FirstTurnTtftMs is long t) { ttftSum += t; ttftCount++; }
                 if (s.CacheHitRate is double c) { cacheSum += c; cacheCount++; }
+                foreach (var turn in s.Turns)
+                {
+                    if (turn.DecodeDurationMs is not > 0)
+                        continue;
+                    decodeOutputTokens += turn.OutputTokens;
+                    decodeDurationMs += turn.DecodeDurationMs.Value;
+                }
 
                 var agentKey = s.Agents.FirstOrDefault() ?? "(none)";
                 a.ByAgent.TryGetValue(agentKey, out var agentCount);
@@ -121,6 +131,9 @@ namespace DeepSeek_v4_for_VisualStudio.Services.Benchmark
             a.AvgDurationMs /= denom;
             a.AvgTtftMs = ttftCount > 0 ? (double)ttftSum / ttftCount : 0;
             a.AvgCacheHitRate = cacheCount > 0 ? cacheSum / cacheCount : null;
+            a.AvgDecodeTokensPerSecond = decodeOutputTokens > 0 && decodeDurationMs > 0
+                ? decodeOutputTokens * 1000.0 / decodeDurationMs
+                : null;
             return a;
         }
 
@@ -139,7 +152,8 @@ namespace DeepSeek_v4_for_VisualStudio.Services.Benchmark
             sb.AppendLine();
             sb.AppendLine("## Averages / totals");
             sb.AppendLine($"- Turns: {a.AvgTurns:F1} | Tool calls: {a.AvgToolCalls:F1} | " +
-                          $"TTFT: {a.AvgTtftMs:F0} ms | Duration: {a.AvgDurationMs:F0} ms");
+                          $"TTFT: {a.AvgTtftMs:F0} ms | Duration: {a.AvgDurationMs:F0} ms" +
+                          (a.AvgDecodeTokensPerSecond is double tps ? $" | {tps:F1} tokens/s" : ""));
             sb.AppendLine($"- Tokens: in {a.TotalInputTokens:N0} / out {a.TotalOutputTokens:N0}" +
                           (a.AvgCacheHitRate is double c ? $" | Cache hit: {c:P1}" : ""));
             sb.AppendLine();

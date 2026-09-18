@@ -330,6 +330,7 @@ namespace DeepSeek_v4_for_VisualStudio.View
         /// <summary>IDE 实时态追踪器（P1-A，惰性创建；仅 UI 线程使用）</summary>
         private Services.IdeContext.IdeContextTracker? _ideContextTracker;
         private readonly Services.IdeContext.GitContextProvider _gitContextProvider = new();
+        private Models.AgentTurnMetrics? _latestTurnMetrics;
 
         /// <summary>
         /// 构建会话开始时的上下文构成快照（P2 Context Debugger 数据面）。
@@ -370,6 +371,14 @@ namespace DeepSeek_v4_for_VisualStudio.View
                         ideChars = _contextManager.IdeContextChars,
                         search = _contextManager.HasSearchContext,
                         rag = _contextManager.HasRagContext,
+                    },
+                    tokensPerSecond = _latestTurnMetrics == null ? null : new
+                    {
+                        turn = _latestTurnMetrics.Turn,
+                        outputTokens = _latestTurnMetrics.OutputTokens,
+                        decodeDurationMs = _latestTurnMetrics.DecodeDurationMs,
+                        decode = _latestTurnMetrics.DecodeTokensPerSecond,
+                        endToEnd = _latestTurnMetrics.EndToEndTokensPerSecond,
                     },
                     workingSet = _contextManager.GetWorkingSetTopPaths(6),
                     ideSnapshot = ide == null ? null : new
@@ -439,13 +448,35 @@ namespace DeepSeek_v4_for_VisualStudio.View
                         $"WS={_contextManager.GetWorkingSetTopPaths(6).Count} " +
                         $"Tokens={dbgStats.EstimatedTokens:N0}/{dbgStats.TokenBudget:N0}");
 
-                    string? ctxJson = BuildContextDebugJson();
-                    if (!string.IsNullOrEmpty(ctxJson))
-                        ChatWebView.CoreWebView2?.PostWebMessageAsString(
-                            "{\"type\":\"contextDebug\",\"d\":" + ctxJson + "}");
+                    PublishContextDebugSnapshot();
                 }
                 catch { }
             }
+        }
+
+        private void PublishContextDebugSnapshot()
+        {
+            if (_options?.ShowContextStats != true)
+                return;
+
+            string? ctxJson = BuildContextDebugJson();
+            if (!string.IsNullOrEmpty(ctxJson))
+                ChatWebView.CoreWebView2?.PostWebMessageAsString(
+                    "{\"type\":\"contextDebug\",\"d\":" + ctxJson + "}");
+        }
+
+        private void OnTelemetryTurnMetricsUpdated(Models.AgentTurnMetrics turn)
+        {
+            _latestTurnMetrics = turn;
+            _ = ThreadHelper.JoinableTaskFactory.RunAsync(async () =>
+            {
+                try
+                {
+                    await ThreadHelper.JoinableTaskFactory.SwitchToMainThreadAsync();
+                    PublishContextDebugSnapshot();
+                }
+                catch { }
+            });
         }
 
         /// <summary>
@@ -485,9 +516,17 @@ namespace DeepSeek_v4_for_VisualStudio.View
 
             // ── P0 Telemetry：会话指标采集器（设置开关控制，创建失败静默降级）──
             Services.Telemetry.AgentMetricsCollector? telemetry = null;
-            if (_options?.EnableTelemetryExport != false)
+            _latestTurnMetrics = null;
+            bool collectMetrics = _options?.EnableTelemetryExport != false
+                || _options?.ShowContextStats == true;
+            if (collectMetrics)
             {
-                try { telemetry = new Services.Telemetry.AgentMetricsCollector(); }
+                try
+                {
+                    telemetry = new Services.Telemetry.AgentMetricsCollector();
+                    telemetry.ExportEnabled = _options?.EnableTelemetryExport != false;
+                    telemetry.TurnMetricsUpdated += OnTelemetryTurnMetricsUpdated;
+                }
                 catch (Exception tex) { Logger.Warn($"[Telemetry] 采集器创建失败: {tex.Message}"); }
             }
 
@@ -628,6 +667,7 @@ namespace DeepSeek_v4_for_VisualStudio.View
                 long lastContentFlushTicks = DateTime.UtcNow.Ticks;
                 long lastThinkingFlushTicks = DateTime.UtcNow.Ticks;
                 var streamingReasoningDeltaSb = new StringBuilder();
+                var streamingContentDeltaSb = new StringBuilder();
 
                 context.OnThinkingChunk = (chunk) =>
                 {
@@ -666,22 +706,25 @@ namespace DeepSeek_v4_for_VisualStudio.View
                 // ── 设置实时内容流回调：每个 content chunk 立即推送到 WebView2 消息正文 ──
                 context.OnContentChunk = (chunk) =>
                 {
-                    // 锁内单次临界区：StringBuilder 增量累积（均摊 O(1)），替代逐 chunk 的
-                    // string += 全量复制；按 60ms 节流把最新完整内容同步到消息并触发批处理推送
+                    // 锁内单次临界区：StringBuilder 增量累积（均摊 O(1)），按 60ms
+                    // 节流只推送本窗口的正文 delta，避免反复复制整段内容。
                     bool syncDue = false;
+                    string contentDelta = string.Empty;
                     int messageIndex;
                     lock (_lock)
                     {
                         messageIndex = streamingTarget.MessageIndex;
                         if (messageIndex < 0 || messageIndex >= _messages.Count) return;
                         _streamingContent.Append(chunk);
+                        streamingContentDeltaSb.Append(chunk);
 
                         long nowTicks = DateTime.UtcNow.Ticks;
                         syncDue = nowTicks - lastContentFlushTicks >= StreamFlushSyncIntervalTicks;
                         if (!syncDue) return;
 
                         lastContentFlushTicks = nowTicks;
-                        _messages[messageIndex].Content = _streamingContent.ToString();
+                        contentDelta = streamingContentDeltaSb.ToString();
+                        streamingContentDeltaSb.Clear();
                     }
                     _ = ThreadHelper.JoinableTaskFactory.RunAsync(async () =>
                     {
@@ -689,16 +732,7 @@ namespace DeepSeek_v4_for_VisualStudio.View
                         if (ChatWebView.CoreWebView2 == null || messageIndex < 0) return;
                         try
                         {
-                            string content;
-                            lock (_lock)
-                            {
-                                content = messageIndex >= 0 && messageIndex < _messages.Count
-                                    ? ChatHtmlService.BuildAssistantDisplayContent(
-                                        _messages[messageIndex].TimelineContent,
-                                        _messages[messageIndex].Content)
-                                    : string.Empty;
-                            }
-                            BatchStreamingUpdate(messageIndex, content);
+                            BatchStreamingUpdate(messageIndex, contentDelta: contentDelta);
                         }
                         catch (Exception ex)
                         {
@@ -1071,6 +1105,8 @@ namespace DeepSeek_v4_for_VisualStudio.View
             {
                 StopConversationElapsedTimer();
                 _activePlan = null;
+                if (telemetry != null)
+                    telemetry.TurnMetricsUpdated -= OnTelemetryTurnMetricsUpdated;
 
                 // ── P1-A：会话结束后清除 IDE 快照，避免过期上下文泄漏到非 Agent 的聊天轮次 ──
                 try { _contextManager.SetIdeContext(null); }

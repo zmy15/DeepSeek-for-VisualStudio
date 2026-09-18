@@ -1,5 +1,5 @@
 using System;
-using System.Text;
+using System.Collections.Generic;
 
 namespace DeepSeek_v4_for_VisualStudio.Services
 {
@@ -43,11 +43,21 @@ namespace DeepSeek_v4_for_VisualStudio.Services
         public const int DefaultRepeatThreshold = 3;
         public const int DefaultSearchWindowCharacters = 8_192;
 
+        private const ulong HashBase = 1099511628211UL;
+
         private readonly int _maxCharacters;
         private readonly int _blockCharacters;
         private readonly int _repeatThreshold;
         private readonly int _searchWindowCharacters;
-        private readonly StringBuilder _normalizedTail;
+        private readonly char[] _tailBuffer;
+        private readonly ulong[] _blockHashes;
+        private readonly Dictionary<ulong, int> _hashCounts = new();
+        private readonly ulong _hashBasePower;
+        private int _tailStart;
+        private int _tailLength;
+        private int _hashStart;
+        private int _hashCount;
+        private ulong _currentBlockHash;
         private int _characterCount;
 
         public ReasoningLoopGuard(
@@ -69,7 +79,9 @@ namespace DeepSeek_v4_for_VisualStudio.Services
             _blockCharacters = blockCharacters;
             _repeatThreshold = repeatThreshold;
             _searchWindowCharacters = searchWindowCharacters;
-            _normalizedTail = new StringBuilder(searchWindowCharacters + blockCharacters);
+            _tailBuffer = new char[searchWindowCharacters];
+            _blockHashes = new ulong[searchWindowCharacters];
+            _hashBasePower = ComputeHashPower(blockCharacters);
         }
 
         public ReasoningGuardResult Inspect(string? delta)
@@ -90,36 +102,133 @@ namespace DeepSeek_v4_for_VisualStudio.Services
                 if (char.IsWhiteSpace(c))
                     continue;
 
-                _normalizedTail.Append(char.ToLowerInvariant(c));
+                AppendNormalizedChar(char.ToLowerInvariant(c));
             }
 
-            if (_normalizedTail.Length > _searchWindowCharacters)
-            {
-                int removeCount = _normalizedTail.Length - _searchWindowCharacters;
-                _normalizedTail.Remove(0, removeCount);
-            }
-
-            if (_normalizedTail.Length < _blockCharacters * _repeatThreshold)
+            if (_tailLength < _blockCharacters * _repeatThreshold || _hashCount == 0)
                 return new ReasoningGuardResult(ReasoningGuardAction.Continue, _characterCount);
 
-            string window = _normalizedTail.ToString();
-            string block = window.Substring(window.Length - _blockCharacters);
-            int repetitionCount = CountOccurrences(window, block);
-            if (repetitionCount >= _repeatThreshold)
+            ulong latestBlockHash = _blockHashes[(_hashStart + _hashCount - 1) % _blockHashes.Length];
+            if (!_hashCounts.TryGetValue(latestBlockHash, out int hashOccurrences)
+                || hashOccurrences < _repeatThreshold)
             {
-                return new ReasoningGuardResult(
-                    ReasoningGuardAction.LoopDetected,
-                    _characterCount,
-                    repetitionCount);
+                return new ReasoningGuardResult(ReasoningGuardAction.Continue, _characterCount);
             }
 
-            return new ReasoningGuardResult(ReasoningGuardAction.Continue, _characterCount);
+            string window = BuildTailString();
+            string block = window.Substring(window.Length - _blockCharacters);
+            int repetitionCount = CountOccurrences(window, block);
+            return repetitionCount >= _repeatThreshold
+                ? new ReasoningGuardResult(
+                    ReasoningGuardAction.LoopDetected,
+                    _characterCount,
+                    repetitionCount)
+                : new ReasoningGuardResult(ReasoningGuardAction.Continue, _characterCount);
+        }
+
+        private void AppendNormalizedChar(char c)
+        {
+            bool removeFromBlock = _tailLength >= _blockCharacters;
+            char charToRemove = removeFromBlock
+                ? GetTailChar(_tailLength - _blockCharacters)
+                : '\0';
+            bool bufferFull = _tailLength >= _tailBuffer.Length;
+
+            if (bufferFull)
+            {
+                _tailBuffer[_tailStart] = c;
+                _tailStart = (_tailStart + 1) % _tailBuffer.Length;
+            }
+            else
+            {
+                _tailBuffer[(_tailStart + _tailLength) % _tailBuffer.Length] = c;
+                _tailLength++;
+            }
+
+            unchecked
+            {
+                _currentBlockHash = removeFromBlock
+                    ? (_currentBlockHash - CharValue(charToRemove) * _hashBasePower) * HashBase + CharValue(c)
+                    : _currentBlockHash * HashBase + CharValue(c);
+            }
+
+            if (_tailLength < _blockCharacters)
+                return;
+
+            if (bufferFull)
+                RemoveOldestHash();
+            AddHash(_currentBlockHash);
+        }
+
+        private void AddHash(ulong hash)
+        {
+            _blockHashes[(_hashStart + _hashCount) % _blockHashes.Length] = hash;
+            _hashCount++;
+            _hashCounts.TryGetValue(hash, out int count);
+            _hashCounts[hash] = count + 1;
+        }
+
+        private void RemoveOldestHash()
+        {
+            if (_hashCount == 0)
+                return;
+
+            ulong oldest = _blockHashes[_hashStart];
+            if (_hashCounts.TryGetValue(oldest, out int count))
+            {
+                if (count <= 1)
+                    _hashCounts.Remove(oldest);
+                else
+                    _hashCounts[oldest] = count - 1;
+            }
+
+            _hashStart = (_hashStart + 1) % _blockHashes.Length;
+            _hashCount--;
+        }
+
+        private char GetTailChar(int offsetFromStart)
+        {
+            int index = _tailStart + offsetFromStart;
+            if (index >= _tailBuffer.Length)
+                index %= _tailBuffer.Length;
+            return _tailBuffer[index];
+        }
+
+        private string BuildTailString()
+        {
+            var chars = new char[_tailLength];
+            for (int i = 0; i < _tailLength; i++)
+                chars[i] = GetTailChar(i);
+            return new string(chars);
+        }
+
+        private static ulong ComputeHashPower(int length)
+        {
+            ulong power = 1;
+            for (int i = 1; i < length; i++)
+            {
+                unchecked
+                {
+                    power *= HashBase;
+                }
+            }
+            return power;
+        }
+
+        private static ulong CharValue(char c)
+        {
+            return (ulong)c + 1;
         }
 
         public void Reset()
         {
             _characterCount = 0;
-            _normalizedTail.Clear();
+            _tailStart = 0;
+            _tailLength = 0;
+            _hashStart = 0;
+            _hashCount = 0;
+            _currentBlockHash = 0;
+            _hashCounts.Clear();
         }
 
         private static int CountOccurrences(string text, string value)

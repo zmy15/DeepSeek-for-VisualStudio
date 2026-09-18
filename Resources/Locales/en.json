@@ -362,6 +362,7 @@
     "chat.html.context.toolCalls": "Tool Calls",
     "chat.html.context.forwarded": "Forwarded",
     "chat.html.context.requestEstimate": "Request Estimate",
+    "chat.html.context.tokensPerSecond": "Tokens/s",
     "chat.html.handoffButton": "Start Implementation",
     "chat.html.handoffButtonTitle": "Handoff plan to Edit Agent for execution",
     "agent.log.buildReconciledStepResult": "(auto-reconciled as succeeded based on final build verification)",

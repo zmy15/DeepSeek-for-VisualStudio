@@ -34,7 +34,8 @@ namespace DeepSeek_v4_for_VisualStudio.Services
                 "," +
                 "toolCalls:" + EscapeJsString(L["chat.html.context.toolCalls"]) +
                 ",forwarded:" + EscapeJsString(L["chat.html.context.forwarded"]) +
-                ",requestEstimate:" + EscapeJsString(L["chat.html.context.requestEstimate"]) +
+            ",requestEstimate:" + EscapeJsString(L["chat.html.context.requestEstimate"]) +
+                ",tokensPerSecond:" + EscapeJsString(L["chat.html.context.tokensPerSecond"]) +
                 "};";
         }
 
@@ -559,6 +560,14 @@ window._showCopyFeedback=function(msgIndex){
                     +'    '+(t.toolCalls||'Tool Calls')+' '+totalToolCalls.toLocaleString()
                     +'    ~'+(totalTokens/1000).toFixed(1)+'k '+(t.tokens||'Tokens'));
             }
+            if(d.tokensPerSecond){
+                var speed=d.tokensPerSecond;
+                var speedParts=[];
+                if(speed.decode!==null&&speed.decode!==undefined)speedParts.push('decode '+Number(speed.decode).toFixed(1));
+                if(speed.endToEnd!==null&&speed.endToEnd!==undefined)speedParts.push('end-to-end '+Number(speed.endToEnd).toFixed(1));
+                rows.push((t.tokensPerSecond||'Tokens/s')+' : '+(speed.turn?'turn '+speed.turn+' | ':'')
+                    +(speed.outputTokens||0)+' '+(t.tokens||'Tokens')+' | '+speedParts.join(' | '));
+            }
             var body=document.getElementById('ctx-debug-body');
             if(body)body.textContent=rows.join('\n');
         }catch(err){ console.error('[DeepSeek] ctxDebug render:',err); }
@@ -730,7 +739,7 @@ window._showCopyFeedback=function(msgIndex){
             var cursor=document.getElementById('cursor-'+msg.i);
 
             // 更新正文内容
-            if(container&&msg.c!==undefined){
+            if(container&&(msg.c!==undefined||msg.cd!==undefined)){
                 // 防护：若 streamEnd 已将 _textNode 显式置为 null，说明已渲染完成，
                 //    此时不应再创建 textNode 覆盖 innerHTML（防止 late chunk 竞态）
                 if(container._textNode===null)continue;
@@ -742,7 +751,8 @@ window._showCopyFeedback=function(msgIndex){
                     container.appendChild(textNode);
                     container.style.whiteSpace='pre-line';  // 流式内容保留换行
                 }
-                textNode.textContent=msg.c;
+                if(msg.c!==undefined)textNode.textContent=msg.c;
+                else if(msg.cd!==undefined)textNode.appendData(msg.cd);
             }
 
             // 更新推理面板。rd 是增量追加路径，避免长 thinking 反复替换整段 DOM。
@@ -765,8 +775,6 @@ window._showCopyFeedback=function(msgIndex){
                     }
                     reasoningTextNode.appendData(msg.rd);
                     if(deltaAtBottom)window.__scrollReasoningToBottom(reasoningBody);
-                }else{
-                    reasoningPanel.style.display='none';
                 }
             }
 

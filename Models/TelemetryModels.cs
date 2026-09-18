@@ -99,6 +99,46 @@ namespace DeepSeek_v4_for_VisualStudio.Models
         [JsonPropertyName("output_tokens")]
         public int OutputTokens { get; set; }
 
+        /// <summary>首 token 之后的纯解码耗时（毫秒）；无 TTFT 或无有效时长时为 null</summary>
+        [JsonPropertyName("decode_duration_ms")]
+        [JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)]
+        public long? DecodeDurationMs
+        {
+            get
+            {
+                if (!TtftMs.HasValue || DurationMs <= TtftMs.Value)
+                    return null;
+                return DurationMs - TtftMs.Value;
+            }
+        }
+
+        /// <summary>解码阶段输出速度（tokens/s）；无 TTFT 时为 null</summary>
+        [JsonPropertyName("decode_tokens_per_second")]
+        [JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)]
+        public double? DecodeTokensPerSecond
+        {
+            get
+            {
+                long? decodeMs = DecodeDurationMs;
+                return OutputTokens > 0 && decodeMs is > 0
+                    ? OutputTokens * 1000.0 / decodeMs.Value
+                    : null;
+            }
+        }
+
+        /// <summary>端到端输出速度（tokens/s，包含 TTFT）</summary>
+        [JsonPropertyName("end_to_end_tokens_per_second")]
+        [JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)]
+        public double? EndToEndTokensPerSecond
+        {
+            get
+            {
+                return OutputTokens > 0 && DurationMs > 0
+                    ? OutputTokens * 1000.0 / DurationMs
+                    : null;
+            }
+        }
+
         /// <summary>Prompt Cache 命中 token</summary>
         [JsonPropertyName("cache_hit_tokens")]
         public int CacheHitTokens { get; set; }
@@ -218,6 +258,44 @@ namespace DeepSeek_v4_for_VisualStudio.Models
 
         [JsonPropertyName("output_tokens")]
         public int OutputTokens => Turns.Sum(t => t.OutputTokens);
+
+        /// <summary>聚合解码 tokens/s；仅统计具备 TTFT 的轮次</summary>
+        [JsonPropertyName("decode_tokens_per_second")]
+        [JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)]
+        public double? DecodeTokensPerSecond
+        {
+            get
+            {
+                long outputTokens = 0;
+                long decodeMs = 0;
+                foreach (var turn in Turns)
+                {
+                    if (turn.DecodeDurationMs is not > 0)
+                        continue;
+                    outputTokens += turn.OutputTokens;
+                    decodeMs += turn.DecodeDurationMs.Value;
+                }
+
+                return outputTokens > 0 && decodeMs > 0
+                    ? outputTokens * 1000.0 / decodeMs
+                    : null;
+            }
+        }
+
+        /// <summary>聚合端到端 tokens/s（包含 TTFT）</summary>
+        [JsonPropertyName("end_to_end_tokens_per_second")]
+        [JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)]
+        public double? EndToEndTokensPerSecond
+        {
+            get
+            {
+                long outputTokens = Turns.Sum(t => (long)t.OutputTokens);
+                long durationMs = Turns.Sum(t => (long)t.DurationMs);
+                return outputTokens > 0 && durationMs > 0
+                    ? outputTokens * 1000.0 / durationMs
+                    : null;
+            }
+        }
 
         /// <summary>聚合 Cache 命中率（0~1；无可缓存数据时为 null）</summary>
         [JsonPropertyName("cache_hit_rate")]

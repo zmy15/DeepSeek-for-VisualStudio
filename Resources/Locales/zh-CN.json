@@ -362,6 +362,7 @@
     "chat.html.context.toolCalls": "工具调用次数",
     "chat.html.context.forwarded": "转发上下文",
     "chat.html.context.requestEstimate": "请求估算",
+    "chat.html.context.tokensPerSecond": "Tokens/s",
     "chat.html.handoffButton": "开始实现",
     "chat.html.handoffButtonTitle": "将计划移交 Edit Agent 执行",
     "chat.html.executing": "执行中...",

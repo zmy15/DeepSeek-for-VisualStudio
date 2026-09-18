@@ -31,8 +31,14 @@ namespace DeepSeek_v4_for_VisualStudio.Services.Telemetry
         private bool _firstTokenSeen;
         private bool _completed;
 
+        /// <summary>单轮指标完成事件；UI 可据此刷新 tokens/s 等实时展示。</summary>
+        public event Action<AgentTurnMetrics>? TurnMetricsUpdated;
+
         /// <summary>会话是否已完成（完成后不再接受写入）</summary>
         public bool IsCompleted { get { lock (_lock) return _completed; } }
+
+        /// <summary>是否将会话指标写入 JSON 文件；false 时仍可用于实时 UI 指标。</summary>
+        public bool ExportEnabled { get; set; } = true;
 
         /// <summary>会话 ID</summary>
         public string SessionId { get { lock (_lock) return _session.SessionId; } }
@@ -148,6 +154,7 @@ namespace DeepSeek_v4_for_VisualStudio.Services.Telemetry
         public void EndTurn(int round, int promptTokens, int completionTokens,
             int cacheHitTokens, int cacheMissTokens)
         {
+            AgentTurnMetrics? completedTurn = null;
             try
             {
                 lock (_lock)
@@ -164,9 +171,26 @@ namespace DeepSeek_v4_for_VisualStudio.Services.Telemetry
                         _session.Turns.Add(turn);
                     _openTurn = null;
                     _requestStartTicks = 0;
+                    completedTurn = turn;
+
+                    if (turn.DecodeTokensPerSecond is double decodeTps)
+                    {
+                        Logger.Info(
+                            $"[Telemetry] Turn {turn.Turn}: TTFT={turn.TtftMs ?? 0}ms, " +
+                            $"decode={turn.DecodeDurationMs ?? 0}ms, " +
+                            $"output={turn.OutputTokens} tokens, " +
+                            $"decode={decodeTps:F1} tokens/s, " +
+                            $"end-to-end={turn.EndToEndTokensPerSecond:F1} tokens/s");
+                    }
                 }
             }
             catch (Exception ex) { Logger.Warn($"[Telemetry] EndTurn 异常: {ex.Message}"); }
+
+            if (completedTurn != null)
+            {
+                try { TurnMetricsUpdated?.Invoke(completedTurn); }
+                catch (Exception ex) { Logger.Warn($"[Telemetry] TurnMetricsUpdated 异常: {ex.Message}"); }
+            }
         }
 
         /// <summary>记录一次工具调用（含超时等待的总耗时）。</summary>
@@ -249,6 +273,7 @@ namespace DeepSeek_v4_for_VisualStudio.Services.Telemetry
         {
             string? json = null;
             string fileName = string.Empty;
+            bool exportEnabled;
             try
             {
                 lock (_lock)
@@ -262,10 +287,14 @@ namespace DeepSeek_v4_for_VisualStudio.Services.Telemetry
                     _session.DurationMs = _sessionClock.ElapsedMilliseconds;
                     json = _session.ToJson();
                     fileName = $"agent-session_{_session.StartedAt:yyyyMMdd_HHmmss}_{_session.SessionId}.json";
+                    exportEnabled = ExportEnabled;
                 }
-                ExportJson(json, fileName);
-                Logger.Info($"[Telemetry] 会话指标已导出: {fileName} ({result}, {_session.TurnCount} 轮, " +
-                            $"{_session.ToolCallCount} 次工具调用)");
+                if (exportEnabled)
+                {
+                    ExportJson(json, fileName);
+                    Logger.Info($"[Telemetry] 会话指标已导出: {fileName} ({result}, {_session.TurnCount} 轮, " +
+                                $"{_session.ToolCallCount} 次工具调用)");
+                }
             }
             catch (Exception ex)
             {

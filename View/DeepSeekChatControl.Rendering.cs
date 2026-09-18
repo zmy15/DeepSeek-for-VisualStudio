@@ -294,11 +294,12 @@ namespace DeepSeek_v4_for_VisualStudio.View
         /// </summary>
         private void PostStreamingUpdate(
             int messageIndex,
-            string content,
+            string? content,
             string reasoningContent,
             bool isComplete,
             string? statusText = null,
-            string? reasoningDelta = null)
+            string? reasoningDelta = null,
+            string? contentDelta = null)
         {
             if (ChatWebView.CoreWebView2 == null || !_pageReady) return;
 
@@ -310,7 +311,8 @@ namespace DeepSeek_v4_for_VisualStudio.View
                     reasoningContent,
                     isComplete,
                     statusText,
-                    reasoningDelta);
+                    reasoningDelta,
+                    contentDelta);
                 ChatWebView.CoreWebView2.PostWebMessageAsString(json);
             }
             catch (Exception ex)
