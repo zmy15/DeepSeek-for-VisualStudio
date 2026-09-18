@@ -807,6 +807,7 @@ namespace DeepSeek_v4_for_VisualStudio.Services.Agents
                 if (IsGitOrTerminalOnlyResult(GetStepToolLoopMessages(messages!, stepToolLoopStart)))
                 {
                     AddLog("INFO", "[EditAgent] 纯 Git/终端操作，跳过编辑格式校验");
+                    result = string.Empty; // 文本是操作结果摘要，不是可执行的编辑格式
                     break;
                 }
 
@@ -872,9 +873,7 @@ namespace DeepSeek_v4_for_VisualStudio.Services.Agents
             // ── 保存原始文件内容（用于最终 diff 比较）──
             var originalContents = new Dictionary<string, string>(StringComparer.OrdinalIgnoreCase);
             var appliedResults = new List<EditApplyResult>();
-
-            // ── operationType 提前声明（goto 路径需要可见）──
-            var operationType = EditOperationType.ApplyPatch;
+            EditOperationType? detectedOperationType = null;
 
             // ── v1.1.10: 路径A — 工具编辑（AI 在工具循环中直接修改了文件）──
             // 工具编辑后需在 originalContents 中记录"原始"状态，防止文本路径重复处理时 diff 归零。
@@ -908,34 +907,43 @@ namespace DeepSeek_v4_for_VisualStudio.Services.Agents
                 }
 
                 // ── 检测编辑操作类型 ──
-                operationType = DetectOperationType(result);
-
-                AddLog("INFO", string.Format(LocalizationService.Instance["agent.log.editTypeDetected"], operationType));
-
-                switch (operationType)
+                detectedOperationType = DetectOperationType(result);
+                if (!detectedOperationType.HasValue)
                 {
-                    case EditOperationType.ApplyPatch:
-                        // ── 方法1：apply_patch ──
-                        await ExecutePatchEditsAsync(result, plan, context, workspaceRoot,
-                            originalContents, appliedResults, ct, toolHandledFiles);
-                        break;
-
-                    case EditOperationType.InsertEditIntoFile:
-                        // ── 方法2：insert_edit_into_file ──
-                        await ExecuteInsertEditsAsync(result, plan, context, workspaceRoot,
-                            originalContents, appliedResults, ct, toolHandledFiles);
-                        break;
-
-                    case EditOperationType.CreateFile:
-                    default:
-                        // ── 方法3：create_file（原有逻辑）──
-                        await ExecuteCreateFileEditsAsync(result, plan, context, workspaceRoot,
-                            originalContents, appliedResults, ct, toolHandledFiles);
-                        break;
+                    AddLog("INFO", "[EditAgent] 文本响应未包含可识别的编辑格式，跳过编辑解析");
                 }
+                else
+                {
+                    AddLog("INFO", string.Format(LocalizationService.Instance["agent.log.editTypeDetected"], detectedOperationType.Value));
 
-                // ── 处理文件删除（delete: 格式，原有逻辑）──
-                await ProcessFileDeletionsAsync(result, plan, context, ct);
+                    switch (detectedOperationType.Value)
+                    {
+                        case EditOperationType.ApplyPatch:
+                            // ── 方法1：apply_patch ──
+                            await ExecutePatchEditsAsync(result, plan, context, workspaceRoot,
+                                originalContents, appliedResults, ct, toolHandledFiles);
+                            break;
+
+                        case EditOperationType.InsertEditIntoFile:
+                            // ── 方法2：insert_edit_into_file ──
+                            await ExecuteInsertEditsAsync(result, plan, context, workspaceRoot,
+                                originalContents, appliedResults, ct, toolHandledFiles);
+                            break;
+
+                        case EditOperationType.CreateFile:
+                            // ── 方法3：create_file（原有逻辑）──
+                            await ExecuteCreateFileEditsAsync(result, plan, context, workspaceRoot,
+                                originalContents, appliedResults, ct, toolHandledFiles);
+                            break;
+
+                        case EditOperationType.DeleteFile:
+                            // 删除由下方 ProcessFileDeletionsAsync 统一执行
+                            break;
+                    }
+
+                    // ── 处理文件删除（delete: 格式，原有逻辑）──
+                    await ProcessFileDeletionsAsync(result, plan, context, ct);
+                }
             }
 
         SkipTextFormatParsing:
@@ -998,7 +1006,7 @@ namespace DeepSeek_v4_for_VisualStudio.Services.Agents
             }
             else if (!string.IsNullOrWhiteSpace(result))
             {
-                operationTypeLabel = operationType.ToString();
+                operationTypeLabel = detectedOperationType?.ToString() ?? "unknown";
             }
             else
             {
@@ -3919,10 +3927,10 @@ namespace DeepSeek_v4_for_VisualStudio.Services.Agents
         /// <summary>
         /// 检测 AI 输出中的编辑操作类型（不依赖 EditPatchService）。
         /// </summary>
-        private static EditOperationType DetectOperationType(string aiOutput)
+        private static EditOperationType? DetectOperationType(string aiOutput)
         {
             if (string.IsNullOrWhiteSpace(aiOutput))
-                return EditOperationType.CreateFile; // 默认
+                return null;
 
             // 检测 patch 格式
             if (System.Text.RegularExpressions.Regex.IsMatch(aiOutput,
@@ -3943,7 +3951,13 @@ namespace DeepSeek_v4_for_VisualStudio.Services.Agents
                 @"```file:\s*[^\r\n]+", System.Text.RegularExpressions.RegexOptions.IgnoreCase))
                 return EditOperationType.CreateFile;
 
-            return EditOperationType.CreateFile; // 默认
+            // 检测 delete: / delete_file:
+            if (System.Text.RegularExpressions.Regex.IsMatch(aiOutput,
+                @"(?:^|\n)\s*(?:delete|delete_file)\s*:",
+                System.Text.RegularExpressions.RegexOptions.IgnoreCase))
+                return EditOperationType.DeleteFile;
+
+            return null;
         }
 
         #endregion

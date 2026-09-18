@@ -56,6 +56,35 @@ public class EditAgentTests
     }
 
     [Fact]
+    public void DetectOperationType_PlainGitSummary_ReturnsNull()
+    {
+        var method = typeof(EditAgent).GetMethod(
+            "DetectOperationType",
+            System.Reflection.BindingFlags.NonPublic | System.Reflection.BindingFlags.Static);
+        method.Should().NotBeNull();
+
+        var result = method!.Invoke(null, new object[]
+        {
+            "拉取已成功完成（快进合并，无冲突）。为报告新增提交明细，我执行一次 git log 查看本次拉取的提交列表。"
+        });
+
+        result.Should().BeNull();
+    }
+
+    [Fact]
+    public void DetectOperationType_DeleteFormat_ReturnsDeleteFile()
+    {
+        var method = typeof(EditAgent).GetMethod(
+            "DetectOperationType",
+            System.Reflection.BindingFlags.NonPublic | System.Reflection.BindingFlags.Static);
+        method.Should().NotBeNull();
+
+        var result = method!.Invoke(null, new object[] { "delete: src/obsolete.cs" });
+
+        result.Should().Be(EditOperationType.DeleteFile);
+    }
+
+    [Fact]
     public void BuildPlanProgressSnapshot_ListsStepsAndMarksCurrent()
     {
         var plan = new AgentTaskPlan
