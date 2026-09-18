@@ -47,6 +47,8 @@
   "DeepSeek.Chat.settings.appendMessageMode.displayName": "Message mode while generating",
   "DeepSeek.Chat.settings.appendMessageMode.guidance": "Guidance",
   "DeepSeek.Chat.settings.appendMessageMode.queue": "Queue",
+  "DeepSeek.Chat.settings.restoreDefaults.description": "Check this option to restore other DeepSeek Chat settings to their defaults. API keys, API endpoints, and model connection settings are preserved, and the option resets automatically.",
+  "DeepSeek.Chat.settings.restoreDefaults.displayName": "Restore Default Settings",
   "DeepSeek.Chat.settings.enableAutoCompression.description": "When context approaches the token budget, automatically compress early conversation into summaries\nrather than deleting old messages. When disabled, falls back to the old truncation behavior.",
   "DeepSeek.Chat.settings.enableAutoCompression.displayName": "Enable Auto Compression",
   "DeepSeek.Chat.settings.enableIdeContextInjection.description": "On each message, automatically provide the AI with the active file, cursor position, selected code and a summary of current-file errors/warnings (injected as volatile context; does not affect prefix cache hits). Deep queries remain available via tools like get_errors.",

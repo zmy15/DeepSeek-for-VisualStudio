@@ -47,6 +47,8 @@
   "DeepSeek.Chat.settings.appendMessageMode.displayName": "生成中发送消息的处理方式",
   "DeepSeek.Chat.settings.appendMessageMode.guidance": "引导模式",
   "DeepSeek.Chat.settings.appendMessageMode.queue": "排队模式",
+  "DeepSeek.Chat.settings.restoreDefaults.description": "勾选后立即将其他 DeepSeek Chat 设置恢复为默认值；API 密钥、API 端点和模型连接配置会保留，勾选项会自动复位。",
+  "DeepSeek.Chat.settings.restoreDefaults.displayName": "恢复默认设置",
   "DeepSeek.Chat.settings.enableAutoCompression.description": "当上下文接近 Token 预算时，自动将早期对话压缩为摘要，\n而非直接删除旧消息。关闭后回退到旧的截断行为。",
   "DeepSeek.Chat.settings.enableAutoCompression.displayName": "启用自动压缩",
   "DeepSeek.Chat.settings.enableIdeContextInjection.description": "每条消息发送时，将当前活动文件、光标位置、选中代码与当前文件的错误/警告摘要自动提供给 AI（注入为易变上下文，不影响缓存命中）。深度查询仍可通过 get_errors 等工具完成。",

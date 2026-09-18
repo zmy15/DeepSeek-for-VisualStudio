@@ -442,6 +442,18 @@ namespace DeepSeek_v4_for_VisualStudio
             };
 
         [VisualStudioContribution]
+        internal static Setting.Boolean RestoreDefaultSettings { get; } =
+            new(
+                "deepseekRestoreDefaultSettings",
+                "%DeepSeek.Chat.settings.restoreDefaults.displayName%",
+                GeneralCategory,
+                defaultValue: false)
+            {
+                Description = "%DeepSeek.Chat.settings.restoreDefaults.description%",
+                SearchKeywords = new[] { "reset", "restore", "default", "恢复", "默认" },
+            };
+
+        [VisualStudioContribution]
         internal static Setting.Enum ApprovalMode { get; } =
             new(
                 "deepseekApprovalMode",

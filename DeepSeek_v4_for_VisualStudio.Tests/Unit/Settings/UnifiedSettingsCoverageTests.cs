@@ -61,6 +61,7 @@ public class UnifiedSettingsCoverageTests
         (nameof(DeepSeekOptionsPage.EnableAutoBuild), "deepseekEnableAutoBuild"),
         (nameof(DeepSeekOptionsPage.EnableAutoSkillRouting), "deepseekEnableAutoSkillRouting"),
         (nameof(DeepSeekOptionsPage.AppendMessageMode), "deepseekAppendMessageMode"),
+        (nameof(DeepSeekOptionsPage.RestoreDefaultSettingsTrigger), "deepseekRestoreDefaultSettings"),
         (nameof(DeepSeekOptionsPage.ApprovalMode), "deepseekApprovalMode"),
         (nameof(DeepSeekOptionsPage.ThemeModeString), "deepseekThemeMode"),
         (nameof(DeepSeekOptionsPage.InputBoxHeight), "deepseekInputBoxHeight"),
@@ -74,7 +75,7 @@ public class UnifiedSettingsCoverageTests
         var declaredIds = GetDeclaredSettingIds();
         var boundMonikers = GetBoundMonikers();
 
-        declaredIds.Should().HaveCount(47);
+        declaredIds.Should().HaveCount(48);
         foreach (var guideSettingId in GuideSettingIds)
             declaredIds.Should().Contain(guideSettingId);
 
@@ -82,8 +83,8 @@ public class UnifiedSettingsCoverageTests
             .Where(id => !GuideSettingIds.Contains(id, StringComparer.Ordinal))
             .ToList();
 
-        synchronizedIds.Should().HaveCount(43);
-        boundMonikers.Should().HaveCount(43);
+        synchronizedIds.Should().HaveCount(44);
+        boundMonikers.Should().HaveCount(44);
         declaredIds.GroupBy(id => id, StringComparer.Ordinal).Should().OnlyContain(group => group.Count() == 1);
         boundMonikers.GroupBy(id => id, StringComparer.Ordinal).Should().OnlyContain(group => group.Count() == 1);
 
@@ -97,7 +98,7 @@ public class UnifiedSettingsCoverageTests
     [Fact]
     public void UnifiedSettings_CoverLegacyNonSensitiveOptions()
     {
-        ExpectedCoverage.Should().HaveCount(43);
+        ExpectedCoverage.Should().HaveCount(44);
 
         var optionProperties = typeof(DeepSeekOptionsPage)
             .GetProperties(BindingFlags.Public | BindingFlags.Instance)

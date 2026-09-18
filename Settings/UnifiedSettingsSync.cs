@@ -83,6 +83,18 @@ namespace DeepSeek_v4_for_VisualStudio.Settings
                     out var mode)
                         ? mode
                         : Models.AppendMessageMode.Queue),
+            (CategoryPrefix + "deepseekRestoreDefaultSettings", p => false, (p, v) =>
+            {
+                bool shouldRestore = v is bool enabled && enabled;
+                p.RestoreDefaultSettingsTrigger = false;
+                if (!shouldRestore)
+                    return;
+
+                p.RestoreDefaultsPreservingCredentials();
+                p.SaveSettingsToStorage();
+                p.ApplyRuntimeHotUpdates();
+                PushFromPage(p);
+            }),
             (CategoryPrefix + "deepseekApprovalMode", p => p.ApprovalMode, (p, v) => p.ApprovalMode = (string?)v ?? "SmartBlock"),
             (CategoryPrefix + "deepseekThemeMode", p => p.ThemeModeString, (p, v) => p.ThemeModeString = (string?)v ?? "Auto"),
             (CategoryPrefix + "deepseekInputBoxHeight", p => p.InputBoxHeight, (p, v) => p.InputBoxHeight = (int)v!),
