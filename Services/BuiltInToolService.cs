@@ -1,4 +1,4 @@
-using DeepSeek_v4_for_VisualStudio.Models;
+﻿using DeepSeek_v4_for_VisualStudio.Models;
 using DeepSeek_v4_for_VisualStudio.Services.BuiltInTools;
 using DeepSeek_v4_for_VisualStudio.Utils;
 using System;
@@ -264,7 +264,13 @@ namespace DeepSeek_v4_for_VisualStudio.Services
         {
             // 只读探索工具
             Register(new ListDirTool());
-            Register(new ReadFileTool(_fileReadCache));
+            // read_file 图片视觉直传判定：与 capture_window 白名单共用同一事实源
+            // （DeepSeekApiService.CurrentIsVision 经 DeepSeekEndpointResolver 权威判定）。
+            // 闭包运行时读取实例字段，避免会话中途切换模型后状态过期；
+            // _apiService 为 null 时返回 false → 保守回退 OCR。
+            var readFileTool = new ReadFileTool(_fileReadCache);
+            readFileTool.IsVisionModelProvider = () => _apiService?.CurrentIsVision == true;
+            Register(readFileTool);
             Register(new FileSearchTool());
             Register(new GrepSearchTool());
             Register(new SymbolSearchTool());

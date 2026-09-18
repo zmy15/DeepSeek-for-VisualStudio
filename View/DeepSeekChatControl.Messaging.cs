@@ -14,6 +14,7 @@ using System.Text.Json;
 using System.Threading;
 using System.Threading.Tasks;
 using System.Windows;
+using System.Windows.Controls;
 using System.Windows.Media.Imaging;
 
 namespace DeepSeek_v4_for_VisualStudio.View
@@ -51,29 +52,38 @@ namespace DeepSeek_v4_for_VisualStudio.View
         /// <summary>
         /// SendMessage 的核心异步逻辑，从 async void 中分离以加固异常边界。
         /// </summary>
-        private async Task SendMessageCoreAsync()
+        private async Task SendMessageCoreAsync(string? queuedUserText = null)
         {
-            lock (_lock)
-            {
-                if (_isGenerating) return;
-            }
-
-            var userText = InputTextBox.Text?.Trim();
+            bool isQueuedAppend = queuedUserText != null;
+            var userText = isQueuedAppend
+                ? queuedUserText
+                : InputTextBox.Text?.Trim();
             // ── 安全净化：防止用户通过 <|tool_calls|> 等标记注入工具调用 ──
             userText = StringExtensions.SanitizeUserInput(userText ?? string.Empty);
             // ── 时间词语解析：将"今天""本周"等替换为具体日期 ──
             userText = ResolveTimeExpressions(userText ?? string.Empty);
             if (string.IsNullOrWhiteSpace(userText)) userText = string.Empty;
-            bool hasAttachments = _attachedFilePaths.Count > 0;
+            bool hasAttachments = !isQueuedAppend && _attachedFilePaths.Count > 0;
 
             // ── 输入历史记录（仅记录用户实际输入，不含技能指令解析结果）──
-            if (!string.IsNullOrEmpty(userText) && !userText.StartsWith("/"))
+            if (!isQueuedAppend && !string.IsNullOrEmpty(userText) && !userText.StartsWith("/"))
             {
                 RecordInputHistory(userText);
             }
 
+            bool isGenerating;
+            lock (_lock)
+            {
+                isGenerating = _isGenerating;
+            }
+            if (isGenerating)
+            {
+                QueueAppendMessage(userText);
+                return;
+            }
+
             // 编辑模式
-            if (_pendingEditMsgIndex >= 0)
+            if (_pendingEditMsgIndex >= 0 && !isQueuedAppend)
             {
                 if (string.IsNullOrEmpty(userText))
                 {
@@ -93,8 +103,9 @@ namespace DeepSeek_v4_for_VisualStudio.View
                 _isGenerating = true;
             }
 
-            // ──  立即更新 UI：清空输入框、禁用按钮，让用户看到即时反馈 ──
-            InputTextBox.Text = string.Empty;
+            // ── 立即更新 UI：清空普通发送的输入框并刷新生成状态 ──
+            if (!isQueuedAppend)
+                InputTextBox.Text = string.Empty;
             UpdateButtonsState();
 
             // 斜杠命令处理
@@ -173,7 +184,7 @@ namespace DeepSeek_v4_for_VisualStudio.View
             bool visionModelSelected = _apiService?.CurrentIsVision ?? false;
             bool ocrExplicitlyRequested = IsOcrExplicitlyRequested(userText, effectiveUserText);
 
-            if (_attachedFilePaths.Count > 0)
+            if (!isQueuedAppend && _attachedFilePaths.Count > 0)
             {
                 StatusLabel.Text = LocalizationService.Instance["status.parsingFile"];
                 attachedFileNames = _attachedFilePaths
@@ -311,7 +322,8 @@ namespace DeepSeek_v4_for_VisualStudio.View
                     LocalizationService.Instance["agent.contextCompressionExhausted.discarded"]);
             }
             UpdateBrowser();
-            ClearAttachedFiles();
+            if (!isQueuedAppend)
+                ClearAttachedFiles();
             TouchCurrentSessionLastActive();
             AutoTitleSession();
 
@@ -486,8 +498,11 @@ namespace DeepSeek_v4_for_VisualStudio.View
                             {
                                 await ThreadHelper.JoinableTaskFactory.SwitchToMainThreadAsync();
                                 lock (_lock) { _isGenerating = false; }
-                                UpdateButtonsState();
-                                StatusLabel.Text = LocalizationService.Instance["status.ready"];
+                                if (!TryStartQueuedAppend())
+                                {
+                                    UpdateButtonsState();
+                                    StatusLabel.Text = LocalizationService.Instance["status.ready"];
+                                }
                             }
                         });
                         return;
@@ -524,7 +539,7 @@ namespace DeepSeek_v4_for_VisualStudio.View
             return string.Equals(Path.GetExtension(filePath), ".pdf", StringComparison.OrdinalIgnoreCase);
         }
 
-        private static bool IsOcrExplicitlyRequested(string? userText, string? effectiveUserText)
+        internal static bool IsOcrExplicitlyRequested(string? userText, string? effectiveUserText)
         {
             string text = ((effectiveUserText ?? string.Empty) + "\n" + (userText ?? string.Empty))
                 .ToLowerInvariant();
@@ -536,6 +551,12 @@ namespace DeepSeek_v4_for_VisualStudio.View
                 || text.Contains("提取图片文字")
                 || text.Contains("读取图片文字")
                 || text.Contains("图片文字");
+        }
+
+        internal static bool IsOcrToolName(string toolName)
+        {
+            var ocrKeywords = new[] { "ocr", "recognize_text", "paddle_ocr", "ocr_image", "image_to_text", "read_text" };
+            return ocrKeywords.Any(k => toolName.IndexOf(k, StringComparison.OrdinalIgnoreCase) >= 0);
         }
 
         private static List<ChatContentPart>? BuildVisionContent(List<string> imagePaths)
@@ -694,8 +715,14 @@ namespace DeepSeek_v4_for_VisualStudio.View
 
                 CancelStreaming();
                 lock (_lock) { _isGenerating = false; }
+                _pendingAppendMessages.Clear();
+                RefreshAppendQueuePanel();
                 UpdateButtonsState();
                 StatusLabel.Text = LocalizationService.Instance["status.stopped"];
+
+                // ── 标记未完成：本轮被用户停止，末尾未完成轮的重试/编辑将走原地路径（不产生分支）──
+                if (streamingIdx >= 0)
+                    MarkAssistantMessageIncomplete(streamingIdx);
 
                 // ── 发送 streamEnd 以渲染 Markdown 并注入重试按钮 ──
                 if (streamingIdx >= 0 && !string.IsNullOrEmpty(partialContent))
@@ -715,6 +742,8 @@ namespace DeepSeek_v4_for_VisualStudio.View
                 {
                     if (_isGenerating) { CancelStreaming(); _isGenerating = false; }
                 }
+                _pendingAppendMessages.Clear();
+                RefreshAppendQueuePanel();
                 UpdateButtonsState();
                 ClearCurrentSessionMessages();
                 Logger.Info("清空对话完成");
@@ -734,10 +763,10 @@ namespace DeepSeek_v4_for_VisualStudio.View
 
         private void UpdateButtonsState()
         {
-            SendButton.IsEnabled = !_isGenerating;
+            SendButton.IsEnabled = true;
             StopButton.Visibility = _isGenerating ? Visibility.Visible : Visibility.Collapsed;
-            SendButton.Visibility = _isGenerating ? Visibility.Collapsed : Visibility.Visible;
-            InputTextBox.IsReadOnly = _isGenerating;
+            SendButton.Visibility = Visibility.Visible;
+            InputTextBox.IsReadOnly = false;
             ClearButton.IsEnabled = !_isGenerating;
 
             // 流式生成结束时刷新消费显示
@@ -746,6 +775,177 @@ namespace DeepSeek_v4_for_VisualStudio.View
                 RefreshConsumptionDisplay();
             }
         }
+
+        /// <summary>
+        /// 将生成中提交的文本加入追加协调器。当前 AgentContext 与 UI 共享同一实例，
+        /// 因此后续单项切换会立即影响 Agent 的消费方式。
+        /// </summary>
+        private void QueueAppendMessage(string userText)
+        {
+            if (string.IsNullOrWhiteSpace(userText))
+                return;
+
+            var mode = _options?.AppendMessageMode ?? AppendMessageMode.Queue;
+            var item = _pendingAppendMessages.Add(userText, GetEffectiveModel(), mode);
+            lock (_lock)
+            {
+                if (_activeAgent?.Context != null)
+                    _activeAgent.Context.PendingAppendMessages = _pendingAppendMessages;
+            }
+
+            InputTextBox.Text = string.Empty;
+            UpdateButtonsState();
+            RefreshAppendQueuePanel();
+
+            var L = LocalizationService.Instance;
+            StatusLabel.Text = mode == AppendMessageMode.Guidance
+                ? L["status.appendMessage.guidance"]
+                : L["status.appendMessage.queue"];
+            Logger.Info($"[AppendMessage] 已暂存生成中消息 {item.Id}，模式={mode}");
+        }
+
+        private void TogglePendingAppendMode_Click(object sender, RoutedEventArgs e)
+        {
+            if (sender is not Button { Tag: PendingAppendMessage item })
+                return;
+
+            if (!_pendingAppendMessages.ToggleMode(item.Id))
+                return;
+
+            RefreshAppendQueuePanel();
+            var L = LocalizationService.Instance;
+            StatusLabel.Text = item.Mode == AppendMessageMode.Guidance
+                ? L["status.appendMessage.guidance"]
+                : L["status.appendMessage.queue"];
+        }
+
+        private void RefreshAppendQueuePanel()
+        {
+            if (!Dispatcher.CheckAccess())
+            {
+                Dispatcher.BeginInvoke(new Action(RefreshAppendQueuePanel));
+                return;
+            }
+
+            var items = _pendingAppendMessages.Snapshot();
+            AppendQueueArea.Visibility = items.Count > 0
+                ? Visibility.Visible
+                : Visibility.Collapsed;
+            if (items.Count == 0)
+            {
+                AppendQueuePanel.Children.Clear();
+                return;
+            }
+
+            var L = LocalizationService.Instance;
+            AppendQueueTitle.Text = L["chat.append.title"];
+            AppendQueuePanel.Children.Clear();
+
+            foreach (var item in items)
+            {
+                string modeText = item.Mode == AppendMessageMode.Guidance
+                    ? L["chat.append.mode.guidance"]
+                    : L["chat.append.mode.queue"];
+
+                var row = new Grid
+                {
+                    Margin = new Thickness(0, 2, 0, 2),
+                };
+                row.ColumnDefinitions.Add(new ColumnDefinition
+                {
+                    Width = new GridLength(1, GridUnitType.Star),
+                });
+                row.ColumnDefinitions.Add(new ColumnDefinition
+                {
+                    Width = GridLength.Auto,
+                });
+
+                var info = new StackPanel
+                {
+                    VerticalAlignment = VerticalAlignment.Center,
+                };
+                info.Children.Add(new TextBlock
+                {
+                    Text = item.Text.Length > 140
+                        ? item.Text.Substring(0, 140) + "…"
+                        : item.Text,
+                    Foreground = System.Windows.Media.Brushes.WhiteSmoke,
+                    FontSize = 11,
+                    TextTrimming = TextTrimming.CharacterEllipsis,
+                    ToolTip = item.Text,
+                });
+                info.Children.Add(new TextBlock
+                {
+                    Text = string.Format(L["chat.append.meta"], modeText, item.Model),
+                    Foreground = System.Windows.Media.Brushes.LightSteelBlue,
+                    FontSize = 10,
+                    TextTrimming = TextTrimming.CharacterEllipsis,
+                });
+
+                var toggleButton = new Button
+                {
+                    Content = item.Mode == AppendMessageMode.Guidance
+                        ? L["chat.append.switchToQueue"]
+                        : L["chat.append.switchToGuidance"],
+                    Tag = item,
+                    IsEnabled = true,
+                    Padding = new Thickness(8, 2, 8, 2),
+                    Margin = new Thickness(10, 0, 0, 0),
+                    VerticalAlignment = VerticalAlignment.Center,
+                    FontSize = 11,
+                    Style = TryFindResource("TransparentButton") as Style,
+                };
+                toggleButton.Click += TogglePendingAppendMode_Click;
+
+                Grid.SetColumn(info, 0);
+                Grid.SetColumn(toggleButton, 1);
+                row.Children.Add(info);
+                row.Children.Add(toggleButton);
+                AppendQueuePanel.Children.Add(row);
+            }
+        }
+
+        /// <summary>
+        /// 工作流完全结束后启动最早的一条追加消息。普通排队项优先；
+        /// 若引导项在任务结束瞬间才到达而未能插入，则降级为下一轮发送。
+        /// </summary>
+        private bool TryStartQueuedAppend()
+        {
+            var next = _pendingAppendMessages.TakeNextQueued()
+                ?? _pendingAppendMessages.TakeNextUndeliveredGuidance();
+            if (next == null)
+            {
+                RefreshAppendQueuePanel();
+                return false;
+            }
+
+            RefreshAppendQueuePanel();
+            StatusLabel.Text = string.Format(
+                LocalizationService.Instance["status.appendMessage.autoSending"],
+                next.Model);
+            _ = StartQueuedAppendAsync(next.Text);
+            return true;
+        }
+
+#pragma warning disable VSTHRD100
+        private async Task StartQueuedAppendAsync(string text)
+        {
+            try
+            {
+                await SendMessageCoreAsync(text);
+            }
+            catch (Exception ex)
+            {
+                Logger.Error($"[AppendMessage] 自动发送排队消息失败: {ex.Message}", ex);
+                lock (_lock) { _isGenerating = false; }
+                DisposeStreamingCts();
+                UpdateButtonsState();
+                StatusLabel.Text = string.Format(
+                    LocalizationService.Instance["status.error"],
+                    ex.Message);
+            }
+        }
+#pragma warning restore VSTHRD100
 
         #endregion
 
@@ -808,9 +1008,7 @@ namespace DeepSeek_v4_for_VisualStudio.View
         /// </summary>
         internal static string SanitizeOcrToolArguments(string toolName, string argumentsJson)
         {
-            var ocrKeywords = new[] { "ocr", "recognize_text", "paddle_ocr", "ocr_image", "image_to_text", "read_text" };
-            bool isOcrTool = ocrKeywords.Any(k => toolName.IndexOf(k, StringComparison.OrdinalIgnoreCase) >= 0);
-            if (!isOcrTool)
+            if (!IsOcrToolName(toolName))
                 return argumentsJson;
 
             // ── OCR 参数格式提醒 ──

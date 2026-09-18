@@ -1,4 +1,4 @@
-<div align="center">
+﻿<div align="center">
 
 > **测试阶段** — 使用前请备份项目。
 
@@ -11,7 +11,7 @@
 [![.NET](https://img.shields.io/badge/.NET%20Framework-4.7.2-blueviolet)]()
 [![DeepSeek](https://img.shields.io/badge/-DeepSeek-green)]()
 [![Platform](https://img.shields.io/badge/platform-Windows%20x64%20%2F%20ARM64-lightgrey)]()
-[![Version](https://img.shields.io/badge/version-1.2.1-blue)]()
+[![Version](https://img.shields.io/badge/version-1.2.2-blue)]()
 
 [English](README.md)
 
@@ -22,6 +22,26 @@
 DeepSeek for Visual Studio 将 AI 聊天、代码编辑、解决方案工具、终端执行和多模态理解直接带入 IDE。扩展支持 **Visual Studio 2022（17.14 及以上）** 和 **Visual Studio 2026**。除 DeepSeek 官方 API 外，还支持通过自定义 Base URL 接入任意 OpenAI 兼容的 `chat/completions` 端点。
 
 它通过 WebView2 提供原生级聊天体验，并结合五个协作 Agent、可复用 Skills、MCP 工具服务器、Ghost Text 补全和持久化项目记忆。
+
+## 界面截图
+
+<p align="center">
+  <img src="docs/images/2.png" width="720" alt="DeepSeek Chat 聊天面板" />
+  <br />
+  <sub>聊天面板 —— 模型选择、深度思考、审批模式与 MCP 状态</sub>
+</p>
+
+<p align="center">
+  <img src="docs/images/4.png" width="720" alt="思考过程与工具调用" />
+  <br />
+  <sub>深度推理、工具调用与会话上下文用量</sub>
+</p>
+
+<p align="center">
+  <img src="docs/images/6.png" width="720" alt="内联 AI 编辑" />
+  <br />
+  <sub>内联 AI 编辑 —— Enter 应用 / Esc 取消</sub>
+</p>
 
 ## 项目亮点
 

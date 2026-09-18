@@ -38,6 +38,20 @@ namespace DeepSeek_v4_for_VisualStudio.Services.Agents
         /// <summary>发现阶段工具循环的硬性上限，避免重复探索阻塞后续规划阶段。</summary>
         internal const int DiscoveryMaxToolRounds = 20;
 
+        /// <summary>可直接复用前序 Agent 探索结果所需的最少有效工具结果数量。</summary>
+        internal const int MinReusableExplorationResults = 3;
+
+        /// <summary>可跨 Handoff 复用的只读探索工具。</summary>
+        private static readonly HashSet<string> ReusableExplorationTools = new(StringComparer.OrdinalIgnoreCase)
+        {
+            "runSubagent",
+            "read_file",
+            "grep_search",
+            "file_search",
+            "symbol_search",
+            "list_dir",
+        };
+
         /// <summary>
         /// ExploreAgent 引用，由 AgentFactory 注入。
         /// 用于在发现阶段并行探索代码库。
@@ -80,6 +94,7 @@ namespace DeepSeek_v4_for_VisualStudio.Services.Agents
                     "read_file",                  // 读取文件（对齐阶段快速查阅）
                     "grep_search",                // 文本搜索（对齐阶段快速查阅）
                     "file_search",                // 文件搜索（对齐阶段快速查阅）
+                    "symbol_search",              // 符号搜索（查找类/方法/接口等定义）
                 },
                 SystemPrompt = BuildSystemPrompt(),
             };
@@ -247,6 +262,19 @@ namespace DeepSeek_v4_for_VisualStudio.Services.Agents
         {
             var L = LocalizationService.Instance;
 
+            // Handoff 已携带前序 Agent 的只读探索时，直接复用结果并跳过 Plan 的二次扫描。
+            List<ChatApiMessage>? reusableMessages = GetReusableExplorationMessages(context);
+            if (reusableMessages != null)
+            {
+                string reusedDiscoveryContext = ExtractDiscoveryContextFromMessages(reusableMessages);
+                if (!string.IsNullOrWhiteSpace(reusedDiscoveryContext))
+                {
+                    int reusedResultCount = reusableMessages.Count(IsExplorationToolResult);
+                    AddLog("INFO", $"跳过 Plan 探索：复用前一 Agent 的 {reusedResultCount} 条只读探索结果。");
+                    return (reusedDiscoveryContext, new List<ChatApiMessage>());
+                }
+            }
+
             // ── 缓存检查：如 ExploreAgent 已有结构缓存，注入摘要跳过重复扫描 ──
             var extraSystemMessages = new List<ChatApiMessage>();
             string? structureCache = null;
@@ -333,7 +361,8 @@ namespace DeepSeek_v4_for_VisualStudio.Services.Agents
 
             // ── 上下文充足判定 ──
             bool hasSufficientContext = !string.IsNullOrEmpty(context.FileContext)
-                || !string.IsNullOrEmpty(structureCache);
+                || !string.IsNullOrEmpty(structureCache)
+                || HasReusableExplorationResults(context);
             if (hasSufficientContext)
             {
                 sb.AppendLine();
@@ -368,21 +397,94 @@ namespace DeepSeek_v4_for_VisualStudio.Services.Agents
 
         /// <summary>
         /// 从对话消息列表中的 tool 消息提取发现上下文文本。
-        /// 遍历所有 role=tool 的消息，提取子代理返回的探索结果。
+        /// 覆盖 runSubagent 及直接只读探索结果，确保 Handoff 后不会丢失前序发现。
         /// </summary>
         private static string ExtractDiscoveryContextFromMessages(List<ChatApiMessage> messages)
         {
             var sb = new StringBuilder();
+            const int maxTotalChars = 32000;
+            const int maxResultChars = 6000;
+            bool truncated = false;
+
             foreach (var msg in messages)
             {
-                if (msg.Role == "tool" && msg.Name == "runSubagent" && !string.IsNullOrWhiteSpace(msg.Content))
+                if (!IsExplorationToolResult(msg))
+                    continue;
+
+                string content = msg.Content!.Trim().Truncate(maxResultChars);
+                string block = $"### {msg.Name}\n{content}";
+                int separatorLength = sb.Length > 0 ? 5 : 0;
+                int remaining = maxTotalChars - sb.Length - separatorLength;
+                if (remaining <= 0)
                 {
-                    if (sb.Length > 0)
-                        sb.AppendLine("\n---\n");
-                    sb.AppendLine(msg.Content);
+                    truncated = true;
+                    break;
                 }
+
+                if (block.Length > remaining)
+                {
+                    block = block.Substring(0, remaining);
+                    truncated = true;
+                }
+
+                if (sb.Length > 0)
+                    sb.AppendLine("\n---\n");
+                sb.AppendLine(block);
+
+                if (truncated)
+                    break;
             }
+
+            if (truncated)
+                sb.AppendLine("\n>  前序探索结果较多，已按总量上限截断。");
+
             return sb.ToString().Trim();
+        }
+
+        /// <summary>
+        /// 判断 Handoff 上下文是否已包含足够的前序只读探索结果，可以跳过 Plan 再次扫描。
+        /// </summary>
+        internal static bool HasReusableExplorationResults(AgentContext context)
+        {
+            return GetReusableExplorationMessages(context) != null;
+        }
+
+        /// <summary>
+        /// 获取满足最低数量要求的前序探索消息列表。
+        /// 仅使用 Handoff 转发的消息，避免把当前会话中无关的旧工具结果误判为本轮探索。
+        /// </summary>
+        private static List<ChatApiMessage>? GetReusableExplorationMessages(AgentContext context)
+        {
+            List<ChatApiMessage>?[] candidates =
+            {
+                context.ForwardedMessages,
+                context.ConsumedForwardedMessages,
+            };
+
+            foreach (var candidate in candidates)
+            {
+                if (candidate != null && candidate.Count(IsExplorationToolResult) >= MinReusableExplorationResults)
+                    return candidate;
+            }
+
+            return null;
+        }
+
+        /// <summary>
+        /// 判断工具消息是否为成功返回的代码库只读探索结果。
+        /// </summary>
+        internal static bool IsExplorationToolResult(ChatApiMessage message)
+        {
+            if (message == null
+                || !string.Equals(message.Role, "tool", StringComparison.OrdinalIgnoreCase)
+                || string.IsNullOrWhiteSpace(message.Name)
+                || !ReusableExplorationTools.Contains(message.Name!)
+                || string.IsNullOrWhiteSpace(message.Content))
+            {
+                return false;
+            }
+
+            return !message.Content!.TrimStart().StartsWith("Error:", StringComparison.OrdinalIgnoreCase);
         }
 
         /// <summary>

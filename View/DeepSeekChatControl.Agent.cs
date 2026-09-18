@@ -1,4 +1,4 @@
-using DeepSeek_v4_for_VisualStudio.Models;
+﻿using DeepSeek_v4_for_VisualStudio.Models;
 using DeepSeek_v4_for_VisualStudio.Services;
 using DeepSeek_v4_for_VisualStudio.Services.Agents;
 using DeepSeek_v4_for_VisualStudio.Utils;
@@ -330,6 +330,7 @@ namespace DeepSeek_v4_for_VisualStudio.View
         /// <summary>IDE 实时态追踪器（P1-A，惰性创建；仅 UI 线程使用）</summary>
         private Services.IdeContext.IdeContextTracker? _ideContextTracker;
         private readonly Services.IdeContext.GitContextProvider _gitContextProvider = new();
+        private Models.AgentTurnMetrics? _latestTurnMetrics;
 
         /// <summary>
         /// 构建会话开始时的上下文构成快照（P2 Context Debugger 数据面）。
@@ -370,6 +371,14 @@ namespace DeepSeek_v4_for_VisualStudio.View
                         ideChars = _contextManager.IdeContextChars,
                         search = _contextManager.HasSearchContext,
                         rag = _contextManager.HasRagContext,
+                    },
+                    tokensPerSecond = _latestTurnMetrics == null ? null : new
+                    {
+                        turn = _latestTurnMetrics.Turn,
+                        outputTokens = _latestTurnMetrics.OutputTokens,
+                        decodeDurationMs = _latestTurnMetrics.DecodeDurationMs,
+                        decode = _latestTurnMetrics.DecodeTokensPerSecond,
+                        endToEnd = _latestTurnMetrics.EndToEndTokensPerSecond,
                     },
                     workingSet = _contextManager.GetWorkingSetTopPaths(6),
                     ideSnapshot = ide == null ? null : new
@@ -439,13 +448,35 @@ namespace DeepSeek_v4_for_VisualStudio.View
                         $"WS={_contextManager.GetWorkingSetTopPaths(6).Count} " +
                         $"Tokens={dbgStats.EstimatedTokens:N0}/{dbgStats.TokenBudget:N0}");
 
-                    string? ctxJson = BuildContextDebugJson();
-                    if (!string.IsNullOrEmpty(ctxJson))
-                        ChatWebView.CoreWebView2?.PostWebMessageAsString(
-                            "{\"type\":\"contextDebug\",\"d\":" + ctxJson + "}");
+                    PublishContextDebugSnapshot();
                 }
                 catch { }
             }
+        }
+
+        private void PublishContextDebugSnapshot()
+        {
+            if (_options?.ShowContextStats != true)
+                return;
+
+            string? ctxJson = BuildContextDebugJson();
+            if (!string.IsNullOrEmpty(ctxJson))
+                ChatWebView.CoreWebView2?.PostWebMessageAsString(
+                    "{\"type\":\"contextDebug\",\"d\":" + ctxJson + "}");
+        }
+
+        private void OnTelemetryTurnMetricsUpdated(Models.AgentTurnMetrics turn)
+        {
+            _latestTurnMetrics = turn;
+            _ = ThreadHelper.JoinableTaskFactory.RunAsync(async () =>
+            {
+                try
+                {
+                    await ThreadHelper.JoinableTaskFactory.SwitchToMainThreadAsync();
+                    PublishContextDebugSnapshot();
+                }
+                catch { }
+            });
         }
 
         /// <summary>
@@ -485,9 +516,17 @@ namespace DeepSeek_v4_for_VisualStudio.View
 
             // ── P0 Telemetry：会话指标采集器（设置开关控制，创建失败静默降级）──
             Services.Telemetry.AgentMetricsCollector? telemetry = null;
-            if (_options?.EnableTelemetryExport != false)
+            _latestTurnMetrics = null;
+            bool collectMetrics = _options?.EnableTelemetryExport != false
+                || _options?.ShowContextStats == true;
+            if (collectMetrics)
             {
-                try { telemetry = new Services.Telemetry.AgentMetricsCollector(); }
+                try
+                {
+                    telemetry = new Services.Telemetry.AgentMetricsCollector();
+                    telemetry.ExportEnabled = _options?.EnableTelemetryExport != false;
+                    telemetry.TurnMetricsUpdated += OnTelemetryTurnMetricsUpdated;
+                }
                 catch (Exception tex) { Logger.Warn($"[Telemetry] 采集器创建失败: {tex.Message}"); }
             }
 
@@ -529,6 +568,7 @@ namespace DeepSeek_v4_for_VisualStudio.View
                     CurrentUserContent = currentUserContent,
                     ConversationHistory = _contextManager.GetConversationHistory(),
                     ContextManager = _contextManager,
+                    PendingAppendMessages = _pendingAppendMessages,
                     IsPlanningMode = routing?.NeedsPlanning == true || routing?.TargetAgent == AgentType.Plan,
                     PreClassifiedTaskSize = routing?.TaskSize ?? TaskSize.Small,
                     IsExplicitRoute = routing?.IsExplicit == true,
@@ -608,12 +648,17 @@ namespace DeepSeek_v4_for_VisualStudio.View
                 {
                     AddMessagesHtml("assistant", LocalizationService.Instance["agent.status.analyzing"]);
                 }
+                var streamingTarget = new AgentStreamingTarget
+                {
+                    MessageIndex = _agentStreamingMsgIndex,
+                };
+                context.OnGuidanceTurnRequested = item =>
+                    BeginGuidanceTurnAsync(item, streamingTarget);
                 _currentStreamingMsgIndex = _agentStreamingMsgIndex;
                 UpdateBrowser();
                 await TaskScheduler.Default;
 
                 // ── 设置实时推理流回调：每个 thinking chunk 立即推送到 WebView2 思考面板 ──
-                var capturedMsgIdx = _agentStreamingMsgIndex;
                 // ── P3: 流式增量累积的节流局部状态。与 BatchStreamingUpdate 内部 60ms 节流对齐，
                 //    将"每 chunk 一次 O(n) 全量拷贝/ToString/线程切换"降为每 60ms 一次，
                 //    长输出时整体字符搬运从 O(n²) 降为近似 O(n)；最终完整性由收尾的
@@ -622,6 +667,7 @@ namespace DeepSeek_v4_for_VisualStudio.View
                 long lastContentFlushTicks = DateTime.UtcNow.Ticks;
                 long lastThinkingFlushTicks = DateTime.UtcNow.Ticks;
                 var streamingReasoningDeltaSb = new StringBuilder();
+                var streamingContentDeltaSb = new StringBuilder();
 
                 context.OnThinkingChunk = (chunk) =>
                 {
@@ -629,8 +675,10 @@ namespace DeepSeek_v4_for_VisualStudio.View
                     // 只推送本窗口的 reasoning delta，避免反复序列化完整 thinking。
                     bool syncDue = false;
                     string delta = string.Empty;
+                    int messageIndex;
                     lock (_lock)
                     {
+                        messageIndex = streamingTarget.MessageIndex;
                         _streamingReasoning.Append(chunk);
                         streamingReasoningDeltaSb.Append(chunk);
                         long nowTicks = DateTime.UtcNow.Ticks;
@@ -643,10 +691,10 @@ namespace DeepSeek_v4_for_VisualStudio.View
                     _ = ThreadHelper.JoinableTaskFactory.RunAsync(async () =>
                     {
                         await ThreadHelper.JoinableTaskFactory.SwitchToMainThreadAsync();
-                        if (ChatWebView.CoreWebView2 == null || capturedMsgIdx < 0) return;
+                        if (ChatWebView.CoreWebView2 == null || messageIndex < 0) return;
                         try
                         {
-                            BatchStreamingUpdate(capturedMsgIdx, reasoningDelta: delta);
+                            BatchStreamingUpdate(messageIndex, reasoningDelta: delta);
                         }
                         catch (Exception ex)
                         {
@@ -658,37 +706,33 @@ namespace DeepSeek_v4_for_VisualStudio.View
                 // ── 设置实时内容流回调：每个 content chunk 立即推送到 WebView2 消息正文 ──
                 context.OnContentChunk = (chunk) =>
                 {
-                    // 锁内单次临界区：StringBuilder 增量累积（均摊 O(1)），替代逐 chunk 的
-                    // string += 全量复制；按 60ms 节流把最新完整内容同步到消息并触发批处理推送
+                    // 锁内单次临界区：StringBuilder 增量累积（均摊 O(1)），按 60ms
+                    // 节流只推送本窗口的正文 delta，避免反复复制整段内容。
                     bool syncDue = false;
+                    string contentDelta = string.Empty;
+                    int messageIndex;
                     lock (_lock)
                     {
-                        if (capturedMsgIdx < 0 || capturedMsgIdx >= _messages.Count) return;
+                        messageIndex = streamingTarget.MessageIndex;
+                        if (messageIndex < 0 || messageIndex >= _messages.Count) return;
                         _streamingContent.Append(chunk);
+                        streamingContentDeltaSb.Append(chunk);
 
                         long nowTicks = DateTime.UtcNow.Ticks;
                         syncDue = nowTicks - lastContentFlushTicks >= StreamFlushSyncIntervalTicks;
                         if (!syncDue) return;
 
                         lastContentFlushTicks = nowTicks;
-                        _messages[capturedMsgIdx].Content = _streamingContent.ToString();
+                        contentDelta = streamingContentDeltaSb.ToString();
+                        streamingContentDeltaSb.Clear();
                     }
                     _ = ThreadHelper.JoinableTaskFactory.RunAsync(async () =>
                     {
                         await ThreadHelper.JoinableTaskFactory.SwitchToMainThreadAsync();
-                        if (ChatWebView.CoreWebView2 == null || capturedMsgIdx < 0) return;
+                        if (ChatWebView.CoreWebView2 == null || messageIndex < 0) return;
                         try
                         {
-                            string content;
-                            lock (_lock)
-                            {
-                                content = capturedMsgIdx >= 0 && capturedMsgIdx < _messages.Count
-                                    ? ChatHtmlService.BuildAssistantDisplayContent(
-                                        _messages[capturedMsgIdx].TimelineContent,
-                                        _messages[capturedMsgIdx].Content)
-                                    : string.Empty;
-                            }
-                            BatchStreamingUpdate(capturedMsgIdx, content);
+                            BatchStreamingUpdate(messageIndex, contentDelta: contentDelta);
                         }
                         catch (Exception ex)
                         {
@@ -989,6 +1033,12 @@ namespace DeepSeek_v4_for_VisualStudio.View
                         telemetry?.CompleteCancelled();
                     else
                         telemetry?.CompleteSuccess();
+ 
+                    // ── 未完成轮标记：计划取消/关联轮取消 → 标记；正常完成 → 防御性清除 ──
+                    if (plan.IsCancelled || context.CancellationToken.IsCancellationRequested)
+                        MarkAssistantMessageIncomplete(_agentStreamingMsgIndex);
+                    else
+                        ClearAssistantMessageIncomplete(_agentStreamingMsgIndex);
 
                     // ── 如果有待处理的 Handoff（如 Plan→Edit），注入"开始实现"按钮 ──
                     await InjectPendingHandoffButtonAsync();
@@ -1028,6 +1078,12 @@ namespace DeepSeek_v4_for_VisualStudio.View
                         telemetry?.CompleteCancelled();
                     else
                         telemetry?.CompleteSuccess();
+ 
+                    // ── 未完成轮标记：取消或正文命中中断哨兵 → 标记；正常完成 → 防御性清除 ──
+                    if (context.CancellationToken.IsCancellationRequested || LooksInterrupted(agentResult.Content))
+                        MarkAssistantMessageIncomplete(_agentStreamingMsgIndex);
+                    else
+                        ClearAssistantMessageIncomplete(_agentStreamingMsgIndex);
 
                     // ── 如果有待处理的 Handoff，注入按钮 ──
                     await InjectPendingHandoffButtonAsync();
@@ -1046,6 +1102,9 @@ namespace DeepSeek_v4_for_VisualStudio.View
                         telemetry?.CompleteCancelled();
                     else
                         telemetry?.CompleteFailure(AgentFailureCategory.None, agentResult.ErrorMessage);
+ 
+                    // ── 未完成轮标记：失败轮一律标记（含 AskAgent「回答已取消」）──
+                    MarkAssistantMessageIncomplete(_agentStreamingMsgIndex);
                 }
             }
             catch (Exception ex)
@@ -1056,11 +1115,16 @@ namespace DeepSeek_v4_for_VisualStudio.View
 
                 // ── P0 Telemetry：未捕获异常归类为 System 故障 ──
                 try { telemetry?.CompleteFailure(AgentFailureCategory.System, ex.ToString()); } catch { }
+ 
+                // ── 未完成轮标记：工作流异常中断 → 标记 ──
+                MarkAssistantMessageIncomplete(_agentStreamingMsgIndex);
             }
             finally
             {
                 StopConversationElapsedTimer();
                 _activePlan = null;
+                if (telemetry != null)
+                    telemetry.TurnMetricsUpdated -= OnTelemetryTurnMetricsUpdated;
 
                 // ── P1-A：会话结束后清除 IDE 快照，避免过期上下文泄漏到非 Agent 的聊天轮次 ──
                 try { _contextManager.SetIdeContext(null); }
@@ -1587,6 +1651,88 @@ namespace DeepSeek_v4_for_VisualStudio.View
             {
                 Logger.Error($"[Agent] 同步响应到树/上下文失败: {ex.Message}", ex);
             }
+        }
+
+        /// <summary>
+        /// 引导消息进入当前 Agent 循环时，结束当前助手输出气泡，
+        /// 插入引导问题气泡，并把后续流式输出切换到新的助手气泡。
+        /// </summary>
+        private async Task BeginGuidanceTurnAsync(
+            PendingAppendMessage item,
+            AgentStreamingTarget streamingTarget)
+        {
+            await ThreadHelper.JoinableTaskFactory.SwitchToMainThreadAsync();
+
+            int previousIndex;
+            int userIndex;
+            int assistantIndex;
+            string previousContent;
+            string previousReasoning;
+            ChatMessage assistantMessage;
+
+            lock (_lock)
+            {
+                previousIndex = streamingTarget.MessageIndex;
+                if (previousIndex < 0 || previousIndex >= _messages.Count)
+                    return;
+
+                var previousMessage = _messages[previousIndex];
+                previousContent = _streamingContent.ToString().Trim();
+                previousReasoning = ReasoningTextPolicy.ClampStored(
+                    _streamingReasoning.ToString()) ?? string.Empty;
+
+                previousMessage.Content = previousContent;
+                previousMessage.ReasoningContent = previousReasoning;
+                previousMessage.TimelineContent = _agentTimelineContent.ToString().Trim();
+                previousMessage.IsStreaming = false;
+                previousMessage.IsRendered = true;
+
+                if (_tree != null && string.IsNullOrEmpty(previousMessage.NodeId))
+                    _tree.AddChildMessage(previousMessage);
+
+                var userMessage = new ChatMessage
+                {
+                    Role = "user",
+                    Content = item.Text,
+                    Timestamp = DateTime.Now,
+                    AgentType = previousMessage.AgentType,
+                };
+                if (_tree != null)
+                    _tree.AddChildMessage(userMessage);
+                _messages.Add(userMessage);
+                userIndex = _messages.Count - 1;
+
+                assistantMessage = new ChatMessage
+                {
+                    Role = "assistant",
+                    Content = LocalizationService.Instance["agent.status.analyzing"],
+                    ReasoningContent = string.Empty,
+                    Timestamp = DateTime.Now,
+                    IsStreaming = true,
+                    IsRendered = false,
+                    AgentType = previousMessage.AgentType,
+                };
+                _messages.Add(assistantMessage);
+                assistantIndex = _messages.Count - 1;
+
+                _agentStreamingMsgIndex = assistantIndex;
+                _currentStreamingMsgIndex = assistantIndex;
+                streamingTarget.MessageIndex = assistantIndex;
+
+                _agentTimelineContent.Clear();
+                _streamingContent.Clear();
+                _streamingReasoning.Clear();
+            }
+
+            PostStreamEnd(previousIndex, previousContent, previousReasoning);
+            _messagesHtml.Append(ChatHtmlService.BuildUserMessageHtml(
+                item.Text,
+                messageIndex: userIndex));
+            _messagesHtml.Append(ChatHtmlService.BuildAssistantMessageHtml(
+                assistantMessage,
+                assistantIndex));
+            RefreshAppendQueuePanel();
+            UpdateBrowser();
         }
 
         /// <summary>

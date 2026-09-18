@@ -426,6 +426,34 @@ namespace DeepSeek_v4_for_VisualStudio
             };
 
         [VisualStudioContribution]
+        internal static Setting.Enum AppendMessageMode { get; } =
+            new(
+                "deepseekAppendMessageMode",
+                "%DeepSeek.Chat.settings.appendMessageMode.displayName%",
+                GeneralCategory,
+                new[]
+                {
+                    new EnumSettingEntry("Queue", "%DeepSeek.Chat.settings.appendMessageMode.queue%"),
+                    new EnumSettingEntry("Guidance", "%DeepSeek.Chat.settings.appendMessageMode.guidance%"),
+                },
+                defaultValue: "Queue")
+            {
+                Description = "%DeepSeek.Chat.settings.appendMessageMode.description%",
+            };
+
+        [VisualStudioContribution]
+        internal static Setting.Boolean RestoreDefaultSettings { get; } =
+            new(
+                "deepseekRestoreDefaultSettings",
+                "%DeepSeek.Chat.settings.restoreDefaults.displayName%",
+                GeneralCategory,
+                defaultValue: false)
+            {
+                Description = "%DeepSeek.Chat.settings.restoreDefaults.description%",
+                SearchKeywords = new[] { "reset", "restore", "default", "恢复", "默认" },
+            };
+
+        [VisualStudioContribution]
         internal static Setting.Enum ApprovalMode { get; } =
             new(
                 "deepseekApprovalMode",

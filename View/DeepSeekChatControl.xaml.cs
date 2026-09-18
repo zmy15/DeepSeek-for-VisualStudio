@@ -68,6 +68,14 @@ namespace DeepSeek_v4_for_VisualStudio.View
                 => Source == EntrySource.Custom ? Model + _customSuffix : Model;
         }
 
+        /// <summary>
+        /// 当前 Agent 流式输出的可变目标。引导消息插入时可切换到新的助手气泡。
+        /// </summary>
+        private sealed class AgentStreamingTarget
+        {
+            public int MessageIndex { get; set; }
+        }
+
         #region Constants
 
         private static string WelcomeMessage => AiPrompts.WelcomeMessage;
@@ -171,6 +179,7 @@ namespace DeepSeek_v4_for_VisualStudio.View
 
         private readonly List<ChatMessage> _messages = new();
         private readonly ConversationContextManager _contextManager = new();
+        private readonly PendingAppendMessageStore _pendingAppendMessages = new();
 
         // ── 树状对话结构 ──
         private ConversationTree? _tree;
@@ -489,6 +498,7 @@ namespace DeepSeek_v4_for_VisualStudio.View
                     UpdateInputPlaceholder();
                     UpdateAllTooltips();
                     UpdateUiLabels();
+                    RefreshAppendQueuePanel();
                     RefreshBalanceDisplay();
                 });
             };
@@ -1793,6 +1803,7 @@ namespace DeepSeek_v4_for_VisualStudio.View
         {
             public int MessageIndex;
             public StringBuilder Content = new(256);
+            public StringBuilder ContentDelta = new(256);
             public StringBuilder Reasoning = new(64);
             public StringBuilder ReasoningDelta = new(256);
             public string? PendingStatus;
@@ -1852,7 +1863,8 @@ namespace DeepSeek_v4_for_VisualStudio.View
             string? reasoning = null,
             string? status = null,
             bool isComplete = false,
-            string? reasoningDelta = null)
+            string? reasoningDelta = null,
+            string? contentDelta = null)
         {
             lock (_streamBatchLock)
             {
@@ -1867,6 +1879,8 @@ namespace DeepSeek_v4_for_VisualStudio.View
                     state.Content.Clear();
                     state.Content.Append(content);
                 }
+                if (contentDelta != null)
+                    state.ContentDelta.Append(contentDelta);
                 if (reasoning != null)
                 {
                     state.Reasoning.Clear();
@@ -1884,6 +1898,7 @@ namespace DeepSeek_v4_for_VisualStudio.View
 
                 // 仅当满足条件时实际推送：已完成 / 内容显著变化 / 思考显著变化 / 间隔达标且有任意内容
                 bool contentChanged = state.Content.Length > StreamRenderInterval;
+                bool contentDeltaChanged = state.ContentDelta.Length >= StreamRenderInterval;
                 bool reasoningChanged =
                     (state.Reasoning.Length > 0
                         && state.Reasoning.Length - state.LastFlushedReasoningLength >= 50)
@@ -1892,14 +1907,21 @@ namespace DeepSeek_v4_for_VisualStudio.View
                 // 思考增量只写入 ReasoningDelta（不写 Content/Reasoning），
                 // 时间兜底必须覆盖它，否则慢速思考要攒满 50 字符才推送一次，流式观感很差。
                 bool hasAnyPending = state.Content.Length > 0
+                    || state.ContentDelta.Length > 0
                     || state.Reasoning.Length > 0
                     || state.ReasoningDelta.Length > 0;
 
-                if (state.IsComplete || contentChanged || reasoningChanged
+                if (state.IsComplete || contentChanged || contentDeltaChanged || reasoningChanged
                     || (timeElapsed && hasAnyPending))
                 {
                     state.LastFlushTicks = now;
                     state.LastFlushedReasoningLength = state.Reasoning.Length;
+                    string? contentSnapshot = state.Content.Length > 0
+                        ? state.Content.ToString()
+                        : null;
+                    string? contentDeltaSnapshot = contentSnapshot == null && state.ContentDelta.Length > 0
+                        ? state.ContentDelta.ToString()
+                        : null;
                     string reasoningSnapshot = state.Reasoning.Length > 0
                         ? state.Reasoning.ToString()
                         : string.Empty;
@@ -1907,11 +1929,13 @@ namespace DeepSeek_v4_for_VisualStudio.View
                         ? state.ReasoningDelta.ToString()
                         : null;
                     PostStreamingUpdate(state.MessageIndex,
-                        state.Content.ToString(),
+                        contentSnapshot,
                         reasoningSnapshot,
                         state.IsComplete,
                         state.PendingStatus,
-                        reasoningDeltaSnapshot);
+                        reasoningDeltaSnapshot,
+                        contentDeltaSnapshot);
+                    state.ContentDelta.Clear();
                     state.ReasoningDelta.Clear();
                     state.PendingStatus = null;
                     if (state.IsComplete)

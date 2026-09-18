@@ -274,6 +274,20 @@ namespace DeepSeek_v4_for_VisualStudio.Models
         public int? ToolHistoryInsertIndex { get; set; }
 
         /// <summary>
+        /// 当前会话的生成中追加消息协调器。
+        /// 引导模式在工具循环轮次边界消费；排队模式由 UI 在工作流完全结束后发。
+        /// </summary>
+        [JsonIgnore]
+        public PendingAppendMessageStore? PendingAppendMessages { get; set; }
+
+        /// <summary>
+        /// 引导消息被 Agent 循环消费时调用。视图层据此结束当前助手气泡、
+        /// 添加引导问题气泡，并把后续流式输出切换到新的助手气泡。
+        /// </summary>
+        [JsonIgnore]
+        public Func<PendingAppendMessage, Task>? OnGuidanceTurnRequested { get; set; }
+
+        /// <summary>
         /// 实时推理流回调。Agent 内部每收到一个 thinking chunk 时调用，
         /// 供 UI 层实时流式更新思考面板。
         /// </summary>

@@ -402,6 +402,7 @@ namespace DeepSeek_v4_for_VisualStudio.View
             var transform = scale == 1.0 ? null : new ScaleTransform(scale, scale);
             DiffGlobalBar.LayoutTransform = transform;
             StatusAreaBorder.LayoutTransform = transform;
+            AppendQueueArea.LayoutTransform = transform;
             InputAreaBorder.LayoutTransform = transform;
             ApprovalAreaBorder.LayoutTransform = transform;
 

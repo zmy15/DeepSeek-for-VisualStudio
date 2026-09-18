@@ -1,6 +1,7 @@
 using System.Reflection;
 using System.Text.Json;
 using System.Text.RegularExpressions;
+using DeepSeek_v4_for_VisualStudio.Models;
 using DeepSeek_v4_for_VisualStudio.Settings;
 
 namespace DeepSeek_v4_for_VisualStudio.Tests.Unit.Settings;
@@ -59,6 +60,8 @@ public class UnifiedSettingsCoverageTests
         (nameof(DeepSeekOptionsPage.AgentNoProgressRounds), "deepseekAgentNoProgressRounds"),
         (nameof(DeepSeekOptionsPage.EnableAutoBuild), "deepseekEnableAutoBuild"),
         (nameof(DeepSeekOptionsPage.EnableAutoSkillRouting), "deepseekEnableAutoSkillRouting"),
+        (nameof(DeepSeekOptionsPage.AppendMessageMode), "deepseekAppendMessageMode"),
+        (nameof(DeepSeekOptionsPage.RestoreDefaultSettingsTrigger), "deepseekRestoreDefaultSettings"),
         (nameof(DeepSeekOptionsPage.ApprovalMode), "deepseekApprovalMode"),
         (nameof(DeepSeekOptionsPage.ThemeModeString), "deepseekThemeMode"),
         (nameof(DeepSeekOptionsPage.InputBoxHeight), "deepseekInputBoxHeight"),
@@ -72,7 +75,7 @@ public class UnifiedSettingsCoverageTests
         var declaredIds = GetDeclaredSettingIds();
         var boundMonikers = GetBoundMonikers();
 
-        declaredIds.Should().HaveCount(46);
+        declaredIds.Should().HaveCount(48);
         foreach (var guideSettingId in GuideSettingIds)
             declaredIds.Should().Contain(guideSettingId);
 
@@ -80,8 +83,8 @@ public class UnifiedSettingsCoverageTests
             .Where(id => !GuideSettingIds.Contains(id, StringComparer.Ordinal))
             .ToList();
 
-        synchronizedIds.Should().HaveCount(42);
-        boundMonikers.Should().HaveCount(42);
+        synchronizedIds.Should().HaveCount(44);
+        boundMonikers.Should().HaveCount(44);
         declaredIds.GroupBy(id => id, StringComparer.Ordinal).Should().OnlyContain(group => group.Count() == 1);
         boundMonikers.GroupBy(id => id, StringComparer.Ordinal).Should().OnlyContain(group => group.Count() == 1);
 
@@ -95,7 +98,7 @@ public class UnifiedSettingsCoverageTests
     [Fact]
     public void UnifiedSettings_CoverLegacyNonSensitiveOptions()
     {
-        ExpectedCoverage.Should().HaveCount(42);
+        ExpectedCoverage.Should().HaveCount(44);
 
         var optionProperties = typeof(DeepSeekOptionsPage)
             .GetProperties(BindingFlags.Public | BindingFlags.Instance)
@@ -117,6 +120,13 @@ public class UnifiedSettingsCoverageTests
     public void AutoSkillRouting_DefaultsToDisabled()
     {
         DeepSeekOptionsPage.DefaultEnableAutoSkillRouting.Should().BeFalse();
+    }
+
+    [Fact]
+    public void AppendMessageMode_DefaultsToQueue()
+    {
+        DeepSeekOptionsPage.DefaultAppendMessageMode.Should().Be(
+            DeepSeek_v4_for_VisualStudio.Models.AppendMessageMode.Queue);
     }
 
     [Fact]

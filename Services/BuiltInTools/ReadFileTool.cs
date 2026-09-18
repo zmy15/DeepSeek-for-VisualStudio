@@ -1,4 +1,4 @@
-using DeepSeek_v4_for_VisualStudio.Models;
+﻿using DeepSeek_v4_for_VisualStudio.Models;
 using DeepSeek_v4_for_VisualStudio.Utils;
 using System;
 using System.Collections.Concurrent;
@@ -35,6 +35,34 @@ namespace DeepSeek_v4_for_VisualStudio.Services.BuiltInTools
         /// 缓存轮数阈值：经过此轮数后允许重新读取文件。
         /// </summary>
         public int RoundThreshold { get; set; } = 10;
+
+        /// <summary>
+        /// 视觉模型探测委托。由 BuiltInToolService 在注册工具时绑定到
+        /// DeepSeekApiService.CurrentIsVision 的运行时读取，避免会话中途切换模型后状态过期。
+        /// 为 null 时按「非视觉模型」处理（保守回退 OCR）。
+        /// </summary>
+        public Func<bool>? IsVisionModelProvider { get; set; }
+
+        /// <summary>
+        /// 运行时判定当前请求的模型是否具备视觉能力。
+        /// 单一事实源：最终读取 DeepSeekApiService.CurrentIsVision（经注入委托）。
+        /// </summary>
+        private bool IsVisionModel() => IsVisionModelProvider?.Invoke() == true;
+
+        /// <summary>视觉模型可直接读取的图片格式。</summary>
+        private static readonly HashSet<string> VisionImageExtensions = new(StringComparer.OrdinalIgnoreCase)
+        {
+            ".png", ".jpg", ".jpeg", ".gif", ".webp",
+        };
+
+        /// <summary>单张图片直传上限，与聊天附件视觉直传保持一致。</summary>
+        private const long MaxVisionImageBytes = 32L * 1024 * 1024;
+
+        /// <summary>工具结果中的图片路径块起始标记，由 BaseAgent 转成 image_url。</summary>
+        public const string VisionImageBlockStart = "[READ_FILE_IMAGE]";
+
+        /// <summary>工具结果中的图片路径块结束标记。</summary>
+        public const string VisionImageBlockEnd = "[/READ_FILE_IMAGE]";
 
         // ── 分页常量（参考 CodeWhale file.rs）──
         /// <summary>默认最大返回行数（无 startLine/endLine 参数时）</summary>
@@ -100,6 +128,8 @@ namespace DeepSeek_v4_for_VisualStudio.Services.BuiltInTools
         {
             if (string.IsNullOrEmpty(toolResult)) return LocalizationService.Instance["tool.common.noResult"];
             if (toolResult.StartsWith("Error: ")) return toolResult;
+            if (toolResult.IndexOf(VisionImageBlockStart, StringComparison.Ordinal) >= 0)
+                return LocalizationService.Instance["tool.readFile.imageReadComplete"];
 
             var readLines = toolResult.Split('\n');
             string firstLine = readLines.Length > 0 ? readLines[0].Trim() : "";
@@ -120,6 +150,10 @@ namespace DeepSeek_v4_for_VisualStudio.Services.BuiltInTools
             int reqStartLine = GetIntArg(args, "startLine", 1);
             int reqEndLine = GetIntArg(args, "endLine", int.MaxValue);
             bool cacheable = !RequiresStructuredParsing(filePath);
+
+            // ── 图片视觉直传：视觉模型不再走 OCR，由 BaseAgent 把本地图片附加为 image_url。──
+            if (CanUseVisionImagePassthrough(filePath))
+                return BuildVisionImageResult(filePath);
 
             // ── 缓存命中 ──
             if (cacheable && _fileReadCache.TryGetValue(filePath, out FileReadCacheEntry cachedEntry))
@@ -412,6 +446,112 @@ namespace DeepSeek_v4_for_VisualStudio.Services.BuiltInTools
         private static bool RequiresStructuredParsing(string filePath)
             => FileParserService.IsSupportedFormat(filePath)
                && !FileParserService.IsTextFormat(filePath);
+
+        /// <summary>
+        /// 判断文件是否可由视觉模型直接读取。超大图片和视觉模型不支持的格式保留 OCR 回退。
+        /// </summary>
+        private bool CanUseVisionImagePassthrough(string filePath)
+        {
+            if (!IsVisionModel() || string.IsNullOrWhiteSpace(filePath) || !File.Exists(filePath))
+                return false;
+
+            if (!VisionImageExtensions.Contains(Path.GetExtension(filePath)))
+                return false;
+
+            try
+            {
+                return new FileInfo(filePath).Length <= MaxVisionImageBytes;
+            }
+            catch
+            {
+                return false;
+            }
+        }
+
+        /// <summary>构建只含本地路径的轻量结果，BaseAgent 负责将其转换成视觉内容块。</summary>
+        private static string BuildVisionImageResult(string filePath)
+        {
+            long sizeBytes = new FileInfo(filePath).Length;
+            return
+                $"<file path=\"{filePath}\" kind=\"image\" size_bytes=\"{sizeBytes}\" vision_passthrough=\"true\">\n" +
+                $"{VisionImageBlockStart}\n{filePath}\n{VisionImageBlockEnd}\n" +
+                "</file>";
+        }
+
+        /// <summary>
+        /// 解析工具结果中的图片路径块，返回剥离块后的纯文本与图片 data URI 列表。
+        /// 块内每行既可以是 data URI，也可以是一个本地图片路径。
+        /// </summary>
+        public static (string CleanText, List<string> ImageDataUris) ParseImageBlock(string raw)
+        {
+            var uris = new List<string>();
+            if (string.IsNullOrEmpty(raw))
+                return (raw ?? string.Empty, uris);
+
+            int start = raw.IndexOf(VisionImageBlockStart, StringComparison.Ordinal);
+            if (start < 0)
+                return (raw, uris);
+
+            int contentStart = start + VisionImageBlockStart.Length;
+            int end = raw.IndexOf(VisionImageBlockEnd, contentStart, StringComparison.Ordinal);
+            if (end < 0)
+                return (raw, uris);
+
+            string cleanText = raw.Remove(start, (end + VisionImageBlockEnd.Length) - start).TrimEnd();
+            string block = raw.Substring(contentStart, end - contentStart);
+
+            foreach (string line in block.Split(new[] { '\r', '\n' }, StringSplitOptions.RemoveEmptyEntries))
+            {
+                string item = line.Trim();
+                if (item.StartsWith("data:image/", StringComparison.OrdinalIgnoreCase))
+                {
+                    uris.Add(item);
+                    continue;
+                }
+
+                string? dataUri = TryBuildImageDataUri(item);
+                if (dataUri != null)
+                    uris.Add(dataUri);
+            }
+
+            return (cleanText, uris);
+        }
+
+        private static string? TryBuildImageDataUri(string filePath)
+        {
+            try
+            {
+                if (!File.Exists(filePath))
+                    return null;
+
+                var fileInfo = new FileInfo(filePath);
+                if (fileInfo.Length > MaxVisionImageBytes)
+                {
+                    Logger.Warn($"[read_file] 图片超过 32MiB，跳过视觉直传: {filePath}");
+                    return null;
+                }
+
+                string? mediaType = Path.GetExtension(filePath).ToLowerInvariant() switch
+                {
+                    ".png" => "image/png",
+                    ".jpg" or ".jpeg" => "image/jpeg",
+                    ".gif" => "image/gif",
+                    ".webp" => "image/webp",
+                    _ => null,
+                };
+
+                if (mediaType == null)
+                    return null;
+
+                byte[] bytes = File.ReadAllBytes(filePath);
+                return $"data:{mediaType};base64,{Convert.ToBase64String(bytes)}";
+            }
+            catch (Exception ex)
+            {
+                Logger.Warn($"[read_file] 构建图片 data URI 失败: {filePath} - {ex.Message}");
+                return null;
+            }
+        }
 
         /// <summary>
         /// 从完整文件内容中提取指定行范围，并添加行号前缀。

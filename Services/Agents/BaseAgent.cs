@@ -53,6 +53,7 @@ namespace DeepSeek_v4_for_VisualStudio.Services.Agents
                 "read_file",
                 "grep_search",
                 "file_search",
+                "symbol_search",
                 "list_dir",
                 "memory",
             };
@@ -133,6 +134,9 @@ namespace DeepSeek_v4_for_VisualStudio.Services.Agents
         ///  双重合并：优先通过 BuiltInToolService 获取（已合并内置+MCP），
         ///    同时兜底直接查询 McpManager 确保 MCP 工具不遗漏。
         /// </summary>
+        internal static bool ShouldSuppressOcrTools(bool isVisionModel, string? userMessage)
+            => isVisionModel && !DeepSeekChatControl.IsOcrExplicitlyRequested(userMessage, null);
+
         protected List<ToolDefinition> BuildFullToolSet()
         {
             var fullSet = new List<ToolDefinition>();
@@ -143,10 +147,17 @@ namespace DeepSeek_v4_for_VisualStudio.Services.Agents
                 var defs = BuiltInTools.GetFullToolDefinitions();
                 bool autoSkillRoutingEnabled =
                     Settings.DeepSeekOptionsPage.Instance?.EnableAutoSkillRouting == true;
+                bool suppressOcrTools = ShouldSuppressOcrTools(
+                    _apiService?.CurrentIsVision == true,
+                    Context?.CurrentUserContent);
                 foreach (var def in defs)
                 {
                     if (!autoSkillRoutingEnabled &&
                         string.Equals(def.Function.Name, "load_skill", StringComparison.OrdinalIgnoreCase))
+                    {
+                        continue;
+                    }
+                    if (suppressOcrTools && DeepSeekChatControl.IsOcrToolName(def.Function.Name))
                     {
                         continue;
                     }
@@ -922,6 +933,40 @@ namespace DeepSeek_v4_for_VisualStudio.Services.Agents
             return messages;
         }
 
+        private async Task<int> ApplyPendingGuidanceMessageAsync(
+            List<ChatApiMessage> messages,
+            int toolInsertPos)
+        {
+            var guidanceItem = Context?.PendingAppendMessages?.TakeNextGuidance();
+            if (guidanceItem == null)
+                return toolInsertPos;
+
+            if (Context?.OnGuidanceTurnRequested != null)
+                await Context.OnGuidanceTurnRequested(guidanceItem).ConfigureAwait(false);
+
+            string guidance = "- " + guidanceItem.Text.Trim()
+                .Replace("\r\n", "\n")
+                .Replace("\n", "\n  ");
+            if (string.IsNullOrWhiteSpace(guidance))
+                return toolInsertPos;
+
+            string guidanceContent = string.Format(
+                LocalizationService.Instance["system.agent.appendGuidance"],
+                guidance);
+            messages.Insert(toolInsertPos, new ChatApiMessage
+            {
+                Role = "user",
+                Content = guidanceContent,
+            });
+            toolInsertPos++;
+            if (Context != null)
+                Context.ToolHistoryInsertIndex = toolInsertPos;
+            Context?.ContextManager?.AddUserMessage(guidanceContent);
+
+            Logger.Info($"[Agent:{Definition.Name}] 已插入 1 条生成中引导消息");
+            return toolInsertPos;
+        }
+
         /// <summary>
         /// 带工具调用的 AI 对话循环（支持多轮工具调用）。
         /// 
@@ -1049,6 +1094,9 @@ namespace DeepSeek_v4_for_VisualStudio.Services.Agents
             while (!loopDetected)
             {
                 round++;
+                toolInsertPos = await ApplyPendingGuidanceMessageAsync(
+                    messages,
+                    toolInsertPos).ConfigureAwait(false);
                 var executionDecision = executionGuard.CheckBeforeStep(round);
                 if (executionDecision.ShouldStop)
                 {
@@ -1492,7 +1540,42 @@ namespace DeepSeek_v4_for_VisualStudio.Services.Agents
                     }
                 }
 
-                if (toolCalls.Count == 0) break;
+                if (toolCalls.Count == 0)
+                {
+                    bool hasInterimAssistant = contentBuilder.Length > 0
+                        || reasoningBuilder.Length > 0;
+                    if (hasInterimAssistant)
+                    {
+                        string interimContent = contentBuilder.ToString();
+                        string interimReasoning = reasoningBuilder.ToString();
+                        messages.Insert(toolInsertPos, new ChatApiMessage
+                        {
+                            Role = "assistant",
+                            Content = string.IsNullOrWhiteSpace(interimContent) ? null : interimContent,
+                            ReasoningContent = string.IsNullOrWhiteSpace(interimReasoning) ? null : interimReasoning,
+                        });
+                        toolInsertPos++;
+                        Context?.ContextManager?.AddAssistantMessage(
+                            string.IsNullOrWhiteSpace(interimContent) ? null : interimContent,
+                            string.IsNullOrWhiteSpace(interimReasoning) ? null : interimReasoning);
+                    }
+
+                    int newToolInsertPos = await ApplyPendingGuidanceMessageAsync(
+                        messages,
+                        toolInsertPos).ConfigureAwait(false);
+                    bool guidanceInserted = newToolInsertPos != toolInsertPos;
+                    toolInsertPos = newToolInsertPos;
+                    if (guidanceInserted)
+                        continue;
+
+                    if (hasInterimAssistant)
+                    {
+                        toolInsertPos--;
+                        messages.RemoveAt(toolInsertPos);
+                        Context?.ContextManager?.RemoveLastAssistantMessage();
+                    }
+                    break;
+                }
 
                 if (toolCalls.Count > 0)
                 {
@@ -1672,18 +1755,18 @@ namespace DeepSeek_v4_for_VisualStudio.Services.Agents
                         string toolResult = toolResults[i];
 
                         // ── 视觉工具：剥离图片块，视觉模型时提取图片直传给视觉模型 ──
-                        // fetch_webpage 提取网页图片 URL；capture_window 提取窗口截图 data URI。
-                        List<string>? webImageUrls = null;
+                        // fetch_webpage 提取网页图片 URL；capture_window / read_file 提取本地图片 data URI。
+                        List<string>? imageUrls = null;
                         string resultText = toolResult;
                         if (tc.Function.Name == "fetch_webpage")
                         {
-                            var (cleanText, imageUrls) = WebSearchService.ParseWebImagesBlock(toolResult);
+                            var (cleanText, fetchedImageUrls) = WebSearchService.ParseWebImagesBlock(toolResult);
                             resultText = cleanText;
-                            if (imageUrls.Count > 0
+                            if (fetchedImageUrls.Count > 0
                                 && _apiService.CurrentIsVision)
                             {
                                 // ── 过滤视觉模型不支持的图片格式（如 SVG），避免直传导致 HTTP 400 ──
-                                webImageUrls = WebSearchService.FilterVisionImageUrls(imageUrls);
+                                imageUrls = WebSearchService.FilterVisionImageUrls(fetchedImageUrls);
                             }
                         }
                         else if (tc.Function.Name == "capture_window")
@@ -1693,7 +1776,17 @@ namespace DeepSeek_v4_for_VisualStudio.Services.Agents
                             if (imageUris.Count > 0
                                 && _apiService.CurrentIsVision)
                             {
-                                webImageUrls = imageUris;
+                                imageUrls = imageUris;
+                            }
+                        }
+                        else if (tc.Function.Name == "read_file")
+                        {
+                            var (cleanText, imageUris) = ReadFileTool.ParseImageBlock(toolResult);
+                            resultText = cleanText;
+                            if (imageUris.Count > 0
+                                && _apiService.CurrentIsVision)
+                            {
+                                imageUrls = imageUris;
                             }
                         }
 
@@ -1705,13 +1798,13 @@ namespace DeepSeek_v4_for_VisualStudio.Services.Agents
                         if (tc.Function.Name == "runSubagent")
                         {
                             messages.Insert(toolInsertPos,
-                                BuildToolResultMessage(tc.Id, tc.Function.Name, contextResult, webImageUrls));
+                                BuildToolResultMessage(tc.Id, tc.Function.Name, contextResult, imageUrls));
                             toolInsertPos++;
                         }
                         else
                         {
                             messages.Insert(toolInsertPos,
-                                BuildToolResultMessage(tc.Id, tc.Function.Name, contextResult, webImageUrls));
+                                BuildToolResultMessage(tc.Id, tc.Function.Name, contextResult, imageUrls));
                             toolInsertPos++;
                         }
 
@@ -3657,11 +3750,11 @@ namespace DeepSeek_v4_for_VisualStudio.Services.Agents
         }
 
         /// <summary>
-        /// 构建工具结果消息。视觉模型的 fetch_webpage 结果会把图片 URL 作为
-        /// image_url 内容块附加，让视觉模型直读网页图片；否则只返回纯文本。
+        /// 构建工具结果消息。视觉工具（fetch_webpage / capture_window / read_file）
+        /// 会把图片作为 image_url 内容块附加；否则只返回纯文本。
         /// </summary>
         private static ChatApiMessage BuildToolResultMessage(
-            string toolCallId, string toolName, string contextResult, List<string>? webImageUrls)
+            string toolCallId, string toolName, string contextResult, List<string>? imageUrls)
         {
             var message = new ChatApiMessage
             {
@@ -3671,13 +3764,13 @@ namespace DeepSeek_v4_for_VisualStudio.Services.Agents
                 Name = toolName,
             };
 
-            if (webImageUrls is { Count: > 0 })
+            if (imageUrls is { Count: > 0 })
             {
                 var parts = new List<ChatContentPart>
                 {
                     new ChatContentPart { Type = "text", Text = contextResult },
                 };
-                foreach (string u in webImageUrls)
+                foreach (string u in imageUrls)
                 {
                     parts.Add(new ChatContentPart
                     {

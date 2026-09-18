@@ -56,6 +56,46 @@ public class EditAgentTests
     }
 
     [Fact]
+    public void ExtractToolMadeEdits_ApplyPatch_UsesPatchHeaderPath()
+    {
+        const string patch = "*** Begin Patch\n*** Update File: README.md\n@@\n-old\n+new\n*** End Patch";
+        string arguments = System.Text.Json.JsonSerializer.Serialize(new
+        {
+            patch,
+            expected = "1: new"
+        });
+        var messages = new List<ChatApiMessage>
+        {
+            new()
+            {
+                Role = "assistant",
+                ToolCalls = new List<ToolCall>
+                {
+                    new()
+                    {
+                        Id = "call_apply_patch",
+                        Function = new ToolCallFunction
+                        {
+                            Name = "apply_patch",
+                            Arguments = arguments
+                        }
+                    }
+                }
+            }
+        };
+        var method = typeof(EditAgent).GetMethod(
+            "ExtractToolMadeEdits",
+            System.Reflection.BindingFlags.NonPublic | System.Reflection.BindingFlags.Static);
+
+        var edits = (List<(string FilePath, string ToolName)>)method!.Invoke(
+            null, new object[] { messages })!;
+
+        edits.Should().ContainSingle();
+        edits[0].FilePath.Should().Be("README.md");
+        edits[0].ToolName.Should().Be("apply_patch");
+    }
+
+    [Fact]
     public void BuildPlanProgressSnapshot_ListsStepsAndMarksCurrent()
     {
         var plan = new AgentTaskPlan
@@ -84,6 +124,16 @@ public class EditAgentTests
     public void BuildPlanProgressSnapshot_EmptyPlan_ReturnsEmpty()
     {
         EditAgent.BuildPlanProgressSnapshot(new AgentTaskPlan()).Should().BeEmpty();
+    }
+
+    [Theory]
+    [InlineData("为 ChatMessage 新增「被停止」标记字段并确定持久化策略", true)]
+    [InlineData("引入新的分支查询方法", true)]
+    [InlineData("边界场景与 UI 一致性核对", false)]
+    [InlineData("分析现有重试路径", false)]
+    public void IsCodeWritingStep_PrefersExplicitWriteIntent(string title, bool expected)
+    {
+        EditAgent.IsCodeWritingStep(title).Should().Be(expected);
     }
 
     [Fact]
@@ -234,6 +284,40 @@ public class EditAgentTests
     }
 
     [Fact]
+    public async Task ExecutePlanAsync_MultiStepPlan_DropsHandoffPrefixWhenFullHistoryExists()
+    {
+        var agent = new EditAgent(_apiService);
+        using var cts = new CancellationTokenSource();
+        cts.Cancel();
+
+        var contextManager = new ConversationContextManager();
+        contextManager.AddUserMessage("用户任务");
+        var context = new AgentContext
+        {
+            ContextManager = contextManager,
+            ForwardedMessages = new List<ChatApiMessage>
+            {
+                new() { Role = "system", Content = "compact handoff prefix" },
+            },
+            CancellationToken = cts.Token,
+        };
+
+        var plan = new AgentTaskPlan
+        {
+            Title = "Multi-step test",
+            Steps =
+            {
+                new AgentStep { Index = 1, Title = "步骤 1", Description = "第一项" },
+                new AgentStep { Index = 2, Title = "步骤 2", Description = "第二项" },
+            },
+        };
+
+        await agent.ExecutePlanAsync(plan, context);
+
+        context.ForwardedMessages.Should().BeNull();
+    }
+
+    [Fact]
     public async Task ExecuteAsync_WithCancelledPlan_DoesNotCreateFollowUpHandoff()
     {
         var agent = new EditAgent(_apiService);
@@ -289,11 +373,10 @@ public class EditAgentTests
         agent.Definition.SystemPrompt.Should().Contain(
             global::DeepSeek_v4_for_VisualStudio.Services.AiPrompts.EditToolCallRule);
         global::DeepSeek_v4_for_VisualStudio.Services.AiPrompts.EditSystemPromptFragment
-            .Should().NotContain("不要作为工具调用")
-            .And.NotContain("not a tool call");
-        global::DeepSeek_v4_for_VisualStudio.Services.AiPrompts.EditFormatRecoveryPrompt
             .Should().Contain("apply_patch")
-            .And.Contain("replace_string_in_file");
+            .And.Contain("replace_string_in_file")
+            .And.Contain("delete_file")
+            .And.NotContain("```file:");
         global::DeepSeek_v4_for_VisualStudio.Services.AiPrompts.EditToolCallRule
             .Should().Contain("终态")
             .And.Contain("不要再次读取");
@@ -414,33 +497,6 @@ public class EditAgentTests
         tools.Should().NotContain("create_directory");
         tools.Should().NotContain("build_solution");
         tools.Should().Contain("git");
-    }
-
-    [Fact]
-    public void ResolveFormatRetryInsertIndex_UsesCurrentListAfterCompression()
-    {
-        var messages = new List<ChatApiMessage>
-        {
-            new() { Role = "system", Content = "shared prefix" },
-            new() { Role = "user", Content = "execute step" },
-            new() { Role = "system", Content = "edit prompt" },
-            new() { Role = "system", Content = "explicit route" },
-        };
-
-        int staleIndex = messages.Count - 1;
-        messages.RemoveAt(0); // 模拟工具循环压缩删除旧消息
-
-        int retryInsertIndex = EditAgent.ResolveFormatRetryInsertIndex(messages);
-
-        retryInsertIndex.Should().Be(1);
-        retryInsertIndex.Should().BeLessThanOrEqualTo(messages.Count);
-        (staleIndex + 1).Should().BeGreaterThan(messages.Count);
-        Action insert = () => messages.Insert(retryInsertIndex, new ChatApiMessage
-        {
-            Role = "assistant",
-            Content = "invalid format",
-        });
-        insert.Should().NotThrow();
     }
 
     [Fact]

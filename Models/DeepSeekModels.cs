@@ -1,4 +1,4 @@
-using System;
+﻿using System;
 using System.Collections.Generic;
 using System.ComponentModel;
 using System.Linq;
@@ -461,6 +461,7 @@ namespace DeepSeek_v4_for_VisualStudio.Models
         private DateTime _timestamp = DateTime.Now;
         private bool _isStreaming;
         private bool _isRendered;
+        private bool _isIncomplete;
 
         [DataMember]
         public string Role
@@ -600,6 +601,26 @@ namespace DeepSeek_v4_for_VisualStudio.Models
         /// </summary>
         [DataMember]
         public string NodeId { get; set; } = string.Empty;
+
+        /// <summary>
+        /// 该助手回复对应的用户轮次树节点 ID。
+        /// 重试时直接使用此锚点，避免把引导消息、恢复提示等其它 user 角色误认为原始提问。
+        /// 旧会话没有此字段时，可回退到对话树祖先查找。
+        /// </summary>
+        [DataMember]
+        public string? RetryAnchorNodeId { get; set; }
+
+        /// <summary>
+        /// 该助手回复是否处于“未完成”状态：被用户停止或异常中断，尚未正常结束。
+        /// 仅当本回合位于活跃路径末尾叶子（ActiveLeaf）时，针对它的重试/编辑才走
+        /// 原地路径（删除/替换后重新生成，不产生分支）；正常完成后必须清除。
+        /// </summary>
+        [DataMember]
+        public bool IsIncomplete
+        {
+            get => _isIncomplete;
+            set => SetProperty(ref _isIncomplete, value);
+        }
 
         /// <summary>
         /// 在兄弟节点中的显示位置（1-based）。

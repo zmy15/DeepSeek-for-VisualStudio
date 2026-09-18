@@ -1,4 +1,4 @@
-<div align="center">
+﻿<div align="center">
 
 > **Beta Stage** — Back up your project before use.
 
@@ -11,7 +11,7 @@
 [![.NET](https://img.shields.io/badge/.NET%20Framework-4.7.2-blueviolet)]()
 [![DeepSeek](https://img.shields.io/badge/-DeepSeek-green)]()
 [![Platform](https://img.shields.io/badge/platform-Windows%20x64%20%2F%20ARM64-lightgrey)]()
-[![Version](https://img.shields.io/badge/version-1.2.1-blue)]()
+[![Version](https://img.shields.io/badge/version-1.2.2-blue)]()
 
 [简体中文](README.zh-CN.md)
 
@@ -22,6 +22,26 @@
 DeepSeek for Visual Studio brings AI chat, code editing, solution-aware tools, terminal execution, and multimodal understanding directly into the IDE. It is designed for Visual Studio 2022 (17.14 or later) and Visual Studio 2026. Beyond the official DeepSeek API, it also supports any OpenAI-compatible `chat/completions` endpoint configured with a custom Base URL.
 
 The extension combines a native-grade WebView2 chat experience with five cooperating agents, reusable Skills, MCP tool servers, Ghost Text completion, and persistent project memory.
+
+## Screenshots
+
+<p align="center">
+  <img src="docs/images/1.png" width="720" alt="DeepSeek Chat panel" />
+  <br />
+  <sub>Chat panel — model selection, Deep Think, approval mode, and MCP status</sub>
+</p>
+
+<p align="center">
+  <img src="docs/images/3.png" width="720" alt="Thinking process and tool calls" />
+  <br />
+  <sub>Deep reasoning, tool calls, and live session context usage</sub>
+</p>
+
+<p align="center">
+  <img src="docs/images/5.png" width="720" alt="Inline AI edit" />
+  <br />
+  <sub>Inline AI edit — Enter to apply / Esc to cancel</sub>
+</p>
 
 ## Project Highlights
 

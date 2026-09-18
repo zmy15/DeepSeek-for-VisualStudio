@@ -19,7 +19,7 @@ namespace DeepSeek_v4_for_VisualStudio.Services.Agents
     /// 
     /// 职责：
     /// - 按计划逐步执行代码修改
-    /// - 输出 ```file: 格式的代码变更
+    /// - 通过原生编辑工具直接修改项目文件
     /// - 支持构建/运行验证步骤
     /// - 请求用户权限确认
     /// - 追踪文件变更
@@ -49,12 +49,6 @@ namespace DeepSeek_v4_for_VisualStudio.Services.Agents
 
         // ── 本轮已修改文件追踪（用于步骤间重读提示）──
         private readonly HashSet<string> _lastModifiedFiles = new(StringComparer.OrdinalIgnoreCase);
-
-        // ── 编辑工具（懒加载，由 EnsureEditTools 初始化）──
-        private ApplyPatchTool? _applyPatchTool;
-        private InsertEditTool? _insertEditTool;
-        private ReplaceStringTool? _replaceStringTool;
-        private MultiReplaceStringTool? _multiReplaceStringTool;
 
         // ── Agent 多步编辑 Workspace ──
         private Editing.StagedEditWorkspace? _stagedWorkspace;
@@ -339,6 +333,12 @@ namespace DeepSeek_v4_for_VisualStudio.Services.Agents
 
             // Handoff 快照只保护 Plan→Edit 的首次请求前缀。
             // 计划包含多个步骤时必须回到完整上下文，否则第 2 步起看不到第 1 步的工具历史。
+            if (plan.Steps.Count > 1
+                && context.ContextManager != null
+                && !context.ContextManager.IsEmpty)
+            {
+                context.ForwardedMessages = null;
+            }
             context.ContextManager?.ClearCacheSnapshot();
 
             // ═══════════════════════════════════════════════════════════════
@@ -652,26 +652,14 @@ namespace DeepSeek_v4_for_VisualStudio.Services.Agents
         }
 
         /// <summary>
-        /// 执行代码编写步骤（支持工具调用探索 + 三种编辑格式 + healing）。
-        /// AI 先使用只读工具探索项目结构和现有代码，再选择最佳编辑格式输出变更。
-        /// 
-        /// 三种编辑格式：
-        /// 1. apply_patch — *** Begin Patch / *** End Patch（首选，局部修改）
-        /// 2. insert_edit_into_file — ```insert_edit_into_file: 代码块（多处修改）
-        /// 3. create_file — ```file: 代码块（新建文件，已有支持）
-        /// 
-        /// 编辑应用流程：
-        /// 1. AI 选择工具并生成编辑内容
-        /// 2. 后端 4 级字符串匹配（精确 → 空白弹性 → 模糊 → Levenshtein）
-        /// 3. 匹配失败时启动 healing 机制（降级模型修正）
-        /// 4. 匹配成功后通过 VS 文本缓冲区应用
-        /// 5. 检查新引入的诊断错误
+        /// 执行代码编写步骤。
+        /// AI 使用只读工具探索项目，并通过原生编辑工具直接完成文件修改；
+        /// 步骤结果只依据本轮真实工具调用判定，不再解析文本格式的编辑块。
         /// </summary>
         private async Task ExecuteCodeStepAsync(
             AgentStep step, AgentTaskPlan plan, AgentContext context,
             string stepPrompt, CancellationToken ct)
         {
-            const int maxFormatRetries = 2;
             string result = string.Empty;
             List<FileChangeSummary> changes = new();
 
@@ -694,160 +682,58 @@ namespace DeepSeek_v4_for_VisualStudio.Services.Agents
 
             _stagedWorkspace.Discard(); // 清空上一轮残留
 
-            EnsureEditTools(workspaceRoot);
             if (BuiltInTools != null)
                 BuiltInTools.Workspace = _stagedWorkspace;
 
-            // ── AI 调用循环（支持格式重试）──
-            // messages 在循环外声明，重试时复用前一次的完整对话上下文（含工具调用结果），
-            // 避免重复读取文件、重复搜索目录等浪费。
-            var retryOutputs = new List<string>();
-            List<ChatApiMessage>? messages = null;
-            int stepToolLoopStart = 0;
+            // ── AI 工具循环：编辑必须通过真实工具调用完成 ──
+            var messages = BuildContextAwareMessages(Definition.SystemPrompt, stepPrompt);
             bool explicitlyNoChanges = false;
+            var thinkingBuilder = new StringBuilder();
+            var stepToolWhitelist = new List<string>(CodeStepTools);
 
-            for (int retry = 0; retry <= maxFormatRetries; retry++)
+            AddLog("INFO", LocalizationService.Instance["agent.log.callingAiToolLoop"]);
+            result = await CallAiWithToolLoopAsync(
+                messages,
+                workspaceRoot,
+                ct,
+                toolWhitelist: stepToolWhitelist,
+                onThinking: (thinking) =>
+                {
+                    thinkingBuilder.Append(thinking);
+                    context.OnThinkingChunk?.Invoke(thinking);
+                },
+                onContent: (content) =>
+                {
+                    context.OnContentChunk?.Invoke(content);
+                },
+                onToolCall: (toolSummary) =>
+                {
+                    AddLog("TOOL", toolSummary);
+                });
+
+            int stepToolLoopStart = Math.Max(
+                0,
+                Context?.ToolHistoryInsertIndex ?? Math.Max(0, messages.Count - 2));
+
+            if (thinkingBuilder.Length > 0)
             {
-                if (ct.IsCancellationRequested) return;
-
-                if (retry == 0)
-                {
-                    // 首次尝试：创建全新的消息列表
-                    messages = BuildContextAwareMessages(Definition.SystemPrompt, stepPrompt);
-                }
-                else
-                {
-                    // 重试：在步骤 prompt 之后、工具消息之前插入格式修正指令
-                    // 这样 sys→history→step 前缀保持完整，DeepSeek 可缓存命中的 KV 不变
-                    int retryInsertIndex = ResolveFormatRetryInsertIndex(messages!);
-                    messages!.Insert(retryInsertIndex, new ChatApiMessage
-                    {
-                        Role = "assistant",
-                        Content = result // 上次的（格式错误）输出，作为对话上下文
-                    });
-                    messages.Insert(retryInsertIndex + 1, new ChatApiMessage
-                    {
-                        Role = "user",
-                        Content = AiPrompts.EditFormatRecoveryPrompt
-                    });
-                }
-
-                // ── 使用工具调用循环：AI 可以先探索再修改（v1.1.10：支持步骤内增量编辑）──
-                // 编译统一交给步骤结束后的验证阶段（非 Planning）或计划完成后的最终构建，
-                // 代码步骤内不提供 build_solution，避免同一轮出现两次构建。
-                AddLog("INFO", string.Format(LocalizationService.Instance["agent.log.callingAiToolLoop"], retry));
-                var thinkingBuilder = new StringBuilder();
-                var stepToolWhitelist = new List<string>(CodeStepTools);
-                result = await CallAiWithToolLoopAsync(
-                    messages,
-                    workspaceRoot,
-                    ct,
-                    toolWhitelist: stepToolWhitelist,
-                    onThinking: (thinking) =>
-                    {
-                        thinkingBuilder.Append(thinking);
-                        context.OnThinkingChunk?.Invoke(thinking);
-                    },
-                    onContent: (content) =>
-                    {
-                        context.OnContentChunk?.Invoke(content);
-                    },
-                    onToolCall: (toolSummary) =>
-                    {
-                        AddLog("TOOL", toolSummary);
-                    });
-
-                stepToolLoopStart = Math.Max(
-                    0,
-                    Context?.ToolHistoryInsertIndex ?? Math.Max(0, messages.Count - 2));
-
-                // ── 累积推理内容（累加所有步骤和重试轮次的思考过程）──
-                if (thinkingBuilder.Length > 0)
-                {
-                    if (!string.IsNullOrEmpty(_accumulatedReasoning))
-                        _accumulatedReasoning += "\n\n";
-                    _accumulatedReasoning += thinkingBuilder.ToString();
-                }
-
-                retryOutputs.Add(result);
-
-                // ── 检测 AI 是否明确表示没有要更改的内容 ──
-                if (IsNoChangesResponse(result))
-                {
-                    explicitlyNoChanges = true;
-                    // ── 但如果本轮有工具调用完成了编辑，则不视为空响应 ──
-                    if (!HasToolMadeEdits(GetStepToolLoopMessages(messages!, stepToolLoopStart)))
-                    {
-                        AddLog("INFO", LocalizationService.Instance["agent.log.editEmptyResponse"]);
-                        result = string.Empty; // 统一置空，后续流程据此跳过编辑
-                        break;
-                    }
-                    AddLog("INFO", "[EditAgent] 文本回复为空但检测到工具编辑，继续处理");
-                }
-
-                // ── v1.1.10: 检测本轮是否通过工具完成了文件编辑 ──
-                // 如果 AI 已在工具循环中直接修改了文件，则无需格式重试，
-                // 文本回复视为操作总结而非编辑格式输出。
-                bool hasToolEditsThisRound = HasToolMadeEdits(GetStepToolLoopMessages(messages!, stepToolLoopStart));
-                if (hasToolEditsThisRound)
-                {
-                    AddLog("INFO", "[EditAgent] 检测到步骤内工具编辑，跳过编辑格式校验");
-                    break;
-                }
-
-                // ── 纯 Git/终端操作跳过格式校验 ──
-                // 如果本轮所有工具调用都是 git/终端/构建（无代码读取/编辑），
-                // AI 的文本回复是操作总结而非编辑输出，无需格式重试。
-                if (IsGitOrTerminalOnlyResult(GetStepToolLoopMessages(messages!, stepToolLoopStart)))
-                {
-                    AddLog("INFO", "[EditAgent] 纯 Git/终端操作，跳过编辑格式校验");
-                    break;
-                }
-
-                // ── 检测编辑格式并解析（仅当 AI 未通过工具编辑时走此路径）──
-                bool hasValidEdit = HasAnyValidEditFormat(result);
-                if (hasValidEdit) break;
-
-                if (retry < maxFormatRetries)
-                    AddLog("WARN", string.Format(LocalizationService.Instance["agent.log.invalidEditFormat"], retry + 1));
-                else
-                    AddLog("WARN", LocalizationService.Instance["agent.log.retriesExhausted"]);
+                if (!string.IsNullOrEmpty(_accumulatedReasoning))
+                    _accumulatedReasoning += "\n\n";
+                _accumulatedReasoning += thinkingBuilder.ToString();
             }
 
-            // ── 保留所有重试输出，方便用户查看完整 AI 交互过程 ──
-            if (retryOutputs.Count > 1)
-            {
-                var sb = new System.Text.StringBuilder();
-                for (int i = 0; i < retryOutputs.Count; i++)
-                {
-                    if (i > 0)
-                    {
-                        sb.AppendLine();
-                        sb.AppendLine("---");
-                        sb.AppendLine(string.Format(LocalizationService.Instance["agent.log.editFormatRetryNotice"], i + 1));
-                        sb.AppendLine();
-                    }
-                    sb.Append(retryOutputs[i]);
-                }
-                step.AiResponse = sb.ToString();
-            }
-            else
-            {
-                step.AiResponse = retryOutputs.FirstOrDefault() ?? "";
-            }
-
-            // ── v1.1.10: 提取工具循环中通过工具完成的文件编辑 ──
-            // AI 可以在步骤内使用 replace_string_in_file / create_file 等工具增量编辑，
-            // 而非强制一次性输出所有变更。此处从消息历史中提取编辑记录。
-            var toolMadeEdits = ExtractToolMadeEdits(GetStepToolLoopMessages(messages!, stepToolLoopStart));
+            step.AiResponse = result;
+            var stepMessages = GetStepToolLoopMessages(messages, stepToolLoopStart);
+            var toolMadeEdits = ExtractToolMadeEdits(stepMessages);
             bool hasToolEdits = toolMadeEdits.Count > 0;
-            if (hasToolEdits)
+
+            if (IsNoChangesResponse(result) && !hasToolEdits)
             {
-                AddLog("INFO", $"[EditAgent] 检测到步骤内 {toolMadeEdits.Count} 个工具编辑: {string.Join(", ", toolMadeEdits.Select(e => Path.GetFileName(e.FilePath)).Distinct())}");
+                explicitlyNoChanges = true;
+                AddLog("INFO", LocalizationService.Instance["agent.log.editEmptyResponse"]);
             }
 
-            // ── AI 明确表示没有要更改的内容 且 工具也未编辑文件 → 跳过编辑执行 ──
-            if (string.IsNullOrWhiteSpace(result) && !hasToolEdits)
+            if (!hasToolEdits)
             {
                 if (explicitlyNoChanges)
                 {
@@ -856,83 +742,27 @@ namespace DeepSeek_v4_for_VisualStudio.Services.Agents
                     return;
                 }
 
+                if (IsGitOrTerminalOnlyResult(stepMessages))
+                {
+                    AddLog("INFO", "[EditAgent] 纯 Git/终端操作，无需编辑文件");
+                    step.ResultSummary = string.IsNullOrWhiteSpace(result)
+                        ? LocalizationService.Instance["agent.log.editNoChange"]
+                        : result;
+                    return;
+                }
+
                 throw new InvalidOperationException(
                     LocalizationService.Instance["agent.log.editNoEditsProduced"]);
             }
 
-            // ── 初始化编辑工具（懒加载，使用当前 workspaceRoot）──
-            EnsureEditTools(workspaceRoot);
+            AddLog("INFO", $"[EditAgent] 检测到步骤内 {toolMadeEdits.Count} 个工具编辑: {string.Join(", ", toolMadeEdits.Select(e => Path.GetFileName(e.FilePath)).Distinct())}");
 
             // ── 保存原始文件内容（用于最终 diff 比较）──
             var originalContents = new Dictionary<string, string>(StringComparer.OrdinalIgnoreCase);
             var appliedResults = new List<EditApplyResult>();
 
-            // ── operationType 提前声明（goto 路径需要可见）──
-            var operationType = EditOperationType.ApplyPatch;
-
-            // ── v1.1.10: 路径A — 工具编辑（AI 在工具循环中直接修改了文件）──
-            // 工具编辑后需在 originalContents 中记录"原始"状态，防止文本路径重复处理时 diff 归零。
-            var toolHandledFiles = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
-            if (hasToolEdits)
-            {
-                await CollectToolMadeEditsAsync(toolMadeEdits, plan, context, workspaceRoot,
-                    originalContents, appliedResults, ct, toolHandledFiles);
-
-                // ── 如果文本回复中也有编辑格式，作为补充处理（但排除已通过工具编辑的文件）──
-                if (!string.IsNullOrWhiteSpace(result) && HasAnyValidEditFormat(result))
-                {
-                    AddLog("INFO", "[EditAgent] 工具编辑之外还检测到文本编辑格式，作为补充处理");
-                    // 继续走下面的文本格式解析（合并模式），但跳过 toolHandledFiles 中的文件
-                }
-                else
-                {
-                    // 纯工具编辑：文本回复作为摘要，直接跳到变更收集阶段
-                    result = string.Empty; // 清空，避免重复解析
-                    goto SkipTextFormatParsing;
-                }
-            }
-
-            // ── 路径B — 文本格式编辑（AI 通过文本输出编辑块）──
-            if (!string.IsNullOrWhiteSpace(result))
-            {
-                // ── 如果工具路径已处理过某些文件，跳过文本路径的重复处理 ──
-                if (toolHandledFiles.Count > 0)
-                {
-                    AddLog("INFO", $"[EditAgent] 跳过 {toolHandledFiles.Count} 个已由工具编辑的文件: {string.Join(", ", toolHandledFiles.Select(Path.GetFileName))}");
-                }
-
-                // ── 检测编辑操作类型 ──
-                operationType = DetectOperationType(result);
-
-                AddLog("INFO", string.Format(LocalizationService.Instance["agent.log.editTypeDetected"], operationType));
-
-                switch (operationType)
-                {
-                    case EditOperationType.ApplyPatch:
-                        // ── 方法1：apply_patch ──
-                        await ExecutePatchEditsAsync(result, plan, context, workspaceRoot,
-                            originalContents, appliedResults, ct, toolHandledFiles);
-                        break;
-
-                    case EditOperationType.InsertEditIntoFile:
-                        // ── 方法2：insert_edit_into_file ──
-                        await ExecuteInsertEditsAsync(result, plan, context, workspaceRoot,
-                            originalContents, appliedResults, ct, toolHandledFiles);
-                        break;
-
-                    case EditOperationType.CreateFile:
-                    default:
-                        // ── 方法3：create_file（原有逻辑）──
-                        await ExecuteCreateFileEditsAsync(result, plan, context, workspaceRoot,
-                            originalContents, appliedResults, ct, toolHandledFiles);
-                        break;
-                }
-
-                // ── 处理文件删除（delete: 格式，原有逻辑）──
-                await ProcessFileDeletionsAsync(result, plan, context, ct);
-            }
-
-        SkipTextFormatParsing:
+            await CollectToolMadeEditsAsync(toolMadeEdits, plan, workspaceRoot,
+                originalContents, appliedResults, ct);
 
             // ── 收集所有变更到 changes 列表（使用真实行数差异而非编辑块数量）──
             changes = appliedResults
@@ -984,20 +814,7 @@ namespace DeepSeek_v4_for_VisualStudio.Services.Agents
             var L = LocalizationService.Instance;
 
             // ── 汇总操作类型描述 ──
-            // 优先使用工具编辑标签（当工具编辑已发生时，文本格式检测可能为误报）
-            string operationTypeLabel;
-            if (hasToolEdits)
-            {
-                operationTypeLabel = "tool_edit";
-            }
-            else if (!string.IsNullOrWhiteSpace(result))
-            {
-                operationTypeLabel = operationType.ToString();
-            }
-            else
-            {
-                operationTypeLabel = "unknown";
-            }
+            const string operationTypeLabel = "tool_edit";
 
             // ── 使用实际变更文件数（而非仅 appliedResults 中的成功计数）──
             int actualChangedFileCount = changes.Count > 0
@@ -1453,532 +1270,24 @@ namespace DeepSeek_v4_for_VisualStudio.Services.Agents
             }
         }
 
-        #region Sub-methods for each edit format
-
-        /// <summary>
-        /// 执行 apply_patch 格式的编辑（使用 ApplyPatchTool）。
-        /// </summary>
-        private async Task ExecutePatchEditsAsync(
-            string aiResult, AgentTaskPlan plan, AgentContext context,
-            string workspaceRoot,
-            Dictionary<string, string> originalContents,
-            List<EditApplyResult> appliedResults,
-            CancellationToken ct,
-            HashSet<string>? toolHandledFiles = null)
-        {
-            if (_applyPatchTool == null)
-            {
-                AddLog("WARN", LocalizationService.Instance["agent.log.patchServiceMissing"]);
-                return;
-            }
-
-            var patches = ApplyPatchTool.ParsePatches(aiResult);
-            AddLog("INFO", string.Format(LocalizationService.Instance["agent.log.parsedPatches"], patches.Count));
-
-            // ── v1.1.11: 检测并告警与工具编辑重叠的文件，但不跳过（支持同一文件多次编辑）──
-            if (toolHandledFiles != null && toolHandledFiles.Count > 0)
-            {
-                var overlapFiles = patches
-                    .Select(p => EditPatchService.ResolvePath(p.FilePath, workspaceRoot))
-                    .Where(p => toolHandledFiles.Contains(p))
-                    .Distinct(StringComparer.OrdinalIgnoreCase)
-                    .ToList();
-                if (overlapFiles.Count > 0)
-                {
-                    AddLog("WARN", $"[EditAgent] ApplyPatch 目标中有 {overlapFiles.Count} 个文件已被工具编辑过（将基于工具编辑后的内容应用补丁）: {string.Join(", ", overlapFiles.Select(Path.GetFileName))}");
-                }
-            }
-
-            // ── 项目文件审批：在执行前检查所有 patch 目标，对项目文件请求用户确认 ──
-            var approvedPatches = new List<PatchOperation>();
-            foreach (var patch in patches)
-            {
-                string resolvedPath = EditPatchService.ResolvePath(patch.FilePath, workspaceRoot);
-                if (IsProjectFile(resolvedPath))
-                {
-                    string fileName = Path.GetFileName(resolvedPath);
-                    string patchPreview = patch.Hunks != null && patch.Hunks.Count > 0
-                        ? string.Join("\n", patch.Hunks.Select(h =>
-                            h.RawText.TrimEnd('\n', '\r')))
-                        : "(无 hunk 详情)";
-                    bool confirmed = await EnsureProjectFileWriteConfirmedAsync(
-                        resolvedPath,
-                        $"Patch 修改项目文件: {fileName}",
-                        "",
-                        $"向 `{fileName}` 应用代码补丁以完成项目配置修改\n\n补丁预览:\n{patchPreview}");
-                    if (!confirmed)
-                    {
-                        AddLog("WARN", LocalizationService.Instance.Format("agent.log.editProjectPatchSkipped", fileName));
-                        appliedResults.Add(new EditApplyResult
-                        {
-                            FilePath = resolvedPath,
-                            Success = false,
-                            OperationType = EditOperationType.ApplyPatch,
-                            ErrorMessage = LocalizationService.Instance["agent.log.editPermissionDeniedGeneric"],
-                        });
-                        continue;
-                    }
-                }
-                approvedPatches.Add(patch);
-            }
-
-            // ── 保存原始内容（执行前读取，确保 diff 计算准确）──
-            foreach (var patch in approvedPatches)
-            {
-                string resolvedPath = EditPatchService.ResolvePath(patch.FilePath, workspaceRoot);
-                if (!originalContents.ContainsKey(resolvedPath))
-                {
-                    string original = File.Exists(resolvedPath)
-                        ? await Task.Run(() => File.ReadAllText(resolvedPath), ct)
-                        : string.Empty;
-                    originalContents[resolvedPath] = original;
-                }
-            }
-
-            // ── 使用 ApplyPatchTool 批量执行（内置 Healing + 原子性）──
-            var results = await _applyPatchTool.ExecutePatchesAsync(approvedPatches, ct);
-
-            foreach (var applyResult in results)
-            {
-                string resolvedPath = applyResult.FilePath;
-
-                if (applyResult.Success)
-                {
-                    AddLog("INFO", string.Format(LocalizationService.Instance["agent.log.patchApplied"], resolvedPath, applyResult.AppliedEdits.Count));
-
-                    // ── 新文件处理 ──
-                    var patch = approvedPatches.FirstOrDefault(p =>
-                        string.Equals(EditPatchService.ResolvePath(p.FilePath, workspaceRoot), resolvedPath, StringComparison.OrdinalIgnoreCase));
-                    bool isNewFile = patch?.Action == PatchFileAction.Add;
-
-                    if (isNewFile)
-                    {
-                        bool writeAllowed = await EnsureProjectFileWriteConfirmedAsync(
-                            resolvedPath, $"Patch 新建文件", applyResult.FinalContent ?? string.Empty);
-                        if (writeAllowed && File.Exists(resolvedPath))
-                        {
-                            await AddFileToProjectAsync(resolvedPath, ct);
-                        }
-                    }
-
-                    NotifyFileChange(plan.PlanId,
-                        isNewFile ? "create" : "modify",
-                        resolvedPath,
-                        string.Format(LocalizationService.Instance["agent.log.patchEditPoints"], applyResult.AppliedEdits.Count));
-
-                    // ── 更新 plan.ChangedFiles ──
-                    if (!plan.ChangedFiles.Any(c => string.Equals(c.FilePath, resolvedPath, StringComparison.OrdinalIgnoreCase)))
-                    {
-                        int added = 0, removed = 0;
-                        if (originalContents.TryGetValue(resolvedPath, out string? orig))
-                        {
-                            string final = applyResult.FinalContent ?? orig;
-                            CountDiffLines(orig, final, out added, out removed);
-                        }
-                        else { added = applyResult.AppliedEdits.Count; }
-
-                        plan.ChangedFiles.Add(new FileChangeSummary
-                        {
-                            FilePath = resolvedPath,
-                            LinesAdded = added,
-                            LinesRemoved = removed,
-                            BriefDescription = $"{Path.GetFileName(resolvedPath)} (patch)",
-                        });
-                    }
-                }
-                else
-                {
-                    AddLog("ERROR", LocalizationService.Instance.Format("agent.log.editPatchFailed", resolvedPath, applyResult.ErrorMessage));
-                }
-
-                appliedResults.Add(applyResult);
-            }
-        }
-
-        /// <summary>
-        /// 执行 insert_edit_into_file 格式的编辑（使用 InsertEditTool）。
-        /// </summary>
-        private async Task ExecuteInsertEditsAsync(
-            string aiResult, AgentTaskPlan plan, AgentContext context,
-            string workspaceRoot,
-            Dictionary<string, string> originalContents,
-            List<EditApplyResult> appliedResults,
-            CancellationToken ct,
-            HashSet<string>? toolHandledFiles = null)
-        {
-            if (_insertEditTool == null)
-            {
-                AddLog("WARN", LocalizationService.Instance["agent.log.editNoInsertEditTool"]);
-                return;
-            }
-
-            var insertEdits = InsertEditTool.ParseInsertEdits(aiResult);
-            AddLog("INFO", LocalizationService.Instance.Format("agent.log.editInsertEditsParsed", insertEdits.Count));
-
-            // ── v1.1.11: 检测并告警与工具编辑重叠的文件，但不跳过（支持同一文件多次编辑）──
-            if (toolHandledFiles != null && toolHandledFiles.Count > 0)
-            {
-                var overlapFiles = insertEdits
-                    .Select(e => EditPatchService.ResolvePath(e.FilePath, workspaceRoot))
-                    .Where(p => toolHandledFiles.Contains(p))
-                    .Distinct(StringComparer.OrdinalIgnoreCase)
-                    .ToList();
-                if (overlapFiles.Count > 0)
-                {
-                    AddLog("WARN", $"[EditAgent] InsertEdit 目标中有 {overlapFiles.Count} 个文件已被工具编辑过（将基于工具编辑后的内容应用编辑）: {string.Join(", ", overlapFiles.Select(Path.GetFileName))}");
-                }
-            }
-
-            // ── 排序：项目配置优先，构建定义文件最后 ──
-            var sortedEdits = insertEdits
-                .OrderBy(e => GetEditPriority(EditPatchService.ResolvePath(e.FilePath, workspaceRoot)))
-                .ThenBy(e => e.FilePath, StringComparer.OrdinalIgnoreCase)
-                .ToList();
-
-            // ── 项目文件审批：在执行前检查所有 InsertEdit 目标，对项目文件请求用户确认 ──
-            var approvedEdits = new List<InsertEditOperation>();
-            foreach (var edit in sortedEdits)
-            {
-                string resolvedPath = EditPatchService.ResolvePath(edit.FilePath, workspaceRoot);
-                if (IsProjectFile(resolvedPath))
-                {
-                    bool confirmed = await EnsureProjectFileWriteConfirmedAsync(
-                        resolvedPath,
-                        string.Format(LocalizationService.Instance["agent.edit.insertEditModifyProject"], Path.GetFileName(resolvedPath)),
-                        "",
-                        string.Format(LocalizationService.Instance["agent.edit.projectConfigChange"], Path.GetFileName(resolvedPath)));
-                    if (!confirmed)
-                    {
-                        AddLog("WARN", LocalizationService.Instance.Format("agent.log.editInsertEditSkipped", Path.GetFileName(resolvedPath)));
-                        appliedResults.Add(new EditApplyResult
-                        {
-                            FilePath = resolvedPath,
-                            Success = false,
-                            OperationType = EditOperationType.InsertEditIntoFile,
-                            ErrorMessage = LocalizationService.Instance["agent.log.editPermissionDeniedGeneric"],
-                        });
-                        continue;
-                    }
-                }
-                approvedEdits.Add(edit);
-            }
-
-            // ── 保存原始内容（执行前读取，确保 diff 计算准确）──
-            foreach (var edit in approvedEdits)
-            {
-                string resolvedPath = EditPatchService.ResolvePath(edit.FilePath, workspaceRoot);
-                if (!originalContents.ContainsKey(resolvedPath))
-                {
-                    string original = File.Exists(resolvedPath)
-                        ? await Task.Run(() => File.ReadAllText(resolvedPath), ct)
-                        : string.Empty;
-                    originalContents[resolvedPath] = original;
-                }
-            }
-
-            // ── 使用 InsertEditTool 批量执行（内置 Healing + create_file 兜底）──
-            var results = await _insertEditTool.ExecuteInsertEditsAsync(approvedEdits, ct);
-
-            foreach (var applyResult in results)
-            {
-                string resolvedPath = applyResult.FilePath;
-
-                if (applyResult.Success)
-                {
-                    AddLog("INFO", LocalizationService.Instance.Format("agent.log.editInsertEditApplied", resolvedPath, applyResult.AppliedEdits.Count));
-
-                    // ── 项目文件拦截 ──
-                    if (!string.IsNullOrEmpty(applyResult.FinalContent))
-                    {
-                        bool writeAllowed = await EnsureProjectFileWriteConfirmedAsync(
-                            resolvedPath, string.Format(LocalizationService.Instance["agent.edit.editPoints"], applyResult.AppliedEdits.Count), applyResult.FinalContent!);
-                        if (!writeAllowed)
-                        {
-                            AddLog("WARN", LocalizationService.Instance.Format("agent.log.editWriteSkipped", Path.GetFileName(resolvedPath)));
-                            applyResult.Success = false;
-                            applyResult.ErrorMessage = LocalizationService.Instance["agent.log.editPermissionDeniedGeneric"];
-                        }
-                    }
-
-                    if (applyResult.Success)
-                    {
-                        NotifyFileChange(plan.PlanId, "modify", resolvedPath,
-                            string.Format(LocalizationService.Instance["agent.log.patchEditPoints"], applyResult.AppliedEdits.Count));
-
-                        if (!plan.ChangedFiles.Any(c => string.Equals(c.FilePath, resolvedPath, StringComparison.OrdinalIgnoreCase)))
-                        {
-                            int added = 0, removed = 0;
-                            if (originalContents.TryGetValue(resolvedPath, out string? orig))
-                            {
-                                string final = applyResult.FinalContent ?? orig;
-                                CountDiffLines(orig, final, out added, out removed);
-                            }
-                            else { added = applyResult.AppliedEdits.Count; }
-
-                            plan.ChangedFiles.Add(new FileChangeSummary
-                            {
-                                FilePath = resolvedPath,
-                                LinesAdded = added,
-                                LinesRemoved = removed,
-                                BriefDescription = $"{Path.GetFileName(resolvedPath)} (InsertEdit)",
-                            });
-                        }
-                    }
-                }
-                else
-                {
-                    AddLog("ERROR", LocalizationService.Instance.Format("agent.log.editInsertEditFailed", resolvedPath, applyResult.ErrorMessage));
-                }
-
-                appliedResults.Add(applyResult);
-            }
-        }
-
-        /// <summary>
-        /// 执行 create_file 格式的编辑（原有 ```file: 逻辑）。
-        /// </summary>
-        private async Task ExecuteCreateFileEditsAsync(
-            string aiResult, AgentTaskPlan plan, AgentContext context,
-            string workspaceRoot,
-            Dictionary<string, string> originalContents,
-            List<EditApplyResult> appliedResults,
-            CancellationToken ct,
-            HashSet<string>? toolHandledFiles = null)
-        {
-            var changes = ParseCodeChangesFromResult(aiResult);
-
-            // ── v1.1.11: 检测并告警与工具编辑重叠的文件，但不跳过（支持同一文件多次编辑）──
-            if (toolHandledFiles != null && toolHandledFiles.Count > 0)
-            {
-                var overlapFiles = changes
-                    .Select(c => ResolveFilePath(c.FilePath, context.SolutionPath))
-                    .Where(p => toolHandledFiles.Contains(p))
-                    .Distinct(StringComparer.OrdinalIgnoreCase)
-                    .ToList();
-                if (overlapFiles.Count > 0)
-                {
-                    AddLog("WARN", $"[EditAgent] CreateFile 目标中有 {overlapFiles.Count} 个文件已被工具编辑过（将基于工具编辑后的内容写入）: {string.Join(", ", overlapFiles.Select(Path.GetFileName))}");
-                }
-            }
-
-            // ── 排序：项目配置优先（避免 VS 冲突对话框），构建定义文件最后（CMakeLists.txt 必须在源文件后写入）──
-            var sortedChanges = changes
-                .OrderBy(c => GetEditPriority(ResolveFilePath(c.FilePath, context.SolutionPath)))
-                .ThenBy(c => c.FilePath, StringComparer.OrdinalIgnoreCase)
-                .ToList();
-
-            foreach (var change in sortedChanges)
-            {
-                if (ct.IsCancellationRequested) break;
-                try
-                {
-                    string resolvedPath = ResolveFilePath(change.FilePath, context.SolutionPath);
-                    change.FilePath = resolvedPath;
-
-                    // 保存原始内容
-                    if (!originalContents.ContainsKey(resolvedPath))
-                    {
-                        // RAG-SOURCE: file-read 读取文件原始内容（CreateFile 前保存）
-                        string original = File.Exists(resolvedPath)
-                            ? await Task.Run(() => File.ReadAllText(resolvedPath), ct)
-                            : string.Empty;
-                        originalContents[resolvedPath] = original;
-                        change.OriginalContent = original;
-                    }
-                    else
-                    {
-                        change.OriginalContent = originalContents[resolvedPath];
-                    }
-
-                    bool isNewFile = !File.Exists(resolvedPath);
-                    if (isNewFile && _stagedWorkspace == null)
-                    {
-                        // ── 仅直接写盘模式：预创建空文件并加入项目 ──
-                        string? dir = Path.GetDirectoryName(resolvedPath);
-                        if (!string.IsNullOrEmpty(dir) && !Directory.Exists(dir))
-                            Directory.CreateDirectory(dir);
-
-                        // 已在编辑器打开（如同名文档）→ buffer+编辑器 Save；否则裸写盘
-                        bool createdViaBuffer = await EditBufferApplier.TryWriteOpenDocumentAsync(
-                            resolvedPath, string.Empty);
-                        if (!createdViaBuffer)
-                            await Task.Run(() => File.WriteAllText(resolvedPath, string.Empty, System.Text.Encoding.UTF8), ct);
-
-                        AddLog("INFO", LocalizationService.Instance.Format("agent.log.editPreCreateFile", Path.GetFileName(resolvedPath)));
-                        await AddFileToProjectAsync(resolvedPath, ct);
-                    }
-                    else if (isNewFile && _stagedWorkspace != null)
-                    {
-                        AddLog("INFO", string.Format(LocalizationService.Instance["agent.log.editStagedNewFile"],
-                            Path.GetFileName(resolvedPath)));
-                    }
-
-                    // ── 项目文件拦截：新建/修改 .vcxproj/.sln 等前请求用户确认 ──
-                    string createOpDesc = isNewFile
-                        ? string.Format(LocalizationService.Instance["agent.edit.newProjectFile"], Path.GetFileName(resolvedPath))
-                        : string.Format(LocalizationService.Instance["agent.edit.modifyFile"], Path.GetFileName(resolvedPath), change.LinesAdded, change.LinesRemoved);
-                    bool createWriteAllowed = await EnsureProjectFileWriteConfirmedAsync(resolvedPath, createOpDesc, change.NewContent ?? string.Empty);
-                    if (!createWriteAllowed)
-                    {
-                        AddLog("WARN", string.Format(LocalizationService.Instance["agent.log.editProjectFileWriteSkipped"], Path.GetFileName(resolvedPath)));
-                        appliedResults.Add(new EditApplyResult
-                        {
-                            FilePath = resolvedPath,
-                            Success = false,
-                            OperationType = EditOperationType.CreateFile,
-                            ErrorMessage = LocalizationService.Instance["agent.log.editPermissionDeniedGeneric"],
-                        });
-                        continue;
-                    }
-
-                    string? error = null;
-
-                    if (_stagedWorkspace != null)
-                    {
-                        // ── Workspace 模式：暂存到 Workspace，不写盘（由 Agent 结束统一提交）──
-                        _stagedWorkspace.WriteFile(resolvedPath, change.NewContent ?? string.Empty);
-                        AddLog("INFO", string.Format(LocalizationService.Instance["agent.log.fileStaged"],
-                            resolvedPath, change.LinesAdded, change.LinesRemoved));
-                    }
-                    else
-                    {
-                        // ── 直接写盘模式（旧版兼容 / 无 Workspace 场景）──
-                        error = await TerminalWindowHelper.WriteCodeToFileAsync(
-                            resolvedPath, change.NewContent ?? string.Empty);
-                    }
-
-                    if (error == null)
-                    {
-                        AddLog("INFO", string.Format(LocalizationService.Instance["agent.log.fileWritten"],
-                            resolvedPath, change.LinesAdded, change.LinesRemoved));
-                        plan.ChangedFiles.Add(change);
-
-                        string changeType = isNewFile ? "create" : "modify";
-                        string detail = $"+{change.LinesAdded} -{change.LinesRemoved}";
-                        NotifyFileChange(plan.PlanId, changeType, resolvedPath, detail);
-
-                        appliedResults.Add(new EditApplyResult
-                        {
-                            FilePath = resolvedPath,
-                            Success = true,
-                            OperationType = EditOperationType.CreateFile,
-                        });
-                    }
-                    else
-                    {
-                        AddLog("ERROR", LocalizationService.Instance.Format("agent.log.editWriteFailed", resolvedPath, error));
-                        appliedResults.Add(new EditApplyResult
-                        {
-                            FilePath = resolvedPath,
-                            Success = false,
-                            OperationType = EditOperationType.CreateFile,
-                            ErrorMessage = error,
-                        });
-                    }
-                }
-                catch (Exception ex)
-                {
-                    AddLog("ERROR", LocalizationService.Instance.Format("agent.log.editWriteError", change.FilePath, ex.Message));
-                }
-            }
-        }
-
-        /// <summary>
-        /// 处理 delete: / delete_file: 格式的文件删除。
-        /// </summary>
-        private async Task ProcessFileDeletionsAsync(
-            string aiResult, AgentTaskPlan plan, AgentContext context, CancellationToken ct)
-        {
-            var deletions = ParseFileDeletionsFromResult(aiResult);
-            if (deletions.Count == 0 || ct.IsCancellationRequested) return;
-
-            var resolvedDeletions = deletions
-                .Select(d => ResolveFilePath(d, context.SolutionPath))
-                .Where(d => File.Exists(d))
-                .Distinct(StringComparer.OrdinalIgnoreCase)
-                .ToList();
-
-            if (resolvedDeletions.Count == 0) return;
-
-            AddLog("INFO", LocalizationService.Instance.Format("agent.log.editDeletionsDetected", resolvedDeletions.Count, string.Join(", ", resolvedDeletions.Select(Path.GetFileName))));
-
-            var deletionOriginals = new Dictionary<string, string>(StringComparer.OrdinalIgnoreCase);
-            foreach (string deletedPath in resolvedDeletions)
-            {
-                try
-                {
-                    if (File.Exists(deletedPath))
-                    {
-                        // RAG-SOURCE: file-read 读取待删除文件原始内容（备份）
-                        string original = await Task.Run(() => File.ReadAllText(deletedPath), ct);
-                        deletionOriginals[deletedPath] = original;
-                    }
-                }
-                catch (Exception ex)
-                {
-                    Logger.Warn($"[EditAgent] 无法读取待删除文件原始内容: {deletedPath} - {ex.Message}");
-                }
-            }
-
-            string deleteReason = plan.Title ?? LocalizationService.Instance["agent.log.editDefaultDeleteReason"];
-            string deletePurpose = string.Format(LocalizationService.Instance["agent.log.editDeletePurpose"], deleteReason);
-            bool confirmed = await RequestFileDeleteConfirmationAsync(resolvedDeletions, deleteReason, deletePurpose);
-
-            if (confirmed)
-            {
-                await AgentFactory.DeleteFilesViaEnvDTEAsync(resolvedDeletions);
-                AddLog("INFO", LocalizationService.Instance.Format("agent.log.editDeletionsDone", resolvedDeletions.Count));
-
-                foreach (string deletedPath in resolvedDeletions)
-                {
-                    deletionOriginals.TryGetValue(deletedPath, out string? capturedOriginal);
-                    plan.ChangedFiles.Add(new FileChangeSummary
-                    {
-                        FilePath = deletedPath,
-                        LinesAdded = 0,
-                        LinesRemoved = -1,
-                        BriefDescription = $"{Path.GetFileName(deletedPath)}{LocalizationService.Instance["agent.log.editFileDeletedSuffix"]}",
-                        OriginalContent = capturedOriginal,
-                    });
-                    NotifyFileChange(plan.PlanId, "delete", deletedPath, LocalizationService.Instance["agent.log.editNotifiedDeleted"]);
-                }
-            }
-            else
-            {
-                AddLog("WARN", LocalizationService.Instance["agent.log.editDeletionsCancelled"]);
-            }
-        }
-
-        /// <summary>
-        /// 检测 AI 输出是否包含任何有效的编辑格式。
-        /// </summary>
         /// <summary>
         /// 检测 AI 是否明确表示没有需要更改的内容。
-        /// 只有明确的文字确认才算"无需修改"；空响应可能是 token 截断，
-        /// 不能据此跳过整个编辑步骤。
+        /// 空响应可能来自 token 截断，不能据此跳过整个编辑步骤。
         /// </summary>
         private static bool IsNoChangesResponse(string aiResult)
         {
             if (string.IsNullOrWhiteSpace(aiResult)) return false;
 
-            // 去除 DSML/XML 标签后再判断，复用统一的格式兼容逻辑。
             string clean = StripDsmlContent(aiResult, removeResidualAttributes: false);
-
-            // 去掉 markdown 代码块内容（可能包含示例代码被误判）
             clean = System.Text.RegularExpressions.Regex.Replace(clean,
                 @"```[\s\S]*?```", string.Empty);
-
-            // 去掉思考标签
             clean = System.Text.RegularExpressions.Regex.Replace(clean,
                 @"</?think>", string.Empty);
-
-            // 去掉 think 标签内容（DeepSeek 推理块）
             clean = System.Text.RegularExpressions.Regex.Replace(clean,
                 @"\s*think\s*", string.Empty, System.Text.RegularExpressions.RegexOptions.IgnoreCase);
 
             if (string.IsNullOrWhiteSpace(clean)) return false;
 
-            // 检测常见的"无需修改"短语（中英文）
             var noChangesPatterns = new[]
             {
                 @"不需要修改|无需修改|没有需要更改|无变更|已完成",
@@ -1987,25 +1296,22 @@ namespace DeepSeek_v4_for_VisualStudio.Services.Agents
                 @"all\s+changes?\s+(?:are\s+)?done",
                 @"no\s+(?:further\s+)?changes?\s+(?:needed|required)",
                 @"nothing\s+to\s+(?:change|modify|edit)",
-                // Git 操作完成语（避免格式重试）
                 @"已推送|推送成功|推送完成|push.*(?:success|done|ok)",
                 @"已提交|提交成功|commit.*(?:success|done|ok)",
                 @"已暂存|已添加|add.*(?:success|done|ok)|暂存.*成功",
                 @"stash.*(?:success|done)",
                 @"切换.*成功|已切换到|checkout.*success",
                 @"(?:git\s+)?操作.*(?:完成|成功|已执行)",
-                // 短回复兜底：非代码的简短完成确认（<100字符，不含代码块标记）
                 @"^(?:OK|Done|完成|好了|搞定|成功|已执行|已处理)[。！!.\s]*$",
             };
 
             foreach (var pattern in noChangesPatterns)
             {
                 if (System.Text.RegularExpressions.Regex.IsMatch(clean, pattern,
-                    System.Text.RegularExpressions.RegexOptions.IgnoreCase))
+                    System.Text.RegularExpressions.RegexOptions.IgnoreCase)
+                    && clean.Trim().Length < 200)
                 {
-                    // 确保不是长篇响应中误匹配（如讨论"无需修改"但实际有编辑块）
-                    if (clean.Trim().Length < 200)
-                        return true;
+                    return true;
                 }
             }
 
@@ -2013,12 +1319,10 @@ namespace DeepSeek_v4_for_VisualStudio.Services.Agents
         }
 
         /// <summary>
-        /// 检测本轮消息中是否只有 git/终端/构建操作（无代码读取或编辑）。
-        /// 如果是纯 Git 操作，AI 的文本回复是操作总结而非编辑格式，应跳过格式重试。
+        /// 检测本轮是否只有 Git/终端/构建操作，没有代码读取或编辑。
         /// </summary>
         private static bool IsGitOrTerminalOnlyResult(List<ChatApiMessage> messages)
         {
-            // 只检查 assistant 消息中的 tool_calls
             bool hasCodeTool = false;
             bool hasGitOrTerminal = false;
 
@@ -2043,58 +1347,11 @@ namespace DeepSeek_v4_for_VisualStudio.Services.Agents
                 }
             }
 
-            // 至少有一次 git/终端操作，且没有任何代码操作 → 纯 Git/终端
             return hasGitOrTerminal && !hasCodeTool;
         }
 
-        private bool HasAnyValidEditFormat(string aiResult)
-        {
-            if (string.IsNullOrWhiteSpace(aiResult)) return false;
-
-            // 检测 apply_patch 格式
-            if (System.Text.RegularExpressions.Regex.IsMatch(aiResult,
-                @"\*\*\*\s*Begin\s*Patch", System.Text.RegularExpressions.RegexOptions.IgnoreCase))
-                return true;
-
-            // 检测 insert_edit_into_file 格式
-            if (System.Text.RegularExpressions.Regex.IsMatch(aiResult,
-                @"```(?:insert_edit_into_file|edit)\s*:", System.Text.RegularExpressions.RegexOptions.IgnoreCase))
-                return true;
-
-            // 检测 create_file 格式（原有 ```file:）
-            if (System.Text.RegularExpressions.Regex.IsMatch(aiResult,
-                @"```file:\s*[^\r\n]+"))
-                return true;
-
-            // 检测 delete 格式
-            if (System.Text.RegularExpressions.Regex.IsMatch(aiResult,
-                @"(?:^|\n)\s*(?:delete|delete_file)\s*:"))
-                return true;
-
-            return false;
-        }
-
-        #endregion
-
         #region Tool-Made Edit Detection (v1.1.10)
 
-        /// <summary>
-        /// 计算格式重试消息的插入位置。工具循环可能压缩并删除旧消息，
-        /// 因此不能复用首次调用前保存的绝对索引；每次重试都应基于当前列表重新计算，
-        /// 并保持末尾的 Agent/路由 system 提示仍位于最后。
-        /// </summary>
-        internal static int ResolveFormatRetryInsertIndex(List<ChatApiMessage> messages)
-        {
-            int index = messages.Count;
-            while (index > 0 && messages[index - 1].Role == "system")
-                index--;
-            return index;
-        }
-
-        /// <summary>
-        /// 检测本轮消息中是否包含编辑类工具调用（replace_string_in_file / create_file 等）。
-        /// 如果 AI 已在工具循环中直接修改了文件，则无需再通过文本格式输出编辑块。
-        /// </summary>
         /// <summary>
         /// 截取当前步骤工具循环期间新增的消息（排除 Handoff/上下文中历史工具调用）。
         /// 防止历史中的 create_file 等调用被误判为本轮“工具编辑”。
@@ -2114,29 +1371,6 @@ namespace DeepSeek_v4_for_VisualStudio.Services.Agents
                 slice.Add(messages[i]);
             }
             return slice;
-        }
-
-        private static bool HasToolMadeEdits(List<ChatApiMessage> messages)
-        {
-            foreach (var msg in messages)
-            {
-                if (msg.ToolCalls == null || msg.ToolCalls.Count == 0) continue;
-
-                foreach (var tc in msg.ToolCalls)
-                {
-                    string name = tc.Function?.Name ?? "";
-                    if (name == "replace_string_in_file" ||
-                        name == "multi_replace_string_in_file" ||
-                        name == "create_file" ||
-                        name == "delete_file" ||
-                        name == "apply_patch" ||
-                        name == "create_directory")
-                    {
-                        return true;
-                    }
-                }
-            }
-            return false;
         }
 
         /// <summary>
@@ -2173,6 +1407,21 @@ namespace DeepSeek_v4_for_VisualStudio.Services.Agents
                         using var doc = System.Text.Json.JsonDocument.Parse(args);
                         var root = doc.RootElement;
 
+                        if (name == "apply_patch"
+                            && root.TryGetProperty("patch", out var patchElement))
+                        {
+                            string patchText = patchElement.GetString() ?? string.Empty;
+                            foreach (var patch in Services.EditTools.ApplyPatchTool.ParsePatches(patchText))
+                            {
+                                string patchPath = string.IsNullOrWhiteSpace(patch.MoveToPath)
+                                    ? patch.FilePath
+                                    : patch.MoveToPath!;
+                                if (!string.IsNullOrEmpty(patchPath) && seen.Add(patchPath))
+                                    edits.Add((patchPath, name));
+                            }
+                            continue;
+                        }
+
                         if (root.TryGetProperty("filePath", out var fp))
                             filePath = fp.GetString();
                         else if (root.TryGetProperty("path", out var p))
@@ -2203,12 +1452,10 @@ namespace DeepSeek_v4_for_VisualStudio.Services.Agents
         private async Task CollectToolMadeEditsAsync(
             List<(string FilePath, string ToolName)> toolEdits,
             AgentTaskPlan plan,
-            AgentContext context,
             string workspaceRoot,
             Dictionary<string, string> originalContents,
             List<EditApplyResult> appliedResults,
-            CancellationToken ct,
-            HashSet<string>? toolHandledFiles = null)
+            CancellationToken ct)
         {
             foreach (var (filePath, toolName) in toolEdits)
             {
@@ -2223,13 +1470,11 @@ namespace DeepSeek_v4_for_VisualStudio.Services.Agents
                     _ => EditOperationType.ApplyPatch, // replace_string_in_file 等归为 Patch 类
                 };
 
-                bool isNewFile = toolName == "create_file" && !File.Exists(resolvedPath);
                 bool fileExists = File.Exists(resolvedPath);
+                bool isNewFile = _stagedWorkspace?.GetOperation(resolvedPath) == ProposedFileOperation.Add
+                    || (toolName == "create_file" && !fileExists);
 
-                // ── 记录已处理的文件（供文本路径去重）──
-                toolHandledFiles?.Add(resolvedPath);
-
-                // ── 为新文件设置空原始内容（防止文本路径的 diff 归零）──
+                // ── 为新文件设置空原始内容，供变更统计使用 ──
                 if (isNewFile)
                 {
                     originalContents[resolvedPath] = string.Empty;
@@ -2237,7 +1482,24 @@ namespace DeepSeek_v4_for_VisualStudio.Services.Agents
 
                 if (toolName == "delete_file")
                 {
-                    // 删除操作不在此处处理（由 ProcessFileDeletionsAsync 统一处理）
+                    appliedResults.Add(new EditApplyResult
+                    {
+                        FilePath = resolvedPath,
+                        Success = true,
+                        OperationType = EditOperationType.DeleteFile,
+                    });
+                    NotifyFileChange(plan.PlanId, "delete", resolvedPath, "工具编辑 (delete_file)");
+
+                    if (!plan.ChangedFiles.Any(c => string.Equals(c.FilePath, resolvedPath, StringComparison.OrdinalIgnoreCase)))
+                    {
+                        plan.ChangedFiles.Add(new FileChangeSummary
+                        {
+                            FilePath = resolvedPath,
+                            LinesAdded = 0,
+                            LinesRemoved = -1,
+                            BriefDescription = $"{Path.GetFileName(resolvedPath)} (delete_file)",
+                        });
+                    }
                     continue;
                 }
 
@@ -2254,10 +1516,7 @@ namespace DeepSeek_v4_for_VisualStudio.Services.Agents
                     continue;
                 }
 
-                // ── v1.1.11: 工具编辑已在磁盘生效，此时无法获取真正的原始内容。
-                //     不设置 originalContents（留待后续文本编辑路径读取当前状态作为基线），
-                //     避免 diff 计算时 original==final 导致变更量归零。
-                //     仅对新文件设置空原始内容。
+                // ── 工具编辑已在磁盘生效；新建文件使用空基线，其余文件由 Workspace 保存原始快照。──
 
                 // ── 新文件处理：添加到项目 ──
                 if (isNewFile && fileExists)
@@ -2403,11 +1662,11 @@ namespace DeepSeek_v4_for_VisualStudio.Services.Agents
         /// <summary>
         /// 判断步骤是否为代码编写类。
         /// </summary>
-        private static bool IsCodeWritingStep(string stepTitle)
+        internal static bool IsCodeWritingStep(string stepTitle)
         {
             if (string.IsNullOrWhiteSpace(stepTitle)) return false;
 
-            var codeKeywords = new[] { "编写", "写", "修改", "创建", "添加", "生成", "实现",
+            var codeKeywords = new[] { "编写", "写", "修改", "创建", "添加", "新增", "引入", "补上", "生成", "实现",
                 "重构", "修复", "改代码", "改", "开发", "build", "write", "code", "implement",
                 "create", "add", "fix", "refactor", "modify", "change", "update" };
 
@@ -2415,7 +1674,7 @@ namespace DeepSeek_v4_for_VisualStudio.Services.Agents
                 stepTitle.IndexOf(k, StringComparison.OrdinalIgnoreCase) >= 0);
 
             var analysisKeywords = new[] { "确定", "分析", "查找", "了解", "理解", "定位",
-                "研究", "检查", "审查", "评估", "阅读", "查看", "review", "analyze",
+                "研究", "检查", "审查", "评估", "核对", "验证", "确认", "阅读", "查看", "review", "analyze",
                 "find", "check", "examine", "investigate", "understand", "identify" };
 
             bool isAnalysis = analysisKeywords.Any(k =>
@@ -2909,19 +2168,6 @@ namespace DeepSeek_v4_for_VisualStudio.Services.Agents
             if (string.IsNullOrWhiteSpace(filePath)) return false;
             string fileName = Path.GetFileName(filePath);
             return BuildDefinitionFileNames.Contains(fileName);
-        }
-
-        /// <summary>
-        /// 获取编辑操作的排序优先级。
-        /// 0 = MSBuild 项目文件最先（避免 VS 冲突对话框）
-        /// 1 = 普通源文件
-        /// 2 = 构建定义文件最后（CMakeLists.txt/Makefile — 必须在源文件创建后才能写入）
-        /// </summary>
-        private static int GetEditPriority(string filePath)
-        {
-            if (IsBuildDefinitionFile(filePath)) return 2;
-            if (IsProjectFile(filePath)) return 0;
-            return 1;
         }
 
         /// <summary>
@@ -3884,60 +3130,6 @@ namespace DeepSeek_v4_for_VisualStudio.Services.Agents
                 return true;
 
             return false;
-        }
-
-        #endregion
-
-        #region Edit Tool Helpers
-
-        /// <summary>
-        /// 懒加载初始化编辑工具实例。
-        /// </summary>
-        private void EnsureEditTools(string workspaceRoot)
-        {
-            _applyPatchTool ??= new ApplyPatchTool(_apiService, workspaceRoot);
-            _insertEditTool ??= new InsertEditTool(_apiService, workspaceRoot);
-            _replaceStringTool ??= new ReplaceStringTool(_apiService, workspaceRoot);
-            _multiReplaceStringTool ??= new MultiReplaceStringTool(_apiService, workspaceRoot);
-
-            // ── 注入 StagedEditWorkspace ──
-            if (_stagedWorkspace != null)
-            {
-                _applyPatchTool.Workspace = _stagedWorkspace;
-                _insertEditTool.Workspace = _stagedWorkspace;
-                _replaceStringTool.Workspace = _stagedWorkspace;
-                _multiReplaceStringTool.Workspace = _stagedWorkspace;
-            }
-        }
-
-        /// <summary>
-        /// 检测 AI 输出中的编辑操作类型（不依赖 EditPatchService）。
-        /// </summary>
-        private static EditOperationType DetectOperationType(string aiOutput)
-        {
-            if (string.IsNullOrWhiteSpace(aiOutput))
-                return EditOperationType.CreateFile; // 默认
-
-            // 检测 patch 格式
-            if (System.Text.RegularExpressions.Regex.IsMatch(aiOutput,
-                @"\*\*\*\s*Begin\s*Patch", System.Text.RegularExpressions.RegexOptions.IgnoreCase))
-                return EditOperationType.ApplyPatch;
-
-            // 检测 insert_edit_into_file 格式
-            if (System.Text.RegularExpressions.Regex.IsMatch(aiOutput,
-                @"```(?:insert_edit_into_file|edit)\s*:", System.Text.RegularExpressions.RegexOptions.IgnoreCase))
-                return EditOperationType.InsertEditIntoFile;
-
-            // 检测 ...existing code... 标记
-            if (aiOutput.Contains("...existing code..."))
-                return EditOperationType.InsertEditIntoFile;
-
-            // 检测 create_file / delete_file
-            if (System.Text.RegularExpressions.Regex.IsMatch(aiOutput,
-                @"```file:\s*[^\r\n]+", System.Text.RegularExpressions.RegexOptions.IgnoreCase))
-                return EditOperationType.CreateFile;
-
-            return EditOperationType.CreateFile; // 默认
         }
 
         #endregion

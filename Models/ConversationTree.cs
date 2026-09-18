@@ -1,4 +1,4 @@
-using System;
+﻿using System;
 using System.Collections.Generic;
 using System.Linq;
 using System.Text;
@@ -110,6 +110,62 @@ namespace DeepSeek_v4_for_VisualStudio.Models
         }
 
         /// <summary>
+        /// 查找指定节点最近的实际用户提问祖先。
+        /// Agent Handoff 等路径可能产生连续助手节点，因此不能假设助手节点的直接父节点一定是 user。
+        /// </summary>
+        public ConvNode? FindNearestUserAncestor(ConvNode node)
+        {
+            var current = node?.Parent;
+            while (current != null && current != Root)
+            {
+                if (current.IsUserMessage)
+                    return current;
+                current = current.Parent;
+            }
+            return null;
+        }
+
+        /// <summary>
+        /// 判断指定助手节点是否为“活跃路径末尾的未完成轮”。
+        /// 判定条件：节点非空、恰为 ActiveLeaf（活跃路径末尾叶子）、其消息带未完成标记。
+        /// </summary>
+        /// <param name="assistantNode">待判定的助手消息节点；可为 null。</param>
+        /// <returns>true 表示该轮未完成且位于末尾，重试/编辑应原地进行。</returns>
+        public bool IsTrailingIncompleteTurn(ConvNode? assistantNode)
+            => assistantNode != null
+               && ReferenceEquals(assistantNode, ActiveLeaf)
+               && assistantNode.Message?.IsIncomplete == true;
+
+        /// <summary>
+        /// 判断指定用户节点所属的回合是否为“活跃路径末尾的未完成轮”。
+        /// 判定条件：ActiveLeaf 恰挂在 userNode 之下（即该回合是当前末尾）且未完成。
+        /// </summary>
+        /// <param name="userNode">用户消息节点；可为 null。</param>
+        /// <returns>true 表示编辑该用户消息应走原地路径。</returns>
+        public bool IsTrailingIncompleteUserTurn(ConvNode? userNode)
+            => userNode != null
+               && ActiveLeaf.Parent != null
+               && ReferenceEquals(ActiveLeaf.Parent, userNode)
+               && IsTrailingIncompleteTurn(ActiveLeaf);
+
+        /// <summary>
+        /// 标记/清除指定节点的未完成状态（消息与节点同步维护）。
+        /// </summary>
+        /// <param name="node">目标节点；null 时静默忽略。</param>
+        /// <param name="incomplete">true 标记未完成；false 清除标记。</param>
+        public void SetIncomplete(ConvNode? node, bool incomplete)
+        {
+            if (node?.Message == null) return;
+            node.Message.IsIncomplete = incomplete;
+        }
+
+        /// <summary>
+        /// 清除指定节点的未完成标记（正常完成或原地重发成功后调用）。
+        /// </summary>
+        /// <param name="node">目标节点；null 时静默忽略。</param>
+        public void ClearIncomplete(ConvNode? node) => SetIncomplete(node, false);
+
+        /// <summary>
         /// 生成新的节点 ID。
         /// </summary>
         private static string NewNodeId() => Guid.NewGuid().ToString("N");
@@ -134,6 +190,8 @@ namespace DeepSeek_v4_for_VisualStudio.Models
                 Parent = parent,
             };
             message.NodeId = node.Id;
+            if (message.Role == "assistant" && string.IsNullOrEmpty(message.RetryAnchorNodeId))
+                message.RetryAnchorNodeId = FindNearestUserAncestor(node)?.Id;
 
             parent.Children.Add(node);
             RegisterNode(node);
@@ -164,6 +222,11 @@ namespace DeepSeek_v4_for_VisualStudio.Models
                 Parent = parent,
             };
             newMessage.NodeId = newNode.Id;
+            if (newMessage.Role == "assistant" && string.IsNullOrEmpty(newMessage.RetryAnchorNodeId))
+            {
+                newMessage.RetryAnchorNodeId = existingNode.Message.RetryAnchorNodeId
+                    ?? FindNearestUserAncestor(existingNode)?.Id;
+            }
 
             // 插入到 existingNode 之后（保持顺序）
             int existingIndex = parent.Children.IndexOf(existingNode);
@@ -197,6 +260,8 @@ namespace DeepSeek_v4_for_VisualStudio.Models
 
             // ── 原地替换消息 ──
             newMessage.NodeId = existingNode.Id;
+            if (newMessage.Role == "assistant" && string.IsNullOrEmpty(newMessage.RetryAnchorNodeId))
+                newMessage.RetryAnchorNodeId = existingNode.Message.RetryAnchorNodeId;
             newMessage.ForkReason = null; // 不显示分支导航
             newMessage.SiblingIndex = 1;
             newMessage.SiblingCount = 1;

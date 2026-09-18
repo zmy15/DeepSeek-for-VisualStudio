@@ -82,6 +82,29 @@ namespace DeepSeek_v4_for_VisualStudio.Tests.Unit.Services.Telemetry
         }
 
         [Fact]
+        public void TurnMetrics_ComputeDecodeAndEndToEndTokensPerSecond()
+        {
+            var turn = new AgentTurnMetrics
+            {
+                Turn = 1,
+                TtftMs = 500,
+                DurationMs = 2_500,
+                OutputTokens = 400,
+            };
+
+            turn.DecodeDurationMs.Should().Be(2_000);
+            turn.DecodeTokensPerSecond.Should().BeApproximately(200, 0.001);
+            turn.EndToEndTokensPerSecond.Should().BeApproximately(160, 0.001);
+
+            var session = new AgentSessionMetrics();
+            session.Turns.Add(turn);
+            session.DecodeTokensPerSecond.Should().BeApproximately(200, 0.001);
+            session.EndToEndTokensPerSecond.Should().BeApproximately(160, 0.001);
+            session.ToJson().Should().Contain("\"decode_tokens_per_second\"");
+            session.ToJson().Should().Contain("\"end_to_end_tokens_per_second\"");
+        }
+
+        [Fact]
         public void EndTurn_WithoutBeginTurn_CreatesImplicitTurn()
         {
             var c = new AgentMetricsCollector();
@@ -91,6 +114,21 @@ namespace DeepSeek_v4_for_VisualStudio.Tests.Unit.Services.Telemetry
             var s = Deserialize(c);
             s!.TurnCount.Should().Be(1);
             s.Turns[0].InputTokens.Should().Be(500);
+        }
+
+        [Fact]
+        public void EndTurn_RaisesTurnMetricsUpdated()
+        {
+            var c = new AgentMetricsCollector();
+            AgentTurnMetrics? updated = null;
+            c.TurnMetricsUpdated += turn => updated = turn;
+            c.BeginSession("m", "Ask", null);
+            c.BeginTurn(1);
+            c.EndTurn(1, 500, 50, 400, 100);
+
+            updated.Should().NotBeNull();
+            updated!.Turn.Should().Be(1);
+            updated.OutputTokens.Should().Be(50);
         }
 
         [Fact]
@@ -233,6 +271,22 @@ namespace DeepSeek_v4_for_VisualStudio.Tests.Unit.Services.Telemetry
             Directory.GetFiles(_tempDir, "agent-session_*.json").Should().HaveCount(1);
             var s = JsonSerializer.Deserialize<AgentSessionMetrics>(File.ReadAllText(SingleExportedFile()));
             s!.Result.Should().Be(AgentSessionResult.Success);
+        }
+
+        [Fact]
+        public void Complete_WithExportDisabled_DoesNotWriteFile()
+        {
+            var c = new AgentMetricsCollector { ExportEnabled = false };
+            c.BeginSession("m", "Ask", null);
+            c.BeginTurn(1);
+            c.RecordFirstToken();
+            c.EndTurn(1, 10, 10, 0, 0);
+            c.CompleteSuccess();
+
+            (Directory.Exists(_tempDir)
+                ? Directory.GetFiles(_tempDir, "agent-session_*.json")
+                : Array.Empty<string>()).Should().BeEmpty();
+            c.BuildJson().Should().Contain("\"turn_count\": 1");
         }
 
         [Fact]

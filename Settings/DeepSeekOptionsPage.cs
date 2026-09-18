@@ -6,6 +6,7 @@ using System;
 using System.Collections.Generic;
 using System.ComponentModel;
 using System.Drawing.Design;
+using System.Globalization;
 using System.Linq;
 
 namespace DeepSeek_v4_for_VisualStudio.Settings
@@ -26,6 +27,7 @@ namespace DeepSeek_v4_for_VisualStudio.Settings
         internal const int MaxWebView2ZoomPercent = 300;
         internal const int DefaultWebView2ZoomPercent = 100;
         internal const bool DefaultEnableAutoSkillRouting = false;
+        internal const AppendMessageMode DefaultAppendMessageMode = Models.AppendMessageMode.Queue;
 
         /// <summary>
         /// 静态构造：订阅语言变更，刷新属性描述符缓存。
@@ -266,12 +268,54 @@ namespace DeepSeek_v4_for_VisualStudio.Settings
             {
                 base.LoadSettingsFromStorage();
                 LoadApiKeysFromCredentialStore();
+                if (UpgradeLegacyDefaultSystemPrompts())
+                {
+                    SaveSettingsToStorage();
+                    UnifiedSettingsSync.PushFromPage(this);
+                }
             }
             catch (InvalidCastException ex)
             {
                 Logger.Warn($"[Settings] LoadSettingsFromStorage 失败（VS 版本兼容性）: {ex.Message}");
             }
         }
+
+        /// <summary>
+        /// 旧版内置中文提示词不会自动更新，因为 DialogPage 会把当次默认值持久化。
+        /// 仅当值仍与旧版内置文本完全一致时升级，避免覆盖用户自定义提示词。
+        /// </summary>
+        private bool UpgradeLegacyDefaultSystemPrompts()
+        {
+            if (!IsLegacyDefaultSystemPrompt(SystemPrompt))
+                return false;
+
+            SystemPrompt = AiPrompts.DefaultSystemPrompt;
+            Logger.Info("[Settings] 已将旧版内置中文系统提示词升级为当前默认版本");
+            return true;
+        }
+
+        internal static bool IsLegacyDefaultSystemPrompt(string? prompt)
+        {
+            const string legacy =
+                "你是 DeepSeek Chat，一个深度集成在 Visual Studio 中的 AI 编程助手。你的核心能力包括：解释代码逻辑、定位并修复 Bug、重构优化代码、生成单元测试、回答各类技术问题。请遵循以下准则：\n" +
+                "- 回答应简洁、准确、直接，优先给出可运行的代码方案。\n" +
+                "- 涉及代码修改时，明确指出文件路径和具体行号。\n" +
+                "- 优先使用用户项目已有的框架和库，不引入不必要的依赖。\n" +
+                "- 如果用户的问题模糊不清，先追问澄清再给出建议。\n" +
+                "- 使用中文回答，代码中的注释也使用中文。\n" +
+                "- 当用户需要获取实时信息、操作文件系统或执行特定任务时，积极使用可用的工具（tools）来完成任务。";
+
+            return string.Equals(
+                NormalizePrompt(prompt),
+                NormalizePrompt(legacy),
+                StringComparison.Ordinal);
+        }
+
+        private static string NormalizePrompt(string? prompt)
+            => (prompt ?? string.Empty)
+                .Replace("\r\n", "\n")
+                .Replace('\r', '\n')
+                .Trim();
 
         /// <summary>
         /// API Key 采用双持久化：优先读写 Visual Studio Credential Storage，
@@ -521,6 +565,24 @@ namespace DeepSeek_v4_for_VisualStudio.Settings
         [DesignerSerializationVisibility(DesignerSerializationVisibility.Visible)]
         public string SystemPromptEn { get; set; } = AiPrompts.DefaultSystemPromptEn;
 
+        [LocalizedCategory("settings.category.api")]
+        [LocalizedDisplayName("settings.restoreDefaults.displayName")]
+        [LocalizedDescription("settings.restoreDefaults.description")]
+        [Editor(typeof(RestoreDefaultSettingsEditor), typeof(UITypeEditor))]
+        [DesignerSerializationVisibility(DesignerSerializationVisibility.Hidden)]
+        public string RestoreDefaultSettings
+        {
+            get => string.Empty;
+            set { }
+        }
+
+        /// <summary>
+        /// Unified Settings 中的一次性恢复开关。勾选后立即执行恢复，并自动复位为 false。
+        /// </summary>
+        [Browsable(false)]
+        [DesignerSerializationVisibility(DesignerSerializationVisibility.Hidden)]
+        public bool RestoreDefaultSettingsTrigger { get; set; }
+
         /// <summary>
         /// 根据当前语言设置获取有效的 System Prompt。
         /// - 英文模式（Language == "en"）：优先使用 SystemPromptEn，为空时回退英文默认值。
@@ -536,6 +598,57 @@ namespace DeepSeek_v4_for_VisualStudio.Settings
             }
             string prompt = SystemPrompt ?? string.Empty;
             return !string.IsNullOrWhiteSpace(prompt) ? prompt : AiPrompts.DefaultSystemPrompt;
+        }
+
+        /// <summary>
+        /// 将非敏感设置恢复为全新实例的默认值，保留 API 密钥等凭据。
+        /// </summary>
+        internal void RestoreDefaultsPreservingCredentials()
+        {
+            // 连接与模型配置视为用户凭据的一部分，恢复默认时保留：
+            // ApiKey / CustomApiKey / BaiduApiKey / BingApiKey /
+            // ApiBaseUrl / SelectedModel / CustomModelName / CustomVisionModels /
+            // ActiveCustomModel / ActiveModelSource。
+            SystemPrompt = AiPrompts.DefaultSystemPrompt;
+            SystemPromptEn = AiPrompts.DefaultSystemPromptEn;
+            IsThinkingEnabled = true;
+            ReasoningEffort = "high";
+            EnableWebSearch = true;
+            SearchProvider = "DuckDuckGo";
+            ShowDiffMarkersInEditor = true;
+            OcrEngine = "Windows Built-in";
+            AutoCompleteEnabled = false;
+            AutoCompleteDelay = 800;
+            AutoCompleteContinueAfterAccept = true;
+            TokenBudget = 900_000;
+            EnableAutoCompression = true;
+            CompressionThreshold = 85;
+            PreserveRecentTurns = 3;
+            EnableRag = false;
+            RagTopK = 5;
+            ShowContextStats = true;
+            EnableTelemetryExport = true;
+            EnableIdeContextInjection = true;
+            LlmTimeoutSeconds = 300;
+            Language = "auto";
+            MaxToolCallRounds = 200;
+            MaxRepeatedSameCall = 5;
+            MaxConsecutiveErrors = 5;
+            AgentMaxWallTimeSeconds = 0;
+            AgentSubagentTimeoutSeconds = 900;
+            AgentMaxTotalTokens = 0;
+            AgentMaxToolCalls = 400;
+            AgentMaxDepth = 3;
+            AgentNoProgressRounds = 5;
+            EnableAutoBuild = true;
+            EnableAutoSkillRouting = DefaultEnableAutoSkillRouting;
+            AppendMessageMode = DefaultAppendMessageMode;
+            ApprovalMode = "SmartBlock";
+            ThemeMode = ThemeMode.Auto;
+            InputBoxHeight = DefaultInputBoxHeight;
+            BottomAreaScalePercent = DefaultBottomAreaScalePercent;
+            WebView2ZoomPercent = DefaultWebView2ZoomPercent;
+            RestoreDefaultSettingsTrigger = false;
         }
 
         [Browsable(false)]
@@ -797,6 +910,13 @@ namespace DeepSeek_v4_for_VisualStudio.Settings
         [DesignerSerializationVisibility(DesignerSerializationVisibility.Visible)]
         public bool EnableAutoSkillRouting { get; set; } = DefaultEnableAutoSkillRouting;
 
+        [LocalizedCategory("settings.category.agent")]
+        [LocalizedDisplayName("settings.appendMessageMode.displayName")]
+        [LocalizedDescription("settings.appendMessageMode.description")]
+        [TypeConverter(typeof(AppendMessageModeConverter))]
+        [DesignerSerializationVisibility(DesignerSerializationVisibility.Visible)]
+        public AppendMessageMode AppendMessageMode { get; set; } = DefaultAppendMessageMode;
+
         // ═══════════════════════════════════════════════
         //  审批模式设置
         // ═══════════════════════════════════════════════
@@ -804,6 +924,7 @@ namespace DeepSeek_v4_for_VisualStudio.Settings
         [LocalizedCategory("settings.category.approval")]
         [LocalizedDisplayName("settings.approvalMode.displayName")]
         [LocalizedDescription("settings.approvalMode.description")]
+        [TypeConverter(typeof(ApprovalModeConverter))]
         [DesignerSerializationVisibility(DesignerSerializationVisibility.Visible)]
         public string ApprovalMode { get; set; } = "SmartBlock";
 
@@ -968,5 +1089,149 @@ namespace DeepSeek_v4_for_VisualStudio.Settings
         public override bool GetStandardValuesSupported(ITypeDescriptorContext? context) => true;
         public override StandardValuesCollection GetStandardValues(ITypeDescriptorContext? context)
             => new(new[] { "Auto", "Dark", "Light" });
+    }
+
+    /// <summary>
+    /// 生成中追加消息模式：旧版属性网格显示本地化名称，底层仍存储 enum 值。
+    /// </summary>
+    internal class AppendMessageModeConverter : EnumConverter
+    {
+        public AppendMessageModeConverter()
+            : base(typeof(AppendMessageMode))
+        {
+        }
+
+        public override bool GetStandardValuesSupported(ITypeDescriptorContext? context) => true;
+
+        public override bool GetStandardValuesExclusive(ITypeDescriptorContext? context) => true;
+
+        public override StandardValuesCollection GetStandardValues(ITypeDescriptorContext? context)
+            => new(new[]
+            {
+                AppendMessageMode.Queue,
+                AppendMessageMode.Guidance,
+            });
+
+        public override object? ConvertTo(
+            ITypeDescriptorContext? context,
+            CultureInfo? culture,
+            object? value,
+            Type destinationType)
+        {
+            if (destinationType == typeof(string) && value is AppendMessageMode mode)
+            {
+                return LocalizationService.Instance[
+                    mode == AppendMessageMode.Guidance
+                        ? "settings.appendMessageMode.guidance"
+                        : "settings.appendMessageMode.queue"];
+            }
+
+            return base.ConvertTo(context, culture, value, destinationType);
+        }
+
+        public override object? ConvertFrom(
+            ITypeDescriptorContext? context,
+            CultureInfo? culture,
+            object value)
+        {
+            if (value is string text)
+            {
+                if (MatchesLocalizedValue(text, "settings.appendMessageMode.guidance")
+                    || string.Equals(text, nameof(AppendMessageMode.Guidance), StringComparison.OrdinalIgnoreCase))
+                {
+                    return AppendMessageMode.Guidance;
+                }
+
+                if (MatchesLocalizedValue(text, "settings.appendMessageMode.queue")
+                    || string.Equals(text, nameof(AppendMessageMode.Queue), StringComparison.OrdinalIgnoreCase))
+                {
+                    return AppendMessageMode.Queue;
+                }
+
+                // 兼容旧版本/其他语言写入的本地化文本，避免语言切换时设置页崩溃。
+                return DeepSeekOptionsPage.DefaultAppendMessageMode;
+            }
+
+            return base.ConvertFrom(context, culture, value);
+        }
+
+        private static bool MatchesLocalizedValue(string text, string resourceKey)
+        {
+            return string.Equals(
+                       text,
+                       LocalizationService.Instance[resourceKey],
+                       StringComparison.OrdinalIgnoreCase)
+                   || string.Equals(
+                       text,
+                       LocalizationService.Instance.GetValueForLocale(resourceKey, "zh-CN"),
+                       StringComparison.OrdinalIgnoreCase)
+                   || string.Equals(
+                       text,
+                       LocalizationService.Instance.GetValueForLocale(resourceKey, "en"),
+                       StringComparison.OrdinalIgnoreCase);
+        }
+    }
+
+    /// <summary>
+    /// 审批模式下拉选项：属性网格显示本地化名称，存储值保持 Raw 字符串。
+    /// </summary>
+    internal class ApprovalModeConverter : StringConverter
+    {
+        private static readonly string[] StoredValues =
+        {
+            "BlockAll",
+            "AllowAll",
+            "SmartBlock",
+        };
+
+        public override bool GetStandardValuesSupported(ITypeDescriptorContext? context) => true;
+
+        public override bool GetStandardValuesExclusive(ITypeDescriptorContext? context) => true;
+
+        public override StandardValuesCollection GetStandardValues(ITypeDescriptorContext? context)
+            => new(StoredValues.Select(GetLocalizedValue).ToArray());
+
+        public override object? ConvertTo(
+            ITypeDescriptorContext? context,
+            CultureInfo? culture,
+            object? value,
+            Type destinationType)
+        {
+            if (destinationType == typeof(string) && value is string storedValue)
+                return GetLocalizedValue(storedValue);
+
+            return base.ConvertTo(context, culture, value, destinationType);
+        }
+
+        public override object? ConvertFrom(
+            ITypeDescriptorContext? context,
+            CultureInfo? culture,
+            object value)
+        {
+            if (value is string text)
+            {
+                foreach (string storedValue in StoredValues)
+                {
+                    if (string.Equals(text, storedValue, StringComparison.OrdinalIgnoreCase)
+                        || string.Equals(
+                            text,
+                            GetLocalizedValue(storedValue),
+                            StringComparison.OrdinalIgnoreCase))
+                    {
+                        return storedValue;
+                    }
+                }
+            }
+
+            return base.ConvertFrom(context, culture, value);
+        }
+
+        private static string GetLocalizedValue(string storedValue)
+            => LocalizationService.Instance[storedValue switch
+            {
+                "BlockAll" => "approval.blockAll",
+                "AllowAll" => "approval.allowAll",
+                _ => "approval.smartBlock",
+            }];
     }
 }
