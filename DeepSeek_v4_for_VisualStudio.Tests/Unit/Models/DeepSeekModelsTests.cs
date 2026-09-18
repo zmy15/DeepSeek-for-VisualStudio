@@ -1,4 +1,4 @@
-using System.Text.Json;
+﻿using System.Text.Json;
 
 namespace DeepSeek_v4_for_VisualStudio.Tests.Unit.Models;
 
@@ -181,5 +181,36 @@ public class DeepSeekModelsTests
         var control = new ThinkingControl();
 
         control.Type.Should().Be("enabled");
+    }
+
+    [Fact]
+    public void ChatMessage_IsIncomplete_RoundTripsWithSystemTextJson()
+    {
+        var message = new ChatMessage
+        {
+            Role = "assistant",
+            Content = "被停止的部分回复",
+            IsIncomplete = true,
+        };
+
+        var json = JsonSerializer.Serialize(message);
+        json.Should().Contain("\"IsIncomplete\":true");
+
+        var deserialized = JsonSerializer.Deserialize<ChatMessage>(json, JsonOpts);
+
+        deserialized.Should().NotBeNull();
+        deserialized!.IsIncomplete.Should().BeTrue();
+    }
+
+    [Fact]
+    public void ChatMessage_LegacyJson_MissingIsIncomplete_DefaultsToFalse()
+    {
+        // 模拟旧版会话 JSON（无 isIncomplete 字段）：反序列化后应默认为 false
+        const string legacyJson = @"{""role"":""assistant"",""content"":""已完成的回复""}";
+
+        var message = JsonSerializer.Deserialize<ChatMessage>(legacyJson, JsonOpts);
+
+        message.Should().NotBeNull();
+        message!.IsIncomplete.Should().BeFalse();
     }
 }

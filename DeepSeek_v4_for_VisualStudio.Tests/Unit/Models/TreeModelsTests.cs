@@ -1,6 +1,7 @@
 ﻿using System.IO;
 using System.Runtime.Serialization.Json;
 using System.Text;
+using System.Text.Json;
 
 namespace DeepSeek_v4_for_VisualStudio.Tests.Unit.Models;
 
@@ -75,6 +76,28 @@ public class TreeModelsTests
         deserialized.ActiveLeafId.Should().Be("node_xyz");
         deserialized.Nodes.Should().HaveCount(2);
         deserialized.Nodes[1].Message!.Content.Should().Be("Hello");
+    }
+
+    [Fact]
+    public void TreePersistenceData_LegacyV2Json_WithoutIsIncomplete_DefaultsToFalse()
+    {
+        // 模拟旧版 v2 树 JSON：消息节点中尚无 isIncomplete 字段（System.Text.Json + camelCase，与生产持久化格式一致）
+        const string legacyJson = @"{
+            ""version"": 2,
+            ""activeLeafId"": ""n2"",
+            ""nodes"": [
+                { ""id"": ""n1"", ""message"": { ""role"": ""user"", ""content"": ""问题"" }, ""childrenIds"": [""n2""] },
+                { ""id"": ""n2"", ""parentId"": ""n1"", ""message"": { ""role"": ""assistant"", ""content"": ""部分回复"" } }
+            ]
+        }";
+
+        var data = JsonSerializer.Deserialize<TreePersistenceData>(
+            legacyJson, new JsonSerializerOptions { PropertyNameCaseInsensitive = true });
+
+        data.Should().NotBeNull();
+        data!.Nodes.Should().HaveCount(2);
+        data.Nodes[1].Message.Should().NotBeNull();
+        data.Nodes[1].Message!.IsIncomplete.Should().BeFalse(); // 缺失字段默认 false，行为与改造前一致
     }
 
     #endregion
@@ -154,6 +177,33 @@ public class TreeModelsTests
         deserialized.Message!.Content.Should().Be("测试内容");
         deserialized.Message.ReasoningContent.Should().Be("思考过程");
         deserialized.ChildrenIds!.Should().Contain("child1");
+    }
+
+    [Fact]
+    public void TreeNodeData_MessageIncomplete_RoundTrips()
+    {
+        var node = new TreeNodeData
+        {
+            Id = "n2",
+            ParentId = "n1",
+            Message = new ChatMessage
+            {
+                Role = "assistant",
+                Content = "被停止的部分回复",
+                IsIncomplete = true,
+            },
+        };
+
+        var serializer = new DataContractJsonSerializer(typeof(TreeNodeData),
+            new DataContractJsonSerializerSettings { UseSimpleDictionaryFormat = true });
+        using var ms = new MemoryStream();
+        serializer.WriteObject(ms, node);
+        string json = Encoding.UTF8.GetString(ms.ToArray());
+
+        ms.Position = 0;
+        var deserialized = (TreeNodeData)serializer.ReadObject(ms)!;
+
+        deserialized.Message!.IsIncomplete.Should().BeTrue();
     }
 
     #endregion

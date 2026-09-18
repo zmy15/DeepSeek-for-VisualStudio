@@ -1,4 +1,4 @@
-using DeepSeek_v4_for_VisualStudio.Models;
+﻿using DeepSeek_v4_for_VisualStudio.Models;
 using DeepSeek_v4_for_VisualStudio.Services;
 using DeepSeek_v4_for_VisualStudio.Services.Agents;
 using DeepSeek_v4_for_VisualStudio.Utils;
@@ -1033,6 +1033,12 @@ namespace DeepSeek_v4_for_VisualStudio.View
                         telemetry?.CompleteCancelled();
                     else
                         telemetry?.CompleteSuccess();
+ 
+                    // ── 未完成轮标记：计划取消/关联轮取消 → 标记；正常完成 → 防御性清除 ──
+                    if (plan.IsCancelled || context.CancellationToken.IsCancellationRequested)
+                        MarkAssistantMessageIncomplete(_agentStreamingMsgIndex);
+                    else
+                        ClearAssistantMessageIncomplete(_agentStreamingMsgIndex);
 
                     // ── 如果有待处理的 Handoff（如 Plan→Edit），注入"开始实现"按钮 ──
                     await InjectPendingHandoffButtonAsync();
@@ -1072,6 +1078,12 @@ namespace DeepSeek_v4_for_VisualStudio.View
                         telemetry?.CompleteCancelled();
                     else
                         telemetry?.CompleteSuccess();
+ 
+                    // ── 未完成轮标记：取消或正文命中中断哨兵 → 标记；正常完成 → 防御性清除 ──
+                    if (context.CancellationToken.IsCancellationRequested || LooksInterrupted(agentResult.Content))
+                        MarkAssistantMessageIncomplete(_agentStreamingMsgIndex);
+                    else
+                        ClearAssistantMessageIncomplete(_agentStreamingMsgIndex);
 
                     // ── 如果有待处理的 Handoff，注入按钮 ──
                     await InjectPendingHandoffButtonAsync();
@@ -1090,6 +1102,9 @@ namespace DeepSeek_v4_for_VisualStudio.View
                         telemetry?.CompleteCancelled();
                     else
                         telemetry?.CompleteFailure(AgentFailureCategory.None, agentResult.ErrorMessage);
+ 
+                    // ── 未完成轮标记：失败轮一律标记（含 AskAgent「回答已取消」）──
+                    MarkAssistantMessageIncomplete(_agentStreamingMsgIndex);
                 }
             }
             catch (Exception ex)
@@ -1100,6 +1115,9 @@ namespace DeepSeek_v4_for_VisualStudio.View
 
                 // ── P0 Telemetry：未捕获异常归类为 System 故障 ──
                 try { telemetry?.CompleteFailure(AgentFailureCategory.System, ex.ToString()); } catch { }
+ 
+                // ── 未完成轮标记：工作流异常中断 → 标记 ──
+                MarkAssistantMessageIncomplete(_agentStreamingMsgIndex);
             }
             finally
             {
