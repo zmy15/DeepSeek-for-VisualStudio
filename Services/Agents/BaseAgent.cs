@@ -53,6 +53,7 @@ namespace DeepSeek_v4_for_VisualStudio.Services.Agents
                 "read_file",
                 "grep_search",
                 "file_search",
+                "symbol_search",
                 "list_dir",
                 "memory",
             };

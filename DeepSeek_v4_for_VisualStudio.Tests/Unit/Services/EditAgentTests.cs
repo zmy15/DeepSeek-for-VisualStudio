@@ -86,6 +86,16 @@ public class EditAgentTests
         EditAgent.BuildPlanProgressSnapshot(new AgentTaskPlan()).Should().BeEmpty();
     }
 
+    [Theory]
+    [InlineData("为 ChatMessage 新增「被停止」标记字段并确定持久化策略", true)]
+    [InlineData("引入新的分支查询方法", true)]
+    [InlineData("边界场景与 UI 一致性核对", false)]
+    [InlineData("分析现有重试路径", false)]
+    public void IsCodeWritingStep_PrefersExplicitWriteIntent(string title, bool expected)
+    {
+        EditAgent.IsCodeWritingStep(title).Should().Be(expected);
+    }
+
     [Fact]
     public void TruncateBuildResultForHandoff_ShortKeepsFull()
     {
@@ -231,6 +241,40 @@ public class EditAgentTests
         plan.IsCompleted.Should().BeFalse();
         plan.Steps.Should().ContainSingle()
             .Which.Status.Should().Be(AgentStepStatus.Pending);
+    }
+
+    [Fact]
+    public async Task ExecutePlanAsync_MultiStepPlan_DropsHandoffPrefixWhenFullHistoryExists()
+    {
+        var agent = new EditAgent(_apiService);
+        using var cts = new CancellationTokenSource();
+        cts.Cancel();
+
+        var contextManager = new ConversationContextManager();
+        contextManager.AddUserMessage("用户任务");
+        var context = new AgentContext
+        {
+            ContextManager = contextManager,
+            ForwardedMessages = new List<ChatApiMessage>
+            {
+                new() { Role = "system", Content = "compact handoff prefix" },
+            },
+            CancellationToken = cts.Token,
+        };
+
+        var plan = new AgentTaskPlan
+        {
+            Title = "Multi-step test",
+            Steps =
+            {
+                new AgentStep { Index = 1, Title = "步骤 1", Description = "第一项" },
+                new AgentStep { Index = 2, Title = "步骤 2", Description = "第二项" },
+            },
+        };
+
+        await agent.ExecutePlanAsync(plan, context);
+
+        context.ForwardedMessages.Should().BeNull();
     }
 
     [Fact]

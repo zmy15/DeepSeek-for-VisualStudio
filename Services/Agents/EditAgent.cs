@@ -339,6 +339,12 @@ namespace DeepSeek_v4_for_VisualStudio.Services.Agents
 
             // Handoff 快照只保护 Plan→Edit 的首次请求前缀。
             // 计划包含多个步骤时必须回到完整上下文，否则第 2 步起看不到第 1 步的工具历史。
+            if (plan.Steps.Count > 1
+                && context.ContextManager != null
+                && !context.ContextManager.IsEmpty)
+            {
+                context.ForwardedMessages = null;
+            }
             context.ContextManager?.ClearCacheSnapshot();
 
             // ═══════════════════════════════════════════════════════════════
@@ -2403,11 +2409,11 @@ namespace DeepSeek_v4_for_VisualStudio.Services.Agents
         /// <summary>
         /// 判断步骤是否为代码编写类。
         /// </summary>
-        private static bool IsCodeWritingStep(string stepTitle)
+        internal static bool IsCodeWritingStep(string stepTitle)
         {
             if (string.IsNullOrWhiteSpace(stepTitle)) return false;
 
-            var codeKeywords = new[] { "编写", "写", "修改", "创建", "添加", "生成", "实现",
+            var codeKeywords = new[] { "编写", "写", "修改", "创建", "添加", "新增", "引入", "补上", "生成", "实现",
                 "重构", "修复", "改代码", "改", "开发", "build", "write", "code", "implement",
                 "create", "add", "fix", "refactor", "modify", "change", "update" };
 
@@ -2415,7 +2421,7 @@ namespace DeepSeek_v4_for_VisualStudio.Services.Agents
                 stepTitle.IndexOf(k, StringComparison.OrdinalIgnoreCase) >= 0);
 
             var analysisKeywords = new[] { "确定", "分析", "查找", "了解", "理解", "定位",
-                "研究", "检查", "审查", "评估", "阅读", "查看", "review", "analyze",
+                "研究", "检查", "审查", "评估", "核对", "验证", "确认", "阅读", "查看", "review", "analyze",
                 "find", "check", "examine", "investigate", "understand", "identify" };
 
             bool isAnalysis = analysisKeywords.Any(k =>

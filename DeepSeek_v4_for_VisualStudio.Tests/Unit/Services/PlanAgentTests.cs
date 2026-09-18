@@ -82,6 +82,14 @@ public class PlanAgentTests
     }
 
     [Fact]
+    public void Definition_AllowedTools_IncludesSymbolSearch()
+    {
+        var agent = new PlanAgent(_apiService);
+
+        agent.Definition.AllowedTools.Should().Contain("symbol_search");
+    }
+
+    [Fact]
     public void Definition_AllowedTools_DoesNotContainModifyTools()
     {
         var agent = new PlanAgent(_apiService);
@@ -247,7 +255,7 @@ public class PlanAgentTests
     }
 
     [Fact]
-    public void ExtractDiscoveryContext_NoRunSubagentMessages_ReturnsEmpty()
+    public void ExtractDiscoveryContext_WithDirectReadMessages_ExtractsContent()
     {
         var messages = new List<ChatApiMessage>
         {
@@ -257,7 +265,39 @@ public class PlanAgentTests
 
         var result = ExtractDiscoveryContextFromMessagesPublic(messages);
 
-        result.Should().BeEmpty();
+        result.Should().Contain("read_file");
+        result.Should().Contain("file content");
+    }
+
+    [Fact]
+    public void HasReusableExplorationResults_WithThreeForwardedResults_ReturnsTrue()
+    {
+        var context = new AgentContext
+        {
+            ForwardedMessages = new List<ChatApiMessage>
+            {
+                new() { Role = "tool", Name = "read_file", Content = "file content" },
+                new() { Role = "tool", Name = "grep_search", Content = "grep result" },
+                new() { Role = "tool", Name = "symbol_search", Content = "symbol result" },
+            },
+        };
+
+        PlanAgent.HasReusableExplorationResults(context).Should().BeTrue();
+    }
+
+    [Fact]
+    public void HasReusableExplorationResults_WithTwoForwardedResults_ReturnsFalse()
+    {
+        var context = new AgentContext
+        {
+            ForwardedMessages = new List<ChatApiMessage>
+            {
+                new() { Role = "tool", Name = "read_file", Content = "file content" },
+                new() { Role = "tool", Name = "grep_search", Content = "grep result" },
+            },
+        };
+
+        PlanAgent.HasReusableExplorationResults(context).Should().BeFalse();
     }
 
     [Fact]
