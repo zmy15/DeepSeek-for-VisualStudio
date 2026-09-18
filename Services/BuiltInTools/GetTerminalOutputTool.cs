@@ -73,6 +73,17 @@ namespace DeepSeek_v4_for_VisualStudio.Services.BuiltInTools
                 {
                     bool isRunning = job.IsRunning;
                     int? exitCode = job.ExitCode;
+                    if (!isRunning)
+                    {
+                        try
+                        {
+                            await job.WaitForDetachedOutputAsync(CancellationToken).ConfigureAwait(false);
+                        }
+                        catch
+                        {
+                            // 输出泵异常时仍返回当前可见日志。
+                        }
+                    }
                     string output = job.ReadLogSnapshot();
                     var detachedOutput = new StringBuilder();
                     detachedOutput.AppendLine(isRunning

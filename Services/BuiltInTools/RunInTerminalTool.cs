@@ -1076,6 +1076,7 @@ namespace DeepSeek_v4_for_VisualStudio.Services.BuiltInTools
             private readonly TaskCompletionSource<TerminalProcessResult> _completion =
                 new(TaskCreationOptions.RunContinuationsAsynchronously);
             private readonly Process? _detachedProcess;
+            private readonly Task? _detachedOutputTask;
 
             public TerminalProcessJob(string id, string command)
             {
@@ -1088,13 +1089,15 @@ namespace DeepSeek_v4_for_VisualStudio.Services.BuiltInTools
                 string id,
                 string command,
                 Process detachedProcess,
-                string logPath)
+                string logPath,
+                Task? detachedOutputTask = null)
             {
                 Id = id;
                 Command = command;
                 StartedAt = DateTimeOffset.Now;
                 _detachedProcess = detachedProcess;
                 LogPath = logPath;
+                _detachedOutputTask = detachedOutputTask;
             }
 
             public string Id { get; }
@@ -1131,6 +1134,9 @@ namespace DeepSeek_v4_for_VisualStudio.Services.BuiltInTools
             public string ReadLogSnapshot()
                 => ReadDetachedLog(LogPath);
 
+            public Task WaitForDetachedOutputAsync(CancellationToken cancellationToken = default)
+                => _detachedOutputTask ?? Task.CompletedTask;
+
             public void DisposeDetachedProcess()
             {
                 try { _detachedProcess?.Dispose(); } catch { }
@@ -1160,37 +1166,90 @@ namespace DeepSeek_v4_for_VisualStudio.Services.BuiltInTools
 
             string logPath = Path.Combine(logDirectory, $"detached-{Guid.NewGuid():N}.log");
             string normalizedWorkingDirectory = workingDirectory.Replace("'", "''");
-            string normalizedLogPath = logPath.Replace("'", "''");
             string script =
+                PowerShellUtf8Prefix +
                 "$ErrorActionPreference = 'Continue'; " +
                 $"Set-Location -LiteralPath '{normalizedWorkingDirectory}'; " +
                 "& {\n" +
                 command +
-                $"\n}} *> '{normalizedLogPath}'";
+                "\n}";
             string encodedCommand = Convert.ToBase64String(Encoding.Unicode.GetBytes(script));
 
             var psi = new ProcessStartInfo
             {
                 FileName = "powershell.exe",
                 Arguments = $"-NoProfile -ExecutionPolicy Bypass -EncodedCommand {encodedCommand}",
-                UseShellExecute = true,
+                RedirectStandardOutput = true,
+                RedirectStandardError = true,
+                StandardOutputEncoding = Encoding.UTF8,
+                StandardErrorEncoding = Encoding.UTF8,
+                UseShellExecute = false,
                 CreateNoWindow = true,
                 WindowStyle = ProcessWindowStyle.Hidden,
                 WorkingDirectory = workingDirectory,
             };
 
+            File.WriteAllText(logPath, string.Empty, new UTF8Encoding(false));
             var process = Process.Start(psi);
             if (process == null)
                 return LocalizationService.Instance["tool.runTerminal.cannotStart"];
 
             string id = process.Id.ToString();
-            var job = new TerminalProcessJob(id, command, process, logPath);
+            var outputPump = PumpDetachedOutputAsync(process, logPath);
+            var job = new TerminalProcessJob(id, command, process, logPath, outputPump);
             AsyncJobs[id] = job;
 
             return warningPrefix
                 + LocalizationService.Instance.Format("tool.runTerminal.detachedStarted", id, logPath)
                 + "\n"
                 + LocalizationService.Instance["tool.runTerminal.detachedHint"];
+        }
+
+        private static async Task PumpDetachedOutputAsync(Process process, string logPath)
+        {
+            var gate = new SemaphoreSlim(1, 1);
+            try
+            {
+                using var stream = new FileStream(
+                    logPath,
+                    FileMode.Append,
+                    FileAccess.Write,
+                    FileShare.ReadWrite | FileShare.Delete);
+                using var writer = new StreamWriter(stream, new UTF8Encoding(false))
+                {
+                    AutoFlush = true,
+                };
+
+                async Task PumpAsync(StreamReader reader)
+                {
+                    string? line;
+                    while ((line = await reader.ReadLineAsync().ConfigureAwait(false)) != null)
+                    {
+                        await gate.WaitAsync().ConfigureAwait(false);
+                        try
+                        {
+                            await writer.WriteLineAsync(line).ConfigureAwait(false);
+                            await writer.FlushAsync().ConfigureAwait(false);
+                        }
+                        finally
+                        {
+                            gate.Release();
+                        }
+                    }
+                }
+
+                await Task.WhenAll(
+                    PumpAsync(process.StandardOutput),
+                    PumpAsync(process.StandardError)).ConfigureAwait(false);
+            }
+            catch
+            {
+                // 输出泵失败不应影响后台进程本身；读取方会在进程结束后自行结束。
+            }
+            finally
+            {
+                gate.Dispose();
+            }
         }
 
         internal static string ReadDetachedLog(string? logPath)
