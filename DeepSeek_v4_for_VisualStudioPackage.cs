@@ -691,6 +691,6 @@ namespace DeepSeek_v4_for_VisualStudio
     {
         public const string Name = "DeepSeek Chat for Visual Studio";
         public const string Description = "DeepSeek AI chat integration for Visual Studio 2022 and 2026.";
-        public const string Version = "1.2.1";
+        public const string Version = "1.2.2";
     }
 }
