@@ -61,23 +61,69 @@ public class LocalizedPropertyGridRefreshTests
     }
 
     [Fact]
-    public void Refresh_ClearsMemberDescriptorDescriptionCache()
+    public void ApprovalModeCategory_SwitchesWithLanguage_EvenForCachedDescriptor()
+    {
+        var localization = LocalizationService.Instance;
+        string originalLanguage = localization.CurrentLanguage;
+
+        try
+        {
+            // 触发 DeepSeekOptionsPage 的静态构造，注册语言变更后的属性网格刷新
+            RuntimeHelpers.RunClassConstructor(typeof(DeepSeekOptionsPage).TypeHandle);
+
+            var descriptor = TypeDescriptor
+                .GetProperties(typeof(DeepSeekOptionsPage))[nameof(DeepSeekOptionsPage.ApprovalMode)];
+            descriptor.Should().NotBeNull();
+
+            // 先以中文读取一次，制造 MemberDescriptor 内部的分组标题缓存
+            localization.SetLanguage("zh-CN");
+            string chinese = descriptor!.Category;
+            chinese.Should().Be(localization["settings.category.approval"]);
+
+            // 切换到英文后，同一个描述符必须返回英文分组标题（修复前仍显示中文）
+            localization.SetLanguage("en");
+            string english = descriptor.Category;
+            english.Should().Be(localization["settings.category.approval"]);
+            english.Should().NotBe(chinese);
+
+            // 再切回中文，确认双向切换都生效
+            localization.SetLanguage("zh-CN");
+            descriptor.Category.Should().Be(chinese);
+        }
+        finally
+        {
+            localization.SetLanguage(originalLanguage);
+        }
+    }
+
+    [Fact]
+    public void Refresh_ClearsMemberDescriptorLocalizedCaches()
     {
         var descriptor = TypeDescriptor
             .GetProperties(typeof(DeepSeekOptionsPage))[nameof(DeepSeekOptionsPage.ApprovalMode)]!;
+        descriptor.Category.Should().NotBeNullOrEmpty();
         descriptor.Description.Should().NotBeNullOrEmpty();
 
-        var cacheFields = typeof(MemberDescriptor)
+        var categoryCacheFields = typeof(MemberDescriptor)
+            .GetFields(CacheFieldFlags)
+            .Where(field =>
+                field.FieldType == typeof(string)
+                && field.Name.IndexOf("category", StringComparison.OrdinalIgnoreCase) >= 0)
+            .ToArray();
+        var descriptionCacheFields = typeof(MemberDescriptor)
             .GetFields(CacheFieldFlags)
             .Where(field =>
                 field.FieldType == typeof(string)
                 && field.Name.IndexOf("description", StringComparison.OrdinalIgnoreCase) >= 0)
             .ToArray();
-        cacheFields.Should().NotBeEmpty();
-        cacheFields.Should().OnlyContain(field => field.GetValue(descriptor) != null);
+        categoryCacheFields.Should().NotBeEmpty();
+        descriptionCacheFields.Should().NotBeEmpty();
+        categoryCacheFields.Should().OnlyContain(field => field.GetValue(descriptor) != null);
+        descriptionCacheFields.Should().OnlyContain(field => field.GetValue(descriptor) != null);
 
         LocalizedPropertyGridRefresh.Refresh(typeof(DeepSeekOptionsPage));
 
-        cacheFields.Should().OnlyContain(field => field.GetValue(descriptor) == null);
+        categoryCacheFields.Should().OnlyContain(field => field.GetValue(descriptor) == null);
+        descriptionCacheFields.Should().OnlyContain(field => field.GetValue(descriptor) == null);
     }
 }
