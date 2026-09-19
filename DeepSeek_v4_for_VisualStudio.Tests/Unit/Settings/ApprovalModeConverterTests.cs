@@ -21,6 +21,25 @@ public class ApprovalModeConverterTests
     }
 
     [Fact]
+    public void PropertyGridConversion_KeepsLocalizedStandardValuesDistinct()
+    {
+        var converter = new ApprovalModeConverter();
+        var values = converter.GetStandardValues(null)!.Cast<string>().ToArray();
+
+        var displayValues = values
+            .Select(value => converter.ConvertTo(
+                null,
+                CultureInfo.CurrentCulture,
+                value,
+                typeof(string)))
+            .Cast<string>()
+            .ToArray();
+
+        displayValues.Should().Equal(values);
+        displayValues.Should().OnlyHaveUniqueItems();
+    }
+
+    [Fact]
     public void Convert_RoundTripsStoredAndLocalizedValues()
     {
         var converter = new ApprovalModeConverter();
