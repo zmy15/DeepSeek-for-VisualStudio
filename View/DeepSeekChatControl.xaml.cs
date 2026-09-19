@@ -341,6 +341,10 @@ namespace DeepSeek_v4_for_VisualStudio.View
         private System.Windows.Threading.DispatcherTimer? _balanceTimer;
         private BalanceResponse? _lastBalance;
 
+        // ── 当前计价时段徽标 ──
+        private System.Windows.Threading.DispatcherTimer? _pricingPeriodTimer;
+        private bool? _lastPricingPeriodIsPeak;
+
         // ── 单次对话耗时 ──
         private readonly Stopwatch _conversationStopwatch = Stopwatch.StartNew();
         private System.Windows.Threading.DispatcherTimer? _conversationElapsedTimer;
@@ -494,6 +498,7 @@ namespace DeepSeek_v4_for_VisualStudio.View
             UpdateInputPlaceholder();
             UpdateAllTooltips();
             UpdateUiLabels();
+            StartPricingPeriodTimer();
             LocalizationService.Instance.LanguageChanged += (_, _) =>
             {
                 Dispatcher.Invoke(() =>
@@ -861,6 +866,73 @@ namespace DeepSeek_v4_for_VisualStudio.View
             => _apiService != null && IsOfficialSource;
 
         /// <summary>
+        /// 启动计价时段徽标定时器。每 30 秒校准一次，确保跨入高峰/空闲边界后及时更新。
+        /// </summary>
+        private void StartPricingPeriodTimer()
+        {
+            if (_pricingPeriodTimer != null)
+                return;
+
+            _pricingPeriodTimer = new System.Windows.Threading.DispatcherTimer
+            {
+                Interval = TimeSpan.FromSeconds(30)
+            };
+            _pricingPeriodTimer.Tick += (_, _) => UpdatePricingPeriodBadge();
+            _pricingPeriodTimer.Start();
+            UpdatePricingPeriodBadge();
+        }
+
+        private void StopPricingPeriodTimer()
+        {
+            _pricingPeriodTimer?.Stop();
+            _pricingPeriodTimer = null;
+        }
+
+        /// <summary>
+        /// 更新状态行中的当前计价时段徽标。仅 DeepSeek 官方来源显示。
+        /// </summary>
+        private void UpdatePricingPeriodBadge()
+        {
+            if (PricingPeriodBadge == null || PricingPeriodText == null)
+                return;
+
+            if (!Dispatcher.CheckAccess())
+            {
+                Dispatcher.Invoke(UpdatePricingPeriodBadge);
+                return;
+            }
+
+            if (!IsOfficialSource)
+            {
+                PricingPeriodBadge.Visibility = Visibility.Collapsed;
+                _lastPricingPeriodIsPeak = null;
+                return;
+            }
+
+            bool isPeak = DeepSeekProvider.IsBeijingPeakTime();
+            var localization = LocalizationService.Instance;
+
+            PricingPeriodBadge.Visibility = Visibility.Visible;
+            PricingPeriodText.Text = isPeak
+                ? localization["status.pricingPeriod.peak"]
+                : localization["status.pricingPeriod.offPeak"];
+            PricingPeriodBadge.ToolTip = localization["status.pricingPeriod.tooltip"];
+
+            if (_lastPricingPeriodIsPeak == isPeak)
+                return;
+
+            _lastPricingPeriodIsPeak = isPeak;
+            PricingPeriodBadge.Background = new System.Windows.Media.SolidColorBrush(
+                isPeak
+                    ? System.Windows.Media.Color.FromRgb(0x7A, 0x3B, 0x12)
+                    : System.Windows.Media.Color.FromRgb(0x1B, 0x55, 0x38));
+            PricingPeriodBadge.BorderBrush = new System.Windows.Media.SolidColorBrush(
+                isPeak
+                    ? System.Windows.Media.Color.FromRgb(0xD0, 0x8A, 0x3C)
+                    : System.Windows.Media.Color.FromRgb(0x3F, 0xA6, 0x6B));
+        }
+
+        /// <summary>
         /// 启动余额查询定时器，每 60 秒自动刷新一次。
         /// </summary>
         private void StartBalanceTimer()
@@ -1074,7 +1146,7 @@ namespace DeepSeek_v4_for_VisualStudio.View
         /// 包含：API 实际 Token 消耗 + 费用估算 + 上下文窗口利用率。
         /// 费用基于 DeepSeek 官方定价，按"国内/国际 × 模型（Flash/Pro）× 时段"分档
         /// （国内 ¥ 价目 / 国际 $ 价目，高峰时段为北京时间周一至周五 9:00-12:00、14:00-18:00，
-        /// 周六、周日全天为空闲时段，详见 DeepSeekProvider.GetPricing）。
+        /// 周末及中国法定节假日（含调休）全天为空闲时段，详见 DeepSeekProvider.GetPricing）。
         /// 币种由余额 API 返回值自动判定（CNY→国内价，USD→国际价），首次查询前默认国内价。
         /// 费用在每次 API 调用时按"当时点的时段"双币种累计
         /// （见 OpenAiCompatibleProvider.AccumulateStats），跨高峰/空闲的会话自动分档计价。
@@ -1339,6 +1411,7 @@ namespace DeepSeek_v4_for_VisualStudio.View
             CancelStreaming();
             DisposeStreamingCts();
             StopBalanceTimer();
+            StopPricingPeriodTimer();
             StopConversationElapsedTimer();
             _conversationElapsedTimer = null;
             SubscribeApiRequestCompletion(null);
@@ -1520,6 +1593,9 @@ namespace DeepSeek_v4_for_VisualStudio.View
                 if (ApprovalModeLabel != null)
                     ApprovalModeLabel.Text = L["chat.approvalModeLabel"];
                 RefreshApprovalModeComboBox();
+
+                // ── 当前计价时段徽标 ──
+                UpdatePricingPeriodBadge();
             }
             catch (Exception ex)
             {
@@ -1727,6 +1803,8 @@ namespace DeepSeek_v4_for_VisualStudio.View
                     ? System.Windows.Visibility.Visible
                     : System.Windows.Visibility.Collapsed;
             }
+
+            UpdatePricingPeriodBadge();
 
             if (!IsOfficialSource)
             {

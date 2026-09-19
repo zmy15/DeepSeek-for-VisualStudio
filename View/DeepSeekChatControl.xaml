@@ -443,6 +443,7 @@
                     <ColumnDefinition Width="*"/>
                     <ColumnDefinition Width="Auto"/>
                     <ColumnDefinition Width="Auto"/>
+                    <ColumnDefinition Width="Auto"/>
                 </Grid.ColumnDefinitions>
                 <TextBlock x:Name="StatusLabel"
                            Grid.Column="0"
@@ -451,8 +452,26 @@
                            VerticalAlignment="Center"
                            TextWrapping="Wrap"
                            TextTrimming="CharacterEllipsis" />
+                <Border x:Name="PricingPeriodBadge"
+                        Grid.Column="1"
+                        Margin="12,0,0,0"
+                        MinHeight="18"
+                        CornerRadius="3"
+                        Background="#1B5538"
+                        BorderBrush="#3FA66B"
+                        BorderThickness="1"
+                        VerticalAlignment="Center"
+                        Visibility="Collapsed">
+                    <TextBlock x:Name="PricingPeriodText"
+                               FontSize="10"
+                               FontWeight="Bold"
+                               Foreground="White"
+                               HorizontalAlignment="Center"
+                               VerticalAlignment="Center"
+                               Padding="8,0" />
+                </Border>
                 <TextBlock x:Name="ConversationElapsedLabel"
-                           Grid.Column="1"
+                           Grid.Column="2"
                            Margin="12,0,0,0"
                            FontSize="11"
                            Foreground="#888888"
@@ -460,7 +479,7 @@
                            TextTrimming="CharacterEllipsis"
                            Visibility="Collapsed" />
                 <Border x:Name="AgentModeBadge"
-                        Grid.Column="2"
+                        Grid.Column="3"
                         HorizontalAlignment="Right"
                         VerticalAlignment="Center"
                         MinWidth="60" Height="18"
