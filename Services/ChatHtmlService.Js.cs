@@ -176,24 +176,38 @@ document.addEventListener('wheel',function(e){
         }
 
         /// <summary>
-        /// 阻止 WebView2 页面处理 F5，并把普通 F5 转发给 Visual Studio 宿主。
-        /// 聊天窗口获得焦点时，F5 应触发调试而不是刷新页面。
+        /// 阻止 WebView2 页面处理 F5/F7，并把对应快捷键转发给 Visual Studio 宿主。
+        /// F5：开始/继续调试；F7：查看代码；Shift+F7：查看设计器。
         /// </summary>
-        private static string BuildDisableF5RefreshJs()
+        private static string BuildVsShortcutForwardingJs()
         {
             return @"
 document.addEventListener('keydown',function(e){
-    if(e.key==='F5'||e.code==='F5'){
-        e.preventDefault();
-        e.stopPropagation();
+    var isF5=e.key==='F5'||e.code==='F5';
+    var isF7=e.key==='F7'||e.code==='F7';
+    if(!isF5&&!isF7)return;
+
+    e.preventDefault();
+    e.stopPropagation();
+    if(e.repeat)return;
+
+    if(isF5){
         var plain=!e.ctrlKey&&!e.altKey&&!e.shiftKey&&!e.metaKey;
-        if(!plain||e.repeat)return;
+        if(!plain)return;
         try{
             if(window.chrome&&window.chrome.webview&&window.chrome.webview.postMessage){
                 window.chrome.webview.postMessage(JSON.stringify({type:'debugShortcut'}));
             }
         }catch(_){}
+        return;
     }
+
+    if(e.ctrlKey||e.altKey||e.metaKey)return;
+    try{
+        if(window.chrome&&window.chrome.webview&&window.chrome.webview.postMessage){
+            window.chrome.webview.postMessage(JSON.stringify({type:'viewCodeShortcut',designer:e.shiftKey}));
+        }
+    }catch(_){}
 },true);";
         }
 

@@ -1228,7 +1228,7 @@ return "<!DOCTYPE html><html lang='" + htmlLang + "'><head><meta charset='UTF-8'
        BuildContextDebugLabelsJs() +
        BuildDecorateCodeBlocksJsFunction() +
        BuildShiftScrollJs() +
-       BuildDisableF5RefreshJs() +
+       BuildVsShortcutForwardingJs() +
        autoScrollJs +
        BuildAppendMessageJsFunction() +
        BuildRetryEditJsFunctions() +

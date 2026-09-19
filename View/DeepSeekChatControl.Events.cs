@@ -2240,6 +2240,12 @@ namespace DeepSeek_v4_for_VisualStudio.View
                     {
                         TriggerDebugShortcut();
                     }
+                    else if (type == "viewCodeShortcut")
+                    {
+                        bool showDesigner = obj.TryGetProperty("designer", out var designerProp)
+                            && designerProp.GetBoolean();
+                        TriggerViewCodeShortcut(showDesigner);
+                    }
                     else if (type == "applyCode")
                     {
                         string code = obj.TryGetProperty("code", out var codeProp)

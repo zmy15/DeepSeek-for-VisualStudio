@@ -106,8 +106,9 @@ namespace DeepSeek_v4_for_VisualStudio.View
         private BaseAgent? _activeAgent;
         private AgentTaskPlan? _activePlan;
         private CancellationTokenSource? _currentStreamingCts;
-        private static readonly long DebugShortcutDedupTicks = Math.Max(1L, Stopwatch.Frequency / 3);
+        private static readonly long IdeShortcutDedupTicks = Math.Max(1L, Stopwatch.Frequency / 3);
         private long _lastDebugShortcutTimestamp;
+        private long _lastViewCodeShortcutTimestamp;
 
         /// <summary>
         /// 线程安全地创建新的流式 CTS（先取消并释放旧的）。
@@ -624,22 +625,34 @@ namespace DeepSeek_v4_for_VisualStudio.View
         }
 
         /// <summary>
-        /// 仅在 WebView2 获得键盘焦点时阻止 F5 刷新页面，并转发普通 F5 到 Visual Studio。
+        /// 仅在 WebView2 获得键盘焦点时拦截并转发 F5/F7 到 Visual Studio。
         /// 页面底部还会注册 JavaScript 捕获器，覆盖 Chromium 直接处理快捷键的场景。
         /// </summary>
         private void ChatWebView_PreviewKeyDown(object sender, KeyEventArgs e)
         {
-            if (e.Key != Key.F5 && e.SystemKey != Key.F5)
+            bool isF5 = e.Key == Key.F5 || e.SystemKey == Key.F5;
+            bool isF7 = e.Key == Key.F7 || e.SystemKey == Key.F7;
+            if (!isF5 && !isF7)
                 return;
 
             e.Handled = true;
             if (e.IsRepeat)
                 return;
 
-            if ((Keyboard.Modifiers & (ModifierKeys.Control | ModifierKeys.Alt | ModifierKeys.Shift)) != 0)
+            ModifierKeys modifiers = Keyboard.Modifiers;
+            if (isF5)
+            {
+                if ((modifiers & (ModifierKeys.Control | ModifierKeys.Alt | ModifierKeys.Shift)) != 0)
+                    return;
+
+                TriggerDebugShortcut();
+                return;
+            }
+
+            if ((modifiers & (ModifierKeys.Control | ModifierKeys.Alt)) != 0)
                 return;
 
-            TriggerDebugShortcut();
+            TriggerViewCodeShortcut((modifiers & ModifierKeys.Shift) != 0);
         }
 
         /// <summary>
@@ -648,21 +661,32 @@ namespace DeepSeek_v4_for_VisualStudio.View
         /// </summary>
         private void TriggerDebugShortcut()
         {
-            if (!TryBeginDebugShortcut())
+            if (!TryBeginIdeShortcut(ref _lastDebugShortcutTimestamp))
                 return;
 
             _ = ExecuteDebugShortcutAsync();
         }
 
-        private bool TryBeginDebugShortcut()
+        /// <summary>
+        /// F7：查看代码；Shift+F7：查看设计器。与 F5 使用独立去重时间戳。
+        /// </summary>
+        private void TriggerViewCodeShortcut(bool showDesigner)
+        {
+            if (!TryBeginIdeShortcut(ref _lastViewCodeShortcutTimestamp))
+                return;
+
+            _ = ExecuteViewCodeShortcutAsync(showDesigner);
+        }
+
+        private static bool TryBeginIdeShortcut(ref long lastTimestamp)
         {
             long now = Stopwatch.GetTimestamp();
-            long previous = Interlocked.Read(ref _lastDebugShortcutTimestamp);
-            if (previous != 0 && now - previous < DebugShortcutDedupTicks)
+            long previous = Interlocked.Read(ref lastTimestamp);
+            if (previous != 0 && now - previous < IdeShortcutDedupTicks)
                 return false;
 
             return Interlocked.CompareExchange(
-                ref _lastDebugShortcutTimestamp, now, previous) == previous;
+                ref lastTimestamp, now, previous) == previous;
         }
 
         /// <summary>
@@ -701,6 +725,33 @@ namespace DeepSeek_v4_for_VisualStudio.View
             catch (Exception ex)
             {
                 Logger.Warn($"[DebugShortcut] 触发调试失败: {ex.Message}");
+            }
+        }
+
+        /// <summary>
+        /// 按 Visual Studio 默认语义模拟 F7/Shift+F7，转发 View.ViewCode/View.ViewDesigner 命令。
+        /// </summary>
+        private async Task ExecuteViewCodeShortcutAsync(bool showDesigner)
+        {
+            try
+            {
+                await ThreadHelper.JoinableTaskFactory.SwitchToMainThreadAsync();
+
+                var dte = (EnvDTE.DTE?)Microsoft.VisualStudio.Shell.Package
+                    .GetGlobalService(typeof(EnvDTE.DTE));
+                if (dte == null)
+                {
+                    Logger.Warn("[ViewCodeShortcut] EnvDTE 不可用，无法切换代码/设计器视图");
+                    return;
+                }
+
+                string command = showDesigner ? "View.ViewDesigner" : "View.ViewCode";
+                Logger.Info($"[ViewCodeShortcut] 执行 {command}");
+                dte.ExecuteCommand(command);
+            }
+            catch (Exception ex)
+            {
+                Logger.Warn($"[ViewCodeShortcut] 执行失败: {ex.Message}");
             }
         }
 
