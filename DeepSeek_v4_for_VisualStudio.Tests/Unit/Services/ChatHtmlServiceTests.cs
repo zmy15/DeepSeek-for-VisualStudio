@@ -145,6 +145,18 @@ public class ChatHtmlServiceTests
         branchNavIdx.Should().BeGreaterThan(actionsRowIdx);
     }
 
+    [Fact]
+    public void BuildInitialPage_RegistersF5RefreshGuardAndDebugForwarding()
+    {
+        string html = ChatHtmlService.BuildInitialPage(new List<ChatMessage>());
+
+        html.Should().Contain("e.key==='F5'||e.code==='F5'");
+        html.Should().Contain("e.preventDefault();");
+        html.Should().Contain("e.stopPropagation();");
+        html.Should().Contain("type:'debugShortcut'");
+        html.Should().Contain("!plain||e.repeat");
+    }
+
     private static int CountOccurrences(string haystack, string needle)
     {
         int count = 0;

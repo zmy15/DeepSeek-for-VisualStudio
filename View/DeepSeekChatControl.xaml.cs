@@ -106,6 +106,8 @@ namespace DeepSeek_v4_for_VisualStudio.View
         private BaseAgent? _activeAgent;
         private AgentTaskPlan? _activePlan;
         private CancellationTokenSource? _currentStreamingCts;
+        private static readonly long DebugShortcutDedupTicks = Math.Max(1L, Stopwatch.Frequency / 3);
+        private long _lastDebugShortcutTimestamp;
 
         /// <summary>
         /// 线程安全地创建新的流式 CTS（先取消并释放旧的）。
@@ -607,6 +609,10 @@ namespace DeepSeek_v4_for_VisualStudio.View
                 // ── 3. 订阅初始化完成事件（原在构造函数中直接订阅 ChatWebView）──
                 ChatWebView.CoreWebView2InitializationCompleted += ChatWebView_CoreWebView2InitializationCompleted;
 
+                // ── 4. 拦截 WebView2 的 F5，避免聊天页面刷新和状态重置 ──
+                ChatWebView.PreviewKeyDown += ChatWebView_PreviewKeyDown;
+                ChatWebView.KeyDown += ChatWebView_PreviewKeyDown;
+
                 Logger.Info("[ChatWebView] WebView2 control created and placed in ChatWebViewHost");
             }
             catch (Exception ex)
@@ -614,6 +620,87 @@ namespace DeepSeek_v4_for_VisualStudio.View
                 Logger.Error($"[ChatWebView] Failed to create WebView2 control: {ex.GetType().Name}: {ex.Message}", ex);
                 StatusLabel.Text = $"WebView2 initialization failed: {ex.Message}";
                 // 不抛出异常，允许工具窗口打开但不含 WebView2（用户将看到错误提示）
+            }
+        }
+
+        /// <summary>
+        /// 仅在 WebView2 获得键盘焦点时阻止 F5 刷新页面，并转发普通 F5 到 Visual Studio。
+        /// 页面底部还会注册 JavaScript 捕获器，覆盖 Chromium 直接处理快捷键的场景。
+        /// </summary>
+        private void ChatWebView_PreviewKeyDown(object sender, KeyEventArgs e)
+        {
+            if (e.Key != Key.F5 && e.SystemKey != Key.F5)
+                return;
+
+            e.Handled = true;
+            if (e.IsRepeat)
+                return;
+
+            if ((Keyboard.Modifiers & (ModifierKeys.Control | ModifierKeys.Alt | ModifierKeys.Shift)) != 0)
+                return;
+
+            TriggerDebugShortcut();
+        }
+
+        /// <summary>
+        /// WebView2 的 JavaScript 与 WPF 键盘事件可能同时上报一次 F5，
+        /// 使用短时间窗口去重，避免启动或继续调试被执行两次。
+        /// </summary>
+        private void TriggerDebugShortcut()
+        {
+            if (!TryBeginDebugShortcut())
+                return;
+
+            _ = ExecuteDebugShortcutAsync();
+        }
+
+        private bool TryBeginDebugShortcut()
+        {
+            long now = Stopwatch.GetTimestamp();
+            long previous = Interlocked.Read(ref _lastDebugShortcutTimestamp);
+            if (previous != 0 && now - previous < DebugShortcutDedupTicks)
+                return false;
+
+            return Interlocked.CompareExchange(
+                ref _lastDebugShortcutTimestamp, now, previous) == previous;
+        }
+
+        /// <summary>
+        /// 按 Visual Studio 当前调试状态模拟普通 F5：设计模式开始调试，中断模式继续调试。
+        /// </summary>
+        private async Task ExecuteDebugShortcutAsync()
+        {
+            try
+            {
+                await ThreadHelper.JoinableTaskFactory.SwitchToMainThreadAsync();
+
+                var dte = (EnvDTE.DTE?)Microsoft.VisualStudio.Shell.Package
+                    .GetGlobalService(typeof(EnvDTE.DTE));
+                if (dte == null)
+                {
+                    Logger.Warn("[DebugShortcut] EnvDTE 不可用，无法触发调试");
+                    return;
+                }
+
+                EnvDTE.dbgDebugMode mode = dte.Debugger.CurrentMode;
+                if (mode == EnvDTE.dbgDebugMode.dbgBreakMode)
+                {
+                    Logger.Info("[DebugShortcut] F5：继续调试");
+                    dte.ExecuteCommand("Debug.Continue");
+                }
+                else if (mode == EnvDTE.dbgDebugMode.dbgDesignMode)
+                {
+                    Logger.Info("[DebugShortcut] F5：开始调试");
+                    dte.ExecuteCommand("Debug.Start");
+                }
+                else
+                {
+                    Logger.Info($"[DebugShortcut] F5 已忽略，当前调试状态: {mode}");
+                }
+            }
+            catch (Exception ex)
+            {
+                Logger.Warn($"[DebugShortcut] 触发调试失败: {ex.Message}");
             }
         }
 

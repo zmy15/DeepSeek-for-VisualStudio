@@ -2236,7 +2236,11 @@ namespace DeepSeek_v4_for_VisualStudio.View
                 {
                     string type = typeProp.GetString() ?? string.Empty;
 
-                    if (type == "applyCode")
+                    if (type == "debugShortcut")
+                    {
+                        TriggerDebugShortcut();
+                    }
+                    else if (type == "applyCode")
                     {
                         string code = obj.TryGetProperty("code", out var codeProp)
                             ? codeProp.GetString() ?? string.Empty : string.Empty;

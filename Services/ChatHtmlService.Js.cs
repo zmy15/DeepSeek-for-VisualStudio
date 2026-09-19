@@ -176,6 +176,28 @@ document.addEventListener('wheel',function(e){
         }
 
         /// <summary>
+        /// 阻止 WebView2 页面处理 F5，并把普通 F5 转发给 Visual Studio 宿主。
+        /// 聊天窗口获得焦点时，F5 应触发调试而不是刷新页面。
+        /// </summary>
+        private static string BuildDisableF5RefreshJs()
+        {
+            return @"
+document.addEventListener('keydown',function(e){
+    if(e.key==='F5'||e.code==='F5'){
+        e.preventDefault();
+        e.stopPropagation();
+        var plain=!e.ctrlKey&&!e.altKey&&!e.shiftKey&&!e.metaKey;
+        if(!plain||e.repeat)return;
+        try{
+            if(window.chrome&&window.chrome.webview&&window.chrome.webview.postMessage){
+                window.chrome.webview.postMessage(JSON.stringify({type:'debugShortcut'}));
+            }
+        }catch(_){}
+    }
+},true);";
+        }
+
+        /// <summary>
         /// KaTeX 数学公式渲染函数。
         /// Markdig 的 UseMathematics() 将 $...$ / $$...$$ 转换为
         /// &lt;span class="math"&gt;\(...\)&lt;/span&gt; 和 &lt;div class="math"&gt;\[...\]&lt;/div&gt;。
