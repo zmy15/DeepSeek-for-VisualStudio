@@ -1,10 +1,13 @@
-﻿name: Cleanup Merged Branches
+name: Cleanup Merged Branches
 
 # 自动清理已合并到 master/dev 的远程分支：
 # 1) PR 合并后即时删除源分支（覆盖 squash/rebase 合并场景）
-# 2) 每周定时兜底扫描（覆盖本地 merge 后直接 push 等非 PR 合并场景）
-# 3) 支持手动触发
+# 2) master/dev 更新后即时兜底扫描（覆盖本地 merge 后直接 push 等非 PR 合并场景）
+# 3) 每周定时扫描 + 支持手动触发
 on:
+  # master/dev 每次更新后立即扫描一次，避免历史已合并分支只能等到周末清理。
+  push:
+    branches: [ master, dev ]
   pull_request:
     types: [ closed ]
   schedule:
@@ -55,9 +58,9 @@ jobs:
               console.log(`删除 ${branch} 失败（忽略）：${err.message}`);
             }
 
-  # ── 2) 定时/手动兜底：扫描删除所有已合并分支 ────────────────
+  # ── 2) push/定时/手动兜底：扫描删除所有已合并分支 ──────────
   cleanup-scheduled:
-    if: github.event_name == 'schedule' || github.event_name == 'workflow_dispatch'
+    if: github.event_name == 'push' || github.event_name == 'schedule' || github.event_name == 'workflow_dispatch'
     runs-on: ubuntu-latest
     concurrency:
       group: cleanup-merged-branches

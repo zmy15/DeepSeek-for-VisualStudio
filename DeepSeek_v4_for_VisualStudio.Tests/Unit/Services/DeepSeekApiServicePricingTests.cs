@@ -37,9 +37,17 @@ public class DeepSeekApiServicePricingTests
     [InlineData(2026, 9, 7, 6, 0, true)]    // 周一 北京 14:00，高峰
     [InlineData(2026, 9, 7, 9, 59, true)]   // 周一 北京 17:59，高峰
     [InlineData(2026, 9, 7, 10, 0, false)]  // 周一 北京 18:00，空闲
+    [InlineData(2026, 1, 2, 2, 0, false)]   // 2026 元旦调休周五 北京 10:00，空闲
+    [InlineData(2026, 2, 16, 2, 0, false)]  // 2026 春节假期周一 北京 10:00，空闲
+    [InlineData(2026, 5, 4, 2, 0, false)]   // 2026 劳动节假期周一 北京 10:00，空闲
+    [InlineData(2026, 4, 6, 2, 0, false)]   // 2026 清明假期周一 北京 10:00，空闲
+    [InlineData(2026, 6, 19, 2, 0, false)]  // 2026 端午假期周五 北京 10:00，空闲
+    [InlineData(2026, 9, 25, 2, 0, false)]  // 2026 中秋假期周五 北京 10:00，空闲
+    [InlineData(2026, 10, 5, 2, 0, false)]  // 2026 国庆假期周一 北京 10:00，空闲
+    [InlineData(2026, 10, 8, 2, 0, true)]   // 国庆假期结束后的周四 北京 10:00，高峰
     [InlineData(2026, 9, 12, 4, 0, false)]  // 周六 北京 12:00，全天空闲
     [InlineData(2026, 9, 13, 6, 0, false)]  // 周日 北京 14:00，全天空闲
-    public void IsBeijingPeakTime_UsesWeekdayScheduleAndWeekendOffPeak(
+    public void IsBeijingPeakTime_UsesWeekdayScheduleAndChinaHolidayCalendar(
         int year,
         int month,
         int day,

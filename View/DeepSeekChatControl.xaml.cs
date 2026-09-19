@@ -106,6 +106,9 @@ namespace DeepSeek_v4_for_VisualStudio.View
         private BaseAgent? _activeAgent;
         private AgentTaskPlan? _activePlan;
         private CancellationTokenSource? _currentStreamingCts;
+        private static readonly long IdeShortcutDedupTicks = Math.Max(1L, Stopwatch.Frequency / 3);
+        private long _lastDebugShortcutTimestamp;
+        private long _lastViewCodeShortcutTimestamp;
 
         /// <summary>
         /// 线程安全地创建新的流式 CTS（先取消并释放旧的）。
@@ -338,6 +341,10 @@ namespace DeepSeek_v4_for_VisualStudio.View
         private System.Windows.Threading.DispatcherTimer? _balanceTimer;
         private BalanceResponse? _lastBalance;
 
+        // ── 当前计价时段徽标 ──
+        private System.Windows.Threading.DispatcherTimer? _pricingPeriodTimer;
+        private bool? _lastPricingPeriodIsPeak;
+
         // ── 单次对话耗时 ──
         private readonly Stopwatch _conversationStopwatch = Stopwatch.StartNew();
         private System.Windows.Threading.DispatcherTimer? _conversationElapsedTimer;
@@ -491,6 +498,7 @@ namespace DeepSeek_v4_for_VisualStudio.View
             UpdateInputPlaceholder();
             UpdateAllTooltips();
             UpdateUiLabels();
+            StartPricingPeriodTimer();
             LocalizationService.Instance.LanguageChanged += (_, _) =>
             {
                 Dispatcher.Invoke(() =>
@@ -607,6 +615,10 @@ namespace DeepSeek_v4_for_VisualStudio.View
                 // ── 3. 订阅初始化完成事件（原在构造函数中直接订阅 ChatWebView）──
                 ChatWebView.CoreWebView2InitializationCompleted += ChatWebView_CoreWebView2InitializationCompleted;
 
+                // ── 4. 拦截 WebView2 的 F5，避免聊天页面刷新和状态重置 ──
+                ChatWebView.PreviewKeyDown += ChatWebView_PreviewKeyDown;
+                ChatWebView.KeyDown += ChatWebView_PreviewKeyDown;
+
                 Logger.Info("[ChatWebView] WebView2 control created and placed in ChatWebViewHost");
             }
             catch (Exception ex)
@@ -614,6 +626,137 @@ namespace DeepSeek_v4_for_VisualStudio.View
                 Logger.Error($"[ChatWebView] Failed to create WebView2 control: {ex.GetType().Name}: {ex.Message}", ex);
                 StatusLabel.Text = $"WebView2 initialization failed: {ex.Message}";
                 // 不抛出异常，允许工具窗口打开但不含 WebView2（用户将看到错误提示）
+            }
+        }
+
+        /// <summary>
+        /// 仅在 WebView2 获得键盘焦点时拦截并转发 F5/F7 到 Visual Studio。
+        /// 页面底部还会注册 JavaScript 捕获器，覆盖 Chromium 直接处理快捷键的场景。
+        /// </summary>
+        private void ChatWebView_PreviewKeyDown(object sender, KeyEventArgs e)
+        {
+            bool isF5 = e.Key == Key.F5 || e.SystemKey == Key.F5;
+            bool isF7 = e.Key == Key.F7 || e.SystemKey == Key.F7;
+            if (!isF5 && !isF7)
+                return;
+
+            e.Handled = true;
+            if (e.IsRepeat)
+                return;
+
+            ModifierKeys modifiers = Keyboard.Modifiers;
+            if (isF5)
+            {
+                if ((modifiers & (ModifierKeys.Control | ModifierKeys.Alt | ModifierKeys.Shift)) != 0)
+                    return;
+
+                TriggerDebugShortcut();
+                return;
+            }
+
+            if ((modifiers & (ModifierKeys.Control | ModifierKeys.Alt)) != 0)
+                return;
+
+            TriggerViewCodeShortcut((modifiers & ModifierKeys.Shift) != 0);
+        }
+
+        /// <summary>
+        /// WebView2 的 JavaScript 与 WPF 键盘事件可能同时上报一次 F5，
+        /// 使用短时间窗口去重，避免启动或继续调试被执行两次。
+        /// </summary>
+        private void TriggerDebugShortcut()
+        {
+            if (!TryBeginIdeShortcut(ref _lastDebugShortcutTimestamp))
+                return;
+
+            _ = ExecuteDebugShortcutAsync();
+        }
+
+        /// <summary>
+        /// F7：查看代码；Shift+F7：查看设计器。与 F5 使用独立去重时间戳。
+        /// </summary>
+        private void TriggerViewCodeShortcut(bool showDesigner)
+        {
+            if (!TryBeginIdeShortcut(ref _lastViewCodeShortcutTimestamp))
+                return;
+
+            _ = ExecuteViewCodeShortcutAsync(showDesigner);
+        }
+
+        private static bool TryBeginIdeShortcut(ref long lastTimestamp)
+        {
+            long now = Stopwatch.GetTimestamp();
+            long previous = Interlocked.Read(ref lastTimestamp);
+            if (previous != 0 && now - previous < IdeShortcutDedupTicks)
+                return false;
+
+            return Interlocked.CompareExchange(
+                ref lastTimestamp, now, previous) == previous;
+        }
+
+        /// <summary>
+        /// 按 Visual Studio 当前调试状态模拟普通 F5：设计模式开始调试，中断模式继续调试。
+        /// </summary>
+        private async Task ExecuteDebugShortcutAsync()
+        {
+            try
+            {
+                await ThreadHelper.JoinableTaskFactory.SwitchToMainThreadAsync();
+
+                var dte = (EnvDTE.DTE?)Microsoft.VisualStudio.Shell.Package
+                    .GetGlobalService(typeof(EnvDTE.DTE));
+                if (dte == null)
+                {
+                    Logger.Warn("[DebugShortcut] EnvDTE 不可用，无法触发调试");
+                    return;
+                }
+
+                EnvDTE.dbgDebugMode mode = dte.Debugger.CurrentMode;
+                if (mode == EnvDTE.dbgDebugMode.dbgBreakMode)
+                {
+                    Logger.Info("[DebugShortcut] F5：继续调试");
+                    dte.ExecuteCommand("Debug.Continue");
+                }
+                else if (mode == EnvDTE.dbgDebugMode.dbgDesignMode)
+                {
+                    Logger.Info("[DebugShortcut] F5：开始调试");
+                    dte.ExecuteCommand("Debug.Start");
+                }
+                else
+                {
+                    Logger.Info($"[DebugShortcut] F5 已忽略，当前调试状态: {mode}");
+                }
+            }
+            catch (Exception ex)
+            {
+                Logger.Warn($"[DebugShortcut] 触发调试失败: {ex.Message}");
+            }
+        }
+
+        /// <summary>
+        /// 按 Visual Studio 默认语义模拟 F7/Shift+F7，转发 View.ViewCode/View.ViewDesigner 命令。
+        /// </summary>
+        private async Task ExecuteViewCodeShortcutAsync(bool showDesigner)
+        {
+            try
+            {
+                await ThreadHelper.JoinableTaskFactory.SwitchToMainThreadAsync();
+
+                var dte = (EnvDTE.DTE?)Microsoft.VisualStudio.Shell.Package
+                    .GetGlobalService(typeof(EnvDTE.DTE));
+                if (dte == null)
+                {
+                    Logger.Warn("[ViewCodeShortcut] EnvDTE 不可用，无法切换代码/设计器视图");
+                    return;
+                }
+
+                string command = showDesigner ? "View.ViewDesigner" : "View.ViewCode";
+                Logger.Info($"[ViewCodeShortcut] 执行 {command}");
+                dte.ExecuteCommand(command);
+            }
+            catch (Exception ex)
+            {
+                Logger.Warn($"[ViewCodeShortcut] 执行失败: {ex.Message}");
             }
         }
 
@@ -721,6 +864,73 @@ namespace DeepSeek_v4_for_VisualStudio.View
         /// </summary>
         private bool CanQueryBalance
             => _apiService != null && IsOfficialSource;
+
+        /// <summary>
+        /// 启动计价时段徽标定时器。每 30 秒校准一次，确保跨入高峰/空闲边界后及时更新。
+        /// </summary>
+        private void StartPricingPeriodTimer()
+        {
+            if (_pricingPeriodTimer != null)
+                return;
+
+            _pricingPeriodTimer = new System.Windows.Threading.DispatcherTimer
+            {
+                Interval = TimeSpan.FromSeconds(30)
+            };
+            _pricingPeriodTimer.Tick += (_, _) => UpdatePricingPeriodBadge();
+            _pricingPeriodTimer.Start();
+            UpdatePricingPeriodBadge();
+        }
+
+        private void StopPricingPeriodTimer()
+        {
+            _pricingPeriodTimer?.Stop();
+            _pricingPeriodTimer = null;
+        }
+
+        /// <summary>
+        /// 更新状态行中的当前计价时段徽标。仅 DeepSeek 官方来源显示。
+        /// </summary>
+        private void UpdatePricingPeriodBadge()
+        {
+            if (PricingPeriodBadge == null || PricingPeriodText == null)
+                return;
+
+            if (!Dispatcher.CheckAccess())
+            {
+                Dispatcher.Invoke(UpdatePricingPeriodBadge);
+                return;
+            }
+
+            if (!IsOfficialSource)
+            {
+                PricingPeriodBadge.Visibility = Visibility.Collapsed;
+                _lastPricingPeriodIsPeak = null;
+                return;
+            }
+
+            bool isPeak = DeepSeekProvider.IsBeijingPeakTime();
+            var localization = LocalizationService.Instance;
+
+            PricingPeriodBadge.Visibility = Visibility.Visible;
+            PricingPeriodText.Text = isPeak
+                ? localization["status.pricingPeriod.peak"]
+                : localization["status.pricingPeriod.offPeak"];
+            PricingPeriodBadge.ToolTip = localization["status.pricingPeriod.tooltip"];
+
+            if (_lastPricingPeriodIsPeak == isPeak)
+                return;
+
+            _lastPricingPeriodIsPeak = isPeak;
+            PricingPeriodBadge.Background = new System.Windows.Media.SolidColorBrush(
+                isPeak
+                    ? System.Windows.Media.Color.FromRgb(0x7A, 0x3B, 0x12)
+                    : System.Windows.Media.Color.FromRgb(0x1B, 0x55, 0x38));
+            PricingPeriodBadge.BorderBrush = new System.Windows.Media.SolidColorBrush(
+                isPeak
+                    ? System.Windows.Media.Color.FromRgb(0xD0, 0x8A, 0x3C)
+                    : System.Windows.Media.Color.FromRgb(0x3F, 0xA6, 0x6B));
+        }
 
         /// <summary>
         /// 启动余额查询定时器，每 60 秒自动刷新一次。
@@ -936,7 +1146,7 @@ namespace DeepSeek_v4_for_VisualStudio.View
         /// 包含：API 实际 Token 消耗 + 费用估算 + 上下文窗口利用率。
         /// 费用基于 DeepSeek 官方定价，按"国内/国际 × 模型（Flash/Pro）× 时段"分档
         /// （国内 ¥ 价目 / 国际 $ 价目，高峰时段为北京时间周一至周五 9:00-12:00、14:00-18:00，
-        /// 周六、周日全天为空闲时段，详见 DeepSeekProvider.GetPricing）。
+        /// 周末及中国法定节假日（含调休）全天为空闲时段，详见 DeepSeekProvider.GetPricing）。
         /// 币种由余额 API 返回值自动判定（CNY→国内价，USD→国际价），首次查询前默认国内价。
         /// 费用在每次 API 调用时按"当时点的时段"双币种累计
         /// （见 OpenAiCompatibleProvider.AccumulateStats），跨高峰/空闲的会话自动分档计价。
@@ -1201,6 +1411,7 @@ namespace DeepSeek_v4_for_VisualStudio.View
             CancelStreaming();
             DisposeStreamingCts();
             StopBalanceTimer();
+            StopPricingPeriodTimer();
             StopConversationElapsedTimer();
             _conversationElapsedTimer = null;
             SubscribeApiRequestCompletion(null);
@@ -1382,6 +1593,9 @@ namespace DeepSeek_v4_for_VisualStudio.View
                 if (ApprovalModeLabel != null)
                     ApprovalModeLabel.Text = L["chat.approvalModeLabel"];
                 RefreshApprovalModeComboBox();
+
+                // ── 当前计价时段徽标 ──
+                UpdatePricingPeriodBadge();
             }
             catch (Exception ex)
             {
@@ -1589,6 +1803,8 @@ namespace DeepSeek_v4_for_VisualStudio.View
                     ? System.Windows.Visibility.Visible
                     : System.Windows.Visibility.Collapsed;
             }
+
+            UpdatePricingPeriodBadge();
 
             if (!IsOfficialSource)
             {

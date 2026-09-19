@@ -31,15 +31,17 @@ namespace DeepSeek_v4_for_VisualStudio.Settings
 
         /// <summary>
         /// 静态构造：订阅语言变更，刷新属性描述符缓存。
-        /// 注意：VS 选项对话框的分类标题在对话框打开期间无法热更新
-        /// （VS 内部属性检查器缓存），关闭后重新打开即可生效。
-        /// DisplayName 和 Description 不受此限制。
+        /// 说明：
+        /// - 属性名（DisplayName）会随语言实时切换；
+        /// - 属性描述（Description）与分组标题（Category）被 .NET Framework 的
+        ///   MemberDescriptor 缓存，必须调用 LocalizedPropertyGridRefresh 清掉缓存；
+        /// - 分类属性自身也会同步刷新，属性网格刷新后可读取当前语言的分组标题。
         /// </summary>
         static DeepSeekOptionsPage()
         {
             LocalizationService.Instance.LanguageChanged += (_, _) =>
             {
-                TypeDescriptor.Refresh(typeof(DeepSeekOptionsPage));
+                LocalizedPropertyGridRefresh.Refresh(typeof(DeepSeekOptionsPage));
             };
         }
 
@@ -1213,10 +1215,7 @@ namespace DeepSeek_v4_for_VisualStudio.Settings
                 foreach (string storedValue in StoredValues)
                 {
                     if (string.Equals(text, storedValue, StringComparison.OrdinalIgnoreCase)
-                        || string.Equals(
-                            text,
-                            GetLocalizedValue(storedValue),
-                            StringComparison.OrdinalIgnoreCase))
+                        || MatchesLocalizedValue(text, GetResourceKey(storedValue)))
                     {
                         return storedValue;
                     }
@@ -1227,11 +1226,41 @@ namespace DeepSeek_v4_for_VisualStudio.Settings
         }
 
         private static string GetLocalizedValue(string storedValue)
-            => LocalizationService.Instance[storedValue switch
+        {
+            foreach (string candidate in StoredValues)
+            {
+                if (string.Equals(storedValue, candidate, StringComparison.OrdinalIgnoreCase)
+                    || MatchesLocalizedValue(storedValue, GetResourceKey(candidate)))
+                {
+                    return LocalizationService.Instance[GetResourceKey(candidate)];
+                }
+            }
+
+            return storedValue;
+        }
+
+        private static string GetResourceKey(string storedValue)
+            => storedValue switch
             {
                 "BlockAll" => "approval.blockAll",
                 "AllowAll" => "approval.allowAll",
                 _ => "approval.smartBlock",
-            }];
+            };
+
+        private static bool MatchesLocalizedValue(string text, string resourceKey)
+        {
+            return string.Equals(
+                       text,
+                       LocalizationService.Instance[resourceKey],
+                       StringComparison.OrdinalIgnoreCase)
+                   || string.Equals(
+                       text,
+                       LocalizationService.Instance.GetValueForLocale(resourceKey, "zh-CN"),
+                       StringComparison.OrdinalIgnoreCase)
+                   || string.Equals(
+                       text,
+                       LocalizationService.Instance.GetValueForLocale(resourceKey, "en"),
+                       StringComparison.OrdinalIgnoreCase);
+        }
     }
 }

@@ -145,6 +145,29 @@ public class ChatHtmlServiceTests
         branchNavIdx.Should().BeGreaterThan(actionsRowIdx);
     }
 
+    [Fact]
+    public void BuildInitialPage_RegistersF5RefreshGuardAndDebugForwarding()
+    {
+        string html = ChatHtmlService.BuildInitialPage(new List<ChatMessage>());
+
+        html.Should().Contain("e.key==='F5'||e.code==='F5'");
+        html.Should().Contain("e.preventDefault();");
+        html.Should().Contain("e.stopPropagation();");
+        html.Should().Contain("type:'debugShortcut'");
+        html.Should().Contain("if(e.repeat)return;");
+        html.Should().Contain("if(!plain)return;");
+    }
+
+    [Fact]
+    public void BuildInitialPage_RegistersF7ViewCodeForwarding()
+    {
+        string html = ChatHtmlService.BuildInitialPage(new List<ChatMessage>());
+
+        html.Should().Contain("e.key==='F7'||e.code==='F7'");
+        html.Should().Contain("type:'viewCodeShortcut'");
+        html.Should().Contain("designer:e.shiftKey");
+    }
+
     private static int CountOccurrences(string haystack, string needle)
     {
         int count = 0;
