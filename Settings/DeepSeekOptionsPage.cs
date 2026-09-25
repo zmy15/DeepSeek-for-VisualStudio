@@ -40,6 +40,12 @@ namespace DeepSeek_v4_for_VisualStudio.Settings
         /// </summary>
         static DeepSeekOptionsPage()
         {
+            var properties = TypeDescriptor.GetProperties(typeof(DeepSeekOptionsPage));
+            TypeDescriptor.AddProvider(
+                new OptionsPageTypeDescriptionProvider(properties),
+                typeof(DeepSeekOptionsPage));
+            TypeDescriptor.Refresh(typeof(DeepSeekOptionsPage));
+
             LocalizationService.Instance.LanguageChanged += (_, _) =>
             {
                 LocalizedPropertyGridRefresh.Refresh(typeof(DeepSeekOptionsPage));
@@ -227,6 +233,24 @@ namespace DeepSeek_v4_for_VisualStudio.Settings
         /// VS 在用户应用设置更改时调用此方法。
         /// 我们在此触发 SettingsChanged 事件以通知订阅者刷新配置。
         /// </summary>
+        protected override void OnActivate(CancelEventArgs e)
+        {
+            base.OnActivate(e);
+
+            // VS 默认按显示名排序；关闭排序后使用 TypeDescriptor 提供的稳定顺序。
+            if (Window is System.Windows.Forms.Control control)
+                ApplyPropertyGridSort(control);
+        }
+
+        private static void ApplyPropertyGridSort(System.Windows.Forms.Control control)
+        {
+            if (control is System.Windows.Forms.PropertyGrid grid)
+                grid.PropertySort = System.Windows.Forms.PropertySort.NoSort;
+
+            foreach (System.Windows.Forms.Control child in control.Controls)
+                ApplyPropertyGridSort(child);
+        }
+
         protected override void OnApply(PageApplyEventArgs e)
         {
             base.OnApply(e);
