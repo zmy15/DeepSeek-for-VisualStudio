@@ -12,6 +12,7 @@
 [![DeepSeek](https://img.shields.io/badge/-DeepSeek-green)]()
 [![Platform](https://img.shields.io/badge/platform-Windows%20x64%20%2F%20ARM64-lightgrey)]()
 [![Version](https://img.shields.io/badge/version-1.2.3-blue)]()
+[![GitHub Stars](https://img.shields.io/github/stars/zmy15/DeepSeek-for-VisualStudio?style=social)](https://github.com/zmy15/DeepSeek-for-VisualStudio)
 
 [English](README.md)
 
@@ -22,6 +23,8 @@
 DeepSeek for Visual Studio 将 AI 聊天、代码编辑、解决方案工具、终端执行和多模态理解直接带入 IDE。扩展支持 **Visual Studio 2022（17.14 及以上）** 和 **Visual Studio 2026**。除 DeepSeek 官方 API 外，还支持通过自定义 Base URL 接入任意 OpenAI 兼容的 `chat/completions` 端点。
 
 它通过 WebView2 提供原生级聊天体验，并结合五个协作 Agent、可复用 Skills、MCP 工具服务器、Ghost Text 补全和持久化项目记忆。
+
+> 如果这个项目对你有帮助，欢迎点个 Star，帮助更多开发者发现它。
 
 ## 界面截图
 

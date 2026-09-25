@@ -12,6 +12,7 @@
 [![DeepSeek](https://img.shields.io/badge/-DeepSeek-green)]()
 [![Platform](https://img.shields.io/badge/platform-Windows%20x64%20%2F%20ARM64-lightgrey)]()
 [![Version](https://img.shields.io/badge/version-1.2.3-blue)]()
+[![GitHub Stars](https://img.shields.io/github/stars/zmy15/DeepSeek-for-VisualStudio?style=social)](https://github.com/zmy15/DeepSeek-for-VisualStudio)
 
 [简体中文](README.zh-CN.md)
 
@@ -22,6 +23,8 @@
 DeepSeek for Visual Studio brings AI chat, code editing, solution-aware tools, terminal execution, and multimodal understanding directly into the IDE. It is designed for Visual Studio 2022 (17.14 or later) and Visual Studio 2026. Beyond the official DeepSeek API, it also supports any OpenAI-compatible `chat/completions` endpoint configured with a custom Base URL.
 
 The extension combines a native-grade WebView2 chat experience with five cooperating agents, reusable Skills, MCP tool servers, Ghost Text completion, and persistent project memory.
+
+> If this project helps you, please consider giving it a Star — it helps more developers discover it.
 
 ## Screenshots
 
