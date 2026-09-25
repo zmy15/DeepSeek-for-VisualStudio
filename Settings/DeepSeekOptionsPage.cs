@@ -40,12 +40,6 @@ namespace DeepSeek_v4_for_VisualStudio.Settings
         /// </summary>
         static DeepSeekOptionsPage()
         {
-            var properties = TypeDescriptor.GetProperties(typeof(DeepSeekOptionsPage));
-            TypeDescriptor.AddProvider(
-                new OptionsPageTypeDescriptionProvider(properties),
-                typeof(DeepSeekOptionsPage));
-            TypeDescriptor.Refresh(typeof(DeepSeekOptionsPage));
-
             LocalizationService.Instance.LanguageChanged += (_, _) =>
             {
                 LocalizedPropertyGridRefresh.Refresh(typeof(DeepSeekOptionsPage));
@@ -81,6 +75,18 @@ namespace DeepSeek_v4_for_VisualStudio.Settings
         /// 全局实例引用，在 Package 初始化时设置，方便静态工具类读取设置。
         /// </summary>
         public static DeepSeekOptionsPage? Instance { get; set; }
+
+        /// <summary>关于扩展、仓库和 Issue 地址。</summary>
+        [LocalizedCategory("settings.category.about")]
+        [LocalizedDisplayName("settings.about.displayName")]
+        [LocalizedDescription("settings.about.description")]
+        [Editor(typeof(AboutEditor), typeof(UITypeEditor))]
+        [DesignerSerializationVisibility(DesignerSerializationVisibility.Hidden)]
+        public string About
+        {
+            get => AboutInfo.RepositoryUrl + Environment.NewLine + AboutInfo.IssuesUrl;
+            set { }
+        }
 
         /// <summary>解析自定义模型列表，保留输入顺序并去重（忽略大小写与首尾空白）。</summary>
         internal static IReadOnlyList<string> ParseCustomModels(string? value)
@@ -233,24 +239,6 @@ namespace DeepSeek_v4_for_VisualStudio.Settings
         /// VS 在用户应用设置更改时调用此方法。
         /// 我们在此触发 SettingsChanged 事件以通知订阅者刷新配置。
         /// </summary>
-        protected override void OnActivate(CancelEventArgs e)
-        {
-            base.OnActivate(e);
-
-            // VS 默认按显示名排序；关闭排序后使用 TypeDescriptor 提供的稳定顺序。
-            if (Window is System.Windows.Forms.Control control)
-                ApplyPropertyGridSort(control);
-        }
-
-        private static void ApplyPropertyGridSort(System.Windows.Forms.Control control)
-        {
-            if (control is System.Windows.Forms.PropertyGrid grid)
-                grid.PropertySort = System.Windows.Forms.PropertySort.NoSort;
-
-            foreach (System.Windows.Forms.Control child in control.Controls)
-                ApplyPropertyGridSort(child);
-        }
-
         protected override void OnApply(PageApplyEventArgs e)
         {
             base.OnApply(e);

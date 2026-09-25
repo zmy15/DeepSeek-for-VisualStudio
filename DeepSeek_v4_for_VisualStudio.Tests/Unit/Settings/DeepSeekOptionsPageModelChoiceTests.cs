@@ -59,19 +59,28 @@ public class DeepSeekOptionsPageModelChoiceTests
             nameof(DeepSeekOptionsPage.ReasoningEffort),
         };
 
-        System.Runtime.CompilerServices.RuntimeHelpers.RunClassConstructor(
-            typeof(DeepSeekOptionsPage).TypeHandle);
         var properties = TypeDescriptor.GetProperties(typeof(DeepSeekOptionsPage));
-        string availableProperties = string.Join(", ", properties.Cast<PropertyDescriptor>().Select(p => p.Name));
-        int previousIndex = -1;
-        foreach (string propertyName in expectedOrder)
-        {
-            var property = properties[propertyName];
-            property.Should().NotBeNull($"available properties: {availableProperties}");
-            int index = properties.IndexOf(property!);
-            index.Should().BeGreaterThan(previousIndex, propertyName);
-            previousIndex = index;
-        }
+        var displayNames = expectedOrder
+            .Select(propertyName => properties[propertyName]?.DisplayName ?? string.Empty)
+            .ToList();
+
+        displayNames.Select(name => name.Length >= 3 ? name.Substring(0, 3) : string.Empty)
+            .Should().Equal("01.", "02.", "03.", "04.", "05.", "06.", "07.", "08.", "09.", "10.", "11.");
+        displayNames
+            .SequenceEqual(displayNames.OrderBy(name => name, StringComparer.CurrentCulture))
+            .Should().BeTrue();
+    }
+
+    [Fact]
+    public void About_UsesAboutEditorAndPublishesProjectLinks()
+    {
+        var property = typeof(DeepSeekOptionsPage).GetProperty(nameof(DeepSeekOptionsPage.About))!;
+
+        property.GetCustomAttribute<EditorAttribute>()?.EditorTypeName
+            .Should().Contain(nameof(AboutEditor));
+        AboutInfo.RepositoryUrl.Should().Be("https://github.com/zmy15/DeepSeek-for-VisualStudio");
+        AboutInfo.IssuesUrl.Should().Be(AboutInfo.RepositoryUrl + "/issues");
+        AboutInfo.Version.Should().Be(Vsix.Version);
     }
 
     [Fact]
