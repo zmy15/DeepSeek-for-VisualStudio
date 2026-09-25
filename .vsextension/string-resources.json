@@ -1,4 +1,4 @@
-{
+﻿{
   "DeepSeek.Chat.approval.allowAll": "Allow all",
   "DeepSeek.Chat.approval.blockAll": "Block all",
   "DeepSeek.Chat.approval.smartBlock": "Smart block",
@@ -17,6 +17,13 @@
   "DeepSeek.Chat.Settings.DeepSeekApiKeyGuideDescription": "Configure the DeepSeek API key in Tools > Options > DeepSeek Chat > Model Settings.",
   "DeepSeek.Chat.Settings.EndpointToolsGuideDescription": "Fetch model list and test connection from Tools > Options > DeepSeek Chat > Custom Endpoint.",
   "DeepSeek.Chat.Settings.EndpointToolsGuideMessage": "Unified Settings cannot host property-grid editors. Use the ... button next to Custom Models to fetch models, then run Test Connection to validate the endpoint.",
+  "DeepSeek.Chat.Settings.AboutDisplayName": "About DeepSeek for Visual Studio",
+  "DeepSeek.Chat.Settings.AboutDescription": "Project repository and issue tracker.",
+  "DeepSeek.Chat.Settings.AboutStarMessage": "If this project helps you, please consider giving it a Star.",  "DeepSeek.Chat.Settings.ApiBaseUrlGuideDescription": "Configure the API endpoint in the classic DeepSeek Chat options page.",
+  "DeepSeek.Chat.Settings.CustomModelNameGuideDescription": "Configure custom endpoint models in the classic DeepSeek Chat options page.",
+  "DeepSeek.Chat.Settings.ModelMaxTokenLimitsGuideDescription": "Configure per-model maximum context tokens in the classic DeepSeek Chat options page.",
+  "DeepSeek.Chat.Settings.VisionModelsGuideDescription": "Configure vision-capable models in the classic DeepSeek Chat options page.",
+  "DeepSeek.Chat.Settings.LegacyModelSettingsGuideMessage": "Use Tools > Options > DeepSeek Chat > Model Settings to configure this value. Unified Settings keeps this entry read-only.",
   "DeepSeek.Chat.Settings.EndpointToolsGuideTitle": "Endpoint Tools",
   "DeepSeek.Chat.Settings.TestConnectionGuideDescription": "Run Test Connection in Tools > Options > DeepSeek Chat > Model Settings.",
   "DeepSeek.Chat.settings.approvalMode.description": "Controls the approval behavior for tool operations (terminal commands, file deletion, etc.): • SmartBlock — Only dangerous commands require approval; safe commands auto-approved • BlockAll — All terminal commands and file operations require user approval • AllowAll — Auto-approve all operations without asking ( use with caution)",
