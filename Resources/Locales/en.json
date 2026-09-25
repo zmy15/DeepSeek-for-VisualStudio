@@ -539,7 +539,7 @@
     "status.ready": "Ready",
     "status.pricingPeriod.offPeak": "Off-peak now",
     "status.pricingPeriod.peak": "Peak now",
-    "status.pricingPeriod.tooltip": "Beijing time pricing: peak on weekdays 09:00–12:00 and 14:00–18:00; off-peak all day on weekends and Chinese public holidays (including adjusted rest days).",
+    "status.pricingPeriod.tooltip": "Beijing time pricing: peak on weekdays 09:00–12:00 and 14:00–18:00; off-peak all day on all weekends (including adjusted working weekends) and Chinese public holidays (including adjusted rest days).",
     "status.appendMessage.queue": "Queued. It will be sent automatically after the current task finishes.",
     "status.appendMessage.guidance": "Guidance added. It will be inserted after the current thinking and tool-call loop.",
     "status.appendMessage.autoSending": "Sending queued message automatically (model: {0})",
