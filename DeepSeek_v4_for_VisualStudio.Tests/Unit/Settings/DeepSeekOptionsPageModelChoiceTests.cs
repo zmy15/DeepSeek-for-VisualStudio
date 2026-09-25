@@ -42,6 +42,39 @@ public class DeepSeekOptionsPageModelChoiceTests
     }
 
     [Fact]
+    public void ModelSettings_UseSpecifiedDisplayOrder()
+    {
+        string[] expectedOrder =
+        {
+            nameof(DeepSeekOptionsPage.ApiKey),
+            nameof(DeepSeekOptionsPage.ApiBaseUrl),
+            nameof(DeepSeekOptionsPage.CustomApiKey),
+            nameof(DeepSeekOptionsPage.TestConnection),
+            nameof(DeepSeekOptionsPage.CustomModelPicker),
+            nameof(DeepSeekOptionsPage.CustomModelName),
+            nameof(DeepSeekOptionsPage.ModelMaxTokenLimits),
+            nameof(DeepSeekOptionsPage.CustomVisionModels),
+            nameof(DeepSeekOptionsPage.SelectedModelChoice),
+            nameof(DeepSeekOptionsPage.IsThinkingEnabled),
+            nameof(DeepSeekOptionsPage.ReasoningEffort),
+        };
+
+        System.Runtime.CompilerServices.RuntimeHelpers.RunClassConstructor(
+            typeof(DeepSeekOptionsPage).TypeHandle);
+        var properties = TypeDescriptor.GetProperties(typeof(DeepSeekOptionsPage));
+        string availableProperties = string.Join(", ", properties.Cast<PropertyDescriptor>().Select(p => p.Name));
+        int previousIndex = -1;
+        foreach (string propertyName in expectedOrder)
+        {
+            var property = properties[propertyName];
+            property.Should().NotBeNull($"available properties: {availableProperties}");
+            int index = properties.IndexOf(property!);
+            index.Should().BeGreaterThan(previousIndex, propertyName);
+            previousIndex = index;
+        }
+    }
+
+    [Fact]
     public void ModelMaxTokenLimits_UsesOptionEditor()
     {
         var property = typeof(DeepSeekOptionsPage)
