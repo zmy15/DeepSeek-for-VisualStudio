@@ -12,6 +12,7 @@ public class DeepSeekOptionsPageModelChoiceTests
         nameof(DeepSeekOptionsPage.CustomApiKey),
         nameof(DeepSeekOptionsPage.ApiBaseUrl),
         nameof(DeepSeekOptionsPage.CustomModelName),
+        nameof(DeepSeekOptionsPage.ModelMaxTokenLimits),
         nameof(DeepSeekOptionsPage.CustomVisionModels),
         nameof(DeepSeekOptionsPage.CustomModelPicker),
         nameof(DeepSeekOptionsPage.TestConnection),
@@ -38,6 +39,17 @@ public class DeepSeekOptionsPageModelChoiceTests
             .Browsable
             .Should()
             .BeFalse();
+    }
+
+    [Fact]
+    public void ModelMaxTokenLimits_UsesOptionEditor()
+    {
+        var property = typeof(DeepSeekOptionsPage)
+            .GetProperty(nameof(DeepSeekOptionsPage.ModelMaxTokenLimits))!;
+
+        property.CanWrite.Should().BeTrue();
+        property.GetCustomAttribute<EditorAttribute>()?.EditorTypeName
+            .Should().Contain(nameof(ModelMaxTokenEditor));
     }
 
     [Fact]

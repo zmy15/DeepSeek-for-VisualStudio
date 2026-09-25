@@ -1722,6 +1722,7 @@ namespace DeepSeek_v4_for_VisualStudio.View
             {
                 RefreshModelFromSettings();
                 SyncApiEndpointFromSettings();
+                ApplyContextBudgetFromSettings();
             });
         }
 
@@ -1754,6 +1755,7 @@ namespace DeepSeek_v4_for_VisualStudio.View
 
             SyncApiEndpointFromSettings();
             SyncThinkingToApiService();
+            ApplyContextBudgetFromSettings();
         }
 
         private void ExecuteWithoutCoreControlEvents(Action action)

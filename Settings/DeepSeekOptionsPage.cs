@@ -28,6 +28,7 @@ namespace DeepSeek_v4_for_VisualStudio.Settings
         internal const int DefaultWebView2ZoomPercent = 100;
         internal const bool DefaultEnableAutoSkillRouting = false;
         internal const AppendMessageMode DefaultAppendMessageMode = Models.AppendMessageMode.Queue;
+        internal const int DefaultTokenBudgetPercent = ModelTokenLimitService.DefaultBudgetPercent;
 
         /// <summary>
         /// 静态构造：订阅语言变更，刷新属性描述符缓存。
@@ -68,6 +69,7 @@ namespace DeepSeek_v4_for_VisualStudio.Settings
         private string _loadedBingApiKey = string.Empty;
         private bool _apiKeysDirty;
         private bool _apiKeysMigrationPending;
+        private int _tokenBudgetPercent = ModelTokenLimitService.DefaultBudgetPercent;
 
         /// <summary>
         /// 全局实例引用，在 Package 初始化时设置，方便静态工具类读取设置。
@@ -97,6 +99,22 @@ namespace DeepSeek_v4_for_VisualStudio.Settings
 
         internal IReadOnlyList<string> GetCustomModels()
             => ParseCustomModels(CustomModelName);
+
+        /// <summary>获取指定模型的最大 Token；未配置时默认 1M。</summary>
+        internal int GetModelMaxTokens(string? model)
+            => ModelTokenLimitService.GetMaxTokens(model, ModelMaxTokenLimits);
+
+        /// <summary>按当前模型最大 Token × 全局预算百分比计算有效上下文预算。</summary>
+        internal int GetEffectiveTokenBudget(string? model = null)
+        {
+            string effectiveModel = string.IsNullOrWhiteSpace(model)
+                ? DeepSeekEndpointResolver.Resolve(this).Model
+                : model;
+            return ModelTokenLimitService.CalculateBudget(
+                effectiveModel,
+                TokenBudget,
+                ModelMaxTokenLimits);
+        }
 
         /// <summary>解析用户手动勾选的多模态模型名单（官方与自定义模型共用）。</summary>
         internal IReadOnlyList<string> GetVisionModels()
@@ -514,6 +532,17 @@ namespace DeepSeek_v4_for_VisualStudio.Settings
         public string CustomModelName { get; set; } = string.Empty;
 
         /// <summary>
+        /// 各模型的最大上下文 Token。每行格式：模型名=最大Token。
+        /// 未配置的模型默认 1M，自定义端点模型也使用同一配置。
+        /// </summary>
+        [LocalizedCategory("settings.category.model")]
+        [LocalizedDisplayName("settings.modelMaxTokenLimits.displayName")]
+        [LocalizedDescription("settings.modelMaxTokenLimits.description")]
+        [Editor(typeof(ModelMaxTokenEditor), typeof(UITypeEditor))]
+        [DesignerSerializationVisibility(DesignerSerializationVisibility.Visible)] // Fix for WFO1000
+        public string ModelMaxTokenLimits { get; set; } = string.Empty;
+
+        /// <summary>
         /// 用户手动勾选为支持图片/PDF 直传（多模态）的模型名单；
         /// 官方接口模型与自定义端点模型共用同一份名单。
         /// </summary>
@@ -609,7 +638,7 @@ namespace DeepSeek_v4_for_VisualStudio.Settings
         {
             // 连接与模型配置视为用户凭据的一部分，恢复默认时保留：
             // ApiKey / CustomApiKey / BaiduApiKey / BingApiKey /
-            // ApiBaseUrl / SelectedModel / CustomModelName / CustomVisionModels /
+            // ApiBaseUrl / SelectedModel / CustomModelName / ModelMaxTokenLimits / CustomVisionModels /
             // ActiveCustomModel / ActiveModelSource。
             SystemPrompt = AiPrompts.DefaultSystemPrompt;
             SystemPromptEn = AiPrompts.DefaultSystemPromptEn;
@@ -622,7 +651,7 @@ namespace DeepSeek_v4_for_VisualStudio.Settings
             AutoCompleteEnabled = false;
             AutoCompleteDelay = 800;
             AutoCompleteContinueAfterAccept = true;
-            TokenBudget = 900_000;
+            TokenBudget = DefaultTokenBudgetPercent;
             EnableAutoCompression = true;
             CompressionThreshold = 85;
             PreserveRecentTurns = 3;
@@ -764,7 +793,11 @@ namespace DeepSeek_v4_for_VisualStudio.Settings
         [LocalizedDisplayName("settings.tokenBudget.displayName")]
         [LocalizedDescription("settings.tokenBudget.description")]
         [DesignerSerializationVisibility(DesignerSerializationVisibility.Visible)]
-        public int TokenBudget { get; set; } = 900_000;
+        public int TokenBudget
+        {
+            get => _tokenBudgetPercent;
+            set => _tokenBudgetPercent = ModelTokenLimitService.NormalizeBudgetPercent(value);
+        }
 
         [LocalizedCategory("settings.category.context")]
         [LocalizedDisplayName("settings.enableAutoCompression.displayName")]

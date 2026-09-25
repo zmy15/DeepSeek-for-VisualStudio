@@ -44,6 +44,7 @@ namespace DeepSeek_v4_for_VisualStudio.Settings
             (CategoryPrefix + "deepseekModel", p => p.SelectedModel, (p, v) => p.SelectedModel = (string?)v ?? string.Empty),
             (CategoryPrefix + "deepseekApiBaseUrl", p => p.ApiBaseUrl, (p, v) => p.ApiBaseUrl = (string?)v ?? string.Empty),
             (CategoryPrefix + "deepseekCustomModelName", p => p.CustomModelName, (p, v) => p.CustomModelName = (string?)v ?? string.Empty),
+            (CategoryPrefix + "deepseekModelMaxTokenLimits", p => p.ModelMaxTokenLimits, (p, v) => p.ModelMaxTokenLimits = (string?)v ?? string.Empty),
             (CategoryPrefix + "deepseekCustomVisionModels", p => p.CustomVisionModels, (p, v) => p.CustomVisionModels = (string?)v ?? string.Empty),
             (CategoryPrefix + "deepseekThinking", p => p.IsThinkingEnabled, (p, v) => p.IsThinkingEnabled = (bool)v!),
             (CategoryPrefix + "deepseekReasoningEffort", p => p.ReasoningEffort, (p, v) => p.ReasoningEffort = (string?)v ?? "high"),
