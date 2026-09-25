@@ -81,7 +81,7 @@ namespace DeepSeek_v4_for_VisualStudio.Services.Providers
 
         /// <summary>
         /// DeepSeek 官方定价，按"国内/国际（币种）× 模型（Flash/Pro）× 时段（高峰/空闲）"分档。
-        /// 高峰时段为北京时间周一至周五 9:00-12:00、14:00-18:00；周末及中国法定节假日（含调休）全天为空闲时段。
+        /// 高峰时段为北京时间周一至周五 9:00-12:00、14:00-18:00；所有周末（含调休上班周末）及中国法定节假日（含调休放假日）全天为空闲时段。
         ///   国内（¥/百万 tokens）：
         ///     输入（缓存命中）:   空闲 Flash ¥0.02  / Pro ¥0.15  ；高峰 Flash ¥0.04  / Pro ¥0.30
         ///     输入（缓存未命中）: 空闲 Flash ¥1     / Pro ¥4.5   ；高峰 Flash ¥2     / Pro ¥9.0
@@ -114,18 +114,25 @@ namespace DeepSeek_v4_for_VisualStudio.Services.Providers
                 : (CacheMiss: usd ? 0.66 : 4.5, CacheHit: usd ? 0.022 : 0.15, Output: usd ? 1.98 : 13.5);
         }
 
+        /// <summary>
+        /// 判断指定北京时间日期是否为全天空闲日。
+        /// 所有周末（含调休上班周末）及中国法定节假日（含调休放假日）全天均为空闲时段。
+        /// </summary>
+        internal static bool IsBeijingOffPeakDay(DateTime beijingDate)
+        {
+            return beijingDate.DayOfWeek == DayOfWeek.Saturday
+                || beijingDate.DayOfWeek == DayOfWeek.Sunday
+                || ChineseHolidayCalendar.IsPublicHoliday(beijingDate);
+        }
+
         /// <summary>判断北京时间是否处于 DeepSeek 高峰计价时段。</summary>
         public static bool IsBeijingPeakTime() => IsBeijingPeakTime(DateTimeOffset.UtcNow);
 
         internal static bool IsBeijingPeakTime(DateTimeOffset utcNow)
         {
             var beijingNow = utcNow.ToOffset(TimeSpan.FromHours(8));
-            if (beijingNow.DayOfWeek == DayOfWeek.Saturday
-                || beijingNow.DayOfWeek == DayOfWeek.Sunday
-                || ChineseHolidayCalendar.IsPublicHoliday(beijingNow.Date))
-            {
+            if (IsBeijingOffPeakDay(beijingNow.Date))
                 return false;
-            }
 
             int hour = beijingNow.Hour;
             return (hour >= 9 && hour < 12) || (hour >= 14 && hour < 18);

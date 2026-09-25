@@ -14,6 +14,8 @@ namespace DeepSeek_v4_for_VisualStudio.Settings
         string CustomVisionModels,
         string ActiveCustomModel,
         string ActiveModelSource,
+        int TokenBudgetPercent,
+        string ModelMaxTokenLimits,
         bool IsThinkingEnabled,
         string ReasoningEffort,
         string OcrEngine,
@@ -42,6 +44,8 @@ namespace DeepSeek_v4_for_VisualStudio.Settings
                 options.CustomVisionModels ?? string.Empty,
                 options.ActiveCustomModel ?? string.Empty,
                 options.ActiveModelSource ?? string.Empty,
+                options.TokenBudget,
+                options.ModelMaxTokenLimits ?? string.Empty,
                 options.IsThinkingEnabled,
                 options.ReasoningEffort ?? string.Empty,
                 options.OcrEngine ?? string.Empty,
@@ -65,6 +69,7 @@ namespace DeepSeek_v4_for_VisualStudio.Settings
         bool EndpointChanged,
         bool OfficialApiKeyChanged,
         bool ModelControlsChanged,
+        bool ContextChanged,
         bool ThinkingChanged,
         bool ApprovalChanged,
         bool AutoSkillRoutingChanged,
@@ -76,6 +81,7 @@ namespace DeepSeek_v4_for_VisualStudio.Settings
             EndpointChanged ||
             OfficialApiKeyChanged ||
             ModelControlsChanged ||
+            ContextChanged ||
             ThinkingChanged ||
             ApprovalChanged ||
             AutoSkillRoutingChanged ||
@@ -87,6 +93,7 @@ namespace DeepSeek_v4_for_VisualStudio.Settings
             EndpointChanged: true,
             OfficialApiKeyChanged: true,
             ModelControlsChanged: true,
+            ContextChanged: true,
             ThinkingChanged: true,
             ApprovalChanged: true,
             AutoSkillRoutingChanged: true,
@@ -104,6 +111,9 @@ namespace DeepSeek_v4_for_VisualStudio.Settings
                 Changed(previous.CustomVisionModels, current.CustomVisionModels) ||
                 Changed(previous.ActiveCustomModel, current.ActiveCustomModel) ||
                 Changed(previous.ActiveModelSource, current.ActiveModelSource);
+            bool contextChanged =
+                previous.TokenBudgetPercent != current.TokenBudgetPercent ||
+                Changed(previous.ModelMaxTokenLimits, current.ModelMaxTokenLimits);
 
             return new RuntimeSettingsChangeSet(
                 EndpointChanged:
@@ -113,6 +123,7 @@ namespace DeepSeek_v4_for_VisualStudio.Settings
                     modelControlsChanged,
                 OfficialApiKeyChanged: Changed(previous.ApiKey, current.ApiKey),
                 ModelControlsChanged: modelControlsChanged,
+                ContextChanged: contextChanged,
                 ThinkingChanged:
                     previous.IsThinkingEnabled != current.IsThinkingEnabled ||
                     Changed(previous.ReasoningEffort, current.ReasoningEffort),
