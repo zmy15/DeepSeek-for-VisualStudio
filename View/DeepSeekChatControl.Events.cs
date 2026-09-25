@@ -2335,7 +2335,7 @@ namespace DeepSeek_v4_for_VisualStudio.View
                                 try
                                 {
                                     await ChatWebView.CoreWebView2.ExecuteScriptAsync(
-                                        "var p=document.getElementById('agent-permission');if(p)p.remove();");
+                                        ChatHtmlService.BuildRemoveElementJs($"agent-permission-{requestId}"));
                                 }
                                 catch { }
                             }
@@ -2358,7 +2358,7 @@ namespace DeepSeek_v4_for_VisualStudio.View
                                 try
                                 {
                                     await ChatWebView.CoreWebView2.ExecuteScriptAsync(
-                                        "var p=document.getElementById('terminal-approval');if(p)p.remove();");
+                                        ChatHtmlService.BuildRemoveElementJs($"terminal-approval-{requestId}"));
                                     StatusLabel.Text = LocalizationService.Instance["status.terminalApproved"];
                                 }
                                 catch { }
@@ -2381,7 +2381,7 @@ namespace DeepSeek_v4_for_VisualStudio.View
                                 try
                                 {
                                     await ChatWebView.CoreWebView2.ExecuteScriptAsync(
-                                        "var p=document.getElementById('terminal-approval');if(p)p.remove();");
+                                        ChatHtmlService.BuildRemoveElementJs($"terminal-approval-{requestId}"));
                                     StatusLabel.Text = LocalizationService.Instance["status.terminalSkipped"];
                                 }
                                 catch { }
@@ -2451,7 +2451,7 @@ namespace DeepSeek_v4_for_VisualStudio.View
                                 try
                                 {
                                     await ChatWebView.CoreWebView2.ExecuteScriptAsync(
-                                        "var p=document.getElementById('file-delete-confirm');if(p)p.remove();");
+                                        ChatHtmlService.BuildRemoveElementJs($"file-delete-confirm-{requestId}"));
                                     StatusLabel.Text = confirmed
                                         ? LocalizationService.Instance.Format("status.filesDeleted", filePaths.Count)
                                         : LocalizationService.Instance["status.deleteCancelled"];
