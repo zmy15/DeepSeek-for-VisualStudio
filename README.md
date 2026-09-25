@@ -6,7 +6,7 @@
 
 **An AI coding assistant for Visual Studio 2022 and 2026**
 
-[![License](https://img.shields.io/badge/license-MIT-blue)](LICENSE)
+[![License](https://img.shields.io/badge/license-MIT-blue)](https://github.com/zmy15/DeepSeek-for-VisualStudio/blob/master/LICENSE)
 [![Visual Studio](https://img.shields.io/badge/Visual%20Studio-2022%20%7C%202026-purple)]()
 [![.NET](https://img.shields.io/badge/.NET%20Framework-4.7.2-blueviolet)]()
 [![DeepSeek](https://img.shields.io/badge/-DeepSeek-green)]()
@@ -14,7 +14,7 @@
 [![Version](https://img.shields.io/badge/version-1.2.4-blue)]()
 [![GitHub Stars](https://img.shields.io/github/stars/zmy15/DeepSeek-for-VisualStudio?style=social)](https://github.com/zmy15/DeepSeek-for-VisualStudio)
 
-[简体中文](README.zh-CN.md)
+[简体中文](https://github.com/zmy15/DeepSeek-for-VisualStudio/blob/master/README.zh-CN.md)
 
 </div>
 
@@ -31,12 +31,12 @@ The extension combines a native-grade WebView2 chat experience with five coopera
 <table align="center">
   <tr>
     <td align="center" valign="top" width="50%">
-      <img src="docs/images/1.png" width="360" alt="DeepSeek Chat panel" />
+      <img src="https://raw.githubusercontent.com/zmy15/DeepSeek-for-VisualStudio/master/docs/images/1.png" width="360" alt="DeepSeek Chat panel" />
       <br />
       <sub>Chat panel — model selection, Deep Think, approval mode, and MCP status</sub>
     </td>
     <td align="center" valign="top" width="50%">
-      <img src="docs/images/3.png" width="360" alt="Thinking process and tool calls" />
+      <img src="https://raw.githubusercontent.com/zmy15/DeepSeek-for-VisualStudio/master/docs/images/3.png" width="360" alt="Thinking process and tool calls" />
       <br />
       <sub>Deep reasoning, tool calls, and live session context usage</sub>
     </td>
@@ -44,7 +44,7 @@ The extension combines a native-grade WebView2 chat experience with five coopera
 </table>
 
 <p align="center">
-  <img src="docs/images/5.png" width="720" alt="Inline AI edit" />
+  <img src="https://raw.githubusercontent.com/zmy15/DeepSeek-for-VisualStudio/master/docs/images/5.png" width="720" alt="Inline AI edit" />
   <br />
   <sub>Inline AI edit — Enter to apply / Esc to cancel</sub>
 </p>
@@ -169,4 +169,4 @@ Use `@ask`, `@plan`, `@edit`, or `@build` to select an agent explicitly, or let 
 
 ## License
 
-[MIT](LICENSE) © 2026 zmy15
+[MIT](https://github.com/zmy15/DeepSeek-for-VisualStudio/blob/master/LICENSE) © 2026 zmy15

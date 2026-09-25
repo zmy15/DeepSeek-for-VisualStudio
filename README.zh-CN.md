@@ -6,7 +6,7 @@
 
 **面向 Visual Studio 2022 和 2026 的 AI 编程助手**
 
-[![License](https://img.shields.io/badge/license-MIT-blue)](LICENSE)
+[![License](https://img.shields.io/badge/license-MIT-blue)](https://github.com/zmy15/DeepSeek-for-VisualStudio/blob/master/LICENSE)
 [![Visual Studio](https://img.shields.io/badge/Visual%20Studio-2022%20%7C%202026-purple)]()
 [![.NET](https://img.shields.io/badge/.NET%20Framework-4.7.2-blueviolet)]()
 [![DeepSeek](https://img.shields.io/badge/-DeepSeek-green)]()
@@ -14,7 +14,7 @@
 [![Version](https://img.shields.io/badge/version-1.2.4-blue)]()
 [![GitHub Stars](https://img.shields.io/github/stars/zmy15/DeepSeek-for-VisualStudio?style=social)](https://github.com/zmy15/DeepSeek-for-VisualStudio)
 
-[English](README.md)
+[English](https://github.com/zmy15/DeepSeek-for-VisualStudio/blob/master/README.md)
 
 </div>
 
@@ -31,12 +31,12 @@ DeepSeek for Visual Studio 将 AI 聊天、代码编辑、解决方案工具、�
 <table align="center">
   <tr>
     <td align="center" valign="top" width="50%">
-      <img src="docs/images/2.png" width="360" alt="DeepSeek Chat 聊天面板" />
+      <img src="https://raw.githubusercontent.com/zmy15/DeepSeek-for-VisualStudio/master/docs/images/2.png" width="360" alt="DeepSeek Chat 聊天面板" />
       <br />
       <sub>聊天面板 —— 模型选择、深度思考、审批模式与 MCP 状态</sub>
     </td>
     <td align="center" valign="top" width="50%">
-      <img src="docs/images/4.png" width="360" alt="思考过程与工具调用" />
+      <img src="https://raw.githubusercontent.com/zmy15/DeepSeek-for-VisualStudio/master/docs/images/4.png" width="360" alt="思考过程与工具调用" />
       <br />
       <sub>深度推理、工具调用与会话上下文用量</sub>
     </td>
@@ -44,7 +44,7 @@ DeepSeek for Visual Studio 将 AI 聊天、代码编辑、解决方案工具、�
 </table>
 
 <p align="center">
-  <img src="docs/images/6.png" width="720" alt="内联 AI 编辑" />
+  <img src="https://raw.githubusercontent.com/zmy15/DeepSeek-for-VisualStudio/master/docs/images/6.png" width="720" alt="内联 AI 编辑" />
   <br />
   <sub>内联 AI 编辑 —— Enter 应用 / Esc 取消</sub>
 </p>
@@ -169,4 +169,4 @@ git clone https://github.com/zmy15/DeepSeek-for-VisualStudio.git
 
 ## 开源协议
 
-[MIT](LICENSE) © 2026 zmy15
+[MIT](https://github.com/zmy15/DeepSeek-for-VisualStudio/blob/master/LICENSE) © 2026 zmy15
