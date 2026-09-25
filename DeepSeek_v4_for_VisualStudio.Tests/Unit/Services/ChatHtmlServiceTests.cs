@@ -168,6 +168,87 @@ public class ChatHtmlServiceTests
         html.Should().Contain("designer:e.shiftKey");
     }
 
+    [Fact]
+    public void BuildTerminalApprovalJs_GeneratesCardInjectionScript()
+    {
+        var request = new AgentPermissionRequest
+        {
+            Title = "Run command?",
+            Command = "dotnet --version",
+            ActionType = "terminal_command",
+            Purpose = "Check the installed SDK version.",
+            FilePaths = new List<string> { "Read the local .NET SDK version." },
+        };
+
+        string js = ChatHtmlService.BuildTerminalApprovalJs(request);
+        string cardId = "terminal-approval-" + request.RequestId;
+
+        js.Should().Contain($"document.getElementById(\"{cardId}\")");
+        js.Should().Contain($"div.id=\"{cardId}\"");
+        js.Should().Contain("window.__scrollToBottom('smooth');");
+        js.Should().Contain("window.__terminalApprove('" + request.RequestId + "')");
+        js.Should().Contain("window.__terminalSkip('" + request.RequestId + "')");
+        js.Should().NotContain("#region");
+        js.Should().NotContain("#endregion");
+        js.Should().NotContain("wind#");
+    }
+
+    [Fact]
+    public void BuildPermissionRequestJs_GeneratesRequestScopedCardInjectionScript()
+    {
+        var request = new AgentPermissionRequest
+        {
+            RequestId = "request-1",
+            Title = "<Modify project>",
+            Command = "Update <ProjectReference>",
+            ActionType = "file_write",
+            Purpose = "Keep the project file valid.",
+            Detail = "<Project><PropertyGroup /></Project>",
+        };
+
+        string js = ChatHtmlService.BuildPermissionRequestJs(request);
+        string cardId = "agent-permission-" + request.RequestId;
+
+        js.Should().Contain($"document.getElementById(\"{cardId}\")");
+        js.Should().Contain($"div.id=\"{cardId}\"");
+        js.Should().Contain("window.__agentApprove('request-1')");
+        js.Should().Contain("window.__agentDeny('request-1')");
+        js.Should().Contain("&lt;Modify project&gt;");
+        js.Should().Contain("&lt;ProjectReference&gt;");
+        js.Should().NotContain("#region");
+    }
+
+    [Fact]
+    public void BuildFileDeleteConfirmationJs_GeneratesRequestScopedCardInjectionScript()
+    {
+        var request = new AgentPermissionRequest
+        {
+            RequestId = "delete-1",
+            Title = "Delete file",
+            ActionType = "file_delete",
+            Purpose = "Remove obsolete source.",
+            FilePaths = new List<string> { @"C:\repo\obsolete & legacy.cs" },
+        };
+
+        string js = ChatHtmlService.BuildFileDeleteConfirmationJs(request);
+        string cardId = "file-delete-confirm-" + request.RequestId;
+
+        js.Should().Contain($"document.getElementById(\"{cardId}\")");
+        js.Should().Contain($"div.id=\"{cardId}\"");
+        js.Should().Contain("window.__fileDeleteConfirm('delete-1')");
+        js.Should().Contain("window.__fileDeleteCancel('delete-1')");
+        js.Should().Contain("obsolete &amp; legacy.cs");
+        js.Should().NotContain("#region");
+    }
+
+    [Fact]
+    public void BuildRemoveElementJs_UsesEscapedElementId()
+    {
+        string js = ChatHtmlService.BuildRemoveElementJs("terminal-approval-abc");
+
+        js.Should().Be("var p=document.getElementById(\"terminal-approval-abc\");if(p)p.remove();");
+    }
+
     private static int CountOccurrences(string haystack, string needle)
     {
         int count = 0;
