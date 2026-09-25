@@ -104,6 +104,10 @@ namespace DeepSeek_v4_for_VisualStudio.View
         {
             if (_options == null) return;
 
+            string effectiveModel = GetEffectiveModel();
+            int effectiveTokenBudget = _options.GetEffectiveTokenBudget(effectiveModel);
+            _contextManager.CurrentModel = effectiveModel;
+
             // ── 初始化上下文压缩服务 ──
             if (_options.EnableAutoCompression)
             {
@@ -139,21 +143,22 @@ namespace DeepSeek_v4_for_VisualStudio.View
                 }
 
                 _contextManager.SetCompressor(_compressorService);
-                _contextManager.TokenBudget = _options.TokenBudget;
+                _contextManager.TokenBudget = effectiveTokenBudget;
 
                 Logger.Info($"[ContextServices] 上下文压缩已启用: " +
-                    $"预算={_options.TokenBudget:N0}, 阈值={_options.CompressionThreshold}%, " +
-                    $"保留轮次={_options.PreserveRecentTurns}");
+                    $"模型={effectiveModel}, 预算={effectiveTokenBudget:N0}/{_options.GetModelMaxTokens(effectiveModel):N0} ({_options.TokenBudget}%), " +
+                    $"阈值={_options.CompressionThreshold}%, 保留轮次={_options.PreserveRecentTurns}");
             }
             else
             {
                 _compressorService = null;
                 _contextManager.SetCompressor(null);
-                _contextManager.TokenBudget = _options.TokenBudget;
+                _contextManager.TokenBudget = effectiveTokenBudget;
                 _contextManager.AutoTrimTurns = _options.PreserveRecentTurns;
 
                 Logger.Info($"[ContextServices] 上下文压缩已禁用，使用旧版截断: " +
-                    $"预算={_options.TokenBudget:N0}, 保留轮次={_options.PreserveRecentTurns}");
+                    $"模型={effectiveModel}, 预算={effectiveTokenBudget:N0}/{_options.GetModelMaxTokens(effectiveModel):N0} ({_options.TokenBudget}%), " +
+                    $"保留轮次={_options.PreserveRecentTurns}");
             }
 
             // ── 初始化 RAG 服务 ──
@@ -263,7 +268,7 @@ namespace DeepSeek_v4_for_VisualStudio.View
                 Logger.Info(
                     "[Settings] 应用增量设置变更: " +
                     $"endpoint={changes.EndpointChanged}, modelUi={changes.ModelControlsChanged}, " +
-                    $"thinking={changes.ThinkingChanged}, approval={changes.ApprovalChanged}, " +
+                    $"context={changes.ContextChanged}, thinking={changes.ThinkingChanged}, approval={changes.ApprovalChanged}, " +
                     $"autoSkillRouting={changes.AutoSkillRoutingChanged}, ocr={changes.OcrChanged}, " +
                     $"webSearch={changes.WebSearchChanged}, layout={changes.LayoutChanged}");
 
@@ -283,6 +288,9 @@ namespace DeepSeek_v4_for_VisualStudio.View
 
             if (changes.ModelControlsChanged)
                 RefreshModelFromSettings();
+
+            if (changes.ModelControlsChanged || changes.ContextChanged)
+                ApplyContextBudgetFromSettings();
 
             if (changes.ThinkingChanged)
             {
@@ -348,6 +356,28 @@ namespace DeepSeek_v4_for_VisualStudio.View
             _apiService?.UpdateEndpoint(config);
             _agentFactory?.InvalidateFullToolSetCache();
             UpdateEndpointCapabilityControls();
+        }
+
+        private void ApplyContextBudgetFromSettings(string? model = null)
+        {
+            if (_contextManager == null || _options == null)
+                return;
+
+            string effectiveModel = string.IsNullOrWhiteSpace(model)
+                ? GetEffectiveModel()
+                : model;
+            int maxTokens = _options.GetModelMaxTokens(effectiveModel);
+            int tokenBudget = ModelTokenLimitService.CalculateBudget(
+                effectiveModel,
+                _options.TokenBudget,
+                _options.ModelMaxTokenLimits);
+
+            _contextManager.CurrentModel = effectiveModel;
+            _contextManager.TokenBudget = tokenBudget;
+
+            Logger.Info(
+                $"[ContextServices] Token 预算已更新: 模型={effectiveModel}, " +
+                $"最大={maxTokens:N0}, 预算={_options.TokenBudget}%, 有效={tokenBudget:N0}");
         }
 
         private void SyncThinkingToApiService()

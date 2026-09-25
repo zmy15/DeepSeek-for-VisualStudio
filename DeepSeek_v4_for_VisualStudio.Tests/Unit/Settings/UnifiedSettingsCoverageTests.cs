@@ -19,6 +19,11 @@ public class UnifiedSettingsCoverageTests
         "deepseekApiKeyGuide",
         "deepseekTestConnectionGuide",
         "deepseekCustomModelPickerGuide",
+        "deepseekAbout",
+        "deepseekApiBaseUrlGuide",
+        "deepseekCustomModelNameGuide",
+        "deepseekModelMaxTokenLimitsGuide",
+        "deepseekVisionModelsGuide",
     };
 
     private static readonly (string OptionProperty, string SettingId)[] ExpectedCoverage =
@@ -26,9 +31,6 @@ public class UnifiedSettingsCoverageTests
         (nameof(DeepSeekOptionsPage.SystemPrompt), "deepseekSystemPrompt"),
         (nameof(DeepSeekOptionsPage.SystemPromptEn), "deepseekSystemPromptEn"),
         (nameof(DeepSeekOptionsPage.SelectedModel), "deepseekModel"),
-        (nameof(DeepSeekOptionsPage.ApiBaseUrl), "deepseekApiBaseUrl"),
-        (nameof(DeepSeekOptionsPage.CustomModelName), "deepseekCustomModelName"),
-        (nameof(DeepSeekOptionsPage.CustomVisionModels), "deepseekCustomVisionModels"),
         (nameof(DeepSeekOptionsPage.IsThinkingEnabled), "deepseekThinking"),
         (nameof(DeepSeekOptionsPage.ReasoningEffort), "deepseekReasoningEffort"),
         (nameof(DeepSeekOptionsPage.EnableWebSearch), "deepseekWebSearch"),
@@ -75,7 +77,7 @@ public class UnifiedSettingsCoverageTests
         var declaredIds = GetDeclaredSettingIds();
         var boundMonikers = GetBoundMonikers();
 
-        declaredIds.Should().HaveCount(48);
+        declaredIds.Should().HaveCount(50);
         foreach (var guideSettingId in GuideSettingIds)
             declaredIds.Should().Contain(guideSettingId);
 
@@ -83,8 +85,8 @@ public class UnifiedSettingsCoverageTests
             .Where(id => !GuideSettingIds.Contains(id, StringComparer.Ordinal))
             .ToList();
 
-        synchronizedIds.Should().HaveCount(44);
-        boundMonikers.Should().HaveCount(44);
+        synchronizedIds.Should().HaveCount(41);
+        boundMonikers.Should().HaveCount(41);
         declaredIds.GroupBy(id => id, StringComparer.Ordinal).Should().OnlyContain(group => group.Count() == 1);
         boundMonikers.GroupBy(id => id, StringComparer.Ordinal).Should().OnlyContain(group => group.Count() == 1);
 
@@ -98,7 +100,7 @@ public class UnifiedSettingsCoverageTests
     [Fact]
     public void UnifiedSettings_CoverLegacyNonSensitiveOptions()
     {
-        ExpectedCoverage.Should().HaveCount(44);
+        ExpectedCoverage.Should().HaveCount(41);
 
         var optionProperties = typeof(DeepSeekOptionsPage)
             .GetProperties(BindingFlags.Public | BindingFlags.Instance)

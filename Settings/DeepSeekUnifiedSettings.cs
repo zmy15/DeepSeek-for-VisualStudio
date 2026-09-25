@@ -21,11 +21,36 @@ namespace DeepSeek_v4_for_VisualStudio
             };
 
         [VisualStudioContribution]
-        internal static Setting.String ApiBaseUrl { get; } =
-            new("deepseekApiBaseUrl", "%DeepSeek.Chat.settings.apiBaseUrl.displayName%", GeneralCategory, defaultValue: string.Empty)
+        internal static Setting.String About { get; } =
+            new(
+                "deepseekAbout",
+                "%DeepSeek.Chat.Settings.AboutDisplayName%",
+                GeneralCategory,
+                defaultValue: "https://github.com/zmy15/DeepSeek-for-VisualStudio\nhttps://github.com/zmy15/DeepSeek-for-VisualStudio/issues")
             {
-                Description = "%DeepSeek.Chat.settings.apiBaseUrl.description%",
+                Description = "%DeepSeek.Chat.Settings.AboutDescription%",
+                SearchKeywords = new[] { "about", "repository", "issues", "star", "关于", "仓库" },
+                Messages = new[]
+                {
+                    new SettingMessage("%DeepSeek.Chat.Settings.AboutStarMessage%"),
+                },
+            };
+
+        [VisualStudioContribution]
+        internal static Setting.String ApiBaseUrlGuide { get; } =
+            new(
+                "deepseekApiBaseUrlGuide",
+                "%DeepSeek.Chat.settings.apiBaseUrl.displayName%",
+                GeneralCategory,
+                defaultValue: "工具 → 选项 → DeepSeek Chat → 模型设置")
+            {
+                Description = "%DeepSeek.Chat.Settings.ApiBaseUrlGuideDescription%",
                 SearchKeywords = new[] { "URL", "endpoint", "baseUrl", "端点", "地址" },
+                Messages = new[]
+                {
+                    new SettingMessage("%DeepSeek.Chat.Settings.LegacyModelSettingsGuideMessage%"),
+                },
+                EnabledWhen = SettingRule.FeatureFlag("DeepSeek.ApiBaseUrlGuideReadOnly", true),
             };
 
         [VisualStudioContribution]
@@ -104,15 +129,23 @@ namespace DeepSeek_v4_for_VisualStudio
             };
 
         /// <summary>
-        /// 用户手动勾选为多模态（视觉）的模型列表；官方接口模型与自定义端点模型
-        /// 共用同一份名单，由 DeepSeekEndpointResolver 判断激活模型是否具备视觉能力。
+        /// 视觉模型列表在新版设置中只读，引导用户前往旧版模型设置页配置。
         /// </summary>
         [VisualStudioContribution]
-        internal static Setting.String CustomVisionModels { get; } =
-            new("deepseekCustomVisionModels", "%DeepSeek.Chat.settings.visionModels.displayName%", GeneralCategory, defaultValue: string.Empty)
+        internal static Setting.String VisionModelsGuide { get; } =
+            new(
+                "deepseekVisionModelsGuide",
+                "%DeepSeek.Chat.settings.visionModels.displayName%",
+                GeneralCategory,
+                defaultValue: "工具 → 选项 → DeepSeek Chat → 模型设置")
             {
-                Description = "%DeepSeek.Chat.settings.visionModels.description%",
+                Description = "%DeepSeek.Chat.Settings.VisionModelsGuideDescription%",
                 SearchKeywords = new[] { "vision", "multimodal", "image", "视觉", "多模态" },
+                Messages = new[]
+                {
+                    new SettingMessage("%DeepSeek.Chat.Settings.LegacyModelSettingsGuideMessage%"),
+                },
+                EnabledWhen = SettingRule.FeatureFlag("DeepSeek.VisionModelsGuideReadOnly", true),
             };
 
         [VisualStudioContribution]
@@ -144,11 +177,37 @@ namespace DeepSeek_v4_for_VisualStudio
             };
 
         [VisualStudioContribution]
-        internal static Setting.String CustomModelName { get; } =
-            new("deepseekCustomModelName", "%DeepSeek.Chat.settings.customModelName.displayName%", GeneralCategory, defaultValue: string.Empty)
+        internal static Setting.String CustomModelNameGuide { get; } =
+            new(
+                "deepseekCustomModelNameGuide",
+                "%DeepSeek.Chat.settings.customModelName.displayName%",
+                GeneralCategory,
+                defaultValue: "工具 → 选项 → DeepSeek Chat → 模型设置")
             {
-                Description = "%DeepSeek.Chat.settings.customModelName.description%",
+                Description = "%DeepSeek.Chat.Settings.CustomModelNameGuideDescription%",
                 SearchKeywords = new[] { "model", "custom", "模型", "自定义" },
+                Messages = new[]
+                {
+                    new SettingMessage("%DeepSeek.Chat.Settings.LegacyModelSettingsGuideMessage%"),
+                },
+                EnabledWhen = SettingRule.FeatureFlag("DeepSeek.CustomModelNameGuideReadOnly", true),
+            };
+
+        [VisualStudioContribution]
+        internal static Setting.String ModelMaxTokenLimitsGuide { get; } =
+            new(
+                "deepseekModelMaxTokenLimitsGuide",
+                "%DeepSeek.Chat.settings.modelMaxTokenLimits.displayName%",
+                GeneralCategory,
+                defaultValue: "工具 → 选项 → DeepSeek Chat → 模型设置")
+            {
+                Description = "%DeepSeek.Chat.Settings.ModelMaxTokenLimitsGuideDescription%",
+                SearchKeywords = new[] { "token", "context", "limit", "model", "Token", "上下文", "模型" },
+                Messages = new[]
+                {
+                    new SettingMessage("%DeepSeek.Chat.Settings.LegacyModelSettingsGuideMessage%"),
+                },
+                EnabledWhen = SettingRule.FeatureFlag("DeepSeek.ModelMaxTokenLimitsGuideReadOnly", true),
             };
 
         [VisualStudioContribution]
@@ -237,9 +296,11 @@ namespace DeepSeek_v4_for_VisualStudio
 
         [VisualStudioContribution]
         internal static Setting.Integer TokenBudget { get; } =
-            new("deepseekTokenBudget", "%DeepSeek.Chat.settings.tokenBudget.displayName%", GeneralCategory, defaultValue: 900_000)
+            new("deepseekTokenBudget", "%DeepSeek.Chat.settings.tokenBudget.displayName%", GeneralCategory, defaultValue: 90)
             {
                 Description = "%DeepSeek.Chat.settings.tokenBudget.description%",
+                Minimum = 1,
+                Maximum = 100,
             };
 
         [VisualStudioContribution]

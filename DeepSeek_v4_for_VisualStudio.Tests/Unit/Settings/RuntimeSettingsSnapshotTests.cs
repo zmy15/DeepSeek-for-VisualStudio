@@ -51,6 +51,28 @@ public class RuntimeSettingsSnapshotTests
     }
 
     [Fact]
+    public void ContextBudgetChange_RefreshesContextOnly()
+    {
+        var previous = CreateSnapshot();
+        var current = previous with
+        {
+            TokenBudgetPercent = 80,
+            ModelMaxTokenLimits = "deepseek-chat=128000",
+        };
+
+        var changes = RuntimeSettingsChangeSet.Between(previous, current);
+
+        changes.ContextChanged.Should().BeTrue();
+        changes.HasChanges.Should().BeTrue();
+        changes.EndpointChanged.Should().BeFalse();
+        changes.ModelControlsChanged.Should().BeFalse();
+        changes.ThinkingChanged.Should().BeFalse();
+        changes.OcrChanged.Should().BeFalse();
+        changes.WebSearchChanged.Should().BeFalse();
+        changes.LayoutChanged.Should().BeFalse();
+    }
+
+    [Fact]
     public void SearchKeyChange_RefreshesWebSearchOnly()
     {
         var previous = CreateSnapshot();
@@ -92,6 +114,8 @@ public class RuntimeSettingsSnapshotTests
             CustomVisionModels: string.Empty,
             ActiveCustomModel: "deepseek-chat",
             ActiveModelSource: "custom",
+            TokenBudgetPercent: 90,
+            ModelMaxTokenLimits: "deepseek-chat=1000000",
             IsThinkingEnabled: true,
             ReasoningEffort: "high",
             OcrEngine: "Windows Built-in",

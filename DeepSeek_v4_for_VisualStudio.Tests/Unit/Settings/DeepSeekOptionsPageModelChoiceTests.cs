@@ -12,6 +12,7 @@ public class DeepSeekOptionsPageModelChoiceTests
         nameof(DeepSeekOptionsPage.CustomApiKey),
         nameof(DeepSeekOptionsPage.ApiBaseUrl),
         nameof(DeepSeekOptionsPage.CustomModelName),
+        nameof(DeepSeekOptionsPage.ModelMaxTokenLimits),
         nameof(DeepSeekOptionsPage.CustomVisionModels),
         nameof(DeepSeekOptionsPage.CustomModelPicker),
         nameof(DeepSeekOptionsPage.TestConnection),
@@ -38,6 +39,59 @@ public class DeepSeekOptionsPageModelChoiceTests
             .Browsable
             .Should()
             .BeFalse();
+    }
+
+    [Fact]
+    public void ModelSettings_UseSpecifiedDisplayOrder()
+    {
+        string[] expectedOrder =
+        {
+            nameof(DeepSeekOptionsPage.ApiKey),
+            nameof(DeepSeekOptionsPage.ApiBaseUrl),
+            nameof(DeepSeekOptionsPage.CustomApiKey),
+            nameof(DeepSeekOptionsPage.TestConnection),
+            nameof(DeepSeekOptionsPage.CustomModelPicker),
+            nameof(DeepSeekOptionsPage.CustomModelName),
+            nameof(DeepSeekOptionsPage.ModelMaxTokenLimits),
+            nameof(DeepSeekOptionsPage.CustomVisionModels),
+            nameof(DeepSeekOptionsPage.SelectedModelChoice),
+            nameof(DeepSeekOptionsPage.IsThinkingEnabled),
+            nameof(DeepSeekOptionsPage.ReasoningEffort),
+        };
+
+        var properties = TypeDescriptor.GetProperties(typeof(DeepSeekOptionsPage));
+        var displayNames = expectedOrder
+            .Select(propertyName => properties[propertyName]?.DisplayName ?? string.Empty)
+            .ToList();
+
+        displayNames.Select(name => name.Length >= 3 ? name.Substring(0, 3) : string.Empty)
+            .Should().Equal("01.", "02.", "03.", "04.", "05.", "06.", "07.", "08.", "09.", "10.", "11.");
+        displayNames
+            .SequenceEqual(displayNames.OrderBy(name => name, StringComparer.CurrentCulture))
+            .Should().BeTrue();
+    }
+
+    [Fact]
+    public void About_UsesAboutEditorAndPublishesProjectLinks()
+    {
+        var property = typeof(DeepSeekOptionsPage).GetProperty(nameof(DeepSeekOptionsPage.About))!;
+
+        property.GetCustomAttribute<EditorAttribute>()?.EditorTypeName
+            .Should().Contain(nameof(AboutEditor));
+        AboutInfo.RepositoryUrl.Should().Be("https://github.com/zmy15/DeepSeek-for-VisualStudio");
+        AboutInfo.IssuesUrl.Should().Be(AboutInfo.RepositoryUrl + "/issues");
+        AboutInfo.Version.Should().Be(Vsix.Version);
+    }
+
+    [Fact]
+    public void ModelMaxTokenLimits_UsesOptionEditor()
+    {
+        var property = typeof(DeepSeekOptionsPage)
+            .GetProperty(nameof(DeepSeekOptionsPage.ModelMaxTokenLimits))!;
+
+        property.CanWrite.Should().BeTrue();
+        property.GetCustomAttribute<EditorAttribute>()?.EditorTypeName
+            .Should().Contain(nameof(ModelMaxTokenEditor));
     }
 
     [Fact]

@@ -30,6 +30,67 @@ public class DeepSeekApiServicePricingTests
     }
 
     [Theory]
+    [InlineData(2026, 1, 4)]   // 元旦调休上班周日
+    [InlineData(2026, 2, 14)]  // 春节调休上班周六
+    [InlineData(2026, 2, 28)]  // 春节调休上班周六
+    [InlineData(2026, 5, 9)]   // 劳动节调休上班周六
+    [InlineData(2026, 9, 12)]  // 普通周六
+    [InlineData(2026, 9, 13)]  // 普通周日
+    [InlineData(2026, 9, 20)]  // 国庆调休上班周日
+    [InlineData(2026, 10, 10)] // 国庆调休上班周六
+    public void IsBeijingPeakTime_WeekendIsOffPeakForEveryHour(
+        int year,
+        int month,
+        int day)
+    {
+        for (int hour = 0; hour < 24; hour++)
+        {
+            var beijingTime = new DateTimeOffset(
+                year, month, day, hour, 0, 0, TimeSpan.FromHours(8));
+
+            DeepSeekProvider.IsBeijingPeakTime(beijingTime).Should().BeFalse(
+                $"{year:0000}-{month:00}-{day:00} {hour:00}:00 北京时间应为全天空闲");
+        }
+    }
+
+    [Theory]
+    [MemberData(nameof(ChinesePublicHolidayDates2026))]
+    public void IsBeijingPeakTime_ChinesePublicHolidayIsOffPeakForEveryHour(
+        int year,
+        int month,
+        int day)
+    {
+        for (int hour = 0; hour < 24; hour++)
+        {
+            var beijingTime = new DateTimeOffset(
+                year, month, day, hour, 0, 0, TimeSpan.FromHours(8));
+
+            DeepSeekProvider.IsBeijingPeakTime(beijingTime).Should().BeFalse(
+                $"{year:0000}-{month:00}-{day:00} {hour:00}:00 北京时间应为全天空闲");
+        }
+    }
+
+    public static IEnumerable<object[]> ChinesePublicHolidayDates2026()
+    {
+        var dates = new List<DateTime>();
+        AddRange(dates, new DateTime(2026, 1, 1), 3);   // 元旦
+        AddRange(dates, new DateTime(2026, 2, 15), 9);  // 春节
+        AddRange(dates, new DateTime(2026, 4, 4), 3);   // 清明节
+        AddRange(dates, new DateTime(2026, 5, 1), 5);   // 劳动节
+        AddRange(dates, new DateTime(2026, 6, 19), 3);  // 端午节
+        AddRange(dates, new DateTime(2026, 9, 25), 3);  // 中秋节
+        AddRange(dates, new DateTime(2026, 10, 1), 7);  // 国庆节
+
+        return dates.Select(date => new object[] { date.Year, date.Month, date.Day });
+    }
+
+    private static void AddRange(List<DateTime> dates, DateTime start, int days)
+    {
+        for (int i = 0; i < days; i++)
+            dates.Add(start.AddDays(i));
+    }
+
+    [Theory]
     [InlineData(2026, 9, 7, 0, 59, false)]  // 周一 北京 08:59，空闲
     [InlineData(2026, 9, 7, 1, 0, true)]    // 周一 北京 09:00，高峰
     [InlineData(2026, 9, 7, 3, 59, true)]   // 周一 北京 11:59，高峰
