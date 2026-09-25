@@ -1446,6 +1446,7 @@ namespace DeepSeek_v4_for_VisualStudio.View
                     var config = DeepSeekEndpointResolver.Resolve(_options);
                     _apiService.UpdateEndpoint(config);
                     UpdateEndpointCapabilityControls();
+                    ApplyContextBudgetFromSettings(config.Model);
 
                     // 模型/来源切换影响 capture_window 等工具可见性 → 使 Agent 完整工具集缓存失效
                     _agentFactory?.InvalidateFullToolSetCache();

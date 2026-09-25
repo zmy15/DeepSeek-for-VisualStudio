@@ -152,6 +152,14 @@ namespace DeepSeek_v4_for_VisualStudio
             };
 
         [VisualStudioContribution]
+        internal static Setting.String ModelMaxTokenLimits { get; } =
+            new("deepseekModelMaxTokenLimits", "%DeepSeek.Chat.settings.modelMaxTokenLimits.displayName%", GeneralCategory, defaultValue: string.Empty)
+            {
+                Description = "%DeepSeek.Chat.settings.modelMaxTokenLimits.description%",
+                SearchKeywords = new[] { "token", "context", "limit", "model", "Token", "上下文", "模型" },
+            };
+
+        [VisualStudioContribution]
         internal static Setting.String SystemPrompt { get; } =
             new("deepseekSystemPrompt", "%DeepSeek.Chat.settings.systemPrompt.displayName%", GeneralCategory, defaultValue: string.Empty)
             {
@@ -237,9 +245,11 @@ namespace DeepSeek_v4_for_VisualStudio
 
         [VisualStudioContribution]
         internal static Setting.Integer TokenBudget { get; } =
-            new("deepseekTokenBudget", "%DeepSeek.Chat.settings.tokenBudget.displayName%", GeneralCategory, defaultValue: 900_000)
+            new("deepseekTokenBudget", "%DeepSeek.Chat.settings.tokenBudget.displayName%", GeneralCategory, defaultValue: 90)
             {
                 Description = "%DeepSeek.Chat.settings.tokenBudget.description%",
+                Minimum = 1,
+                Maximum = 100,
             };
 
         [VisualStudioContribution]
