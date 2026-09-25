@@ -1,5 +1,5 @@
 name: 功能建议 / Feature Request
-description: 建议新功能、改进现有体验或集成新的能力。
+description: 建议新功能、改进现有体验或集成新的能力。 / Suggest a new feature, an experience improvement, or a new integration.
 labels: [enhancement]
 body:
   - type: markdown
@@ -12,7 +12,7 @@ body:
     id: problem
     attributes:
       label: 使用场景 / Problem or Use Case
-      description: 当前遇到什么限制？这个功能会解决什么问题？
+      description: 当前遇到什么限制？这个功能会解决什么问题？ / What limitation are you facing, and what problem would this feature solve?
     validations:
       required: true
 
@@ -32,7 +32,7 @@ body:
     id: acceptance
     attributes:
       label: 验收标准 / Acceptance Criteria
-      description: 可以的话，请描述实现后应该如何验证。
+      description: 可以的话，请描述实现后应该如何验证。 / If possible, describe how the implementation should be verified.
 
   - type: dropdown
     id: willingness

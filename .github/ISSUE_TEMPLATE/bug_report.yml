@@ -1,5 +1,5 @@
 name: Bug 报告 / Bug Report
-description: 报告扩展运行错误、界面异常或功能失效。
+description: 报告扩展运行错误、界面异常或功能失效。 / Report extension errors, UI issues, or broken functionality.
 labels: [bug]
 body:
   - type: markdown
@@ -12,7 +12,7 @@ body:
     id: description
     attributes:
       label: 问题描述 / Description
-      description: 简要说明遇到了什么问题，以及它对使用的影响。
+      description: 简要说明遇到了什么问题，以及它对使用的影响。 / Briefly describe the issue and how it affects your use.
     validations:
       required: true
 
@@ -21,9 +21,9 @@ body:
     attributes:
       label: 复现步骤 / Reproduction Steps
       placeholder: |
-        1. 打开...
-        2. 点击...
-        3. 出现...
+        1. 打开... / Open...
+        2. 点击... / Click...
+        3. 出现... / Observe...
     validations:
       required: true
 
@@ -45,7 +45,7 @@ body:
     id: os-version
     attributes:
       label: 操作系统版本 / Operating System Version
-      placeholder: 例如 Windows 10 22H2 / Windows 11 23H2
+      placeholder: 例如 Windows 10 22H2 / Windows 11 23H2 / e.g. Windows 10 22H2 / Windows 11 23H2
     validations:
       required: true
 
@@ -53,7 +53,7 @@ body:
     id: visual-studio-version
     attributes:
       label: Visual Studio 版本 / Visual Studio Version
-      placeholder: 例如 Visual Studio 2022 17.14
+      placeholder: 例如 Visual Studio 2022 17.14 / e.g. Visual Studio 2022 17.14
     validations:
       required: true
 
@@ -61,7 +61,7 @@ body:
     id: extension-version
     attributes:
       label: 扩展版本 / Extension Version
-      placeholder: 可在“扩展 > 管理扩展”中查看
+      placeholder: 可在“扩展 > 管理扩展”中查看 / View under Extensions > Manage Extensions
     validations:
       required: true
 
@@ -92,7 +92,7 @@ body:
     id: logs
     attributes:
       label: 日志或错误信息 / Logs or Error Message
-      description: 请移除 API Key、解决方案路径、公司代码等敏感信息。
+      description: 请移除 API Key、解决方案路径、公司代码等敏感信息。 / Remove sensitive information such as API keys, solution paths, and proprietary code.
       render: text
 
   - type: textarea
