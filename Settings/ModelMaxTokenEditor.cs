@@ -26,8 +26,10 @@ namespace DeepSeek_v4_for_VisualStudio.Settings
                 return value;
 
             var configured = ModelTokenLimitService.ParseLimits(page.ModelMaxTokenLimits);
-            var models = OfficialModelCatalogService.GetModels()
-                .Concat(page.GetCustomModels())
+            var officialModels = OfficialModelCatalogService.GetModels().ToList();
+            var customModels = page.GetCustomModels().ToList();
+            var models = officialModels
+                .Concat(customModels)
                 .Concat(new[] { page.SelectedModel, page.ActiveCustomModel })
                 .Concat(configured.Keys)
                 .Where(model => !string.IsNullOrWhiteSpace(model))
@@ -36,7 +38,11 @@ namespace DeepSeek_v4_for_VisualStudio.Settings
                 .OrderBy(model => model, StringComparer.OrdinalIgnoreCase)
                 .ToList();
 
-            using var dialog = new ModelMaxTokenDialog(models, configured);
+            using var dialog = new ModelMaxTokenDialog(
+                models,
+                officialModels,
+                customModels,
+                configured);
             if (dialog.ShowDialog() == DialogResult.OK)
             {
                 page.ModelMaxTokenLimits = dialog.ConfigurationText;
@@ -56,6 +62,8 @@ namespace DeepSeek_v4_for_VisualStudio.Settings
 
         public ModelMaxTokenDialog(
             IReadOnlyList<string> models,
+            IReadOnlyList<string> officialModels,
+            IReadOnlyList<string> customModels,
             IReadOnlyDictionary<string, int> configured)
         {
             var l = LocalizationService.Instance;
@@ -96,24 +104,34 @@ namespace DeepSeek_v4_for_VisualStudio.Settings
                 HeaderText = l["settings.modelMaxTokenLimits.modelColumn"],
                 ReadOnly = true,
                 AutoSizeMode = DataGridViewAutoSizeColumnMode.Fill,
-                FillWeight = 62,
+                FillWeight = 48,
+            });
+            _grid.Columns.Add(new DataGridViewTextBoxColumn
+            {
+                Name = "source",
+                HeaderText = l["settings.modelMaxTokenLimits.sourceColumn"],
+                ReadOnly = true,
+                AutoSizeMode = DataGridViewAutoSizeColumnMode.Fill,
+                FillWeight = 24,
             });
             _grid.Columns.Add(new DataGridViewTextBoxColumn
             {
                 Name = "tokens",
                 HeaderText = l["settings.modelMaxTokenLimits.contextColumn"],
                 AutoSizeMode = DataGridViewAutoSizeColumnMode.Fill,
-                FillWeight = 38,
+                FillWeight = 28,
             });
             _grid.RowTemplate.Height = 34;
             _grid.ColumnHeadersHeight = 32;
 
+            var officialSet = new HashSet<string>(officialModels, StringComparer.OrdinalIgnoreCase);
+            var customSet = new HashSet<string>(customModels, StringComparer.OrdinalIgnoreCase);
             foreach (string model in models)
             {
                 string text = configured.TryGetValue(model, out int maxTokens)
                     ? ModelTokenLimitService.FormatTokenCount(maxTokens)
                     : string.Empty;
-                _grid.Rows.Add(model, text);
+                _grid.Rows.Add(model, GetSourceText(model, officialSet, customSet), text);
             }
 
             var buttons = new FlowLayoutPanel
@@ -158,6 +176,24 @@ namespace DeepSeek_v4_for_VisualStudio.Settings
             Controls.Add(_grid);
             Controls.Add(buttons);
             Controls.Add(descriptionLabel);
+        }
+
+        private static string GetSourceText(
+            string model,
+            HashSet<string> officialModels,
+            HashSet<string> customModels)
+        {
+            bool isOfficial = officialModels.Contains(model);
+            bool isCustom = customModels.Contains(model);
+            var l = LocalizationService.Instance;
+
+            if (isOfficial && isCustom)
+                return l["settings.modelMaxTokenLimits.sourceBoth"];
+            if (isCustom)
+                return l["settings.modelMaxTokenLimits.sourceCustom"];
+            if (isOfficial)
+                return l["settings.modelMaxTokenLimits.sourceOfficial"];
+            return l["settings.modelMaxTokenLimits.sourceConfigured"];
         }
 
         private bool TryBuildConfiguration(out string configuration, out string error)
