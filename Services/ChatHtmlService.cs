@@ -1307,53 +1307,80 @@ return "<!DOCTYPE html><html lang='" + htmlLang + "'><head><meta charset='UTF-8'
 
 
         /// <summary>
+        /// 构建移除指定审批 UI 元素的 JS 脚本。
+        /// </summary>
+        public static string BuildRemoveElementJs(string elementId)
+        {
+            return $"var p=document.getElementById({EscapeJsString(elementId)});if(p)p.remove();";
+        }
+
+        /// <summary>
         /// 构建权限请求 UI 的 JS 脚本（在聊天底部注入确认/拒绝按钮）。
         /// 显示：标题 → 目的（为什么）→ 操作描述（做什么）→ 内容预览 → 按钮
         /// </summary>
         public static string BuildPermissionRequestJs(AgentPermissionRequest request)
         {
-            string escapedTitle = EscapeJsString(request.Title);
-            string escapedCommand = EscapeJsString(request.Command);
+            string cardId = "agent-permission-" + request.RequestId;
+            string escapedCardId = EscapeJsString(cardId);
             string safeRequestId = EscapeHtmlAttribute(request.RequestId);
 
-            // ── 目的说明（告诉用户为什么要执行此操作）──
-            string purposeJs = "";
+            var cardHtml = new StringBuilder();
+            cardHtml.Append("<div style=\"color:#C8A84E;font-size:12px;font-weight:600;margin-bottom:6px\">")
+                .Append(EscapeHtml(L["chat.html.permissionTitle"]))
+                .Append("</div>");
+
             if (!string.IsNullOrWhiteSpace(request.Purpose))
             {
-                string escapedPurpose = EscapeJsString(request.Purpose);
-                purposeJs = $@"'<div style=""color:#CEA85C;font-size:11px;margin-bottom:4px;padding:6px 8px;background:#2A2218;border-left:3px solid #C8A84E;border-radius:4px"">'+'<span style=""font-weight:600"">{L["chat.html.purposeLabel"]}</span>{escapedPurpose}</div>'+";
+                cardHtml.Append("<div style=\"color:#CEA85C;font-size:11px;margin-bottom:4px;padding:6px 8px;background:#2A2218;border-left:3px solid #C8A84E;border-radius:4px\">")
+                    .Append("<span style=\"font-weight:600\">")
+                    .Append(EscapeHtml(L["chat.html.purposeLabel"]))
+                    .Append("</span>")
+                    .Append(EscapeHtml(request.Purpose))
+                    .Append("</div>");
             }
 
-            // 额外详情（如修改文件时的内容预览）
-            string detailJs = "";
+            cardHtml.Append("<div style=\"color:#D4D4D4;font-size:12px;margin-bottom:4px\">")
+                .Append(EscapeHtml(request.Title))
+                .Append("</div>");
+            cardHtml.Append("<pre style=\"background:#1A1A0E;color:#C8C84E;padding:8px;border-radius:4px;font-size:11px;margin:4px 0;max-height:60px;overflow-y:auto\">")
+                .Append(EscapeHtml(request.Command))
+                .Append("</pre>");
+
             if (!string.IsNullOrWhiteSpace(request.Detail))
             {
-                string escapedDetail = EscapeJsString(request.Detail);
-                detailJs = $@"
-        '<details style=""margin-top:8px"">'+
-        '<summary style=""color:#C8A84E;font-size:11px;cursor:pointer"">{L["chat.html.changePreview"]}</summary>'+
-        '<pre style=""background:#1A1A0E;color:#C8C84E;padding:8px;border-radius:4px;font-size:10px;margin-top:4px;max-height:200px;overflow-y:auto;white-space:pre-wrap;word-break:break-all"">{escapedDetail}</pre>'+
-        '</details>'+";
+                cardHtml.Append("<details style=\"margin-top:8px\">")
+                    .Append("<summary style=\"color:#C8A84E;font-size:11px;cursor:pointer\">")
+                    .Append(EscapeHtml(L["chat.html.changePreview"]))
+                    .Append("</summary>")
+                    .Append("<pre style=\"background:#1A1A0E;color:#C8C84E;padding:8px;border-radius:4px;font-size:10px;margin-top:4px;max-height:200px;overflow-y:auto;white-space:pre-wrap;word-break:break-all\">")
+                    .Append(EscapeHtml(request.Detail))
+                    .Append("</pre></details>");
             }
+
+            cardHtml.Append("<div style=\"display:flex;gap:8px;margin-top:8px\">")
+                .Append("<button onclick=\"window.__agentApprove('")
+                .Append(safeRequestId)
+                .Append("')\" style=\"background:#1A3A1A;color:#4EC9B0;border:1px solid #3A6A3A;border-radius:4px;padding:4px 16px;cursor:pointer;font-size:12px\">")
+                .Append(EscapeHtml(L["chat.html.approveButton"]))
+                .Append("</button>")
+                .Append("<button onclick=\"window.__agentDeny('")
+                .Append(safeRequestId)
+                .Append("')\" style=\"background:#3A1A1A;color:#E07878;border:1px solid #6A3A3A;border-radius:4px;padding:4px 16px;cursor:pointer;font-size:12px\">")
+                .Append(EscapeHtml(L["chat.html.denyButton"]))
+                .Append("</button></div>");
+
+            string escapedInnerHtml = EscapeJsString(cardHtml.ToString());
 
             return $@"
 (function(){{
-    // 移除已有的权限请求 UI
-    var existing=document.getElementById('agent-permission');
+    // 移除同一 RequestId 的旧权限请求 UI
+    var existing=document.getElementById({escapedCardId});
     if(existing)existing.remove();
 
     var div=document.createElement('div');
-    div.id='agent-permission';
+    div.id={escapedCardId};
     div.style.cssText='border:1px solid #C8A84E;border-radius:8px;background:#2E2A1A;padding:12px;margin:8px 0;animation:fadeIn .3s';
-
-    div.innerHTML=
-        '<div style=""color:#C8A84E;font-size:12px;font-weight:600;margin-bottom:6px"">{L["chat.html.permissionTitle"]}</div>'+{purposeJs}
-        '<div style=""color:#D4D4D4;font-size:12px;margin-bottom:4px"">{escapedTitle}</div>'+
-        '<pre style=""background:#1A1A0E;color:#C8C84E;padding:8px;border-radius:4px;font-size:11px;margin:4px 0;max-height:60px;overflow-y:auto"">{escapedCommand}</pre>'+{detailJs}
-        '<div style=""display:flex;gap:8px;margin-top:8px"">'+
-        '<button onclick=""window.__agentApprove(\'{safeRequestId}\')"" style=""background:#1A3A1A;color:#4EC9B0;border:1px solid #3A6A3A;border-radius:4px;padding:4px 16px;cursor:pointer;font-size:12px"">{L["chat.html.approveButton"]}</button>'+
-        '<button onclick=""window.__agentDeny(\'{safeRequestId}\')"" style=""background:#3A1A1A;color:#E07878;border:1px solid #6A3A3A;border-radius:4px;padding:4px 16px;cursor:pointer;font-size:12px"">{L["chat.html.denyButton"]}</button>'+
-        '</div>';
+    div.innerHTML={escapedInnerHtml};
 
     var container=document.getElementById('chat-container');
     if(container)window.__insertBeforeTaskPanel(div);
@@ -1444,7 +1471,8 @@ return "<!DOCTYPE html><html lang='" + htmlLang + "'><head><meta charset='UTF-8'
         /// <param name="request">权限请求，其 ActionType 应为 "file_delete"，FilePaths 包含待删除文件路径列表</param>
         public static string BuildFileDeleteConfirmationJs(AgentPermissionRequest request)
         {
-            string escapedRequestId = EscapeJsString(request.RequestId);
+            string cardId = "file-delete-confirm-" + request.RequestId;
+            string escapedCardId = EscapeJsString(cardId);
 
             // 构建文件列表 HTML（在 C# 侧完成，避免 JS 字符串嵌套转义）
             var fileItemsHtml = new StringBuilder();
@@ -1493,11 +1521,11 @@ return "<!DOCTYPE html><html lang='" + htmlLang + "'><head><meta charset='UTF-8'
 
             return $@"
 (function(){{
-    var existing=document.getElementById('file-delete-confirm');
+    var existing=document.getElementById({escapedCardId});
     if(existing)existing.remove();
 
     var div=document.createElement('div');
-    div.id='file-delete-confirm';
+    div.id={escapedCardId};
     div.className='file-delete-card';
     div.innerHTML={escapedInnerHtml};
 
@@ -1514,12 +1542,10 @@ return "<!DOCTYPE html><html lang='" + htmlLang + "'><head><meta charset='UTF-8'
         /// Title 为操作标题，Command 为实际命令，FilePaths[0] 为命令说明，Purpose 为操作目的。</param>
         public static string BuildTerminalApprovalJs(AgentPermissionRequest request)
         {
-            string escapedRequestId = EscapeJsString(request.RequestId);
-            string escapedTitle = EscapeJsString(request.Title);
-            string escapedCommand = EscapeJsString(request.Command);
+            string cardId = "terminal-approval-" + request.RequestId;
+            string escapedCardId = EscapeJsString(cardId);
             string explanation = (request.FilePaths != null && request.FilePaths.Count > 0)
                 ? request.FilePaths[0] : string.Empty;
-            string escapedExplanation = EscapeJsString(explanation);
 
             // ── 目的说明 ──
             // Purpose 优先；如果为空则用 explanation（FilePaths[0]）作为 fallback
@@ -1555,23 +1581,23 @@ return "<!DOCTYPE html><html lang='" + htmlLang + "'><head><meta charset='UTF-8'
 
             return $@"
 (function(){{
-    var existing=document.getElementById('terminal-approval');
+    var existing=document.getElementById({escapedCardId});
     if(existing)existing.remove();
 
     var div=document.createElement('div');
-    div.id='terminal-approval';
+    div.id={escapedCardId};
     div.className='terminal-approval-card';
     div.innerHTML={escapedInnerHtml};
 
     var container=document.getElementById('chat-container');
     if(container)window.__insertBeforeTaskPanel(div);
-    wind#endregion
-
-        #region HTML/JS String Helpers
-
-        ow.__scrollToBottom('smooth');
+    window.__scrollToBottom('smooth');
 }})();";
         }
+
+        #endregion
+
+        #region HTML/JS String Helpers
 
         /// <summary>
         /// 转义 HTML 属性值中的引号字符。
@@ -1608,13 +1634,14 @@ return "<!DOCTYPE html><html lang='" + htmlLang + "'><head><meta charset='UTF-8'
         {
             if (string.IsNullOrEmpty(text)) return string.Empty;
             string escaped = System.Net.WebUtility.HtmlEncode(text);
-        #endregion
-
-        #region Task Panel Helpers
 
             // 将 \n 转换为 <br> 以在 HTML 中正确显示换行
             return escaped.Replace("\n", "<br>");
         }
+
+        #endregion
+
+        #region Task Panel Helpers
 
         /// <summary>
         /// 根据计划状态计算任务面板标题文本。
