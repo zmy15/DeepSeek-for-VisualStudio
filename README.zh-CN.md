@@ -1,4 +1,4 @@
-﻿<div align="center">
+<div align="center">
 
 > **测试阶段** — 使用前请备份项目。
 
@@ -11,7 +11,7 @@
 [![.NET](https://img.shields.io/badge/.NET%20Framework-4.7.2-blueviolet)]()
 [![DeepSeek](https://img.shields.io/badge/-DeepSeek-green)]()
 [![Platform](https://img.shields.io/badge/platform-Windows%20x64%20%2F%20ARM64-lightgrey)]()
-[![Version](https://img.shields.io/badge/version-1.2.4-blue)]()
+[![Version](https://img.shields.io/badge/version-1.2.5-blue)]()
 [![GitHub Stars](https://img.shields.io/github/stars/zmy15/DeepSeek-for-VisualStudio?style=social)](https://github.com/zmy15/DeepSeek-for-VisualStudio)
 
 [English](https://github.com/zmy15/DeepSeek-for-VisualStudio/blob/master/README.md)

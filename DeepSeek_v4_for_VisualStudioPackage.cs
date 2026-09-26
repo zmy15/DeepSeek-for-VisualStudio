@@ -691,6 +691,6 @@ namespace DeepSeek_v4_for_VisualStudio
     {
         public const string Name = "DeepSeek Chat for Visual Studio";
         public const string Description = "DeepSeek AI coding agent for Visual Studio 2022 and 2026, combining chat, code completion, and autonomous coding workflows.";
-        public const string Version = "1.2.4";
+        public const string Version = "1.2.5";
     }
 }
