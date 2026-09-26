@@ -528,7 +528,7 @@ namespace DeepSeek_v4_for_VisualStudio.View
                 // 如果 WebView2 已就绪且有消息，重载以应用正确 CSS
                 if (ChatWebView?.CoreWebView2 != null && _messages.Count > 0)
                 {
-                    string newHtml = ChatHtmlService.BuildInitialPage(_messages);
+                    string newHtml = ChatHtmlService.BuildInitialPageFromMessagesHtml(_messagesHtml.ToString());
                     ChatWebView.CoreWebView2.NavigateToString(newHtml);
                     Logger.Info("[Theme] ApplyInitialTheme: WebView2 reloaded");
                 }
@@ -541,7 +541,7 @@ namespace DeepSeek_v4_for_VisualStudio.View
 
         /// <summary>
         /// 主题变更后重新加载 WebView2 内容。
-        /// 如果 WebView 已就绪且有消息，则重新渲染所有消息。
+        /// 如果 WebView 已就绪且有消息，则重新渲染当前窗口中的消息。
         /// </summary>
         private async void ReloadWebViewForTheme()
         {
@@ -558,7 +558,7 @@ namespace DeepSeek_v4_for_VisualStudio.View
                 lock (_lock) { _createdPlanIds.Clear(); }
 
                 // 重新生成完整 HTML 页面
-                string newHtml = ChatHtmlService.BuildInitialPage(_messages);
+                string newHtml = ChatHtmlService.BuildInitialPageFromMessagesHtml(_messagesHtml.ToString());
                 ChatWebView.CoreWebView2.NavigateToString(newHtml);
                 Logger.Info("[Theme] WebView2 reloaded with new theme");
 

@@ -169,6 +169,18 @@ public class ChatHtmlServiceTests
     }
 
     [Fact]
+    public void BuildInitialPageFromMessagesHtml_UsesProvidedWindow()
+    {
+        const string windowHtml = "<div id='render-window'>only recent messages</div>";
+
+        string html = ChatHtmlService.BuildInitialPageFromMessagesHtml(windowHtml);
+
+        html.Should().Contain(windowHtml);
+        html.Should().Contain("window.__appendMessageHtml");
+        html.Should().Contain("__pageReady__");
+    }
+
+    [Fact]
     public void BuildTerminalApprovalJs_GeneratesCardInjectionScript()
     {
         var request = new AgentPermissionRequest

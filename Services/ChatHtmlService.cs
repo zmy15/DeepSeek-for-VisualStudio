@@ -113,7 +113,17 @@ namespace DeepSeek_v4_for_VisualStudio.Services
                 }
             }
 
-            return WrapFullPage(sb.ToString(), hasStreamingMessage: true);
+            return BuildInitialPageFromMessagesHtml(sb.ToString());
+        }
+
+        /// <summary>
+        /// 使用已渲染的消息 HTML 片段构建初始完整页面。
+        /// 首次导航必须复用窗口化后的片段，避免把全部历史传给 NavigateToString
+        /// 并触发 WebView2 的 2 MB 内容限制。
+        /// </summary>
+        internal static string BuildInitialPageFromMessagesHtml(string messagesHtml)
+        {
+            return WrapFullPage(messagesHtml, hasStreamingMessage: true);
         }
 
         /// <summary>

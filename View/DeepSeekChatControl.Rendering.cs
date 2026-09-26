@@ -71,7 +71,7 @@ namespace DeepSeek_v4_for_VisualStudio.View
                 // ── 全量刷新路径（首次初始化、增量失败回退、或 _lastRenderedMessagesLength 被并发调用重置后）──
                 // 需要重新读取 _messagesHtml 长度，因为并发调用可能已追加新内容
                 string allMessagesNow = _messagesHtml.ToString();
-                string html = ChatHtmlService.BuildInitialPage(_messages);
+                string html = ChatHtmlService.BuildInitialPageFromMessagesHtml(allMessagesNow);
                 ChatWebView.CoreWebView2.NavigateToString(html);
                 _browserInitialized = true;
                 _lastRenderedMessagesLength = allMessagesNow.Length;
