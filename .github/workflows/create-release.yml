@@ -48,6 +48,7 @@ jobs:
         $tag = if ($variant -eq 'no-local-ocr') { "v${version}-No-Local-OCR" } else { "v${version}" }
         Write-Host "将创建 tag: $tag"
         "tag=$tag" >> $env:GITHUB_OUTPUT
+        "version=$version" >> $env:GITHUB_OUTPUT
 
     - name: 检查 tag 是否已存在
       shell: pwsh
@@ -59,11 +60,47 @@ jobs:
         }
         Write-Host "tag $tag 不存在，可以创建"
 
+    - name: 同步全部版本号并提交
+      shell: pwsh
+      env:
+        RELEASE_VERSION: ${{ steps.tag.outputs.version }}
+        TARGET_BRANCH: ${{ github.event.inputs.variant == 'no-local-ocr' && 'no-local-paddleocr' || 'master' }}
+      run: |
+        $version = $env:RELEASE_VERSION.Trim()
+        $updates = @(
+          @{ Path = 'source.extension.vsixmanifest'; Pattern = '(<Identity\b[^>]*?Version=")[^"]*(")'; Replacement = '${1}' + $version + '${2}' },
+          @{ Path = 'DeepSeek_v4_for_VisualStudioPackage.cs'; Pattern = '(public const string Version = ")[^"]*(")'; Replacement = '${1}' + $version + '${2}' },
+          @{ Path = 'README.md'; Pattern = '(version-)[0-9.]+(-blue)'; Replacement = '${1}' + $version + '${2}' },
+          @{ Path = 'README.zh-CN.md'; Pattern = '(version-)[0-9.]+(-blue)'; Replacement = '${1}' + $version + '${2}' },
+          @{ Path = 'benchmark/tasks.sample.json'; Pattern = '("extension_version"\s*:\s*")[^"]*(")'; Replacement = '${1}' + $version + '${2}' }
+        )
+
+        foreach ($update in $updates) {
+          $content = Get-Content -LiteralPath $update.Path -Raw
+          $updated = [regex]::Replace($content, $update.Pattern, $update.Replacement)
+          if ($updated -eq $content) {
+            Write-Host "$($update.Path) 版本号无需变化"
+          } else {
+            Set-Content -LiteralPath $update.Path -Value $updated -NoNewline
+            Write-Host "$($update.Path) 版本号已更新为 $version"
+          }
+        }
+
+        git config user.name "github-actions[bot]"
+        git config user.email "github-actions[bot]@users.noreply.github.com"
+        git diff --quiet
+        if ($LASTEXITCODE -eq 0) {
+          Write-Host "版本号已经是 $version，无需提交"
+        } else {
+          git add -- source.extension.vsixmanifest DeepSeek_v4_for_VisualStudioPackage.cs README.md README.zh-CN.md benchmark/tasks.sample.json
+          git commit -m "chore(release): bump version to $version"
+          git push origin "HEAD:$env:TARGET_BRANCH"
+          Write-Host "版本号提交已推送到 $env:TARGET_BRANCH"
+        }
+
     - name: 创建并推送 tag
       shell: pwsh
       run: |
-        git config user.name "github-actions[bot]"
-        git config user.email "github-actions[bot]@users.noreply.github.com"
         $tag = "${{ steps.tag.outputs.tag }}"
         git tag "$tag"
         git push origin "$tag"
@@ -80,17 +117,17 @@ jobs:
     - name: 还原 NuGet 包
       run: dotnet restore
 
-    - name: 同步 VSIX 版本号
+    - name: 校验 VSIX 版本号
       shell: pwsh
+      env:
+        RELEASE_VERSION: ${{ steps.tag.outputs.version }}
       run: |
-        $tag = "${{ steps.tag.outputs.tag }}"
-        # 去掉 v 前缀和 -No-Local-OCR 后缀，得到纯数字版本号（VSIX 版本号必须是 x.y.z 格式）
-        $version = $tag -replace '^v', '' -replace '-No-Local-OCR$', ''
-        $manifest = 'source.extension.vsixmanifest'
-        $content = Get-Content $manifest -Raw
-        $content = $content -creplace '(<Identity\b[^>]*?Version=")[^"]*(")', ('${1}' + $version + '${2}')
-        Set-Content $manifest $content -NoNewline
-        Write-Host "VSIX 版本号已同步为: $version"
+        $content = Get-Content -LiteralPath 'source.extension.vsixmanifest' -Raw
+        $expected = 'Version="' + $env:RELEASE_VERSION + '"'
+        if (-not $content.Contains($expected)) {
+          throw "source.extension.vsixmanifest 未同步到版本 $env:RELEASE_VERSION"
+        }
+        Write-Host "VSIX 版本号已确认: $env:RELEASE_VERSION"
 
     - name: 构建 VSIX
       run: msbuild DeepSeek_v4_for_VisualStudio.csproj /t:Build /p:Configuration=Release /p:DeployExtension=false
