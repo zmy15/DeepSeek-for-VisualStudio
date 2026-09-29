@@ -1,4 +1,4 @@
-# DeepSeek Visual Studio Prompt Inventory
+﻿# DeepSeek Visual Studio Prompt Inventory
 
 本文件列出项目中发送给模型的 Prompt 文本。包含 `Resources/Locales/zh-CN.json` 与 `Resources/Locales/en.json` 中的中英文值，以及代码中直接构造的提示词。
 
@@ -3358,7 +3358,7 @@ Please output step planning JSON:
 **zh-CN**
 
 `````text
-你是一个记忆管理助手。根据一轮对话（用户问题 + AI回答），判断是否有值得持久化记忆的信息，并以 JSON 格式输出。
+你是一个记忆管理助手。你将收到一段完整的对话上下文（含系统提示、历史轮次与工具调用记录），请判断最近一轮问答（最后一次用户提问与 AI 回答）是否有值得持久化记忆的信息，并以 JSON 格式输出。
 
 记忆作用域：
 - user — 用户记忆：跨所有工作区持久化，存储用户偏好、编码习惯、常用命令等
@@ -3382,7 +3382,7 @@ JSON 输出格式（严格遵守，不要包含任何其他文本）：
 **en**
 
 `````text
-You are a memory management assistant. Given one round of conversation (user question + AI response), determine if there is information worth persisting, and output in JSON format.
+You are a memory management assistant. You will receive a complete conversation context (including the system prompt, history turns, and tool-call records). Judge whether the latest round of Q&A (the last user question and AI response) contains information worth persisting, and output in JSON format.
 
 Memory scopes:
 - user — User memory: persists across all workspaces, stores preferences, coding habits, frequently used commands, etc.
@@ -3408,25 +3408,13 @@ When not needed, output:
 **zh-CN**
 
 `````text
-## 用户消息
-{0}
-
-## AI 回答摘要
-{1}
-
-请以 JSON 数组格式输出判断结果。
+请基于以上完整对话上下文，判断最近一轮问答是否有值得持久化的信息。需要记录时严格按系统指令的 JSON 格式输出；不需要时输出 []；不要输出任何其他文本。
 `````
 
 **en**
 
 `````text
-## User Message
-{0}
-
-## AI Response Summary
-{1}
-
-Please output the judgment result as a JSON array.
+Based on the complete conversation context above, judge whether the latest round of Q&A contains information worth persisting. When recording is needed, strictly output the JSON format specified in the system instructions; when not, output []; do not output any other text.
 `````
 
 ### `system.aiPrompt.outOfWorkspaceWarning`
@@ -3452,7 +3440,7 @@ Please complete the task using only files within the current workspace {1}.
 **zh-CN**
 
 `````text
-你是一个代码变更总结助手。请基于下方参考资料，自由生成面向用户的最终总结。
+你是一个代码变更总结助手。你将收到一段完整的会话上下文（含代码修改过程、步骤记录与工具调用信息），最后一条 user 消息是待润色的摘要草稿；请基于完整上下文与草稿，自由生成面向用户的最终总结。
 
 要求：
 1. 不要求固定结构、句数或格式，按内容选择最清晰的表达方式
@@ -3467,7 +3455,7 @@ Please complete the task using only files within the current workspace {1}.
 **en**
 
 `````text
-You are a code change summary assistant. Based on the reference material below, freely generate the final user-facing summary.
+You are a code change summary assistant. You will receive a complete session context (including the code-change process, step records, and tool-call information); the last user message is the summary draft to polish. Based on the complete context and the draft, freely generate the final user-facing summary.
 
 Requirements:
 1. No fixed structure, sentence count, or format is required; choose the clearest presentation for the content
@@ -3484,7 +3472,7 @@ Output only the final summary itself.
 **zh-CN**
 
 `````text
-请基于以下代码变更资料自由生成最终总结：
+以下是待润色的摘要草稿，请结合以上完整上下文生成最终总结：
 
 {0}
 `````
@@ -3492,7 +3480,7 @@ Output only the final summary itself.
 **en**
 
 `````text
-Freely generate the final summary from the following code-change material:
+Below is the summary draft to polish; combine it with the complete context above to generate the final summary:
 
 {0}
 `````

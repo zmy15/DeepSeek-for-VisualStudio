@@ -1,7 +1,8 @@
-using DeepSeek_v4_for_VisualStudio.Services.Agents;
+﻿using DeepSeek_v4_for_VisualStudio.Services.Agents;
 using System.Net;
 using System.Net.Http;
 using System.Text;
+using System.Text.Json;
 using System.Threading;
 
 namespace DeepSeek_v4_for_VisualStudio.Tests.Unit.Services;
@@ -83,6 +84,75 @@ public class AskAgentSummaryPolishingTests
         // 润色请求必须显式禁用工具调用，而不是只靠客户端空白名单拦截。
         handler.RequestBodies.Should().ContainSingle()
             .Which.Should().Contain("\"tool_choice\":\"none\"");
+    }
+
+    [Fact]
+    public async Task ExecuteAsync_SummaryHandoff_WithForwardedMessages_UsesFullContextAndTailSignature()
+    {
+        // 模拟 Handoff 完整上下文（含历史轮次与来源 Agent 末尾身份提示词），验证润色请求：
+        // 1) 完整保留 ForwardedMessages 前缀；2) 末尾恒为 [user 待润色草稿][system 润色指令]。
+        var sseLines = new[]
+        {
+            "data: {\"id\":\"chatcmpl-fwd-1\",\"choices\":[{\"index\":0,\"delta\":{\"content\":\"最终总结文本\"}}]}\n",
+            "data: [DONE]\n",
+        };
+
+        var handler = new CapturingHttpMessageHandler(sseLines);
+        var apiService = new DeepSeekApiService(new HttpClient(handler));
+        var agent = new AskAgent(apiService)
+        {
+            BuiltInTools = new BuiltInToolService(),
+        };
+
+        var context = new AgentContext
+        {
+            IsExplicitRoute = true,
+            ExplicitRouteTarget = AgentType.Ask,
+            ForwardedMessages = new List<ChatApiMessage>
+            {
+                new() { Role = "system", Content = "SharedImmutablePrefix" },
+                new() { Role = "user", Content = "把 A.cs 改成异步实现" },
+                new() { Role = "assistant", Content = "已修改 A.cs。" },
+                new() { Role = "system", Content = "来源 Agent 末尾身份提示词" },
+            },
+            ActivePlan = new AgentTaskPlan
+            {
+                Title = "实现功能 X",
+                IsCompleted = true,
+                ChangedFiles =
+                {
+                    new FileChangeSummary
+                    {
+                        FilePath = @"C:\proj\A.cs",
+                        LinesAdded = 10,
+                        BriefDescription = "实现功能 X",
+                    },
+                },
+            },
+        };
+
+        var result = await agent.ExecuteAsync("请根据上文生成变更总结", context);
+
+        result.Success.Should().BeTrue();
+        result.Content.Should().Contain("最终总结文本");
+
+        var body = handler.RequestBodies.Should().ContainSingle().Which;
+        using var doc = JsonDocument.Parse(body);
+        var messages = doc.RootElement.GetProperty("messages").EnumerateArray().ToList();
+
+        // 完整转发前缀保留（含历史轮次），末位来源身份提示词由基类移除
+        messages.Should().Contain(m => m.GetProperty("role").GetString() == "user"
+            && m.GetProperty("content").GetString() == "把 A.cs 改成异步实现");
+        messages.Should().Contain(m => m.GetProperty("role").GetString() == "assistant"
+            && m.GetProperty("content").GetString() == "已修改 A.cs。");
+        messages.Should().NotContain(m => m.GetProperty("content").GetString() == "来源 Agent 末尾身份提示词");
+
+        // 尾部签名：[user 待润色草稿][system 润色指令]，doNotHandoff 路由指令不尾随
+        // net472 无 System.Index，不能用 ^n 索引语法，改用显式 Count 索引
+        messages[messages.Count - 1].GetProperty("role").GetString().Should().Be("system");
+        messages[messages.Count - 1].GetProperty("content").GetString().Should().Be(AiPrompts.SummaryPolishSystemPrompt);
+        messages[messages.Count - 2].GetProperty("role").GetString().Should().Be("user");
+        messages[messages.Count - 2].GetProperty("content").GetString().Should().NotBeNullOrEmpty();
     }
 
     /// <summary>

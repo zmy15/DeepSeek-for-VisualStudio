@@ -1404,8 +1404,9 @@ namespace DeepSeek_v4_for_VisualStudio.View
         }
 
         /// <summary>
-        /// 一次回答结束后调度自动记忆：后台读取本轮问答（最近一条 user 消息 + 当前回答正文），
-        /// 交给 AutoRecordMemoryAsync 判断是否需要持久化。常规工作流与按钮触发的 Handoff 收尾共用。
+        /// 一次回答结束后调度自动记忆：后台采集本轮问答（最近一条 user 消息 + 当前回答正文），
+        /// 作为「本轮是否有内容可判断」的调度守卫；实际记忆判断请求由 AutoRecordMemoryAsync
+        /// 基于 _contextManager 完整消息历史构建。常规工作流与按钮触发的 Handoff 收尾共用。
         /// </summary>
         private void TryScheduleAutoMemoryRecord()
         {
@@ -1434,10 +1435,11 @@ namespace DeepSeek_v4_for_VisualStudio.View
                             }
                         }
                     }
-                    // 最近 user 消息无文本（纯图片轮次）或无回答内容时跳过本次记录，避免错配
+                    // 守卫：纯图片轮次（user 无文本）或无回答内容时跳过本次记录，避免无意义 AI 调用；
+                    // 实际记忆判断内容来自 _contextManager 的完整消息历史，此处仅作调度判定
                     if (!string.IsNullOrEmpty(lastUserMsg) && !string.IsNullOrEmpty(lastAssistantMsg))
                     {
-                        await AutoRecordMemoryAsync(lastUserMsg, lastAssistantMsg);
+                        await AutoRecordMemoryAsync();
                     }
                 }
                 catch (Exception ex)
@@ -1448,28 +1450,24 @@ namespace DeepSeek_v4_for_VisualStudio.View
         }
 
         /// <summary>
-        /// 在一次问答结束后，自动判断是否需要将关键信息记录到持久化记忆。
-        /// 使用轻量级非流式 API 调用，解析 AI 返回的记忆操作指令并执行。
+        /// 基于完整对话上下文判断是否需要将关键信息记录到持久化记忆。
+        /// 消息数组 = 完整 API 历史 + [user 判定指令] + [system 记忆管理助手]（替换/追加末尾 system），
+        /// 由 ConversationContextManager 统一组装；解析 AI 返回的记忆操作指令并执行。
         /// </summary>
-        private async Task AutoRecordMemoryAsync(string userMessage, string assistantResponse)
+        private async Task AutoRecordMemoryAsync()
         {
-            if (_activeAgent == null || _memoryService == null) return;
+            if (_activeAgent == null || _contextManager == null || _memoryService == null) return;
 
             try
             {
-                var systemPrompt = AiPrompts.MemoryAutoRecordSystemPrompt;
+                // ── 基于完整消息历史组装：末尾追加 user 判定指令 + 替换/追加末尾 system ──
+                var messages = _contextManager.BuildApiMessagesWithSubTaskPrompt(
+                    AiPrompts.MemoryAutoRecordUserPrompt,
+                    AiPrompts.MemoryAutoRecordSystemPrompt);
 
-                var userPrompt = string.Format(AiPrompts.MemoryAutoRecordUserPrompt,
-                    userMessage.Truncate(2000), assistantResponse.Truncate(2000));
-
-                var messages = new List<ChatApiMessage>
-                {
-                    new ChatApiMessage { Role = "system", Content = systemPrompt },
-                    new ChatApiMessage { Role = "user", Content = userPrompt },
-                };
-
+                // toolChoice:"none"：完整上下文含工具调用记录，防止模型模仿发起工具调用
                 var rawResponse = await _activeAgent.CallAiWithMessagesAsync(
-                    messages, CancellationToken.None, responseFormat: "json_object", temperature: 0.0);
+                    messages, CancellationToken.None, responseFormat: "json_object", temperature: 0.0, toolChoice: "none");
 
                 if (string.IsNullOrWhiteSpace(rawResponse))
                 {
