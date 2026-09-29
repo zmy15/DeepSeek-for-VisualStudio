@@ -131,6 +131,10 @@ public class AskAgentSummaryPolishingTests
             },
         };
 
+        // 模拟真实 Handoff：orchestrator 会先把 AgentContext 注入 BaseAgent.Context，
+        // BuildContextAwareMessages 才能读取 ForwardedMessages 完整前缀。
+        agent.Context = context;
+
         var result = await agent.ExecuteAsync("请根据上文生成变更总结", context);
 
         result.Success.Should().BeTrue();
