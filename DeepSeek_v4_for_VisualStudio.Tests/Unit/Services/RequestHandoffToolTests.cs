@@ -1,4 +1,4 @@
-using DeepSeek_v4_for_VisualStudio.Models;
+﻿using DeepSeek_v4_for_VisualStudio.Models;
 using DeepSeek_v4_for_VisualStudio.Services.BuiltInTools;
 using System.Collections.Generic;
 using System.Linq;
@@ -139,6 +139,18 @@ public class RequestHandoffToolTests
         request.EditSteps.Should().BeNull();
     }
 
+    /// <summary>chainBack=true 透传到 HandoffRequest，供执行循环完成后返回源 Agent。</summary>
+    [Fact]
+    public async Task Execute_WithChainBack_ParsesTrue()
+    {
+        var args = BuildArgs();
+        args["chainBack"] = JsonSerializer.SerializeToElement(true);
+
+        var request = await RunExecuteAsync(args);
+
+        request.ChainBack.Should().BeTrue();
+    }
+
     #endregion
 
     #region Execute — gitState 解析
@@ -194,6 +206,19 @@ public class RequestHandoffToolTests
         var request = await RunExecuteAsync(args);
 
         request.GitState.Should().BeNull();
+    }
+
+    /// <summary>工具 schema 暴露可选 chainBack 布尔参数。</summary>
+    [Fact]
+    public void GetDefinition_IncludesChainBackSchema()
+    {
+        var tool = new RequestHandoffTool(_ => Task.CompletedTask);
+
+        var schema = JsonSerializer.SerializeToElement(tool.GetDefinition().Function.Parameters);
+
+        schema.TryGetProperty("properties", out var properties).Should().BeTrue();
+        properties.TryGetProperty("chainBack", out var chainBack).Should().BeTrue();
+        chainBack.GetProperty("type").GetString().Should().Be("boolean");
     }
 
     #endregion

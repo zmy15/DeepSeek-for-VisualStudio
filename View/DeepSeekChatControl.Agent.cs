@@ -1,4 +1,4 @@
-﻿using DeepSeek_v4_for_VisualStudio.Models;
+using DeepSeek_v4_for_VisualStudio.Models;
 using DeepSeek_v4_for_VisualStudio.Services;
 using DeepSeek_v4_for_VisualStudio.Services.Agents;
 using DeepSeek_v4_for_VisualStudio.Utils;
@@ -501,6 +501,38 @@ namespace DeepSeek_v4_for_VisualStudio.View
             }
         }
 
+        /// <summary>
+        /// 构造 chainBack 续接 Handoff：把目标 Agent 的执行结果和原始用户请求交还源 Agent，
+        /// 让源 Agent 继续回答同一条消息中尚未处理的问题。
+        /// </summary>
+        private static AgentHandoff BuildChainBackHandoff(
+            AgentHandoff completedHandoff,
+            AgentResult targetResult,
+            string originalUserRequest)
+        {
+            AgentType source = completedHandoff.SourceAgent ?? AgentType.Ask;
+            string outcome = targetResult.Content?.Trim() ?? string.Empty;
+            if (outcome.Length > 12000)
+                outcome = outcome.Substring(0, 12000) + "\n\n...(目标 Agent 输出已截断)";
+
+            var L = LocalizationService.Instance;
+            return new AgentHandoff
+            {
+                Label = L.Format("agent.chainback.label", source),
+                TargetAgent = source,
+                SourceAgent = completedHandoff.TargetAgent,
+                Prompt = L.Format(
+                    "agent.chainback.prompt",
+                    completedHandoff.TargetAgent,
+                    string.IsNullOrWhiteSpace(outcome) ? "(目标 Agent 未返回正文)" : outcome,
+                    originalUserRequest ?? string.Empty),
+                AutoSend = true,
+                ShowContinueOn = false,
+                ChainBack = false,
+                IsChainBackContinuation = true,
+            };
+        }
+
         private async Task RunAgentWorkflowAsync(
             string userText,
             string fileContext = "",
@@ -866,16 +898,21 @@ namespace DeepSeek_v4_for_VisualStudio.View
                 int handoffChainDepth = 0;
                 bool handoffChainCompleted = false;
                 string mergedReasoning = agentResult.ReasoningContent ?? string.Empty;
+                string originalUserRequest = context.CurrentUserContent ?? userText;
+                AgentHandoff? pendingChainBack = null;
 
                 while (agentResult.Handoff != null
                     && !handoffChainCompleted
                     && !context.CancellationToken.IsCancellationRequested
                     && agentResult.Plan?.IsCancelled != true)
                 {
+                    var incomingHandoff = agentResult.Handoff;
+                    if (incomingHandoff.ChainBack && incomingHandoff.SourceAgent.HasValue)
+                        pendingChainBack = incomingHandoff;
                     handoffChainDepth++;
-                    if (agentResult.Handoff.ForwardedMessages == null)
+                    if (incomingHandoff.ForwardedMessages == null)
                     {
-                        agentResult.Handoff.ForwardedMessages = _activeAgent?.SnapshotHandoffCacheMessages();
+                        incomingHandoff.ForwardedMessages = _activeAgent?.SnapshotHandoffCacheMessages();
                     }
 
                     if (handoffChainDepth > maxHandoffChainDepth)
@@ -884,41 +921,68 @@ namespace DeepSeek_v4_for_VisualStudio.View
                         break;
                     }
 
-                    if (agentResult.Handoff.ShowContinueOn)
+                    if (incomingHandoff.ShowContinueOn)
                     {
                         // ── 需要用户确认：保存引用，注入按钮，中断链 ──
-                        _pendingHandoff = agentResult.Handoff;
-                        Logger.Info($"[Agent] Handoff 链中断 (ShowContinueOn)，等待用户点击 → {agentResult.Handoff.TargetAgent}");
+                        _pendingHandoff = incomingHandoff;
+                        Logger.Info($"[Agent] Handoff 链中断 (ShowContinueOn)，等待用户点击 → {incomingHandoff.TargetAgent}");
                         handoffChainCompleted = true;
                         break;
                     }
 
-                    if (!agentResult.Handoff.AutoSend)
+                    if (!incomingHandoff.AutoSend)
                     {
                         // ── 既非 AutoSend 也非 ShowContinueOn：静默终止 ──
                         break;
                     }
 
                     // ── AutoSend：自动链式移交 ──
-                    Logger.Info($"[Agent] Handoff 链 #{handoffChainDepth}: → {agentResult.Handoff.TargetAgent} ({agentResult.Handoff.Label})");
+                    Logger.Info($"[Agent] Handoff 链 #{handoffChainDepth}: → {incomingHandoff.TargetAgent} ({incomingHandoff.Label})");
 
                     await ThreadHelper.JoinableTaskFactory.SwitchToMainThreadAsync();
-                    StatusLabel.Text = string.Format(LocalizationService.Instance["status.agentSwitched"], agentResult.Handoff.TargetAgent);
+                    StatusLabel.Text = string.Format(LocalizationService.Instance["status.agentSwitched"], incomingHandoff.TargetAgent);
                     await TaskScheduler.Default;
 
-                    var nextAgent = _agentFactory.GetAgent(agentResult.Handoff.TargetAgent);
+                    var nextAgent = _agentFactory.GetAgent(incomingHandoff.TargetAgent);
                     SwitchActiveAgent(nextAgent, context);
-                    context.Metrics?.SwitchAgent(agentResult.Handoff.TargetAgent.ToString());
+                    context.Metrics?.SwitchAgent(incomingHandoff.TargetAgent.ToString());
                     if (_agentFactory.EditAgent is EditAgent ea2)
                         ea2.PlanUpdated += OnAgentPlanUpdated;
+                    context.IsChainBackContinuation = incomingHandoff.IsChainBackContinuation;
                     try
                     {
-                        agentResult = await _activeAgent.ExecuteHandoffAsync(agentResult.Handoff, context, _activePlan, _agentFactory);
+                        agentResult = await _activeAgent.ExecuteHandoffAsync(incomingHandoff, context, _activePlan, _agentFactory);
                     }
                     finally
                     {
+                        if (incomingHandoff.IsChainBackContinuation)
+                            context.IsChainBackContinuation = false;
                         if (_agentFactory.EditAgent is EditAgent ea3)
                             ea3.PlanUpdated -= OnAgentPlanUpdated;
+                    }
+
+                    // ── 链回不能在目标 Agent 刚返回时立刻插入；先让其 AutoSend 链自然结束
+                    //    （例如 Edit→Build→Ask），避免跳过 Build 修复阶段。 ──
+                    if (pendingChainBack != null)
+                    {
+                        AgentHandoff chainBack = BuildChainBackHandoff(pendingChainBack, agentResult, originalUserRequest);
+                        if (agentResult.Handoff == null)
+                        {
+                            agentResult.Handoff = chainBack;
+                            pendingChainBack = null;
+                            Logger.Info($"[Agent] Handoff 链回: → {agentResult.Handoff.TargetAgent} ({agentResult.Handoff.Label})");
+                        }
+                        else if (agentResult.Handoff.AutoSend
+                            && agentResult.Handoff.TargetAgent == chainBack.TargetAgent)
+                        {
+                            // 目标 Agent 已准备移交回源 Agent；把链回续答要求合并进该 Handoff，
+                            // 保留原有的总结/执行上下文，不额外增加一次调用。
+                            agentResult.Handoff.Prompt = (agentResult.Handoff.Prompt ?? string.Empty)
+                                + "\n\n" + chainBack.Prompt;
+                            agentResult.Handoff.IsChainBackContinuation = true;
+                            pendingChainBack = null;
+                            Logger.Info($"[Agent] Handoff 链回并入: → {agentResult.Handoff.TargetAgent} ({agentResult.Handoff.Label})");
+                        }
                     }
 
                     // ── 合并推理内容 ──
