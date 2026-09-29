@@ -35,6 +35,12 @@ public class BuiltInToolsTests
     }
 
     [Fact]
+    public void FileSymbolsTool_HasCorrectName()
+    {
+        new FileSymbolsTool().Name.Should().Be("get_file_symbols");
+    }
+
+    [Fact]
     public void GetErrorsTool_HasCorrectName()
     {
         new GetErrorsTool().Name.Should().Be("get_errors");
@@ -347,6 +353,7 @@ public class BuiltInToolsTests
             new ReadFileTool(new()),
             new FileSearchTool(),
             new GrepSearchTool(),
+            new FileSymbolsTool(),
             new GetErrorsTool(),
             new FetchWebpageTool(),
             new CaptureWindowTool(),

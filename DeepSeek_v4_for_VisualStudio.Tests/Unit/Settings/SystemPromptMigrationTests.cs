@@ -21,9 +21,22 @@ public class SystemPromptMigrationTests
     }
 
     [Fact]
+    public void PreviousBuiltInPrompts_AreDetectedForMigration()
+    {
+        AiPrompts.PreviousDefaultSystemPrompt.Should().Contain("如果用户的问题模糊不清");
+        AiPrompts.PreviousDefaultSystemPromptEn.Should().Contain("If the user's question is ambiguous");
+        DeepSeekOptionsPage.IsLegacyDefaultSystemPrompt(AiPrompts.PreviousDefaultSystemPrompt)
+            .Should().BeTrue();
+        DeepSeekOptionsPage.IsLegacyDefaultSystemPromptEn(AiPrompts.PreviousDefaultSystemPromptEn)
+            .Should().BeTrue();
+    }
+
+    [Fact]
     public void CurrentOrCustomPrompt_IsNotOverwritten()
     {
         DeepSeekOptionsPage.IsLegacyDefaultSystemPrompt(AiPrompts.DefaultSystemPrompt)
+            .Should().BeFalse();
+        DeepSeekOptionsPage.IsLegacyDefaultSystemPromptEn(AiPrompts.DefaultSystemPromptEn)
             .Should().BeFalse();
         DeepSeekOptionsPage.IsLegacyDefaultSystemPrompt("我的自定义提示词")
             .Should().BeFalse();

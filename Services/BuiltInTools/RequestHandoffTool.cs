@@ -69,6 +69,11 @@ namespace DeepSeek_v4_for_VisualStudio.Services.BuiltInTools
                                 type = "string",
                                 description = LocalizationService.Instance["tool.requestHandoff.param.taskDescription"]
                             },
+                            chainBack = new
+                            {
+                                type = "boolean",
+                                description = LocalizationService.Instance["tool.requestHandoff.param.chainBack"]
+                            },
                             editSteps = new
                             {
                                 type = "array",
@@ -127,6 +132,9 @@ namespace DeepSeek_v4_for_VisualStudio.Services.BuiltInTools
 
             if (string.IsNullOrWhiteSpace(taskDescription))
                 return "Error: request_handoff: 缺少 taskDescription 参数。请描述目标 Agent 需要执行的任务。";
+
+            bool chainBack = args.TryGetValue("chainBack", out var chainBackNode)
+                && chainBackNode.ValueKind == JsonValueKind.True;
 
             // ── 解析可选 editSteps → List<AgentStep>?（防御式：非法项跳过、空标题过滤、超限截断）──
             List<AgentStep>? editSteps = null;
@@ -211,6 +219,7 @@ namespace DeepSeek_v4_for_VisualStudio.Services.BuiltInTools
                 Reason = reason,
                 TaskDescription = taskDescription,
                 AutoSend = true,
+                ChainBack = chainBack,
                 EditSteps = editSteps,
                 GitState = gitState,
             };

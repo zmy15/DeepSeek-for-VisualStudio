@@ -12,6 +12,7 @@ namespace DeepSeek_v4_for_VisualStudio.Tests.Unit.Services.Tools
         [InlineData("memory", 10)]
         [InlineData("get_errors", 20)]
         [InlineData("symbol_search", 20)]
+        [InlineData("get_file_symbols", 20)]
         [InlineData("fetch_webpage", 45)]
         public void GetTimeout_KnownTools_UseTieredValues(string tool, int seconds)
         {

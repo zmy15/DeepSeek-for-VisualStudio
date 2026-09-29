@@ -1,4 +1,4 @@
-using DeepSeek_v4_for_VisualStudio.Models;
+﻿using DeepSeek_v4_for_VisualStudio.Models;
 using DeepSeek_v4_for_VisualStudio.Utils;
 using System;
 using System.Collections.Generic;
@@ -783,6 +783,38 @@ namespace DeepSeek_v4_for_VisualStudio.Services
         public List<ChatApiMessage> BuildApiMessages()
         {
             return BuildApiMessagesCore(0);
+        }
+
+        /// <summary>
+        /// 构建「完整 API 消息历史 + 子任务尾部」的消息数组，供记忆总结等 UI 侧子任务复用主对话完整上下文。
+        /// 结构：[0] 稳定前缀 + [1] 动态块（记忆注入）+ [2..] 完整历史 + [user 子任务提示] + [system 子任务指令]。
+        /// 末尾原为 system 时以新对象整体替换，否则直接追加，保证尾部签名恒为 [user][system]。
+        /// </summary>
+        /// <param name="userPrompt">追加到末尾的 user 提示（子任务指令正文）。</param>
+        /// <param name="systemPrompt">子任务 system 指令；替换或追加到消息数组最末。</param>
+        /// <returns>新构建的消息列表；不修改内部历史条目对象，也不影响后续主对话请求。</returns>
+        public List<ChatApiMessage> BuildApiMessagesWithSubTaskPrompt(string userPrompt, string systemPrompt)
+        {
+            // ── 复用主对话完整快照（稳定前缀 + 动态块 + 完整历史，含工具调用记录）──
+            var messages = BuildApiMessages();
+
+            // ── 尾部恒为 [user][system]，与主对话「user 在前、system 固定在最后」的签名保持一致 ──
+            if (messages.Count > 0 && messages[messages.Count - 1].Role == "system")
+            {
+                // 末尾已是 system（如主对话的 Agent 行为指令）：在其位置前插入 user 提示，
+                // 并以新对象替换原末尾 system——不修改原对象、不污染内部状态。
+                int last = messages.Count - 1;
+                messages.Insert(last, new ChatApiMessage { Role = "user", Content = userPrompt });
+                messages[last + 1] = new ChatApiMessage { Role = "system", Content = systemPrompt };
+            }
+            else
+            {
+                // 末尾非 system（含空列表）：直接追加 user + system 两条新消息。
+                messages.Add(new ChatApiMessage { Role = "user", Content = userPrompt });
+                messages.Add(new ChatApiMessage { Role = "system", Content = systemPrompt });
+            }
+
+            return messages;
         }
 
         /// <summary>

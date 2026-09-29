@@ -1,4 +1,4 @@
-using DeepSeek_v4_for_VisualStudio.Models;
+﻿using DeepSeek_v4_for_VisualStudio.Models;
 using DeepSeek_v4_for_VisualStudio.Services;
 using DeepSeek_v4_for_VisualStudio.Services.EditTools;
 using DeepSeek_v4_for_VisualStudio.Utils;
@@ -162,7 +162,7 @@ namespace DeepSeek_v4_for_VisualStudio.Services.BuiltInTools
                 }
 
                 if (!writtenViaBuffer)
-                    File.WriteAllText(filePath, newContent, Encoding.UTF8);
+                    FileEncodingHelper.WriteAllText(filePath, newContent, workspaceRoot);
 
                 // ── 写入成功 → 清理备份 ──
                 BackupService.CleanupBackup(backupPath);
@@ -230,7 +230,7 @@ namespace DeepSeek_v4_for_VisualStudio.Services.BuiltInTools
             }
 
             if (!writtenViaBuffer)
-                File.WriteAllText(filePath, normalized, Encoding.UTF8);
+                FileEncodingHelper.WriteAllText(filePath, normalized, null);
             BackupService.CleanupBackup(backupPath);
         }
 

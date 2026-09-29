@@ -367,11 +367,14 @@ namespace DeepSeek_v4_for_VisualStudio.Services.BuiltInTools
 
             // ── 输出重定向写入文件（`>` 覆盖 / `>>` 追加）──
             // PowerShell 中裸 `>` 是写文件重定向；比较运算用 -gt/-lt，无歧义。
-            if (c.Contains(">>"))
-                return true;
-            if (System.Text.RegularExpressions.Regex.IsMatch(
-                c, @"(?<![<>=+\-])\s>(?!=)\s*\S"))
-                return true;
+            // 但单引号字符串是纯文本，例如 `-join ' > '`，不能把它误判为重定向。
+            foreach (System.Text.RegularExpressions.Match redirectMatch in
+                System.Text.RegularExpressions.Regex.Matches(
+                    c, @">>|(?<![<>=+\-])\s>(?!=)\s*\S"))
+            {
+                if (!IsInsidePowerShellSingleQuotedString(c, redirectMatch.Index))
+                    return true;
+            }
 
             // ── 文件修改类命令（匹配命令起始或 | ; ( & 之后）──
             const string fileVerbs =
@@ -403,6 +406,30 @@ namespace DeepSeek_v4_for_VisualStudio.Services.BuiltInTools
                 return true;
 
             return false;
+        }
+
+        /// <summary>
+        /// 判断字符位置是否位于 PowerShell 单引号字符串内部。
+        /// 单引号字符串不会执行重定向，可用于排除 `-join ' > '` 这类误报。
+        /// </summary>
+        private static bool IsInsidePowerShellSingleQuotedString(string command, int position)
+        {
+            bool inSingleQuotedString = false;
+            for (int i = 0; i < position && i < command.Length; i++)
+            {
+                if (command[i] != '\'') continue;
+
+                // PowerShell 单引号字符串中的两个连续单引号表示一个字面量单引号。
+                if (inSingleQuotedString && i + 1 < position && command[i + 1] == '\'')
+                {
+                    i++;
+                    continue;
+                }
+
+                inSingleQuotedString = !inSingleQuotedString;
+            }
+
+            return inSingleQuotedString;
         }
 
         private static bool ContainsGitWriteCommand(string command)
