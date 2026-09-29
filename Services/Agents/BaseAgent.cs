@@ -727,11 +727,9 @@ namespace DeepSeek_v4_for_VisualStudio.Services.Agents
                 {
                     result.RemoveAt(count - 1);
                 }
-                else if (count >= 2 && result[count - 2].Role == "system" && result[count - 1].Role == "user")
-                {
-                    // 兼容旧结构：尾部 [agent] + [user] 一并移除
-                    result.RemoveRange(count - 2, 2);
-                }
+                // 注：不再对尾部 [system, user] 做"旧结构一并移除"——新结构快照中 user 前紧邻的
+                // system 是 volatile 上下文块，与旧结构 agent 提示词无法区分；跨版本旧快照中的
+                // 遗留身份指令由 HandoffRoleBoundaryPrompt 兜底。
 
                 // Handoff 前缀保留到源 Agent 的稳定工具历史为止；目标 Agent 的
                 // 身份边界以后的内容由目标 Agent 重新生成。
