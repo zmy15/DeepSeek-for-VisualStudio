@@ -32,6 +32,7 @@ namespace DeepSeek_v4_for_VisualStudio.Services.Tools
                 "memory" => Memory,
                 "get_errors" => Diagnostics,
                 "symbol_search" => Diagnostics,
+                "get_file_symbols" => Diagnostics,
                 "fetch_webpage" => WebFetch,
                 _ => Default,
             };
