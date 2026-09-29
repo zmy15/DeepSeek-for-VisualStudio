@@ -376,12 +376,13 @@ public class EditAgentTests
             .Should().Contain("apply_patch")
             .And.Contain("replace_string_in_file")
             .And.Contain("delete_file")
+            .And.Contain("工具会返回删除结果")
             .And.NotContain("```file:");
         global::DeepSeek_v4_for_VisualStudio.Services.AiPrompts.EditToolCallRule
             .Should().Contain("终态")
             .And.Contain("不要再次读取");
         global::DeepSeek_v4_for_VisualStudio.Services.AiPrompts.AgentConclusionStopRule
-            .Should().Contain("超过 2 种");
+            .Should().Contain("不要质疑用户给出的明确操作");
     }
 
     #endregion

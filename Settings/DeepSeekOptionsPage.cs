@@ -313,17 +313,28 @@ namespace DeepSeek_v4_for_VisualStudio.Settings
         }
 
         /// <summary>
-        /// 旧版内置中文提示词不会自动更新，因为 DialogPage 会把当次默认值持久化。
-        /// 仅当值仍与旧版内置文本完全一致时升级，避免覆盖用户自定义提示词。
+        /// 旧版内置提示词不会自动更新，因为 DialogPage 会把当次默认值持久化。
+        /// 仅当中英文值仍与旧版内置文本完全一致时升级，避免覆盖用户自定义提示词。
         /// </summary>
         private bool UpgradeLegacyDefaultSystemPrompts()
         {
-            if (!IsLegacyDefaultSystemPrompt(SystemPrompt))
-                return false;
+            bool changed = false;
 
-            SystemPrompt = AiPrompts.DefaultSystemPrompt;
-            Logger.Info("[Settings] 已将旧版内置中文系统提示词升级为当前默认版本");
-            return true;
+            if (IsLegacyDefaultSystemPrompt(SystemPrompt))
+            {
+                SystemPrompt = AiPrompts.DefaultSystemPrompt;
+                Logger.Info("[Settings] 已将旧版内置中文系统提示词升级为当前默认版本");
+                changed = true;
+            }
+
+            if (IsLegacyDefaultSystemPromptEn(SystemPromptEn))
+            {
+                SystemPromptEn = AiPrompts.DefaultSystemPromptEn;
+                Logger.Info("[Settings] 已将旧版内置英文系统提示词升级为当前默认版本");
+                changed = true;
+            }
+
+            return changed;
         }
 
         internal static bool IsLegacyDefaultSystemPrompt(string? prompt)
@@ -337,11 +348,22 @@ namespace DeepSeek_v4_for_VisualStudio.Settings
                 "- 使用中文回答，代码中的注释也使用中文。\n" +
                 "- 当用户需要获取实时信息、操作文件系统或执行特定任务时，积极使用可用的工具（tools）来完成任务。";
 
+            string normalizedPrompt = NormalizePrompt(prompt);
             return string.Equals(
-                NormalizePrompt(prompt),
-                NormalizePrompt(legacy),
-                StringComparison.Ordinal);
+                       normalizedPrompt,
+                       NormalizePrompt(legacy),
+                       StringComparison.Ordinal)
+                   || string.Equals(
+                       normalizedPrompt,
+                       NormalizePrompt(AiPrompts.PreviousDefaultSystemPrompt),
+                       StringComparison.Ordinal);
         }
+
+        internal static bool IsLegacyDefaultSystemPromptEn(string? prompt)
+            => string.Equals(
+                NormalizePrompt(prompt),
+                NormalizePrompt(AiPrompts.PreviousDefaultSystemPromptEn),
+                StringComparison.Ordinal);
 
         private static string NormalizePrompt(string? prompt)
             => (prompt ?? string.Empty)

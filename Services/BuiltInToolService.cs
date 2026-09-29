@@ -287,7 +287,10 @@ namespace DeepSeek_v4_for_VisualStudio.Services
             Register(new ReplaceStringInFileTool());
             Register(new MultiReplaceStringInFileTool());
             Register(new CreateFileTool());
-            Register(new DeleteFileTool());
+            Register(new DeleteFileTool
+            {
+                ProjectItemRemover = Agents.AgentFactory.RemoveFileFromProjectAsync
+            });
             Register(new ApplyPatchTool());
             Register(new CreateDirectoryTool());
 

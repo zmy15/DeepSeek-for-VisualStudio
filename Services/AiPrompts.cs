@@ -28,6 +28,24 @@ namespace DeepSeek_v4_for_VisualStudio.Services
         /// </summary>
         public static string DefaultSystemPromptEn => L.GetValueForLocale("system.defaultSystemPrompt", "en");
 
+        /// <summary>
+        /// 上一版内置中文系统提示词。
+        /// 仅用于识别并迁移仍保持旧默认值的设置，不能覆盖用户自定义提示词。
+        /// </summary>
+        public static string PreviousDefaultSystemPrompt =>
+            L.GetValueForLocale("system.defaultSystemPrompt", "zh-CN").Replace(
+                "仅当缺少关键参数且不同理解会导致明显不同的执行结果时才提问；意图明确的指令直接执行，不要反复确认或质疑。",
+                "如果用户的问题模糊不清，先追问澄清再给出建议。");
+
+        /// <summary>
+        /// 上一版内置英文系统提示词。
+        /// 仅用于识别并迁移仍保持旧默认值的设置，不能覆盖用户自定义提示词。
+        /// </summary>
+        public static string PreviousDefaultSystemPromptEn =>
+            L.GetValueForLocale("system.defaultSystemPrompt", "en").Replace(
+                "Ask only when a critical parameter is missing or different interpretations would produce materially different results; execute clear instructions directly without repeated confirmation or second-guessing.",
+                "If the user's question is ambiguous, ask for clarification before making suggestions.");
+
         #endregion
 
         #region UI Messages
