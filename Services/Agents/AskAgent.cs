@@ -40,6 +40,7 @@ namespace DeepSeek_v4_for_VisualStudio.Services.Agents
         {
             // ── 简单搜索与读取（无需委派 Explore）──
             "symbol_search",      // 符号搜索（类/方法/接口/属性定义）
+            "get_file_symbols",   // 单文件符号定义列表
             "file_search",        // Glob 文件名搜索
             "grep_search",        // 文本/正则内容搜索
             "read_file",          // 读取文件

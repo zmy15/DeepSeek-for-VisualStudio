@@ -23,6 +23,9 @@ namespace DeepSeek_v4_for_VisualStudio.Services.Agents
     /// </summary>
     public abstract class BaseAgent : IDisposable
     {
+        /// <summary>Ask Agent 直接探索工具的最大累计调用次数。</summary>
+        internal const int AskDirectExplorationCallLimit = 3;
+
         protected readonly DeepSeekApiService _apiService;
         protected readonly List<AgentLogEntry> _logs = new();
 
@@ -34,7 +37,7 @@ namespace DeepSeek_v4_for_VisualStudio.Services.Agents
         /// <summary>已知内置工具名（MCP 同名工具会覆盖内置，不同名工具按分类注入）</summary>
         protected static readonly HashSet<string> KnownBuiltInToolNames = new(StringComparer.OrdinalIgnoreCase)
         {
-            "list_dir", "read_file", "file_search", "grep_search", "symbol_search", "get_errors",
+            "list_dir", "read_file", "file_search", "grep_search", "symbol_search", "get_file_symbols", "get_errors",
             "fetch_webpage", "build_solution", "replace_string_in_file", "multi_replace_string_in_file",
             "create_file", "delete_file", "apply_patch", "create_directory", "run_in_terminal",
             "get_terminal_output", "VisualStudio_askQuestions", "runSubagent", "request_handoff",
@@ -54,6 +57,7 @@ namespace DeepSeek_v4_for_VisualStudio.Services.Agents
                 "grep_search",
                 "file_search",
                 "symbol_search",
+                "get_file_symbols",
                 "list_dir",
                 "memory",
             };
@@ -1026,6 +1030,7 @@ namespace DeepSeek_v4_for_VisualStudio.Services.Agents
             int rejectedToolRounds = 0;
             int consecutiveErrorRounds = 0;
             int askQuestionsCallCount = 0;
+            int askDirectExplorationCallCount = 0;
             bool noToolsReminderAppended = false;
             int maxRepeatedSameCall = Settings.DeepSeekOptionsPage.Instance?.MaxRepeatedSameCall ?? 5;
             if (maxRepeatedSameCall < 1) maxRepeatedSameCall = 5;
@@ -1620,6 +1625,38 @@ namespace DeepSeek_v4_for_VisualStudio.Services.Agents
                         }
                     }
 
+                    // ── Ask Agent 直接探索预算：超过 3 次后不再自己读/搜，强制委派 Explore。──
+                    HashSet<int>? blockedDirectExplorationIndices = null;
+                    bool canDelegateAskExploration = Definition.Type == AgentType.Ask
+                        && ExploreAgent != null
+                        && effectiveWhitelist?.Contains("runSubagent", StringComparer.OrdinalIgnoreCase) == true;
+                    if (canDelegateAskExploration)
+                    {
+                        int remaining = Math.Max(0, AskDirectExplorationCallLimit - askDirectExplorationCallCount);
+                        foreach (int idx in dedupedIndices)
+                        {
+                            if (!IsDirectExplorationTool(toolCalls[idx].Function.Name))
+                                continue;
+
+                            if (remaining > 0)
+                            {
+                                remaining--;
+                                askDirectExplorationCallCount++;
+                            }
+                            else
+                            {
+                                (blockedDirectExplorationIndices ??= new HashSet<int>()).Add(idx);
+                            }
+                        }
+
+                        if (blockedDirectExplorationIndices?.Count > 0)
+                        {
+                            Logger.Warn(
+                                $"[Agent:{Definition.Name}] 已拦截超过预算的直接探索调用 " +
+                                $"({askDirectExplorationCallCount}/{AskDirectExplorationCallLimit})，要求委派 Explore");
+                        }
+                    }
+
                     // ── 通知工具调用（含详细信息，每轮仅一次，去重后只通知唯一调用）──
                     foreach (var idx in dedupedIndices)
                     {
@@ -1704,6 +1741,12 @@ namespace DeepSeek_v4_for_VisualStudio.Services.Agents
                                 "请立即基于用户回答继续，不要重复提问；需求对齐阶段必须只回复 DONE。");
                         }
 
+                        if (blockedDirectExplorationIndices?.Contains(idx) == true)
+                        {
+                            return Task.FromResult(LocalizationService.Instance.Format(
+                                "tool.ask.explorationLimitReached", AskDirectExplorationCallLimit));
+                        }
+
                         // ── 白名单拦截：不在白名单中的工具不执行，返回拒绝消息 ──
                         if (blockedToolIndices != null && blockedToolIndices.Contains(idx))
                         {
@@ -1726,6 +1769,15 @@ namespace DeepSeek_v4_for_VisualStudio.Services.Agents
                     }).ToList();
                     var dedupedResults = await Task.WhenAll(toolTasks).ConfigureAwait(false);
                     CurrentActivity = $"工具已完成（第 {round} 轮），准备下一轮";
+
+                    if (canDelegateAskExploration
+                        && dedupedIndices
+                            .Select((idx, resultIndex) => (Tool: toolCalls[idx], Result: dedupedResults[resultIndex]))
+                            .Any(item => NormalizeToolName(item.Tool.Function.Name) == "runSubagent"
+                                && ToolExecutionOutcome.Classify(item.Result) == ToolResultKind.Success))
+                    {
+                        askDirectExplorationCallCount = 0;
+                    }
 
                     // ── 将去重后的结果映射回原始 toolCalls 数组 ──
                     var toolResults = new string[toolCalls.Count];
@@ -2438,7 +2490,7 @@ namespace DeepSeek_v4_for_VisualStudio.Services.Agents
                 };
             }
 
-            // ── Git 工具审批（写操作需审批，只读操作自动放行）──
+            // ── Git 工具审批（危险操作需审批；只读 Agent 的写操作交由 GitTool 拒绝）──
             if (toolName == "git" && BuiltInTools != null)
             {
                 string operation = string.Empty;
@@ -2461,6 +2513,8 @@ namespace DeepSeek_v4_for_VisualStudio.Services.Agents
                 string stashMode = string.Empty;
                 string resetPath = string.Empty;
                 bool delete = false;
+                bool force = false;
+                var requestedFlags = new List<string>();
                 try
                 {
                     using var doc2 = System.Text.Json.JsonDocument.Parse(argumentsJson);
@@ -2472,13 +2526,39 @@ namespace DeepSeek_v4_for_VisualStudio.Services.Agents
                         resetPath = pProp.GetString() ?? string.Empty;
                     if (doc2.RootElement.TryGetProperty("delete", out var dProp) && dProp.ValueKind == System.Text.Json.JsonValueKind.True)
                         delete = true;
+                    if (doc2.RootElement.TryGetProperty("force", out var forceProp) && forceProp.ValueKind == System.Text.Json.JsonValueKind.True)
+                        force = true;
+                    if (doc2.RootElement.TryGetProperty("flags", out var flagsProp)
+                        && flagsProp.ValueKind == System.Text.Json.JsonValueKind.Array)
+                    {
+                        foreach (var flagProp in flagsProp.EnumerateArray())
+                        {
+                            if (flagProp.ValueKind == System.Text.Json.JsonValueKind.String)
+                            {
+                                string flag = flagProp.GetString() ?? string.Empty;
+                                if (!string.IsNullOrWhiteSpace(flag))
+                                    requestedFlags.Add(flag);
+                            }
+                        }
+                    }
                 }
                 catch { }
 
                 bool isReadOnly = GitTool.IsReadOnlyOperation(
                     operation, branch, stashMode, resetPath, delete);
+                bool flagsRequireApproval = GitTool.FlagsRequireApproval(
+                    operation, requestedFlags, out string flagsReason);
+                bool requiresApproval = GitTool.RequiresApproval(
+                    Definition.Type,
+                    operation,
+                    isReadOnly,
+                    stashMode,
+                    delete,
+                    force,
+                    requestedFlags,
+                    out string approvalReason);
 
-                if (!isReadOnly && !string.IsNullOrWhiteSpace(operation))
+                if (requiresApproval && !string.IsNullOrWhiteSpace(operation))
                 {
                     string gitOpDesc = operation switch
                     {
@@ -2493,17 +2573,33 @@ namespace DeepSeek_v4_for_VisualStudio.Services.Agents
                         _ => $"git {operation}"
                     };
 
-                    string approvalCmd = $"git {operation}";
-                    string approvalTitle = operation == "push"
-                        ? $"确认 git push 操作"
-                        : $"确认 git {operation}: {gitOpDesc}";
+                    string approvalCmd = string.IsNullOrEmpty(approvalReason)
+                        || string.Equals(approvalReason, operation, StringComparison.OrdinalIgnoreCase)
+                            ? $"git {operation}"
+                            : $"git {operation} {approvalReason}";
+                    string approvalTitle = flagsRequireApproval
+                        ? $"确认 git {operation} 额外参数"
+                        : operation == "push"
+                            ? $"确认 git push 操作"
+                            : $"确认 git {operation} 危险操作: {gitOpDesc}";
+                    string approvalDetail = string.IsNullOrEmpty(purpose)
+                        ? $"AI 请求执行 git {operation} 操作"
+                        : purpose;
+                    if (!string.IsNullOrEmpty(approvalReason))
+                    {
+                        approvalDetail += "\n" + LocalizationService.Instance.Format(
+                            flagsRequireApproval
+                                ? "tool.git.approvalFlagsReason"
+                                : "tool.git.approvalDangerReason",
+                            approvalReason);
+                    }
 
                     bool approved = await RequestPermissionAsync(
                         approvalTitle,
                         approvalCmd,
                         "git_operation",
                         purpose,
-                        string.IsNullOrEmpty(purpose) ? $"AI 请求执行 git {operation} 操作" : purpose,
+                        approvalDetail,
                         ct);
 
                     if (!approved)
@@ -3796,6 +3892,16 @@ namespace DeepSeek_v4_for_VisualStudio.Services.Agents
                 "delete_file" => true,
                 "apply_patch" => true,
                 "create_directory" => true,
+                _ => false,
+            };
+        }
+
+        /// <summary>判断工具是否属于 Ask Agent 的直接代码库探索工具。</summary>
+        internal static bool IsDirectExplorationTool(string toolName)
+        {
+            return NormalizeToolName(toolName) switch
+            {
+                "read_file" or "grep_search" or "file_search" or "list_dir" or "symbol_search" or "get_file_symbols" => true,
                 _ => false,
             };
         }

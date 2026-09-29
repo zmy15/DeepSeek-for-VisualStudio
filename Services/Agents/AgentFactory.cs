@@ -228,55 +228,36 @@ namespace DeepSeek_v4_for_VisualStudio.Services.Agents
         }
 
         /// <summary>
-        /// 通过 EnvDTE 项目系统删除文件。
+        /// 通过 EnvDTE 从项目中移除文件引用，但不删除磁盘文件。
+        /// 磁盘删除由 delete_file 工具统一负责，确保审批与执行各发生一次。
         /// </summary>
-        public static async System.Threading.Tasks.Task DeleteFilesViaEnvDTEAsync(List<string> filePaths)
+        /// <param name="filePath">要从 VS 项目中移除的文件绝对路径。</param>
+        public static async System.Threading.Tasks.Task RemoveFileFromProjectAsync(string filePath)
         {
-            if (filePaths == null || filePaths.Count == 0) return;
+            if (string.IsNullOrWhiteSpace(filePath))
+                return;
 
             await Microsoft.VisualStudio.Shell.ThreadHelper.JoinableTaskFactory
                 .SwitchToMainThreadAsync();
 
             var dte = (EnvDTE.DTE?)Microsoft.VisualStudio.Shell.ServiceProvider.GlobalProvider
                 .GetService(typeof(EnvDTE.DTE));
-            if (dte == null || dte.Solution == null || !dte.Solution.IsOpen)
-            {
-                foreach (string fp in filePaths)
-                {
-                    try { if (System.IO.File.Exists(fp)) System.IO.File.Delete(fp); }
-                    catch (Exception ex) { Logger.Warn($"[AgentFactory] 磁盘删除失败: {fp} - {ex.Message}"); }
-                }
-                Logger.Warn("[AgentFactory] DTE 不可用，仅执行磁盘文件删除");
+            if (dte?.Solution == null || !dte.Solution.IsOpen)
                 return;
-            }
 
-            foreach (string filePath in filePaths)
+            try
             {
-                try
-                {
-                    EnvDTE.ProjectItem? item = FindProjectItemByPath(dte, filePath);
-                    if (item != null)
-                    {
-                        item.Delete();
-                        Logger.Info($"[AgentFactory]  已通过 EnvDTE 从项目中删除: {filePath}");
-                    }
-                    else
-                    {
-                        if (System.IO.File.Exists(filePath))
-                        {
-                            System.IO.File.Delete(filePath);
-                            Logger.Info($"[AgentFactory]  已从磁盘删除: {filePath}");
-                        }
-                        else
-                        {
-                            Logger.Warn($"[AgentFactory] 文件不存在，跳过: {filePath}");
-                        }
-                    }
-                }
-                catch (Exception ex)
-                {
-                    Logger.Warn($"[AgentFactory] 删除文件失败: {filePath} - {ex.Message}");
-                }
+                EnvDTE.ProjectItem? item = FindProjectItemByPath(dte, filePath);
+                if (item == null)
+                    return;
+
+                // Remove() only detaches the item from the project; it must not delete the disk file.
+                item.Remove();
+                Logger.Info($"[AgentFactory]  已从项目中移除: {filePath}");
+            }
+            catch (Exception ex)
+            {
+                Logger.Warn($"[AgentFactory] 从项目中移除文件失败: {filePath} - {ex.Message}");
             }
         }
 

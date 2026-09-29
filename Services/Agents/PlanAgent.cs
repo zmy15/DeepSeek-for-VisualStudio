@@ -49,6 +49,7 @@ namespace DeepSeek_v4_for_VisualStudio.Services.Agents
             "grep_search",
             "file_search",
             "symbol_search",
+            "get_file_symbols",
             "list_dir",
         };
 
@@ -95,6 +96,7 @@ namespace DeepSeek_v4_for_VisualStudio.Services.Agents
                     "grep_search",                // 文本搜索（对齐阶段快速查阅）
                     "file_search",                // 文件搜索（对齐阶段快速查阅）
                     "symbol_search",              // 符号搜索（查找类/方法/接口等定义）
+                    "get_file_symbols",           // 单文件符号定义列表
                 },
                 SystemPrompt = BuildSystemPrompt(),
             };

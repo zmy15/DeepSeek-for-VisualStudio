@@ -100,6 +100,32 @@ public class BaseAgentWhitelistRecoveryTests
         handler.RequestBodies.Should().HaveCount(4);
     }
 
+    [Fact]
+    public async Task AskAgent_DirectExplorationBudget_BlocksFourthCallAndRequiresExplore()
+    {
+        var handler = new SequenceHttpMessageHandler(new[]
+        {
+            ToolCallSse("read_file", "{\"filePath\":\"C:\\\\a.txt\"}"),
+            ToolCallSse("read_file", "{\"filePath\":\"C:\\\\b.txt\"}"),
+            ToolCallSse("read_file", "{\"filePath\":\"C:\\\\c.txt\"}"),
+            ToolCallSse("read_file", "{\"filePath\":\"C:\\\\d.txt\"}"),
+            ContentSse("delegated"),
+        });
+        var agent = CreateAgent(handler);
+        agent.ExploreAgent = new ExploreAgent(new DeepSeekApiService(
+            new HttpClient(new SequenceHttpMessageHandler(Array.Empty<string>()))));
+
+        var result = await agent.RunLoopAsync(
+            new List<ChatApiMessage> { new() { Role = "user", Content = "调查多个文件" } },
+            new List<string> { "read_file", "runSubagent" },
+            CancellationToken.None);
+
+        result.Should().Contain("delegated");
+        handler.RequestBodies.Should().HaveCount(5);
+        handler.RequestBodies[4].Should().Contain("runSubagent");
+        handler.RequestBodies[4].Should().Contain("Explore");
+    }
+
     private static RecoveryTestAgent CreateAgent(SequenceHttpMessageHandler handler)
     {
         var apiService = new DeepSeekApiService(new HttpClient(handler));

@@ -21,6 +21,12 @@ namespace DeepSeek_v4_for_VisualStudio.Services.BuiltInTools
         /// </summary>
         public Services.Editing.StagedEditWorkspace? Workspace { get; set; }
 
+        /// <summary>
+        /// VS 项目引用移除器（可选注入）。
+        /// 只移除项目项，不再次删除磁盘文件，避免审批层与工具层重复删除。
+        /// </summary>
+        public Func<string, Task>? ProjectItemRemover { get; set; }
+
         public override string Name => "delete_file";
 
         public override ToolDefinition GetDefinition()
@@ -71,13 +77,15 @@ namespace DeepSeek_v4_for_VisualStudio.Services.BuiltInTools
 
             try
             {
+                // 文件不存在通常意味着路径错误或工作区选择错误，必须明确提示用户核对路径。
                 if (!File.Exists(filePath))
                     return LocalizationService.Instance.Format("tool.deleteFile.notFound", Path.GetFileName(filePath));
 
-                // ── Workspace 模式：暂存删除标记，不立即删除 ──
+                // ── Workspace 模式：直接落盘并登记 Baseline，供 diff 预览和撤销使用 ──
                 if (Workspace != null)
                 {
                     Workspace.DeleteFile(filePath);
+                    await RemoveProjectItemAsync(filePath).ConfigureAwait(false);
                     return LocalizationService.Instance.Format("tool.deleteFile.stagedDelete", Path.GetFileName(filePath));
                 }
 
@@ -91,6 +99,7 @@ namespace DeepSeek_v4_for_VisualStudio.Services.BuiltInTools
 
                 string fileName = Path.GetFileName(filePath);
                 await Task.Run(() => File.Delete(filePath));
+                await RemoveProjectItemAsync(filePath).ConfigureAwait(false);
 
                 // ── 删除成功 → 清理备份 ──
                 BackupService.CleanupBackup(backupPath);
@@ -100,6 +109,21 @@ namespace DeepSeek_v4_for_VisualStudio.Services.BuiltInTools
             catch (Exception ex)
             {
                 return LocalizationService.Instance.Format("tool.deleteFile.failed", ex.Message);
+            }
+        }
+
+        private async Task RemoveProjectItemAsync(string filePath)
+        {
+            if (ProjectItemRemover == null)
+                return;
+
+            try
+            {
+                await ProjectItemRemover(filePath).ConfigureAwait(false);
+            }
+            catch (Exception ex)
+            {
+                Logger.Warn($"[DeleteFileTool] 从项目中移除文件失败: {Path.GetFileName(filePath)} - {ex.Message}");
             }
         }
     }
