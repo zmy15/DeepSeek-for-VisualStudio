@@ -2492,7 +2492,7 @@ namespace DeepSeek_v4_for_VisualStudio.Services.Agents
                 };
             }
 
-            // ── Git 工具审批（写操作需审批，只读操作自动放行）──
+            // ── Git 工具审批（危险操作需审批；只读 Agent 的写操作交由 GitTool 拒绝）──
             if (toolName == "git" && BuiltInTools != null)
             {
                 string operation = string.Empty;
@@ -2515,6 +2515,8 @@ namespace DeepSeek_v4_for_VisualStudio.Services.Agents
                 string stashMode = string.Empty;
                 string resetPath = string.Empty;
                 bool delete = false;
+                bool force = false;
+                var requestedFlags = new List<string>();
                 try
                 {
                     using var doc2 = System.Text.Json.JsonDocument.Parse(argumentsJson);
@@ -2526,13 +2528,39 @@ namespace DeepSeek_v4_for_VisualStudio.Services.Agents
                         resetPath = pProp.GetString() ?? string.Empty;
                     if (doc2.RootElement.TryGetProperty("delete", out var dProp) && dProp.ValueKind == System.Text.Json.JsonValueKind.True)
                         delete = true;
+                    if (doc2.RootElement.TryGetProperty("force", out var forceProp) && forceProp.ValueKind == System.Text.Json.JsonValueKind.True)
+                        force = true;
+                    if (doc2.RootElement.TryGetProperty("flags", out var flagsProp)
+                        && flagsProp.ValueKind == System.Text.Json.JsonValueKind.Array)
+                    {
+                        foreach (var flagProp in flagsProp.EnumerateArray())
+                        {
+                            if (flagProp.ValueKind == System.Text.Json.JsonValueKind.String)
+                            {
+                                string flag = flagProp.GetString() ?? string.Empty;
+                                if (!string.IsNullOrWhiteSpace(flag))
+                                    requestedFlags.Add(flag);
+                            }
+                        }
+                    }
                 }
                 catch { }
 
                 bool isReadOnly = GitTool.IsReadOnlyOperation(
                     operation, branch, stashMode, resetPath, delete);
+                bool flagsRequireApproval = GitTool.FlagsRequireApproval(
+                    operation, requestedFlags, out string flagsReason);
+                bool requiresApproval = GitTool.RequiresApproval(
+                    Definition.Type,
+                    operation,
+                    isReadOnly,
+                    stashMode,
+                    delete,
+                    force,
+                    requestedFlags,
+                    out string approvalReason);
 
-                if (!isReadOnly && !string.IsNullOrWhiteSpace(operation))
+                if (requiresApproval && !string.IsNullOrWhiteSpace(operation))
                 {
                     string gitOpDesc = operation switch
                     {
@@ -2547,17 +2575,33 @@ namespace DeepSeek_v4_for_VisualStudio.Services.Agents
                         _ => $"git {operation}"
                     };
 
-                    string approvalCmd = $"git {operation}";
-                    string approvalTitle = operation == "push"
-                        ? $"确认 git push 操作"
-                        : $"确认 git {operation}: {gitOpDesc}";
+                    string approvalCmd = string.IsNullOrEmpty(approvalReason)
+                        || string.Equals(approvalReason, operation, StringComparison.OrdinalIgnoreCase)
+                            ? $"git {operation}"
+                            : $"git {operation} {approvalReason}";
+                    string approvalTitle = flagsRequireApproval
+                        ? $"确认 git {operation} 额外参数"
+                        : operation == "push"
+                            ? $"确认 git push 操作"
+                            : $"确认 git {operation} 危险操作: {gitOpDesc}";
+                    string approvalDetail = string.IsNullOrEmpty(purpose)
+                        ? $"AI 请求执行 git {operation} 操作"
+                        : purpose;
+                    if (!string.IsNullOrEmpty(approvalReason))
+                    {
+                        approvalDetail += "\n" + LocalizationService.Instance.Format(
+                            flagsRequireApproval
+                                ? "tool.git.approvalFlagsReason"
+                                : "tool.git.approvalDangerReason",
+                            approvalReason);
+                    }
 
                     bool approved = await RequestPermissionAsync(
                         approvalTitle,
                         approvalCmd,
                         "git_operation",
                         purpose,
-                        string.IsNullOrEmpty(purpose) ? $"AI 请求执行 git {operation} 操作" : purpose,
+                        approvalDetail,
                         ct);
 
                     if (!approved)
