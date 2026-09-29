@@ -287,6 +287,7 @@ namespace DeepSeek_v4_for_VisualStudio.Services.BuiltInTools
                             message = new { type = "string", description = L["tool.git.param.message"] },
                             branch = new { type = "string", description = L["tool.git.param.branch"] },
                             reference = new { type = "string", description = L["tool.git.param.reference"] },
+                            range = new { type = "string", description = L["tool.git.param.range"] },
                             files = new
                             {
                                 type = "array",
@@ -421,6 +422,9 @@ namespace DeepSeek_v4_for_VisualStudio.Services.BuiltInTools
         /// </summary>
         internal string BuildGitCommand(string operation, Dictionary<string, JsonElement> args, string repoDir)
         {
+            if (!TryValidateRevisionRange(operation, args, out string? rangeError))
+                return rangeError!;
+
             if (!TryValidateGitFlags(operation, args, out string? blockedMessage))
                 return blockedMessage!;
 
@@ -432,6 +436,45 @@ namespace DeepSeek_v4_for_VisualStudio.Services.BuiltInTools
             return string.IsNullOrEmpty(flags)
                 ? command
                 : InsertFlagsAfterCommand(command, flags);
+        }
+
+        /// <summary>
+        /// 读取 log/diff 的提交范围；range 优先，未提供时兼容旧的 reference 参数。
+        /// </summary>
+        private static string GetRevisionRange(Dictionary<string, JsonElement> args)
+        {
+            string range = GetStringArg(args, "range");
+            return string.IsNullOrEmpty(range) ? GetStringArg(args, "reference") : range;
+        }
+
+        /// <summary>
+        /// 校验 log/diff 的提交范围，避免位置参数被解释为危险选项。
+        /// </summary>
+        private static bool TryValidateRevisionRange(
+            string operation,
+            Dictionary<string, JsonElement> args,
+            out string? blockedMessage)
+        {
+            blockedMessage = null;
+            if (!string.Equals(operation, "log", StringComparison.OrdinalIgnoreCase)
+                && !string.Equals(operation, "diff", StringComparison.OrdinalIgnoreCase))
+                return true;
+
+            string range = GetRevisionRange(args);
+            if (string.IsNullOrWhiteSpace(range))
+                return true;
+
+            bool hasControlChars = range.IndexOfAny(new[] { '\r', '\n', '\0' }) >= 0;
+            bool validShape = System.Text.RegularExpressions.Regex.IsMatch(
+                range,
+                @"^[0-9A-Za-z_./@{}^~:-]+$");
+            if (range.StartsWith("-", StringComparison.Ordinal) || hasControlChars || !validShape)
+            {
+                blockedMessage = L.Format("tool.git.rangeInvalid", range);
+                return false;
+            }
+
+            return true;
         }
 
         private static bool TryValidateGitFlags(
@@ -670,8 +713,10 @@ namespace DeepSeek_v4_for_VisualStudio.Services.BuiltInTools
                     {
                         bool staged = GetBoolArg(args, "staged");
                         string path = GetStringArg(args, "path");
+                        string range = GetRevisionRange(args);
                         var sb = new StringBuilder("diff");
                         if (staged) sb.Append(" --staged");
+                        if (!string.IsNullOrEmpty(range)) sb.Append($" {EscapeArg(range)}");
                         if (!string.IsNullOrEmpty(path)) sb.Append($" -- \"{EscapeArg(path)}\"");
                         return sb.ToString();
                     }
@@ -684,6 +729,7 @@ namespace DeepSeek_v4_for_VisualStudio.Services.BuiltInTools
                         string search = GetStringArg(args, "search");
                         bool searchRegex = GetBoolArg(args, "searchRegex");
                         string path = GetStringArg(args, "path");
+                        string range = GetRevisionRange(args);
                         var sb = new StringBuilder("log");
                         if (oneline) sb.Append(" --oneline");
                         if (noDiff) sb.Append(" -s");
@@ -694,6 +740,7 @@ namespace DeepSeek_v4_for_VisualStudio.Services.BuiltInTools
                             sb.Append($" -S \"{EscapeArg(search)}\"");
                             if (searchRegex) sb.Append(" --pickaxe-regex");
                         }
+                        if (!string.IsNullOrEmpty(range)) sb.Append($" {EscapeArg(range)}");
                         if (!string.IsNullOrEmpty(path)) sb.Append($" -- \"{EscapeArg(path)}\"");
                         return sb.ToString();
                     }

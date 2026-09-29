@@ -273,6 +273,46 @@ public class GitToolTests
     }
 
     [Fact]
+    public void BuildGitCommand_Log_WithRange_AppendsRangeBeforePath()
+    {
+        var args = ParseArgs("{\"operation\":\"log\",\"range\":\"master..dev\",\"oneline\":true,\"count\":5,\"path\":\"Services/Agents/BaseAgent.cs\"}");
+
+        var command = new GitTool().BuildGitCommand("log", args, "C:\\repo");
+
+        command.Should().Be("log --oneline -5 master..dev -- \"Services/Agents/BaseAgent.cs\"");
+    }
+
+    [Fact]
+    public void BuildGitCommand_Log_WithReferenceRange_SupportsCompatibilityAlias()
+    {
+        var args = ParseArgs("{\"operation\":\"log\",\"reference\":\"origin/main...HEAD\",\"count\":3}");
+
+        var command = new GitTool().BuildGitCommand("log", args, "C:\\repo");
+
+        command.Should().Be("log -3 origin/main...HEAD");
+    }
+
+    [Fact]
+    public void BuildGitCommand_Diff_WithRange_AppendsRange()
+    {
+        var args = ParseArgs("{\"operation\":\"diff\",\"range\":\"master..dev\"}");
+
+        var command = new GitTool().BuildGitCommand("diff", args, "C:\\repo");
+
+        command.Should().Be("diff master..dev");
+    }
+
+    [Fact]
+    public void BuildGitCommand_Log_WithOptionLikeRange_ReturnsBlocked()
+    {
+        var args = ParseArgs("{\"operation\":\"log\",\"range\":\"--output=out.txt\"}");
+
+        var command = new GitTool().BuildGitCommand("log", args, "C:\\repo");
+
+        command.Should().StartWith("[BLOCKED] ");
+    }
+
+    [Fact]
     public void BuildGitCommand_Log_WithDangerousFlag_BuildsCommandForApproval()
     {
         var args = ParseArgs("{\"operation\":\"log\",\"flags\":[\"--output=out.txt\"]}");
