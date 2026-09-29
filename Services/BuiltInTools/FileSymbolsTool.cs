@@ -1,5 +1,6 @@
 using DeepSeek_v4_for_VisualStudio.Models;
 using EnvDTE;
+using DeepSeek_v4_for_VisualStudio.Utils;
 using Microsoft.VisualStudio.Shell;
 using System;
 using System.Collections.Generic;

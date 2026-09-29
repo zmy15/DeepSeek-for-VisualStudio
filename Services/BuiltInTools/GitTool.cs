@@ -3,6 +3,7 @@ using DeepSeek_v4_for_VisualStudio.Utils;
 using System;
 using System.Collections.Generic;
 using System.Diagnostics;
+using System.Linq;
 using System.IO;
 using System.Text;
 using System.Text.Json;
@@ -13,7 +14,8 @@ namespace DeepSeek_v4_for_VisualStudio.Services.BuiltInTools
 {
     /// <summary>
     /// git 工具 — 支持常用 Git 操作，并显式提供安全的只读查询能力。
-    /// 启动时自动检测 git 是否安装，写操作通过 BaseAgent 审批流程控制。
+    /// 启动时自动检测 git 是否安装；危险操作通过 BaseAgent 审批流程控制，
+    /// 只读 Agent 的写操作在工具层直接拒绝。
     /// </summary>
     public class GitTool : BuiltInToolBase
     {
@@ -79,16 +81,49 @@ namespace DeepSeek_v4_for_VisualStudio.Services.BuiltInTools
             "describe", "tag", "rev-parse", "reflog", "ls-files",
         };
 
-        /// <summary>写操作 — 需要审批</summary>
+        /// <summary>写操作 — 在只读 Agent 中拒绝</summary>
         private static readonly HashSet<string> WriteOps = new(StringComparer.OrdinalIgnoreCase)
         {
             "add", "commit", "branch", "checkout", "merge", "pull", "stash", "reset",
         };
 
-        /// <summary>危险操作 — 需要审批 + 额外警告</summary>
+        /// <summary>危险操作 — 无论是否为写操作，都需要审批</summary>
         private static readonly HashSet<string> DangerousOps = new(StringComparer.OrdinalIgnoreCase)
         {
             "push",
+        };
+
+        /// <summary>每种只读 operation 允许的布尔/固定值 flags。</summary>
+        private static readonly Dictionary<string, HashSet<string>> AllowedGitFlags = new(StringComparer.OrdinalIgnoreCase)
+        {
+            ["status"] = new(StringComparer.Ordinal) { "--short", "--branch", "--porcelain", "--porcelain=v1", "--porcelain=v2", "--untracked-files=all", "--untracked-files=normal", "--untracked-files=no" },
+            ["diff"] = new(StringComparer.Ordinal) { "--stat", "--shortstat", "--numstat", "--name-only", "--name-status", "--cached", "--staged", "--check", "--word-diff", "--ignore-space-at-eol", "--ignore-all-space", "--ignore-blank-lines", "--binary", "--full-index", "--no-ext-diff", "--no-textconv" },
+            ["log"] = new(StringComparer.Ordinal) { "-s", "--no-patch", "--oneline", "--graph", "--decorate", "--all", "--first-parent", "--stat", "--shortstat", "--numstat", "--name-only", "--name-status", "--follow", "--reverse", "--merges", "--no-merges", "--pickaxe-regex", "--full-history", "--simplify-merges", "--topo-order", "--date-order", "--no-ext-diff", "--no-textconv" },
+            ["show"] = new(StringComparer.Ordinal) { "-s", "--no-patch", "--stat", "--shortstat", "--numstat", "--name-only", "--name-status", "--oneline", "--decorate", "--no-ext-diff", "--no-textconv" },
+            ["describe"] = new(StringComparer.Ordinal) { "--tags", "--long", "--always", "--dirty" },
+            ["tag"] = new(StringComparer.Ordinal) { "--list" },
+            ["rev-parse"] = new(StringComparer.Ordinal) { "--short", "--verify", "--symbolic", "--symbolic-full-name", "--abbrev-ref", "--is-inside-work-tree", "--show-toplevel", "--show-prefix", "--is-bare-repository" },
+            ["reflog"] = new(StringComparer.Ordinal) { "--date=iso", "--date=relative" },
+            ["ls-files"] = new(StringComparer.Ordinal) { "--cached", "--deleted", "--modified", "--others", "--exclude-standard", "--stage", "--unmerged", "--directory", "--error-unmatch" },
+            ["add"] = new(StringComparer.Ordinal) { "--all", "-A", "--update", "-u", "--intent-to-add", "-N", "--dry-run", "-n" },
+            ["commit"] = new(StringComparer.Ordinal) { "--amend", "--no-edit", "--allow-empty", "--allow-empty-message", "--signoff", "--no-verify" },
+            ["branch"] = new(StringComparer.Ordinal) { "--list", "-l", "--all", "-a", "--remotes", "-r", "--verbose", "-v", "--show-current" },
+            ["checkout"] = new(StringComparer.Ordinal) { "--track", "-t", "--detach", "--quiet", "-q" },
+            ["merge"] = new(StringComparer.Ordinal) { "--ff-only", "--no-ff", "--squash", "--no-commit", "--abort", "--continue", "--quit" },
+            ["pull"] = new(StringComparer.Ordinal) { "--rebase", "--ff-only", "--no-ff", "--autostash", "--no-rebase" },
+            ["push"] = new(StringComparer.Ordinal) { "--dry-run", "--set-upstream", "-u" },
+            ["stash"] = new(StringComparer.Ordinal) { "--include-untracked", "-u", "--keep-index", "--staged", "--quiet" },
+            ["reset"] = new(StringComparer.Ordinal) { "--soft", "--mixed", "--quiet" },
+        };
+
+        /// <summary>每种只读 operation 允许的、需要后续值的 flags。</summary>
+        private static readonly Dictionary<string, HashSet<string>> AllowedGitValueFlags = new(StringComparer.OrdinalIgnoreCase)
+        {
+            ["log"] = new(StringComparer.Ordinal) { "-S", "-G", "--grep", "--author", "--committer", "--since", "--until", "--format", "--date", "--max-count", "--skip", "--ancestry-path", "--diff-filter" },
+            ["show"] = new(StringComparer.Ordinal) { "--format", "--date", "--diff-filter" },
+            ["diff"] = new(StringComparer.Ordinal) { "--diff-filter", "--ignore-matching-lines" },
+            ["describe"] = new(StringComparer.Ordinal) { "--match", "--exclude" },
+            ["tag"] = new(StringComparer.Ordinal) { "--sort", "--merged", "--no-merged", "--contains", "--points-at", "--format" },
         };
 
         /// <summary>所有有效操作</summary>
@@ -134,6 +169,93 @@ namespace DeepSeek_v4_for_VisualStudio.Services.BuiltInTools
                 || (operation == "reset" && !string.IsNullOrEmpty(path));
         }
 
+        /// <summary>
+        /// 判断 Agent 是否属于只读模式。
+        /// </summary>
+        /// <param name="agentType">当前 Agent 类型；为空表示未限定 Agent。</param>
+        /// <returns>Ask/Explore Agent 返回 true，其余返回 false。</returns>
+        internal static bool IsReadOnlyAgent(AgentType? agentType)
+        {
+            return agentType is AgentType.Ask or AgentType.Explore;
+        }
+
+        /// <summary>
+        /// 统一判断 Git 调用是否需要进入审批流程。
+        /// 只读 Agent 的写操作直接交给 GitTool 拦截，不先用审批覆盖权限边界。
+        /// </summary>
+        /// <param name="agentType">当前 Agent 类型。</param>
+        /// <param name="operation">Git 操作名。</param>
+        /// <param name="isReadOnly">该操作在当前参数下是否属于只读操作。</param>
+        /// <param name="mode">操作的细化模式，例如 reset hard、stash drop。</param>
+        /// <param name="delete">是否请求删除分支。</param>
+        /// <param name="force">是否请求强制操作。</param>
+        /// <param name="flags">额外 Git 参数。</param>
+        /// <param name="reason">需要审批的具体参数或操作。</param>
+        /// <returns>需要审批时返回 true。</returns>
+        internal static bool RequiresApproval(
+            AgentType? agentType,
+            string operation,
+            bool isReadOnly,
+            string mode,
+            bool delete,
+            bool force,
+            IReadOnlyList<string>? flags,
+            out string reason)
+        {
+            reason = string.Empty;
+
+            // 只读 Agent 的写操作必须在执行层阻断；审批只能放宽危险参数，
+            // 不能放宽 Agent 的职责边界。
+            if (IsReadOnlyAgent(agentType) && !isReadOnly)
+                return false;
+
+            if (FlagsRequireApproval(operation, flags, out string flagReason))
+            {
+                reason = flagReason;
+                return true;
+            }
+
+            string dangerousReason = GetDangerousOperationReason(operation, mode, delete, force);
+            if (string.IsNullOrEmpty(dangerousReason))
+                return false;
+
+            reason = dangerousReason;
+            return true;
+        }
+
+        /// <summary>
+        /// 获取危险操作或危险参数的审批原因。
+        /// </summary>
+        /// <param name="operation">Git 操作名。</param>
+        /// <param name="mode">操作的细化模式。</param>
+        /// <param name="delete">是否请求删除分支。</param>
+        /// <param name="force">是否请求强制操作。</param>
+        /// <returns>需要审批时返回可读原因，否则返回空字符串。</returns>
+        internal static string GetDangerousOperationReason(
+            string operation,
+            string mode,
+            bool delete,
+            bool force)
+        {
+            if (DangerousOps.Contains(operation))
+                return operation;
+
+            if (string.Equals(operation, "reset", StringComparison.OrdinalIgnoreCase)
+                && string.Equals(mode, "hard", StringComparison.OrdinalIgnoreCase))
+                return "--hard";
+
+            if (string.Equals(operation, "branch", StringComparison.OrdinalIgnoreCase)
+                && delete
+                && force)
+                return "--force --delete";
+
+            if (string.Equals(operation, "stash", StringComparison.OrdinalIgnoreCase)
+                && string.Equals(mode, "drop", StringComparison.OrdinalIgnoreCase))
+                return "drop";
+
+            return string.Empty;
+        }
+
         public override string Name => "git";
 
         public override ToolDefinition GetDefinition()
@@ -174,6 +296,15 @@ namespace DeepSeek_v4_for_VisualStudio.Services.BuiltInTools
                             staged = new { type = "boolean", description = L["tool.git.param.staged"] },
                             count = new { type = "integer", description = L["tool.git.param.count"] },
                             oneline = new { type = "boolean", description = L["tool.git.param.oneline"] },
+                            search = new { type = "string", description = L["tool.git.param.search"] },
+                            searchRegex = new { type = "boolean", description = L["tool.git.param.searchRegex"] },
+                            noDiff = new { type = "boolean", description = L["tool.git.param.noDiff"] },
+                            flags = new
+                            {
+                                type = "array",
+                                items = new { type = "string" },
+                                description = L["tool.git.param.flags"]
+                            },
                             delete = new { type = "boolean", description = L["tool.git.param.delete"] },
                             force = new { type = "boolean", description = L["tool.git.param.force"] },
                             remote = new { type = "string", description = L["tool.git.param.remote"] },
@@ -285,10 +416,247 @@ namespace DeepSeek_v4_for_VisualStudio.Services.BuiltInTools
         #region Git Command Builder
 
         /// <summary>
-        /// 根据操作类型和参数构建安全的 git 命令。
-        /// 返回以 "[BLOCKED] " 开头的字符串表示操作被硬拒绝。
+        /// 根据操作类型和参数构建 git 命令。
+        /// 非白名单或危险 flags 由 BaseAgent 进入审批流程；格式错误返回 Error。
         /// </summary>
         internal string BuildGitCommand(string operation, Dictionary<string, JsonElement> args, string repoDir)
+        {
+            if (!TryValidateGitFlags(operation, args, out string? blockedMessage))
+                return blockedMessage!;
+
+            string command = BuildBaseGitCommand(operation, args, repoDir);
+            if (command.StartsWith("[BLOCKED] ", StringComparison.Ordinal))
+                return command;
+
+            string flags = FormatValidatedGitFlags(operation, args);
+            return string.IsNullOrEmpty(flags)
+                ? command
+                : InsertFlagsAfterCommand(command, flags);
+        }
+
+        private static bool TryValidateGitFlags(
+            string operation,
+            Dictionary<string, JsonElement> args,
+            out string? blockedMessage)
+        {
+            blockedMessage = null;
+            string[] flags = GetStringArrayArg(args, "flags") ?? Array.Empty<string>();
+            if (flags.Length == 0)
+                return true;
+
+            AllowedGitFlags.TryGetValue(operation, out var exactFlags);
+            AllowedGitValueFlags.TryGetValue(operation, out var valueFlags);
+
+            for (int i = 0; i < flags.Length; i++)
+            {
+                string flag = (flags[i] ?? string.Empty).Trim();
+                if (string.IsNullOrEmpty(flag)
+                    || !flag.StartsWith("-", StringComparison.Ordinal)
+                    || flag.IndexOfAny(new[] { '\r', '\n', '\0' }) >= 0)
+                {
+                    blockedMessage = L.Format(
+                        "tool.git.flagInvalid",
+                        operation,
+                        flag);
+                    return false;
+                }
+
+                if (exactFlags?.Contains(flag) == true)
+                    continue;
+
+                if (valueFlags?.Contains(flag) == true)
+                {
+                    if (i + 1 >= flags.Length)
+                    {
+                        blockedMessage = L.Format(
+                            "tool.git.flagInvalid",
+                            operation,
+                            flag);
+                        return false;
+                    }
+                    i++;
+                    continue;
+                }
+
+                // Non-whitelisted but syntactically valid flags are allowed here;
+                // BaseAgent requires explicit approval before execution.
+                if (i + 1 < flags.Length
+                    && !string.IsNullOrWhiteSpace(flags[i + 1])
+                    && !flags[i + 1].TrimStart().StartsWith("-", StringComparison.Ordinal))
+                {
+                    i++;
+                }
+            }
+
+            return true;
+        }
+
+        private static string FormatValidatedGitFlags(string operation, Dictionary<string, JsonElement> args)
+        {
+            string[] flags = GetStringArrayArg(args, "flags") ?? Array.Empty<string>();
+            if (flags.Length == 0)
+                return string.Empty;
+
+            AllowedGitFlags.TryGetValue(operation, out var exactFlags);
+            AllowedGitValueFlags.TryGetValue(operation, out var valueFlags);
+            var sb = new StringBuilder();
+
+            for (int i = 0; i < flags.Length; i++)
+            {
+                string flag = (flags[i] ?? string.Empty).Trim();
+                if (exactFlags?.Contains(flag) == true)
+                {
+                    sb.Append(' ').Append(flag);
+                }
+                else if (valueFlags?.Contains(flag) == true)
+                {
+                    string value = flags[++i] ?? string.Empty;
+                    sb.Append(' ').Append(flag).Append(' ').Append(QuoteFlagValue(value));
+                }
+                else if (TryGetAttachedValuePrefix(flag, valueFlags, out string? prefix))
+                {
+                    string value = flag.Substring(prefix!.Length);
+                    sb.Append(' ').Append(prefix);
+                    if (!prefix.EndsWith("=", StringComparison.Ordinal))
+                        sb.Append(' ');
+                    sb.Append(QuoteFlagValue(value));
+                }
+                else
+                {
+                    int equalsIndex = flag.IndexOf('=');
+                    if (equalsIndex > 0 && equalsIndex < flag.Length - 1)
+                    {
+                        sb.Append(' ')
+                          .Append(flag.Substring(0, equalsIndex + 1))
+                          .Append(QuoteFlagValue(flag.Substring(equalsIndex + 1)));
+                    }
+                    else if (i + 1 < flags.Length
+                        && !string.IsNullOrWhiteSpace(flags[i + 1])
+                        && !flags[i + 1].TrimStart().StartsWith("-", StringComparison.Ordinal))
+                    {
+                        string value = flags[++i] ?? string.Empty;
+                        sb.Append(' ').Append(flag).Append(' ').Append(QuoteFlagValue(value));
+                    }
+                    else
+                    {
+                        sb.Append(' ').Append(flag);
+                    }
+                }
+            }
+
+            return sb.ToString().Trim();
+        }
+
+        private static bool TryGetAttachedValuePrefix(
+            string flag,
+            HashSet<string>? valueFlags,
+            out string? prefix)
+        {
+            prefix = null;
+            if (valueFlags == null)
+                return false;
+
+            foreach (string valueFlag in valueFlags)
+            {
+                if (valueFlag.StartsWith("--", StringComparison.Ordinal))
+                {
+                    string candidate = valueFlag + "=";
+                    if (flag.StartsWith(candidate, StringComparison.Ordinal)
+                        && flag.Length > candidate.Length)
+                    {
+                        prefix = candidate;
+                        return true;
+                    }
+                }
+                else if (valueFlag.Length == 2
+                    && flag.StartsWith(valueFlag, StringComparison.Ordinal)
+                    && flag.Length > valueFlag.Length)
+                {
+                    prefix = valueFlag;
+                    return true;
+                }
+            }
+
+            return false;
+        }
+
+        /// <summary>
+        /// 判断 flags 中是否存在需要用户审批的非白名单参数。
+        /// </summary>
+        internal static bool FlagsRequireApproval(
+            string operation,
+            IReadOnlyList<string>? flags,
+            out string reason)
+        {
+            reason = string.Empty;
+            if (flags == null || flags.Count == 0)
+                return false;
+
+            AllowedGitFlags.TryGetValue(operation, out var exactFlags);
+            AllowedGitValueFlags.TryGetValue(operation, out var valueFlags);
+            var dangerous = new List<string>();
+
+            for (int i = 0; i < flags.Count; i++)
+            {
+                string flag = (flags[i] ?? string.Empty).Trim();
+                if (string.IsNullOrEmpty(flag))
+                    continue;
+
+                if (exactFlags?.Contains(flag) == true)
+                    continue;
+
+                if (valueFlags?.Contains(flag) == true)
+                {
+                    if (i + 1 >= flags.Count)
+                        return false; // malformed flag: let BuildGitCommand return a format error
+                    i++;
+                    continue;
+                }
+
+                if (TryGetAttachedValuePrefix(flag, valueFlags, out _))
+                    continue;
+
+                dangerous.Add(flag);
+                if (i + 1 < flags.Count
+                    && !string.IsNullOrWhiteSpace(flags[i + 1])
+                    && !flags[i + 1].TrimStart().StartsWith("-", StringComparison.Ordinal))
+                {
+                    dangerous.Add(flags[i + 1]);
+                    i++;
+                }
+            }
+
+            if (dangerous.Count == 0)
+                return false;
+
+            reason = string.Join(" ", dangerous);
+            return true;
+        }
+
+        private static string QuoteFlagValue(string value)
+        {
+            return "\"" + EscapeArg(value) + "\"";
+        }
+
+        private static string InsertFlagsAfterCommand(string command, string flags)
+        {
+            int firstSpace = command.IndexOf(' ');
+            if (firstSpace < 0)
+                return command + " " + flags;
+
+            string commandName = command.Substring(0, firstSpace);
+            if (string.Equals(commandName, "stash", StringComparison.OrdinalIgnoreCase))
+            {
+                int secondSpace = command.IndexOf(' ', firstSpace + 1);
+                return secondSpace < 0
+                    ? command + " " + flags
+                    : command.Substring(0, secondSpace) + " " + flags + command.Substring(secondSpace);
+            }
+
+            return command.Substring(0, firstSpace) + " " + flags + command.Substring(firstSpace);
+        }
+
+        private string BuildBaseGitCommand(string operation, Dictionary<string, JsonElement> args, string repoDir)
         {
             switch (operation)
             {
@@ -312,11 +680,20 @@ namespace DeepSeek_v4_for_VisualStudio.Services.BuiltInTools
                     {
                         int count = GetIntArg(args, "count", 10);
                         bool oneline = GetBoolArg(args, "oneline");
+                        bool noDiff = GetBoolArg(args, "noDiff");
+                        string search = GetStringArg(args, "search");
+                        bool searchRegex = GetBoolArg(args, "searchRegex");
                         string path = GetStringArg(args, "path");
                         var sb = new StringBuilder("log");
                         if (oneline) sb.Append(" --oneline");
+                        if (noDiff) sb.Append(" -s");
                         int clamped = count < 1 ? 1 : (count > 50 ? 50 : count);
                         sb.Append($" -{clamped}");
+                        if (!string.IsNullOrEmpty(search))
+                        {
+                            sb.Append($" -S \"{EscapeArg(search)}\"");
+                            if (searchRegex) sb.Append(" --pickaxe-regex");
+                        }
                         if (!string.IsNullOrEmpty(path)) sb.Append($" -- \"{EscapeArg(path)}\"");
                         return sb.ToString();
                     }
@@ -326,8 +703,10 @@ namespace DeepSeek_v4_for_VisualStudio.Services.BuiltInTools
                         string commit = GetStringArg(args, "reference");
                         if (string.IsNullOrEmpty(commit))
                             commit = GetStringArg(args, "branch"); // backward compatibility
+                        bool noDiff = GetBoolArg(args, "noDiff");
                         string path = GetStringArg(args, "path");
                         var sb = new StringBuilder("show");
+                        if (noDiff) sb.Append(" -s");
                         if (!string.IsNullOrEmpty(commit))
                             sb.Append($" {EscapeArg(commit)}");
                         else
@@ -421,14 +800,14 @@ namespace DeepSeek_v4_for_VisualStudio.Services.BuiltInTools
                         bool delete = GetBoolArg(args, "delete");
                         bool force = GetBoolArg(args, "force");
 
-                        // 硬拒绝：强制删除分支
-                        if (delete && force)
-                            return $"[BLOCKED] " + L["tool.git.branchForceDeleteBlocked"];
-
                         if (delete)
-                            return string.IsNullOrEmpty(branch)
-                                ? "branch --list"
+                        {
+                            if (string.IsNullOrEmpty(branch))
+                                return "branch --list";
+                            return force
+                                ? $"branch -D \"{EscapeArg(branch)}\""
                                 : $"branch -d \"{EscapeArg(branch)}\"";
+                        }
 
                         if (!string.IsNullOrEmpty(branch))
                             return $"branch \"{EscapeArg(branch)}\"";
@@ -484,20 +863,10 @@ namespace DeepSeek_v4_for_VisualStudio.Services.BuiltInTools
                         bool force = GetBoolArg(args, "force");
                         if (string.IsNullOrEmpty(remote)) remote = "origin";
 
-                        // 硬拒绝：force push 到 main/master
-                        if (force && !string.IsNullOrEmpty(branch))
-                        {
-                            string lower = branch.ToLowerInvariant();
-                            if (lower == "main" || lower == "master")
-                                return $"[BLOCKED] " + L["tool.git.pushForceMainBlocked"];
-                        }
-                        // 硬拒绝：任何 force push
-                        if (force)
-                            return $"[BLOCKED] " + L["tool.git.pushForceBlocked"];
-
+                        string forceFlag = force ? " --force" : string.Empty;
                         return string.IsNullOrEmpty(branch)
-                            ? $"push {EscapeArg(remote)}"
-                            : $"push {EscapeArg(remote)} \"{EscapeArg(branch)}\"";
+                            ? $"push{forceFlag} {EscapeArg(remote)}"
+                            : $"push{forceFlag} {EscapeArg(remote)} \"{EscapeArg(branch)}\"";
                     }
 
                 case "stash":
@@ -522,22 +891,23 @@ namespace DeepSeek_v4_for_VisualStudio.Services.BuiltInTools
                         string path = GetStringArg(args, "path");
                         string mode = GetStringArg(args, "mode").ToLowerInvariant().Trim();
 
-                        // 硬拒绝：reset --hard
-                        if (mode == "hard")
-                            return $"[BLOCKED] " + L["tool.git.resetHardBlocked"];
-
                         // 如果指定了 path，为 unstage 操作（reset HEAD <path>）
                         if (!string.IsNullOrEmpty(path))
                             return $"reset HEAD -- \"{EscapeArg(path)}\"";
 
                         // 否则为模式 reset
+                        bool hasHardFlag = (GetStringArrayArg(args, "flags") ?? Array.Empty<string>())
+                            .Any(f => string.Equals(f, "--hard", StringComparison.Ordinal));
                         string resetMode = mode switch
                         {
+                            "hard" => "--hard",
                             "soft" => "--soft",
                             "mixed" => "--mixed",
-                            _ => "--mixed",
+                            _ => hasHardFlag ? string.Empty : "--mixed",
                         };
-                        return $"reset {resetMode} HEAD~1";
+                        return string.IsNullOrEmpty(resetMode)
+                            ? "reset HEAD~1"
+                            : $"reset {resetMode} HEAD~1";
                     }
 
                 default:
