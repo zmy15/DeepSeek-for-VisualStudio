@@ -60,6 +60,7 @@ public class AskAgentTests
         agent.Definition.SystemPrompt.Should().Contain("必须直接调用");
         agent.Definition.SystemPrompt.Should().Contain(
             global::DeepSeek_v4_for_VisualStudio.Services.AiPrompts.AgentConclusionStopRule);
+        agent.Definition.SystemPrompt.Should().Contain("直接复用上述结论");
     }
 
     [Fact]

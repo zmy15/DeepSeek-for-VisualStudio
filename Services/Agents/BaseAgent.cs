@@ -23,6 +23,9 @@ namespace DeepSeek_v4_for_VisualStudio.Services.Agents
     /// </summary>
     public abstract class BaseAgent : IDisposable
     {
+        /// <summary>Ask Agent 直接探索工具的最大累计调用次数。</summary>
+        internal const int AskDirectExplorationCallLimit = 3;
+
         protected readonly DeepSeekApiService _apiService;
         protected readonly List<AgentLogEntry> _logs = new();
 
@@ -1028,6 +1031,7 @@ namespace DeepSeek_v4_for_VisualStudio.Services.Agents
             int rejectedToolRounds = 0;
             int consecutiveErrorRounds = 0;
             int askQuestionsCallCount = 0;
+            int askDirectExplorationCallCount = 0;
             bool noToolsReminderAppended = false;
             int maxRepeatedSameCall = Settings.DeepSeekOptionsPage.Instance?.MaxRepeatedSameCall ?? 5;
             if (maxRepeatedSameCall < 1) maxRepeatedSameCall = 5;
@@ -1622,6 +1626,38 @@ namespace DeepSeek_v4_for_VisualStudio.Services.Agents
                         }
                     }
 
+                    // ── Ask Agent 直接探索预算：超过 3 次后不再自己读/搜，强制委派 Explore。──
+                    HashSet<int>? blockedDirectExplorationIndices = null;
+                    bool canDelegateAskExploration = Definition.Type == AgentType.Ask
+                        && ExploreAgent != null
+                        && effectiveWhitelist?.Contains("runSubagent", StringComparer.OrdinalIgnoreCase) == true;
+                    if (canDelegateAskExploration)
+                    {
+                        int remaining = Math.Max(0, AskDirectExplorationCallLimit - askDirectExplorationCallCount);
+                        foreach (int idx in dedupedIndices)
+                        {
+                            if (!IsDirectExplorationTool(toolCalls[idx].Function.Name))
+                                continue;
+
+                            if (remaining > 0)
+                            {
+                                remaining--;
+                                askDirectExplorationCallCount++;
+                            }
+                            else
+                            {
+                                (blockedDirectExplorationIndices ??= new HashSet<int>()).Add(idx);
+                            }
+                        }
+
+                        if (blockedDirectExplorationIndices?.Count > 0)
+                        {
+                            Logger.Warn(
+                                $"[Agent:{Definition.Name}] 已拦截超过预算的直接探索调用 " +
+                                $"({askDirectExplorationCallCount}/{AskDirectExplorationCallLimit})，要求委派 Explore");
+                        }
+                    }
+
                     // ── 通知工具调用（含详细信息，每轮仅一次，去重后只通知唯一调用）──
                     foreach (var idx in dedupedIndices)
                     {
@@ -1706,6 +1742,12 @@ namespace DeepSeek_v4_for_VisualStudio.Services.Agents
                                 "请立即基于用户回答继续，不要重复提问；需求对齐阶段必须只回复 DONE。");
                         }
 
+                        if (blockedDirectExplorationIndices?.Contains(idx) == true)
+                        {
+                            return Task.FromResult(LocalizationService.Instance.Format(
+                                "tool.ask.explorationLimitReached", AskDirectExplorationCallLimit));
+                        }
+
                         // ── 白名单拦截：不在白名单中的工具不执行，返回拒绝消息 ──
                         if (blockedToolIndices != null && blockedToolIndices.Contains(idx))
                         {
@@ -1728,6 +1770,15 @@ namespace DeepSeek_v4_for_VisualStudio.Services.Agents
                     }).ToList();
                     var dedupedResults = await Task.WhenAll(toolTasks).ConfigureAwait(false);
                     CurrentActivity = $"工具已完成（第 {round} 轮），准备下一轮";
+
+                    if (canDelegateAskExploration
+                        && dedupedIndices
+                            .Select((idx, resultIndex) => (Tool: toolCalls[idx], Result: dedupedResults[resultIndex]))
+                            .Any(item => NormalizeToolName(item.Tool.Function.Name) == "runSubagent"
+                                && ToolExecutionOutcome.Classify(item.Result) == ToolResultKind.Success))
+                    {
+                        askDirectExplorationCallCount = 0;
+                    }
 
                     // ── 将去重后的结果映射回原始 toolCalls 数组 ──
                     var toolResults = new string[toolCalls.Count];
@@ -3798,6 +3849,16 @@ namespace DeepSeek_v4_for_VisualStudio.Services.Agents
                 "delete_file" => true,
                 "apply_patch" => true,
                 "create_directory" => true,
+                _ => false,
+            };
+        }
+
+        /// <summary>判断工具是否属于 Ask Agent 的直接代码库探索工具。</summary>
+        internal static bool IsDirectExplorationTool(string toolName)
+        {
+            return NormalizeToolName(toolName) switch
+            {
+                "read_file" or "grep_search" or "file_search" or "list_dir" or "symbol_search" => true,
                 _ => false,
             };
         }
