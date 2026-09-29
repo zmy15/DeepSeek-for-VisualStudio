@@ -212,19 +212,44 @@ namespace DeepSeek_v4_for_VisualStudio.View
                 };
 
                 // ── 设置实时推理流回调 ──
+                // Handoff 路径同样按 60ms 聚合 thinking chunk，避免每个 token 都切换一次
+                // UI 线程造成任务堆积，使思考面板显示明显滞后于实际生成速度。
                 var capturedRetryMsgIdx = _agentStreamingMsgIndex;
+                const long StreamFlushSyncIntervalTicks = 60 * TimeSpan.TicksPerMillisecond;
+                long lastThinkingFlushTicks = DateTime.UtcNow.Ticks;
+                var streamingReasoningDeltaSb = new StringBuilder();
+
                 context.OnThinkingChunk = (chunk) =>
                 {
-                    lock (_lock) { _streamingReasoning.Append(chunk); }
+                    bool syncDue;
+                    string delta;
+                    lock (_lock)
+                    {
+                        _streamingReasoning.Append(chunk);
+                        streamingReasoningDeltaSb.Append(chunk);
+
+                        long nowTicks = DateTime.UtcNow.Ticks;
+                        syncDue = nowTicks - lastThinkingFlushTicks >= StreamFlushSyncIntervalTicks;
+                        if (!syncDue)
+                            return;
+
+                        lastThinkingFlushTicks = nowTicks;
+                        delta = streamingReasoningDeltaSb.ToString();
+                        streamingReasoningDeltaSb.Clear();
+                    }
+
                     _ = ThreadHelper.JoinableTaskFactory.RunAsync(async () =>
                     {
                         await ThreadHelper.JoinableTaskFactory.SwitchToMainThreadAsync();
                         if (ChatWebView.CoreWebView2 == null || capturedRetryMsgIdx < 0) return;
                         try
                         {
-                            BatchStreamingUpdate(capturedRetryMsgIdx, reasoningDelta: chunk);
+                            BatchStreamingUpdate(capturedRetryMsgIdx, reasoningDelta: delta);
                         }
-                        catch { }
+                        catch (Exception ex)
+                        {
+                            Logger.Warn($"[AgentHandoff] OnThinkingChunk BatchStreamingUpdate 异常: {ex.Message}");
+                        }
                     });
                 };
 
