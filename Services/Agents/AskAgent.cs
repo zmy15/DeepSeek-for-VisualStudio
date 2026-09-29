@@ -40,6 +40,7 @@ namespace DeepSeek_v4_for_VisualStudio.Services.Agents
         {
             // ── 简单搜索与读取（无需委派 Explore）──
             "symbol_search",      // 符号搜索（类/方法/接口/属性定义）
+            "get_file_symbols",   // 单文件符号定义列表
             "file_search",        // Glob 文件名搜索
             "grep_search",        // 文本/正则内容搜索
             "read_file",          // 读取文件
@@ -97,7 +98,7 @@ namespace DeepSeek_v4_for_VisualStudio.Services.Agents
             PendingHandoffRequest = null;
 
             // ── 检测是否为 Edit Agent 的摘要 Handoff ──
-            if (IsSummaryHandoff(context))
+            if (!context.IsChainBackContinuation && IsSummaryHandoff(context))
             {
                 return await ExecuteSummaryAsync(userMessage, context);
             }
@@ -123,14 +124,17 @@ namespace DeepSeek_v4_for_VisualStudio.Services.Agents
                 //    由 volatile context 和原始 user 轮次承载。 ──
                 var contextManager = Context?.ContextManager;
                 bool useSessionHistory = contextManager != null && !contextManager.IsEmpty;
-                string contextualPrompt = useSessionHistory
-                    ? string.Empty
-                    : BuildContextualPrompt(userMessage, context);
+                bool isChainBackContinuation = context.IsChainBackContinuation;
+                string contextualPrompt = isChainBackContinuation
+                    ? userMessage
+                    : useSessionHistory
+                        ? string.Empty
+                        : BuildContextualPrompt(userMessage, context);
                 var messages = BuildContextAwareMessages(
                     Definition.SystemPrompt,
                     contextualPrompt,
                     maxRecentTurns: int.MaxValue,
-                    deduplicateCurrentUser: useSessionHistory,
+                    deduplicateCurrentUser: useSessionHistory && !isChainBackContinuation,
                     persistVolatileToHistory: useSessionHistory);
 
                 // ── 使用工具调用循环（支持 runSubagent 委派探索任务 + request_handoff 移交）──
@@ -298,14 +302,13 @@ namespace DeepSeek_v4_for_VisualStudio.Services.Agents
                 string directSummary = BuildDirectSummaryMarkdown(plan, memorySummary);
 
                 // ── 第3层（可选）：用一次无工具 AI 调用润色自然语言部分 ──
-                //  v1.1.11：消费 ForwardedMessages（摘要生成是终端步骤，不需要完整对话历史），
-                // 避免 PolishSummaryWithAiAsync 通过 BuildContextAwareMessages 注入大量历史消息。
+                //  保留 ForwardedMessages 完整 handoff 上下文：润色请求基于「完整历史 +
+                //  末尾追加待润色草稿 + 末尾 system 润色指令」构建，与主对话尾部签名一致。
                 string aiSummary = string.Empty;
                 bool hasMeaningfulChanges = plan.ChangedFiles.Count > 0
                     || plan.Steps.Any(s => s.Status == AgentStepStatus.Completed && !string.IsNullOrWhiteSpace(s.ResultSummary));
                 if (hasMeaningfulChanges)
                 {
-                    context.ForwardedMessages = null;
                     // 将步骤语义描述追加到 directSummary，确保润色 AI 有足够上下文
                     string enrichedSummary = AppendStepDescriptions(directSummary, plan);
                     aiSummary = await PolishSummaryWithAiAsync(enrichedSummary, context);
@@ -532,17 +535,13 @@ namespace DeepSeek_v4_for_VisualStudio.Services.Agents
         /// 用一次无工具 AI 调用对直接摘要进行自然语言润色。
         /// 仅在记忆摘要非空且存在文件变更时调用。
         /// 
-        ///  v1.1.11：通过 BuildContextAwareMessages + handoff 路径构建消息，
-        /// 而非手动拼接 raw messages。润色专用指令作为 AskAgent 的子任务 prompt
-        /// 注入在 Agent 系统提示之后、用户消息之前。
+        /// 消息结构（ForwardedMessages 复用路径，与主对话尾部签名一致）：
+        ///   [0..K] 完整 handoff 上下文（含工具调用记录，原样保留）← 命中前缀缓存
+        ///   [K+1] system: HandoffRoleBoundaryPrompt（由 BaseAgent 固定插入）
+        ///   [K+2] user:   待润色摘要草稿（SummaryPolishUserPrompt）
+        ///   [K+3] system: SummaryPolishSystemPrompt（替换原 AskAgent 末尾 system）
         /// 
-        /// 消息结构：
-        ///   [0] SharedImmutablePrefix      ← 始终命中缓存
-        ///   [1] AskAgent.Definition.SystemPrompt  ← 与正常 Ask 调用共享
-        ///   [2] SummaryPolishSystemPrompt  ← 润色子任务指令
-        ///   [3] user: 待润色摘要内容       ← 每次不同
-        /// 
-        /// 前置条件：调用方已清空 context.ForwardedMessages，避免注入完整对话历史。
+        /// 前置条件：调用方保留 context.ForwardedMessages 完整传入（不再清空）。
         /// </summary>
         private async Task<string> PolishSummaryWithAiAsync(string directSummary, AgentContext context)
         {
@@ -550,28 +549,29 @@ namespace DeepSeek_v4_for_VisualStudio.Services.Agents
             {
                 var ct = context.CancellationToken;
 
-                // ── 润色子任务指令作为额外 system 消息注入 ──
-                var polishInstructions = new List<ChatApiMessage>
-                {
-                    new ChatApiMessage
-                    {
-                        Role = "system",
-                        Content = AiPrompts.SummaryPolishSystemPrompt
-                    }
-                };
-
-                // ── 通过 BuildContextAwareMessages 走标准 handoff 路径 ──
-                // maxRecentTurns:0 → 不注入对话历史，保持润色调用轻量
+                // ── 通过 BuildContextAwareMessages 走完整 handoff 上下文路径 ──
+                // 传润色指令作为末尾 systemPrompt：基类会把润色指令固定追加到最后一条 system，
+                // 保证尾部签名恒为 [user 待润色草稿][system 润色指令]（与主对话一致）。
                 var messages = BuildContextAwareMessages(
-                    Definition.SystemPrompt,
-                    string.Format(AiPrompts.SummaryPolishUserPrompt, directSummary),
-                    polishInstructions,
-                    maxRecentTurns: 0);
+                    AiPrompts.SummaryPolishSystemPrompt,
+                    string.Format(AiPrompts.SummaryPolishUserPrompt, directSummary));
+
+                // ── 显式路由场景（Handoff 执行会设置 IsExplicitRoute）会在末尾追加 doNotHandoff
+                //    边界指令；润色是终端子任务，需保证最后一条 system 恒为润色指令，故尾随匹配时移除。──
+                string routeInstruction = string.Format(
+                    LocalizationService.Instance["agent.explicitRoute.doNotHandoff"], Definition.Name);
+                if (messages.Count > 1
+                    && messages[messages.Count - 1].Role == "system"
+                    && messages[messages.Count - 1].Content == routeInstruction)
+                {
+                    messages.RemoveAt(messages.Count - 1);
+                }
 
                 // 使用无工具调用的简单 API 调用。
                 // 走 toolChoice:"none" 的标准无工具路径，而不是"空白名单 + 完整工具集"：
                 // 后者仍会把 read_file 等定义暴露给模型，模型一旦调用就会被白名单拦截，
-                // 拦截警告会替代润色摘要成为最终内容。
+                // 拦截警告会替代润色摘要成为最终内容；
+                // 且完整上下文现含工具调用记录，显式禁用工具可防止模型模仿历史发起工具调用。
                 string result = await CallAiWithMessagesAsync(
                     messages,
                     ct,

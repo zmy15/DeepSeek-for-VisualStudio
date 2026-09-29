@@ -1,4 +1,4 @@
-using DeepSeek_v4_for_VisualStudio.Models;
+﻿using DeepSeek_v4_for_VisualStudio.Models;
 using DeepSeek_v4_for_VisualStudio.Services.EditTools;
 using DeepSeek_v4_for_VisualStudio.Utils;
 using System;
@@ -42,9 +42,9 @@ namespace DeepSeek_v4_for_VisualStudio.Services.Editing
                 if (!string.IsNullOrEmpty(dir) && !Directory.Exists(dir))
                     Directory.CreateDirectory(dir);
 
-                // 2. 写入文件
+                // 2. 写入文件（按项目编码惯例；兜底 UTF-8 无 BOM）
                 var content = EditStringMatcher.NormalizeToCrLf(change.ProposedText);
-                await Task.Run(() => File.WriteAllText(change.FilePath, content, Encoding.UTF8),
+                await Task.Run(() => FileEncodingHelper.WriteAllText(change.FilePath, content, null),
                     cancellationToken);
 
                 _createdFilePath = change.FilePath;

@@ -1,4 +1,4 @@
-using DeepSeek_v4_for_VisualStudio.Models;
+﻿using DeepSeek_v4_for_VisualStudio.Models;
 using DeepSeek_v4_for_VisualStudio.Utils;
 using System;
 using System.Collections.Generic;
@@ -205,7 +205,7 @@ namespace DeepSeek_v4_for_VisualStudio.Services.Editing
             {
                 try
                 {
-                    File.WriteAllText(filePath, content, Encoding.UTF8);
+                    FileEncodingHelper.WriteAllText(filePath, content, null);
                     if (attempt > 0)
                         Logger.Info($"[StagedWorkspace] 文件锁重试成功: {Path.GetFileName(filePath)} (attempt {attempt + 1})");
                     return;

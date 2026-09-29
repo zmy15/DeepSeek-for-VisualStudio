@@ -2435,10 +2435,8 @@ namespace DeepSeek_v4_for_VisualStudio.View
                         var pendingPermission = filePermAgent?.TryGetPendingPermission(requestId);
                         List<string> filePaths = pendingPermission?.FilePaths ?? new List<string>();
 
-                        if (confirmed && filePaths.Count > 0)
-                        {
-                            await AgentFactory.DeleteFilesViaEnvDTEAsync(filePaths);
-                        }
+                        // 审批层只负责放行，不能提前删除文件；
+                        // 实际删除统一由 delete_file 执行一次，避免工具侧看到“文件不存在”。
 
                         // 完成权限响应（解除 Agent 等待）
                         (filePermAgent ?? _activeAgent)?.RespondToPermission(requestId, confirmed);

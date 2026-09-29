@@ -223,29 +223,24 @@ public class EditAgentTests
     #endregion
 
     [Theory]
-    [InlineData(false, true, true, true, false, false, true)]
-    [InlineData(true, false, true, true, false, false, true)]
-    [InlineData(false, false, true, true, false, false, false)]
-    [InlineData(true, false, false, true, false, false, false)]
-    [InlineData(true, false, true, false, false, false, false)]
-    [InlineData(true, false, true, true, true, false, false)]
-    [InlineData(true, false, true, true, false, true, false)]
-    public void ShouldRunFinalBuild_RespectsNormalFlowAndExplicitRoute(
-        bool isPlanningMode,
-        bool isExplicitRoute,
-        bool planCompleted,
+    [InlineData(true, true, true, false, false)]   // 构建成功 → 不移交 Build
+    [InlineData(true, true, false, false, true)]   // 构建失败 → 移交 Build
+    [InlineData(true, false, null, false, true)]   // 修改文件但未构建 → 移交 Build
+    [InlineData(false, false, null, false, false)] // 仅 Git/终端，无文件变更 → 不移交 Build
+    [InlineData(false, true, false, false, false)] // 无文件变更即使构建失败 → 不移交 Build
+    [InlineData(true, false, null, true, false)]   // 用户/设置禁用构建 → 不移交 Build
+    public void ShouldHandoffToBuild_MatchesEditCompletionRules(
         bool hasFileChanges,
-        bool planCancelled,
-        bool cancellationRequested,
+        bool didAttemptBuild,
+        bool? lastBuildSucceeded,
+        bool skipAutoBuild,
         bool expected)
     {
-        bool result = EditAgent.ShouldRunFinalBuild(
-            isPlanningMode,
-            isExplicitRoute,
-            planCompleted,
+        bool result = EditAgent.ShouldHandoffToBuild(
             hasFileChanges,
-            planCancelled,
-            cancellationRequested);
+            didAttemptBuild,
+            lastBuildSucceeded,
+            skipAutoBuild);
 
         result.Should().Be(expected);
     }
@@ -376,12 +371,13 @@ public class EditAgentTests
             .Should().Contain("apply_patch")
             .And.Contain("replace_string_in_file")
             .And.Contain("delete_file")
+            .And.Contain("工具会返回删除结果")
             .And.NotContain("```file:");
         global::DeepSeek_v4_for_VisualStudio.Services.AiPrompts.EditToolCallRule
             .Should().Contain("终态")
             .And.Contain("不要再次读取");
         global::DeepSeek_v4_for_VisualStudio.Services.AiPrompts.AgentConclusionStopRule
-            .Should().Contain("超过 2 种");
+            .Should().Contain("不要质疑用户给出的明确操作");
     }
 
     #endregion
@@ -434,7 +430,7 @@ public class EditAgentTests
     }
 
     [Fact]
-    public void CodeStepTools_AllowsTerminalAndExplorationButExcludesBuildAndHandoffTools()
+    public void CodeStepTools_AllowsBuildTerminalAndExplorationButExcludesHandoffTools()
     {
         var field = typeof(EditAgent).GetField(
             "CodeStepTools",
@@ -449,7 +445,7 @@ public class EditAgentTests
         tools.Should().Contain("run_in_terminal");
         tools.Should().Contain("get_terminal_output");
         tools.Should().Contain("VisualStudio_askQuestions");
-        tools.Should().NotContain("build_solution");
+        tools.Should().Contain("build_solution");
         tools.Should().NotContain("request_handoff");
         tools.Should().NotContain("edit_notebook_file");
     }
@@ -553,7 +549,7 @@ public class EditAgentTests
         })!;
 
         prompt.Should().Contain("## 代码修改步骤");
-        prompt.Should().Contain("系统会自动执行编译验证与移交");
+        prompt.Should().Contain("可调用一次 build_solution 验证");
         prompt.Should().Contain("按系统提示中的编辑格式和项目文件规则执行修改");
         prompt.Should().NotContain("本阶段可用工具");
         prompt.Should().NotContain("*** Begin Patch");

@@ -1,4 +1,4 @@
-using DeepSeek_v4_for_VisualStudio.Models;
+﻿using DeepSeek_v4_for_VisualStudio.Models;
 using DeepSeek_v4_for_VisualStudio.Services.EditTools;
 using DeepSeek_v4_for_VisualStudio.Utils;
 using System;
@@ -73,9 +73,9 @@ namespace DeepSeek_v4_for_VisualStudio.Services.Editing
                     return ApplyResult.Failed(change.FilePath, "无法创建备份文件");
                 }
 
-                // 2. 写入（使用 UTF-8，保留原换行符）
+                // 2. 写入（保持原文件编码，保留原换行符）
                 var content = EditStringMatcher.NormalizeToCrLf(change.ProposedText);
-                await Task.Run(() => File.WriteAllText(change.FilePath, content, Encoding.UTF8),
+                await Task.Run(() => FileEncodingHelper.WriteAllText(change.FilePath, content, null),
                     cancellationToken);
 
                 // 3. 验证写入

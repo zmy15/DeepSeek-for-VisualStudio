@@ -37,6 +37,7 @@ namespace DeepSeek_v4_for_VisualStudio.Services.BuiltInTools
                         {
                             query = new { type = "string", description = LocalizationService.Instance["tool.grepSearch.param.query"] },
                             isRegexp = new { type = "boolean", description = LocalizationService.Instance["tool.grepSearch.param.isRegexp"] },
+                            path = new { type = "string", description = LocalizationService.Instance["tool.grepSearch.param.path"] },
                             includePattern = new { type = "string", description = LocalizationService.Instance["tool.grepSearch.param.includePattern"] },
                             maxResults = new { type = "integer", description = LocalizationService.Instance["tool.grepSearch.param.maxResults"] }
                         },
@@ -81,6 +82,7 @@ namespace DeepSeek_v4_for_VisualStudio.Services.BuiltInTools
 
             bool isRegexp = GetBoolArg(args, "isRegexp");
             string? includePattern = GetStringArg(args, "includePattern");
+            string? scopePath = GetStringArg(args, "path");
             int maxResults = GetIntArg(args, "maxResults", 30);
 
             string searchRoot = workspaceRoot ?? Directory.GetCurrentDirectory();
@@ -91,23 +93,46 @@ namespace DeepSeek_v4_for_VisualStudio.Services.BuiltInTools
             {
                 var results = new List<string>();
                 var searchOption = SearchOption.AllDirectories;
+                string normalizedRoot = Path.GetFullPath(searchRoot);
+                string searchDir = searchRoot;
+                string? scopedFile = null;
+
+                if (!string.IsNullOrWhiteSpace(scopePath))
+                {
+                    string resolvedScope = Path.GetFullPath(ResolvePath(scopePath, workspaceRoot));
+                    if (!IsWithinDirectory(resolvedScope, normalizedRoot))
+                    {
+                        return Task.FromResult(LocalizationService.Instance.Format(
+                            "tool.grepSearch.pathOutsideWorkspace", scopePath));
+                    }
+
+                    if (File.Exists(resolvedScope))
+                    {
+                        scopedFile = resolvedScope;
+                        searchDir = Path.GetDirectoryName(resolvedScope) ?? searchRoot;
+                    }
+                    else if (Directory.Exists(resolvedScope))
+                    {
+                        searchDir = resolvedScope;
+                    }
+                    else
+                    {
+                        return Task.FromResult(LocalizationService.Instance.Format(
+                            "tool.grepSearch.pathNotExist", scopePath));
+                    }
+                }
 
                 string fileGlob = string.IsNullOrEmpty(includePattern) ? "*.*" : includePattern;
                 string cleanGlob = fileGlob.Replace("**/", "").Replace("**", "");
-                string searchDir = searchRoot;
 
-                if (cleanGlob.Contains('/') || cleanGlob.Contains('\\'))
+                if (scopedFile == null && (cleanGlob.Contains('/') || cleanGlob.Contains('\\')))
                 {
                     int lastSlash = cleanGlob.LastIndexOfAny(new[] { '/', '\\' });
                     string subDir = cleanGlob.Substring(0, lastSlash);
                     cleanGlob = cleanGlob.Substring(lastSlash + 1);
-                    string candidateDir = Path.Combine(searchRoot, subDir);
-                    // ── 防止 Path.Combine 因绝对路径越权 ──
+                    string candidateDir = Path.Combine(searchDir, subDir);
                     string resolvedDir = Path.GetFullPath(candidateDir);
-                    string resolvedRoot = Path.GetFullPath(searchRoot);
-                    if ((resolvedDir.StartsWith(resolvedRoot + Path.DirectorySeparatorChar, StringComparison.OrdinalIgnoreCase)
-                         || resolvedDir.Equals(resolvedRoot, StringComparison.OrdinalIgnoreCase))
-                        && Directory.Exists(resolvedDir))
+                    if (IsWithinDirectory(resolvedDir, Path.GetFullPath(searchDir)) && Directory.Exists(resolvedDir))
                     {
                         searchDir = resolvedDir;
                     }
@@ -117,17 +142,24 @@ namespace DeepSeek_v4_for_VisualStudio.Services.BuiltInTools
 
                 const int maxFilesToSearch = 5000;
                 IEnumerable<string> filesToSearch;
-                try
+                if (scopedFile != null)
                 {
-                    filesToSearch = Directory.EnumerateFiles(searchDir, cleanGlob, searchOption)
-                        .Where(f => !IsExcludedDirectory(Path.GetDirectoryName(f) ?? ""))
-                        .Take(maxFilesToSearch);
+                    filesToSearch = new[] { scopedFile };
                 }
-                catch
+                else
                 {
-                    filesToSearch = Directory.EnumerateFiles(searchRoot, "*.*", SearchOption.AllDirectories)
-                        .Where(f => !IsExcludedDirectory(Path.GetDirectoryName(f) ?? ""))
-                        .Take(maxFilesToSearch);
+                    try
+                    {
+                        filesToSearch = Directory.EnumerateFiles(searchDir, cleanGlob, searchOption)
+                            .Where(f => !IsExcludedDirectory(Path.GetDirectoryName(f) ?? ""))
+                            .Take(maxFilesToSearch);
+                    }
+                    catch
+                    {
+                        filesToSearch = Directory.EnumerateFiles(searchRoot, "*.*", SearchOption.AllDirectories)
+                            .Where(f => !IsExcludedDirectory(Path.GetDirectoryName(f) ?? ""))
+                            .Take(maxFilesToSearch);
+                    }
                 }
 
                 Regex? regex = null;
@@ -181,6 +213,19 @@ namespace DeepSeek_v4_for_VisualStudio.Services.BuiltInTools
             {
                 return Task.FromResult(LocalizationService.Instance.Format("tool.grepSearch.failed", ex.Message));
             }
+        }
+
+        private static bool IsWithinDirectory(string path, string directory)
+        {
+            string normalizedPath = Path.GetFullPath(path)
+                .TrimEnd(Path.DirectorySeparatorChar, Path.AltDirectorySeparatorChar);
+            string normalizedDirectory = Path.GetFullPath(directory)
+                .TrimEnd(Path.DirectorySeparatorChar, Path.AltDirectorySeparatorChar);
+
+            return string.Equals(normalizedPath, normalizedDirectory, StringComparison.OrdinalIgnoreCase)
+                || normalizedPath.StartsWith(
+                    normalizedDirectory + Path.DirectorySeparatorChar,
+                    StringComparison.OrdinalIgnoreCase);
         }
 
         /// <summary>

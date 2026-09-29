@@ -1,4 +1,4 @@
-using DeepSeek_v4_for_VisualStudio.Models;
+﻿using DeepSeek_v4_for_VisualStudio.Models;
 using DeepSeek_v4_for_VisualStudio.Services;
 using DeepSeek_v4_for_VisualStudio.Utils;
 using System;
@@ -1519,7 +1519,7 @@ namespace DeepSeek_v4_for_VisualStudio.Services.EditTools
                     bool writtenViaBuffer = await EditBufferApplier.TryWriteOpenDocumentAsync(
                         resolvedPath, contentToWrite);
                     if (!writtenViaBuffer)
-                        await Task.Run(() => File.WriteAllText(resolvedPath, contentToWrite), ct);
+                        await Task.Run(() => FileEncodingHelper.WriteAllText(resolvedPath, contentToWrite, WorkspaceRoot), ct);
 
                     var validationErrors = ValidateWrittenContent(
                         resolvedPath, result.FinalContent, result.AppliedEdits);
