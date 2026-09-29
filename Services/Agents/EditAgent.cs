@@ -94,6 +94,7 @@ namespace DeepSeek_v4_for_VisualStudio.Services.Agents
             "create_directory",
             // 编辑必需：读取文件（利用缓存命中）
             "read_file",
+            "get_file_symbols",
             "capture_window",      // 视觉模型直接查看窗口截图
             "get_errors",
             // 终端与构建
@@ -126,6 +127,7 @@ namespace DeepSeek_v4_for_VisualStudio.Services.Agents
             "file_search",
             "grep_search",
             "symbol_search",
+            "get_file_symbols",
             "list_dir",
             "get_errors",
             "runSubagent",
@@ -175,6 +177,7 @@ namespace DeepSeek_v4_for_VisualStudio.Services.Agents
             "file_search",
             "grep_search",
             "symbol_search",
+            "get_file_symbols",
             "list_dir",
             "run_in_terminal",
             "get_terminal_output",

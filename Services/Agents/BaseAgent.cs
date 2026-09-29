@@ -37,7 +37,7 @@ namespace DeepSeek_v4_for_VisualStudio.Services.Agents
         /// <summary>已知内置工具名（MCP 同名工具会覆盖内置，不同名工具按分类注入）</summary>
         protected static readonly HashSet<string> KnownBuiltInToolNames = new(StringComparer.OrdinalIgnoreCase)
         {
-            "list_dir", "read_file", "file_search", "grep_search", "symbol_search", "get_errors",
+            "list_dir", "read_file", "file_search", "grep_search", "symbol_search", "get_file_symbols", "get_errors",
             "fetch_webpage", "build_solution", "replace_string_in_file", "multi_replace_string_in_file",
             "create_file", "delete_file", "apply_patch", "create_directory", "run_in_terminal",
             "get_terminal_output", "VisualStudio_askQuestions", "runSubagent", "request_handoff",
@@ -57,6 +57,7 @@ namespace DeepSeek_v4_for_VisualStudio.Services.Agents
                 "grep_search",
                 "file_search",
                 "symbol_search",
+                "get_file_symbols",
                 "list_dir",
                 "memory",
             };
@@ -3858,7 +3859,7 @@ namespace DeepSeek_v4_for_VisualStudio.Services.Agents
         {
             return NormalizeToolName(toolName) switch
             {
-                "read_file" or "grep_search" or "file_search" or "list_dir" or "symbol_search" => true,
+                "read_file" or "grep_search" or "file_search" or "list_dir" or "symbol_search" or "get_file_symbols" => true,
                 _ => false,
             };
         }
