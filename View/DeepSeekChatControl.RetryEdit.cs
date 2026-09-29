@@ -332,6 +332,7 @@ namespace DeepSeek_v4_for_VisualStudio.View
                         ea.PlanUpdated -= OnAgentPlanUpdated;
                 }
 
+                string originalUserRequest = context.CurrentUserContent ?? _pendingHandoff.Prompt;
                 _pendingHandoff = null; // 消费后清空原始 Handoff（Plan→Edit）
 
                 // ── AutoSend 链式处理：EditAgent 返回的 Handoff（如 Edit→Build、Edit→Ask）
@@ -339,6 +340,7 @@ namespace DeepSeek_v4_for_VisualStudio.View
                 //    此处补充 Handoff 场景下的多层 AutoSend 链。 ──
                 int chainDepth = 0;
                 const int maxChainDepth = 10;
+                AgentHandoff? pendingChainBack = null;
                 while (agentResult.Handoff != null
                     && agentResult.Handoff.AutoSend
                     && !context.CancellationToken.IsCancellationRequested
@@ -351,6 +353,8 @@ namespace DeepSeek_v4_for_VisualStudio.View
                         break;
                     }
                     var nextHandoff = agentResult.Handoff;
+                    if (nextHandoff.ChainBack && nextHandoff.SourceAgent.HasValue)
+                        pendingChainBack = nextHandoff;
                     Logger.Info($"[AgentHandoff] AutoSend 链式跟进: → {nextHandoff.TargetAgent} ({nextHandoff.Label})");
 
                     // ── 保存当前推理内容，防止链式 Handoff 覆盖 ──
@@ -365,13 +369,36 @@ namespace DeepSeek_v4_for_VisualStudio.View
                     // ── 切换并执行链式 Handoff ──
                     var chainAgent = _agentFactory.GetAgent(nextHandoff.TargetAgent);
                     SwitchActiveAgent(chainAgent, context);
+                    context.IsChainBackContinuation = nextHandoff.IsChainBackContinuation;
                     try
                     {
                         agentResult = await _activeAgent.ExecuteHandoffAsync(nextHandoff, context, _activePlan, _agentFactory);
                     }
                     finally
                     {
+                        if (nextHandoff.IsChainBackContinuation)
+                            context.IsChainBackContinuation = false;
                         // 事件已在 SwitchActiveAgent 中解绑旧 Agent
+                    }
+
+                    if (pendingChainBack != null)
+                    {
+                        AgentHandoff chainBack = BuildChainBackHandoff(pendingChainBack, agentResult, originalUserRequest);
+                        if (agentResult.Handoff == null)
+                        {
+                            agentResult.Handoff = chainBack;
+                            pendingChainBack = null;
+                            Logger.Info($"[AgentHandoff] Handoff 链回: → {agentResult.Handoff.TargetAgent} ({agentResult.Handoff.Label})");
+                        }
+                        else if (agentResult.Handoff.AutoSend
+                            && agentResult.Handoff.TargetAgent == chainBack.TargetAgent)
+                        {
+                            agentResult.Handoff.Prompt = (agentResult.Handoff.Prompt ?? string.Empty)
+                                + "\n\n" + chainBack.Prompt;
+                            agentResult.Handoff.IsChainBackContinuation = true;
+                            pendingChainBack = null;
+                            Logger.Info($"[AgentHandoff] Handoff 链回并入: → {agentResult.Handoff.TargetAgent} ({agentResult.Handoff.Label})");
+                        }
                     }
 
                     // ── 合并链式 Handoff 前后的推理内容 ──

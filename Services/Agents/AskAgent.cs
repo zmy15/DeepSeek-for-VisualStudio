@@ -1,4 +1,4 @@
-﻿using DeepSeek_v4_for_VisualStudio.Models;
+using DeepSeek_v4_for_VisualStudio.Models;
 using DeepSeek_v4_for_VisualStudio.Utils;
 using System;
 using System.Collections.Generic;
@@ -98,7 +98,7 @@ namespace DeepSeek_v4_for_VisualStudio.Services.Agents
             PendingHandoffRequest = null;
 
             // ── 检测是否为 Edit Agent 的摘要 Handoff ──
-            if (IsSummaryHandoff(context))
+            if (!context.IsChainBackContinuation && IsSummaryHandoff(context))
             {
                 return await ExecuteSummaryAsync(userMessage, context);
             }
@@ -124,14 +124,17 @@ namespace DeepSeek_v4_for_VisualStudio.Services.Agents
                 //    由 volatile context 和原始 user 轮次承载。 ──
                 var contextManager = Context?.ContextManager;
                 bool useSessionHistory = contextManager != null && !contextManager.IsEmpty;
-                string contextualPrompt = useSessionHistory
-                    ? string.Empty
-                    : BuildContextualPrompt(userMessage, context);
+                bool isChainBackContinuation = context.IsChainBackContinuation;
+                string contextualPrompt = isChainBackContinuation
+                    ? userMessage
+                    : useSessionHistory
+                        ? string.Empty
+                        : BuildContextualPrompt(userMessage, context);
                 var messages = BuildContextAwareMessages(
                     Definition.SystemPrompt,
                     contextualPrompt,
                     maxRecentTurns: int.MaxValue,
-                    deduplicateCurrentUser: useSessionHistory,
+                    deduplicateCurrentUser: useSessionHistory && !isChainBackContinuation,
                     persistVolatileToHistory: useSessionHistory);
 
                 // ── 使用工具调用循环（支持 runSubagent 委派探索任务 + request_handoff 移交）──

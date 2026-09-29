@@ -1,4 +1,4 @@
-﻿using System;
+using System;
 using System.Collections.Generic;
 using System.Text.Json.Serialization;
 using System.Threading;
@@ -90,6 +90,22 @@ namespace DeepSeek_v4_for_VisualStudio.Models
         /// 是否为只读终态总结移交。目标 Agent 只能生成最终回复，不能调用工具或再次移交。
         /// </summary>
         public bool IsSummaryOnly { get; set; }
+
+        /// <summary>
+        /// 发起当前 Handoff 的源 Agent。ChainBack=true 时用于完成后返回。
+        /// </summary>
+        public AgentType? SourceAgent { get; set; }
+
+        /// <summary>
+        /// 目标 Agent 完成后是否自动链回源 Agent，继续处理原用户请求中尚未完成的部分。
+        /// </summary>
+        public bool ChainBack { get; set; }
+
+        /// <summary>
+        /// 当前 Handoff 是否由 ChainBack 自动生成。仅用于运行时区分，不参与持久化。
+        /// </summary>
+        [System.Text.Json.Serialization.JsonIgnore]
+        public bool IsChainBackContinuation { get; set; }
 
         /// <summary>
         /// 源 Agent 在当前 Handoff 前实际缓存的消息前缀。
@@ -259,6 +275,13 @@ namespace DeepSeek_v4_for_VisualStudio.Models
         public bool IsSummaryOnlyHandoff { get; set; }
 
         /// <summary>
+        /// 当前调用是否由 request_handoff 的 chainBack 生成，用于让 AskAgent
+        /// 跳过“已完成计划总结”分支，改按原始问题进行普通回答。
+        /// </summary>
+        [JsonIgnore]
+        public bool IsChainBackContinuation { get; set; }
+
+        /// <summary>
         /// UI 层已写入 ContextManager 的当前轮原始 user 内容。
         /// Agent 构建请求时用它确认当前 user 已在标准多轮历史中，避免重复包装。
         /// </summary>
@@ -375,6 +398,11 @@ namespace DeepSeek_v4_for_VisualStudio.Models
 
         /// <summary>是否自动执行（不等待用户确认）</summary>
         public bool AutoSend { get; set; }
+
+        /// <summary>
+        /// 目标 Agent 完成后是否自动链回源 Agent，继续处理原用户请求中尚未完成的部分。
+        /// </summary>
+        public bool ChainBack { get; set; }
 
         /// <summary>
         /// 移交 Edit Agent 时携带的规划步骤（≤4 步），仅 TargetAgent == AgentType.Edit 时生效。

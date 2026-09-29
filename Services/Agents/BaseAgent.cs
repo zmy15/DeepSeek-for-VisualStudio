@@ -2916,11 +2916,13 @@ namespace DeepSeek_v4_for_VisualStudio.Services.Agents
             {
                 Label = label,
                 TargetAgent = request.TargetAgent,
+                SourceAgent = request.SourceAgent,
                 Prompt = prompt,
                 AutoSend = request.AutoSend,
                 ShowContinueOn = !request.AutoSend,
-                EditSteps = request.EditSteps,   // ★ 新增：透传移交携带的编辑步骤
-                GitState = request.GitState,      // 透传移交携带的 Git 状态快照
+                ChainBack = request.ChainBack,
+                EditSteps = request.EditSteps,
+                GitState = request.GitState,
             };
         }
 
