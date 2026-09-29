@@ -352,6 +352,64 @@ public class AskAgentTests
     }
 
     [Fact]
+    public void BuildContextAwareMessages_HandoffPrefix_PreservesVolatileAndUserBeforeBoundary()
+    {
+        var contextManager = new ConversationContextManager();
+        contextManager.SetIdeContext("[IDE Context] Active File: Test.cs");
+
+        var context = new AgentContext
+        {
+            ContextManager = contextManager,
+            // 回归场景：快照末尾为 [上下文块(system), 用户提问(user)]。
+            // 修复前该组合会被误判为"旧结构 [agent] + [user]"一并删除，导致用户提问丢失。
+            ForwardedMessages = new List<ChatApiMessage>
+            {
+                new() { Role = "system", Content = "stable system" },
+                new() { Role = "system", Content = "volatile 上下文块" },
+                new() { Role = "user", Content = "原始用户提问" },
+            },
+        };
+        var agent = new AskAgent(_apiService)
+        {
+            Context = context,
+        };
+
+        var method = typeof(BaseAgent).GetMethod(
+            "BuildContextAwareMessages",
+            System.Reflection.BindingFlags.Instance | System.Reflection.BindingFlags.NonPublic,
+            binder: null,
+            new[] { typeof(string), typeof(string), typeof(int), typeof(bool) },
+            modifiers: null);
+        method.Should().NotBeNull();
+
+        var messages = (List<ChatApiMessage>)method!.Invoke(
+            agent,
+            new object[] { "Edit agent prompt", "handoff user", int.MaxValue, false })!;
+
+        // 快照前缀原样保留：volatile 上下文块与用户提问均未被删除
+        messages[0].Role.Should().Be("system");
+        messages[0].Content.Should().Be("stable system");
+        messages[1].Role.Should().Be("system");
+        messages[1].Content.Should().Be("volatile 上下文块");
+        messages[2].Role.Should().Be("user");
+        messages[2].Content.Should().Be("原始用户提问");
+
+        // 身份边界提示紧随用户提问之后（[3]），而非直接跟在主 system 之后
+        messages[3].Role.Should().Be("system");
+        messages[3].Content.Should().NotBeNullOrWhiteSpace();
+
+        // volatile 重注入、新任务 user 与 Edit 提示词位于末尾
+        messages[4].Role.Should().Be("system");
+        messages[4].Content.Should().Contain("[IDE Context]");
+        messages[5].Role.Should().Be("user");
+        messages[5].Content.Should().Be("handoff user");
+        messages[6].Role.Should().Be("system");
+        messages[6].Content.Should().Be("Edit agent prompt");
+
+        context.ToolHistoryInsertIndex.Should().Be(6);
+    }
+
+    [Fact]
     public void SnapshotHandoffCacheMessages_PreservesCompletedToolHistory()
     {
         var sentMessages = new List<ChatApiMessage>
