@@ -1,4 +1,5 @@
 using DeepSeek_v4_for_VisualStudio.Models;
+using System.Text.Json;
 using DeepSeek_v4_for_VisualStudio.Services;
 using DeepSeek_v4_for_VisualStudio.Services.BuiltInTools;
 
@@ -65,5 +66,63 @@ public class ToolResultPrefixContractTests
         var tool = new DeepSeek_v4_for_VisualStudio.Services.BuiltInTools.DeleteFileTool();
         var summary = tool.GetResultSummary("Error: 文件不存在: ghost.cs");
         summary.Should().NotBe(LocalizationService.Instance["tool.deleteFile.deleted"]);
+    }
+
+    [Fact]
+    public async Task DeleteFile_ExistingFile_DeletesOnceAndRemovesProjectReference()
+    {
+        var tempDir = Path.Combine(Path.GetTempPath(), $"delete-tool-{Guid.NewGuid():N}");
+        Directory.CreateDirectory(tempDir);
+        var filePath = Path.Combine(tempDir, "backup.cpp");
+        File.WriteAllText(filePath, "int main() { return 0; }");
+
+        try
+        {
+            int projectItemRemovalCount = 0;
+            string? removedPath = null;
+            var tool = new DeepSeek_v4_for_VisualStudio.Services.BuiltInTools.DeleteFileTool
+            {
+                ProjectItemRemover = path =>
+                {
+                    projectItemRemovalCount++;
+                    removedPath = path;
+                    return Task.CompletedTask;
+                }
+            };
+            var args = new Dictionary<string, JsonElement>
+            {
+                ["filePath"] = JsonSerializer.SerializeToElement(filePath)
+            };
+
+            var result = await tool.ExecuteAsync(args, tempDir);
+
+            File.Exists(filePath).Should().BeFalse();
+            projectItemRemovalCount.Should().Be(1);
+            removedPath.Should().Be(filePath);
+            ToolExecutionOutcome.Classify(result).Should().Be(ToolResultKind.Success);
+        }
+        finally
+        {
+            if (Directory.Exists(tempDir))
+                Directory.Delete(tempDir, recursive: true);
+        }
+    }
+
+    [Fact]
+    public async Task DeleteFile_MissingFile_ReturnsPathError()
+    {
+        // 文件不存在通常表示路径错误，必须返回可定位的错误，而不是伪装成删除成功。
+        var tool = new DeepSeek_v4_for_VisualStudio.Services.BuiltInTools.DeleteFileTool();
+        var missingPath = Path.Combine(Path.GetTempPath(), $"{Guid.NewGuid():N}.cpp");
+        var args = new Dictionary<string, JsonElement>
+        {
+            ["filePath"] = JsonSerializer.SerializeToElement(missingPath)
+        };
+
+        var result = await tool.ExecuteAsync(args, null);
+
+        result.Should().Be(LocalizationService.Instance.Format(
+            "tool.deleteFile.notFound", Path.GetFileName(missingPath)));
+        ToolExecutionOutcome.Classify(result).Should().Be(ToolResultKind.ToolError);
     }
 }
