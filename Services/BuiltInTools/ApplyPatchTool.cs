@@ -1,4 +1,4 @@
-using DeepSeek_v4_for_VisualStudio.Models;
+﻿using DeepSeek_v4_for_VisualStudio.Models;
 using DeepSeek_v4_for_VisualStudio.Services;
 using DeepSeek_v4_for_VisualStudio.Services.EditTools;
 using DeepSeek_v4_for_VisualStudio.Utils;
@@ -238,7 +238,7 @@ namespace DeepSeek_v4_for_VisualStudio.Services.BuiltInTools
                                     bool writtenViaBuffer = await EditBufferApplier.TryWriteOpenDocumentAsync(
                                         filePath, normalized);
                                     if (!writtenViaBuffer)
-                                        await Task.Run(() => File.WriteAllText(filePath, normalized));
+                                        await Task.Run(() => FileEncodingHelper.WriteAllText(filePath, normalized, workspaceRoot));
                                 }
                                 results.Add(LocalizationService.Instance.Format("tool.applyPatch.applied",
                                     Path.GetFileName(filePath), patch.Hunks.Count));

@@ -1,4 +1,4 @@
-using DeepSeek_v4_for_VisualStudio.Models;
+﻿using DeepSeek_v4_for_VisualStudio.Models;
 using DeepSeek_v4_for_VisualStudio.Services;
 using DeepSeek_v4_for_VisualStudio.Utils;
 using System;
@@ -163,7 +163,7 @@ namespace DeepSeek_v4_for_VisualStudio.Services.EditTools
                                     bool writtenViaBuffer = await EditBufferApplier.TryWriteOpenDocumentAsync(
                                         resolvedPath, fallbackContent);
                                     if (!writtenViaBuffer)
-                                        await Task.Run(() => File.WriteAllText(resolvedPath, fallbackContent), ct);
+                                        await Task.Run(() => FileEncodingHelper.WriteAllText(resolvedPath, fallbackContent, WorkspaceRoot), ct);
                                 }
                                 result.Success = true;
                                 result.FinalContent = edit.FullContent;
@@ -191,7 +191,7 @@ namespace DeepSeek_v4_for_VisualStudio.Services.EditTools
                         bool writtenViaBuffer = await EditBufferApplier.TryWriteOpenDocumentAsync(
                             resolvedPath, normalizedContent);
                         if (!writtenViaBuffer)
-                            await Task.Run(() => File.WriteAllText(resolvedPath, normalizedContent), ct);
+                            await Task.Run(() => FileEncodingHelper.WriteAllText(resolvedPath, normalizedContent, WorkspaceRoot), ct);
                     }
                 }
 
