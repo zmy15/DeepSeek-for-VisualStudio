@@ -1,4 +1,4 @@
-using System;
+﻿using System;
 
 namespace DeepSeek_v4_for_VisualStudio.Services
 {
@@ -231,7 +231,7 @@ namespace DeepSeek_v4_for_VisualStudio.Services
         /// <summary>自动记忆记录 — 系统提示词</summary>
         public static string MemoryAutoRecordSystemPrompt => L["system.aiPrompt.memoryAutoRecordSystem"];
 
-        /// <summary>自动记忆记录 — 用户提示词模板。{0}=userMessage, {1}=assistantResponse</summary>
+        /// <summary>自动记忆记录 — 用户提示词（纯指令，基于完整上下文判断）</summary>
         public static string MemoryAutoRecordUserPrompt => L["system.aiPrompt.memoryAutoRecordUser"];
 
         /// <summary>步骤自动拆分 — 系统提示词。{0}=maxFiles, {1}=maxLines, {2}=userMessage</summary>
