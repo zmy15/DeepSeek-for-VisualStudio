@@ -372,52 +372,7 @@ public class EditAgentTests
 
     #endregion
 
-    #region EditTools Static Array
-
-    [Fact]
-    public void EditTools_ContainsFileModificationTools()
-    {
-        EditAgent.EditTools.Should().Contain("create_file");
-        EditAgent.EditTools.Should().Contain("delete_file");
-        EditAgent.EditTools.Should().Contain("replace_string_in_file");
-        EditAgent.EditTools.Should().Contain("multi_replace_string_in_file");
-        EditAgent.EditTools.Should().Contain("apply_patch");
-        EditAgent.EditTools.Should().Contain("create_directory");
-    }
-
-    [Fact]
-    public void EditTools_ContainsReadAndDelegationTools()
-    {
-        // EditAgent keeps read_file for editing, delegates exploration via runSubagent
-        EditAgent.EditTools.Should().Contain("read_file");
-        EditAgent.EditTools.Should().Contain("get_errors");
-        EditAgent.EditTools.Should().Contain("runSubagent");
-        EditAgent.EditTools.Should().Contain("request_handoff");
-    }
-
-    [Fact]
-    public void EditTools_ContainsTerminalBuildAndMemoryTools()
-    {
-        EditAgent.EditTools.Should().Contain("run_in_terminal");
-        EditAgent.EditTools.Should().Contain("get_terminal_output");
-        EditAgent.EditTools.Should().Contain("build_solution");
-        EditAgent.EditTools.Should().Contain("memory");
-        EditAgent.EditTools.Should().NotContain("create_and_run_task");
-        EditAgent.EditTools.Should().NotContain("manage_todo_list");
-        EditAgent.EditTools.Should().NotContain("edit_notebook_file");
-    }
-
-    [Fact]
-    public void Definition_AllowedTools_MatchesEditTools()
-    {
-        var agent = new EditAgent(_apiService);
-
-        // All EditTools should be in AllowedTools
-        foreach (var tool in EditAgent.EditTools)
-        {
-            agent.Definition.AllowedTools.Should().Contain(tool);
-        }
-    }
+    #region StepTools Whitelist
 
     [Fact]
     public void StepTools_AreUnifiedAcrossAllStepTypes()
@@ -439,6 +394,9 @@ public class EditAgentTests
         tools.Should().Contain("create_file");
         tools.Should().NotContain("request_handoff");
         tools.Should().NotContain("edit_notebook_file");
+
+        var agent = new EditAgent(_apiService);
+        agent.Definition.AllowedTools.Should().BeEquivalentTo(tools);
     }
 
     [Fact]
