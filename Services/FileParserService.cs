@@ -336,21 +336,14 @@ namespace DeepSeek_v4_for_VisualStudio.Services
         #region Private Methods
 
         /// <summary>
-        /// 以 UTF-8 读取文本文件，遇到非 UTF-8 编码时回退到系统默认编码。
+        /// 以探测到的编码读取文本文件。
+        /// 编码判定（BOM → 严格 UTF-8 校验 → 无 BOM UTF-16 启发式 → 系统 ANSI/GBK 回退）
+        /// 统一由 <see cref="FileEncodingHelper"/> 提供，与写入侧共用同一事实源，
+        /// 避免 GBK/UTF-16 文件被读成乱码、或编辑后编码被悄悄改变。
         /// </summary>
-        private static async Task<string> ReadTextFileAsync(string filePath)
+        private static Task<string> ReadTextFileAsync(string filePath)
         {
-            try
-            {
-                using var reader = new StreamReader(filePath, Encoding.UTF8, detectEncodingFromByteOrderMarks: true);
-                return await reader.ReadToEndAsync();
-            }
-            catch (DecoderFallbackException)
-            {
-                // UTF-8 解码失败，回退到系统默认编码
-                using var reader = new StreamReader(filePath, Encoding.Default);
-                return await reader.ReadToEndAsync();
-            }
+            return Task.Run(() => FileEncodingHelper.ReadAllText(filePath));
         }
 
         /// <summary>

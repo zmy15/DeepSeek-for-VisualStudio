@@ -1,4 +1,4 @@
-﻿using DeepSeek_v4_for_VisualStudio.Models;
+using DeepSeek_v4_for_VisualStudio.Models;
 using DeepSeek_v4_for_VisualStudio.Services;
 using DeepSeek_v4_for_VisualStudio.Utils;
 using System;
@@ -131,7 +131,7 @@ namespace DeepSeek_v4_for_VisualStudio.Services.EditTools
                 }
                 else
                 {
-                    fileContent = await Task.Run(() => File.ReadAllText(prepared.FilePath), ct);
+                    fileContent = await Task.Run(() => FileEncodingHelper.ReadAllText(prepared.FilePath), ct);
                 }
             }
             catch (Exception ex)

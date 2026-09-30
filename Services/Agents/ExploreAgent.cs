@@ -822,7 +822,7 @@ namespace DeepSeek_v4_for_VisualStudio.Services.Agents
                 if (!SourceFileExtensions.Contains(ext)) return score;
 
                 // 读取文件内容并在行级别搜索
-                var lines = File.ReadAllLines(filePath);
+                var lines = FileEncodingHelper.ReadAllLines(filePath);
                 const int maxLineScore = 30; // 内容搜索最高30分
                 int lineHitCount = 0;
 

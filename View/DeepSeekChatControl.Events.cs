@@ -1,4 +1,4 @@
-﻿using DeepSeek_v4_for_VisualStudio.Models;
+using DeepSeek_v4_for_VisualStudio.Models;
 using DeepSeek_v4_for_VisualStudio.Services;
 using DeepSeek_v4_for_VisualStudio.Services.Agents;
 using DeepSeek_v4_for_VisualStudio.Settings;
@@ -2096,7 +2096,7 @@ namespace DeepSeek_v4_for_VisualStudio.View
                                 {
                                     try
                                     {
-                                        var lines = File.ReadAllLines(file);
+                                        var lines = FileEncodingHelper.ReadAllLines(file);
                                         for (int i = 0; i < lines.Length; i++)
                                         {
                                             string line = lines[i].Trim();
@@ -2139,7 +2139,7 @@ namespace DeepSeek_v4_for_VisualStudio.View
                                 {
                                     try
                                     {
-                                        var lines = File.ReadAllLines(file);
+                                        var lines = FileEncodingHelper.ReadAllLines(file);
                                         for (int i = 0; i < lines.Length; i++)
                                         {
                                             if (lines[i].Contains(symbolName))
