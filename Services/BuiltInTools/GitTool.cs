@@ -78,7 +78,7 @@ namespace DeepSeek_v4_for_VisualStudio.Services.BuiltInTools
         private static readonly HashSet<string> ReadOnlyOps = new(StringComparer.OrdinalIgnoreCase)
         {
             "status", "diff", "log", "show",
-            "describe", "tag", "rev-parse", "reflog", "ls-files",
+            "describe", "tag", "rev-parse", "reflog", "ls-files", "fetch",
         };
 
         /// <summary>写操作 — 在只读 Agent 中拒绝</summary>
@@ -110,6 +110,7 @@ namespace DeepSeek_v4_for_VisualStudio.Services.BuiltInTools
             ["branch"] = new(StringComparer.Ordinal) { "--list", "-l", "--all", "-a", "--remotes", "-r", "--verbose", "-v", "--show-current" },
             ["checkout"] = new(StringComparer.Ordinal) { "--track", "-t", "--detach", "--quiet", "-q" },
             ["merge"] = new(StringComparer.Ordinal) { "--ff-only", "--no-ff", "--squash", "--no-commit", "--abort", "--continue", "--quit" },
+            ["fetch"] = new(StringComparer.Ordinal) { "--all", "--prune", "-p", "--tags", "--no-tags", "--no-write-fetch-head", "--dry-run" },
             ["pull"] = new(StringComparer.Ordinal) { "--rebase", "--ff-only", "--no-ff", "--autostash", "--no-rebase" },
             ["push"] = new(StringComparer.Ordinal) { "--dry-run", "--set-upstream", "-u" },
             ["stash"] = new(StringComparer.Ordinal) { "--include-untracked", "-u", "--keep-index", "--staged", "--quiet" },
@@ -124,6 +125,7 @@ namespace DeepSeek_v4_for_VisualStudio.Services.BuiltInTools
             ["diff"] = new(StringComparer.Ordinal) { "--diff-filter", "--ignore-matching-lines" },
             ["describe"] = new(StringComparer.Ordinal) { "--match", "--exclude" },
             ["tag"] = new(StringComparer.Ordinal) { "--sort", "--merged", "--no-merged", "--contains", "--points-at", "--format" },
+            ["fetch"] = new(StringComparer.Ordinal) { "--depth", "--shallow-since", "--shallow-exclude", "--refmap" },
         };
 
         /// <summary>所有有效操作</summary>
@@ -131,7 +133,7 @@ namespace DeepSeek_v4_for_VisualStudio.Services.BuiltInTools
         {
             "status", "diff", "log", "show", "describe", "tag",
             "rev-parse", "reflog", "ls-files",
-            "add", "commit", "branch", "checkout", "merge", "pull", "push", "stash", "reset",
+            "add", "commit", "branch", "checkout", "merge", "fetch", "pull", "push", "stash", "reset",
         };
 
         /// <summary>同步模式超时</summary>
@@ -280,7 +282,7 @@ namespace DeepSeek_v4_for_VisualStudio.Services.BuiltInTools
                                 {
                                     "status", "diff", "log", "show", "describe", "tag",
                                     "rev-parse", "reflog", "ls-files",
-                                    "add", "commit", "branch", "checkout", "merge", "pull", "push", "stash", "reset"
+                                    "add", "commit", "branch", "checkout", "merge", "fetch", "pull", "push", "stash", "reset"
                                 }
                             },
                             path = new { type = "string", description = L["tool.git.param.path"] },
@@ -337,6 +339,7 @@ namespace DeepSeek_v4_for_VisualStudio.Services.BuiltInTools
                 "branch" => L["tool.git.displayBranch"],
                 "checkout" => L["tool.git.displayCheckout"],
                 "merge" => L["tool.git.displayMerge"],
+                "fetch" => L["tool.git.displayFetch"],
                 "pull" => L["tool.git.displayPull"],
                 "push" => L["tool.git.displayPush"],
                 "stash" => L["tool.git.displayStash"],
@@ -891,6 +894,17 @@ namespace DeepSeek_v4_for_VisualStudio.Services.BuiltInTools
                             "squash" => $"merge --squash \"{EscapeArg(branch)}\"",
                             _ => $"merge \"{EscapeArg(branch)}\"",
                         };
+                    }
+
+                case "fetch":
+                    {
+                        string remote = GetStringArg(args, "remote");
+                        string branch = GetStringArg(args, "branch");
+                        if (string.IsNullOrEmpty(remote) && string.IsNullOrEmpty(branch)) return "fetch";
+                        if (string.IsNullOrEmpty(remote)) remote = "origin";
+                        return string.IsNullOrEmpty(branch)
+                            ? $"fetch {EscapeArg(remote)}"
+                            : $"fetch {EscapeArg(remote)} \"{EscapeArg(branch)}\"";
                     }
 
                 case "pull":
