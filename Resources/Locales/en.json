@@ -458,6 +458,8 @@
     "chat.html.taskAllSuccess": "{0}/{1} steps all succeeded",
     "chat.html.taskProgress": "{0}/{1} steps",
     "chat.html.closePanelTitle": "Close panel",
+    "chat.html.collapsePanelTitle": "Collapse panel",
+    "chat.html.expandPanelTitle": "Expand panel",
     "═══ Diff Viewer ═══": "═══ Diff Viewer ═══",
  "diff.windowTitle": "Code Diff Comparison",
  "diff.inlineMode": "Inline",

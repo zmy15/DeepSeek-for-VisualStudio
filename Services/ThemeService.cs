@@ -446,6 +446,9 @@ table{border-collapse:collapse;margin:8px 0;width:100%}th,td{border:1px solid #4
 .agent-task-panel-header{display:flex;align-items:center;gap:6px;padding:6px 10px;background:#222a3a;cursor:pointer;user-select:none;border-bottom:1px solid #2a3a4a}
 .agent-task-panel-header:hover{background:#263040}
 .task-icon{font-size:12px}.task-title{color:#b0c8e0;font-size:11px;font-weight:600;flex:1;min-width:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}.task-progress{color:#7ea8c8;font-size:10px;flex-shrink:0}
+.task-collapse-arrow{display:flex;align-items:center;justify-content:center;width:20px;height:20px;border-radius:50%;color:#8a9ab0;cursor:pointer;font-size:10px;line-height:1;flex-shrink:0;transition:all .2s;user-select:none}
+.task-collapse-arrow:hover{background:#2f3b4d;color:#cfe3f5}
+.task-collapse-arrow:focus-visible{outline:1px solid #4fc1ff;outline-offset:1px}
 .task-close{background:transparent;border:1px solid #4a5a6a;color:#8a9ab0;cursor:pointer;font-size:11px;line-height:1;padding:0;width:20px;height:20px;border-radius:50%;display:flex;align-items:center;justify-content:center;transition:all .2s;flex-shrink:0}
 .task-close:hover{background:#c0392b;color:#fff;border-color:#c0392b;transform:scale(1.1)}
 .task-close.finished{background:#3C1A1A;color:#E07878;border-color:#6A3A3A}
@@ -556,6 +559,9 @@ table{border-collapse:collapse;margin:8px 0;width:100%}th,td{border:1px solid #d
 .agent-task-panel-header{display:flex;align-items:center;gap:6px;padding:6px 10px;background:#e4ecf4;cursor:pointer;user-select:none;border-bottom:1px solid #d0dce8}
 .agent-task-panel-header:hover{background:#d8e4f0}
 .task-icon{font-size:12px}.task-title{color:#3a5070;font-size:11px;font-weight:600;flex:1;min-width:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}.task-progress{color:#5a7a9a;font-size:10px;flex-shrink:0}
+.task-collapse-arrow{display:flex;align-items:center;justify-content:center;width:20px;height:20px;border-radius:50%;color:#7a8a9a;cursor:pointer;font-size:10px;line-height:1;flex-shrink:0;transition:all .2s;user-select:none}
+.task-collapse-arrow:hover{background:#d8e4f0;color:#2a4a6a}
+.task-collapse-arrow:focus-visible{outline:1px solid #0e639c;outline-offset:1px}
 .task-close{background:transparent;border:1px solid #b0c0d0;color:#7a8a9a;cursor:pointer;font-size:11px;line-height:1;padding:0;width:20px;height:20px;border-radius:50%;display:flex;align-items:center;justify-content:center;transition:all .2s;flex-shrink:0}
 .task-close:hover{background:#c0392b;color:#fff;border-color:#c0392b;transform:scale(1.1)}
 .task-close.finished{background:#f8e0e0;color:#c04040;border-color:#d8a0a0}

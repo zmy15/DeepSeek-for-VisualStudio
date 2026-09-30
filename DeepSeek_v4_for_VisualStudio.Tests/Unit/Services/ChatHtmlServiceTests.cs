@@ -303,6 +303,35 @@ public class ChatHtmlServiceTests
     }
 
     [Fact]
+    public void BuildAgentTaskPanelCreateJs_RendersCollapseArrowSharingHeaderToggleLogic()
+    {
+        var plan = new AgentTaskPlan { PlanId = "p1", Title = "任务面板" };
+        plan.Steps.Add(new AgentStep { Title = "步骤一", Status = AgentStepStatus.Completed });
+
+        string js = ChatHtmlService.BuildAgentTaskPanelCreateJs(plan);
+
+        // 头部点击与向下箭头必须走同一个折叠函数，保证「点箭头」与「点面板」行为完全一致
+        js.Should().Contain(@"onclick=""window.__toggleTaskPanel(\'p1\')""");
+        js.Should().Contain("class=\"task-collapse-arrow\"");
+        js.Should().Contain(@"event.stopPropagation();window.__toggleTaskPanel(\'p1\');return false;",
+            "箭头点击需阻止冒泡，否则会与头部点击叠加成两次切换（等于没切换）");
+        js.Should().Contain("data-title-expanded=");
+        js.Should().Contain("data-title-collapsed=");
+        js.Should().Contain("&#9662;", "展开状态显示向下箭头");
+        js.Should().Contain("window.__syncTaskPanelArrow(panel)", "创建后需初始化箭头方向与提示");
+    }
+
+    [Fact]
+    public void BuildInitialPage_DefinesTaskPanelToggleFunctions()
+    {
+        string html = ChatHtmlService.BuildInitialPage(new List<ChatMessage>());
+
+        // 面板注入脚本会调用这两个函数，必须存在于初始页面脚本中
+        html.Should().Contain("window.__toggleTaskPanel=function");
+        html.Should().Contain("window.__syncTaskPanelArrow=function");
+    }
+
+    [Fact]
     public void BuildTerminalApprovalJs_GeneratesCardInjectionScript()
     {
         var request = new AgentPermissionRequest
