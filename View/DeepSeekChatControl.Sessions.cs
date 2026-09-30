@@ -1,4 +1,4 @@
-﻿using DeepSeek_v4_for_VisualStudio.Models;
+using DeepSeek_v4_for_VisualStudio.Models;
 using DeepSeek_v4_for_VisualStudio.Services;
 using DeepSeek_v4_for_VisualStudio.Utils;
 using Microsoft.VisualStudio.Shell;
@@ -818,6 +818,9 @@ namespace DeepSeek_v4_for_VisualStudio.View
                 RefreshAppendQueuePanel();
                 // ── 重置累计 Token / 费用计数器 ──
                 _apiService?.ResetAccumulatedStats();
+
+                // ── 聊天区即将重建：清空审批显示队列，移除残留审批卡片 ──
+                ResetApprovalQueue();
 
                 ResetActiveAgentToAsk();
                 _builtInToolService?.ResetConversationState();

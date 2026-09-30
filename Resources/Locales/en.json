@@ -591,6 +591,7 @@
     "status.terminalWaitingApproval": "Waiting for terminal command approval: {0}",
     "status.deleteWaitingConfirm": "Waiting for deletion confirmation: {0}",
     "status.waitingConfirm": "Waiting for confirmation: {0}",
+    "status.approvalQueuePending": "({0} more approval(s) queued)",
     "status.questionsWaiting": "Waiting for answers to {0} question(s)...",
     "status.context.noActiveDoc": "No active document open",
     "status.context.noSelection": "Please select a code block first",

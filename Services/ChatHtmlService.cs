@@ -1324,13 +1324,51 @@ return "<!DOCTYPE html><html lang='" + htmlLang + "'><head><meta charset='UTF-8'
             return $"var p=document.getElementById({EscapeJsString(elementId)});if(p)p.remove();";
         }
 
+        /// <summary>通用权限请求审批卡片的 DOM id 前缀。</summary>
+        public const string PermissionCardIdPrefix = "agent-permission-";
+
+        /// <summary>文件删除确认卡片的 DOM id 前缀。</summary>
+        public const string FileDeleteCardIdPrefix = "file-delete-confirm-";
+
+        /// <summary>终端命令审批卡片的 DOM id 前缀。</summary>
+        public const string TerminalApprovalCardIdPrefix = "terminal-approval-";
+
+        /// <summary>
+        /// 按操作类型计算审批卡片的 DOM 元素 id（注入与移除两侧共用的唯一事实源）。
+        /// </summary>
+        /// <param name="request">审批请求。</param>
+        /// <returns>卡片元素 id。</returns>
+        public static string GetApprovalCardId(AgentPermissionRequest request)
+        {
+            return GetApprovalCardId(request?.ActionType, request?.RequestId ?? string.Empty);
+        }
+
+        /// <summary>
+        /// 按操作类型与请求 ID 计算审批卡片的 DOM 元素 id。
+        /// 操作类型分支必须与 <c>DeepSeekChatControl.OnAgentPermissionRequested</c> 的注入分支保持一致。
+        /// </summary>
+        /// <param name="actionType">操作类型（"file_delete" / "terminal_command" / 其他）。</param>
+        /// <param name="requestId">请求 ID。</param>
+        /// <returns>卡片元素 id。</returns>
+        public static string GetApprovalCardId(string? actionType, string requestId)
+        {
+            string id = requestId ?? string.Empty;
+
+            if (string.Equals(actionType, "file_delete", StringComparison.Ordinal))
+                return FileDeleteCardIdPrefix + id;
+            if (string.Equals(actionType, "terminal_command", StringComparison.Ordinal))
+                return TerminalApprovalCardIdPrefix + id;
+
+            return PermissionCardIdPrefix + id;
+        }
+
         /// <summary>
         /// 构建权限请求 UI 的 JS 脚本（在聊天底部注入确认/拒绝按钮）。
         /// 显示：标题 → 目的（为什么）→ 操作描述（做什么）→ 内容预览 → 按钮
         /// </summary>
         public static string BuildPermissionRequestJs(AgentPermissionRequest request)
         {
-            string cardId = "agent-permission-" + request.RequestId;
+            string cardId = PermissionCardIdPrefix + request.RequestId;
             string escapedCardId = EscapeJsString(cardId);
             string safeRequestId = EscapeHtmlAttribute(request.RequestId);
 
@@ -1481,7 +1519,7 @@ return "<!DOCTYPE html><html lang='" + htmlLang + "'><head><meta charset='UTF-8'
         /// <param name="request">权限请求，其 ActionType 应为 "file_delete"，FilePaths 包含待删除文件路径列表</param>
         public static string BuildFileDeleteConfirmationJs(AgentPermissionRequest request)
         {
-            string cardId = "file-delete-confirm-" + request.RequestId;
+            string cardId = FileDeleteCardIdPrefix + request.RequestId;
             string escapedCardId = EscapeJsString(cardId);
 
             // 构建文件列表 HTML（在 C# 侧完成，避免 JS 字符串嵌套转义）
@@ -1552,7 +1590,7 @@ return "<!DOCTYPE html><html lang='" + htmlLang + "'><head><meta charset='UTF-8'
         /// Title 为操作标题，Command 为实际命令，FilePaths[0] 为命令说明，Purpose 为操作目的。</param>
         public static string BuildTerminalApprovalJs(AgentPermissionRequest request)
         {
-            string cardId = "terminal-approval-" + request.RequestId;
+            string cardId = TerminalApprovalCardIdPrefix + request.RequestId;
             string escapedCardId = EscapeJsString(cardId);
             string explanation = (request.FilePaths != null && request.FilePaths.Count > 0)
                 ? request.FilePaths[0] : string.Empty;

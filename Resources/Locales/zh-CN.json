@@ -584,6 +584,7 @@
     "status.terminalWaitingApproval": "等待终端命令审批: {0}",
     "status.deleteWaitingConfirm": "等待确认删除: {0}",
     "status.waitingConfirm": "等待确认: {0}",
+    "status.approvalQueuePending": "（还有 {0} 项审批排队中）",
     "status.questionsWaiting": "等待回答 {0} 个问题...",
     "status.context.noActiveDoc": "没有打开的活动文档",
     "status.context.noSelection": "请先在编辑器中选中代码块",

@@ -2336,10 +2336,14 @@ namespace DeepSeek_v4_for_VisualStudio.View
                                 try
                                 {
                                     await ChatWebView.CoreWebView2.ExecuteScriptAsync(
-                                        ChatHtmlService.BuildRemoveElementJs($"agent-permission-{requestId}"));
+                                        ChatHtmlService.BuildRemoveElementJs(
+                                            ChatHtmlService.PermissionCardIdPrefix + requestId));
                                 }
                                 catch { }
                             }
+
+                            // 审批卡片串行显示：当前项处理完 → 显示下一个
+                            AdvanceApprovalQueue(requestId);
                         });
                     }
                     // ── 终端命令审批 ──
@@ -2359,11 +2363,15 @@ namespace DeepSeek_v4_for_VisualStudio.View
                                 try
                                 {
                                     await ChatWebView.CoreWebView2.ExecuteScriptAsync(
-                                        ChatHtmlService.BuildRemoveElementJs($"terminal-approval-{requestId}"));
+                                        ChatHtmlService.BuildRemoveElementJs(
+                                            ChatHtmlService.TerminalApprovalCardIdPrefix + requestId));
                                     StatusLabel.Text = LocalizationService.Instance["status.terminalApproved"];
                                 }
                                 catch { }
                             }
+
+                            // 审批卡片串行显示：当前项处理完 → 显示下一个
+                            AdvanceApprovalQueue(requestId);
                         });
                     }
                     else if (type == "terminalSkip")
@@ -2382,11 +2390,15 @@ namespace DeepSeek_v4_for_VisualStudio.View
                                 try
                                 {
                                     await ChatWebView.CoreWebView2.ExecuteScriptAsync(
-                                        ChatHtmlService.BuildRemoveElementJs($"terminal-approval-{requestId}"));
+                                        ChatHtmlService.BuildRemoveElementJs(
+                                            ChatHtmlService.TerminalApprovalCardIdPrefix + requestId));
                                     StatusLabel.Text = LocalizationService.Instance["status.terminalSkipped"];
                                 }
                                 catch { }
                             }
+
+                            // 审批卡片串行显示：当前项处理完 → 显示下一个
+                            AdvanceApprovalQueue(requestId);
                         });
                     }
                     // ── VisualStudio_askQuestions 回答 ──
@@ -2450,12 +2462,16 @@ namespace DeepSeek_v4_for_VisualStudio.View
                                 try
                                 {
                                     await ChatWebView.CoreWebView2.ExecuteScriptAsync(
-                                        ChatHtmlService.BuildRemoveElementJs($"file-delete-confirm-{requestId}"));
+                                        ChatHtmlService.BuildRemoveElementJs(
+                                            ChatHtmlService.FileDeleteCardIdPrefix + requestId));
                                     StatusLabel.Text = confirmed
                                         ? LocalizationService.Instance.Format("status.filesDeleted", filePaths.Count)
                                         : LocalizationService.Instance["status.deleteCancelled"];
                                 }
                                 catch { }
+
+                                // 审批卡片串行显示：当前项处理完 → 显示下一个
+                                AdvanceApprovalQueue(requestId);
                             }
                         });
                     }

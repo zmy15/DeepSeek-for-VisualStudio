@@ -180,6 +180,43 @@ public class ChatHtmlServiceTests
         html.Should().Contain("__pageReady__");
     }
 
+    [Theory]
+    [InlineData("terminal_command", "terminal-approval-")]
+    [InlineData("file_delete", "file-delete-confirm-")]
+    [InlineData("file_write", "agent-permission-")]
+    [InlineData("command", "agent-permission-")]
+    public void GetApprovalCardId_MapsActionTypeToCardIdPrefix(string actionType, string expectedPrefix)
+    {
+        string cardId = ChatHtmlService.GetApprovalCardId(actionType, "req-1");
+
+        cardId.Should().Be(expectedPrefix + "req-1");
+    }
+
+    [Fact]
+    public void GetApprovalCardId_MatchesCardIdUsedByInjectionBuilders()
+    {
+        // 注入（Builder）与移除（审批队列推进 / 看门狗）必须落在同一个 DOM id 上，
+        // 否则卡片会在聊天区残留或永远无法移除。
+        var terminal = new AgentPermissionRequest { ActionType = "terminal_command", Command = "dotnet build" };
+        var delete = new AgentPermissionRequest { ActionType = "file_delete", Title = "确认删除" };
+        var permission = new AgentPermissionRequest { ActionType = "file_write", Title = "确认修改" };
+
+        ChatHtmlService.BuildTerminalApprovalJs(terminal)
+            .Should().Contain($"div.id=\"{ChatHtmlService.GetApprovalCardId(terminal)}\"");
+        ChatHtmlService.BuildFileDeleteConfirmationJs(delete)
+            .Should().Contain($"div.id=\"{ChatHtmlService.GetApprovalCardId(delete)}\"");
+        ChatHtmlService.BuildPermissionRequestJs(permission)
+            .Should().Contain($"div.id=\"{ChatHtmlService.GetApprovalCardId(permission)}\"");
+
+        // 移除脚本使用同一 id
+        foreach (var request in new[] { terminal, delete, permission })
+        {
+            string cardId = ChatHtmlService.GetApprovalCardId(request);
+            ChatHtmlService.BuildRemoveElementJs(cardId)
+                .Should().Contain(cardId);
+        }
+    }
+
     [Fact]
     public void BuildTerminalApprovalJs_GeneratesCardInjectionScript()
     {
