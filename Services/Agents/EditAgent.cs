@@ -83,40 +83,6 @@ namespace DeepSeek_v4_for_VisualStudio.Services.Agents
         #region Agent Definition
 
         /// <summary>
-        /// Edit Agent 工具集 — 编辑/终端/构建能力。
-        /// 代码库探索（搜索、列表、grep）通过 runSubagent 委派给 ExploreAgent。
-        /// read_file 保留用于编辑前确认文件内容（利用 ExploreAgent 预热缓存）。
-        /// </summary>
-        public static readonly string[] EditTools = new[]
-        {
-            // 编辑工具
-            "create_file",
-            "delete_file",
-            "replace_string_in_file",
-            "multi_replace_string_in_file",
-            "apply_patch",
-            "create_directory",
-            // 编辑必需：读取文件（利用缓存命中）
-            "read_file",
-            "get_file_symbols",
-            "capture_window",      // 视觉模型直接查看窗口截图
-            "get_errors",
-            // 终端与构建
-            "run_in_terminal",
-            "get_terminal_output",
-            "build_solution",
-            // Git 版本控制
-            "git",
-            // 子代理委派与移交
-            "runSubagent",
-            "request_handoff",
-            // 记忆
-            "memory",
-            // 用户交互
-            "VisualStudio_askQuestions",  // 向用户提问澄清
-        };
-
-        /// <summary>
         /// Edit Agent 统一步骤工具集。
         /// 所有步骤都使用同一工具循环，由模型根据步骤要求选择读取、编辑、终端、构建或 Git 工具。
         /// request_handoff 由系统统一决策，不暴露给步骤工具循环。
@@ -156,7 +122,7 @@ namespace DeepSeek_v4_for_VisualStudio.Services.Agents
             {
                 Type = AgentType.Edit,
                 Name = "Edit",
-                AllowedTools = new List<string>(EditTools),
+                AllowedTools = new List<string>(StepTools),
                 SystemPrompt = BuildSystemPrompt(),
             };
         }
