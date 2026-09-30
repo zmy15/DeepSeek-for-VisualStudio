@@ -1324,13 +1324,51 @@ return "<!DOCTYPE html><html lang='" + htmlLang + "'><head><meta charset='UTF-8'
             return $"var p=document.getElementById({EscapeJsString(elementId)});if(p)p.remove();";
         }
 
+        /// <summary>通用权限请求审批卡片的 DOM id 前缀。</summary>
+        public const string PermissionCardIdPrefix = "agent-permission-";
+
+        /// <summary>文件删除确认卡片的 DOM id 前缀。</summary>
+        public const string FileDeleteCardIdPrefix = "file-delete-confirm-";
+
+        /// <summary>终端命令审批卡片的 DOM id 前缀。</summary>
+        public const string TerminalApprovalCardIdPrefix = "terminal-approval-";
+
+        /// <summary>
+        /// 按操作类型计算审批卡片的 DOM 元素 id（注入与移除两侧共用的唯一事实源）。
+        /// </summary>
+        /// <param name="request">审批请求。</param>
+        /// <returns>卡片元素 id。</returns>
+        public static string GetApprovalCardId(AgentPermissionRequest request)
+        {
+            return GetApprovalCardId(request?.ActionType, request?.RequestId ?? string.Empty);
+        }
+
+        /// <summary>
+        /// 按操作类型与请求 ID 计算审批卡片的 DOM 元素 id。
+        /// 操作类型分支必须与 <c>DeepSeekChatControl.OnAgentPermissionRequested</c> 的注入分支保持一致。
+        /// </summary>
+        /// <param name="actionType">操作类型（"file_delete" / "terminal_command" / 其他）。</param>
+        /// <param name="requestId">请求 ID。</param>
+        /// <returns>卡片元素 id。</returns>
+        public static string GetApprovalCardId(string? actionType, string requestId)
+        {
+            string id = requestId ?? string.Empty;
+
+            if (string.Equals(actionType, "file_delete", StringComparison.Ordinal))
+                return FileDeleteCardIdPrefix + id;
+            if (string.Equals(actionType, "terminal_command", StringComparison.Ordinal))
+                return TerminalApprovalCardIdPrefix + id;
+
+            return PermissionCardIdPrefix + id;
+        }
+
         /// <summary>
         /// 构建权限请求 UI 的 JS 脚本（在聊天底部注入确认/拒绝按钮）。
         /// 显示：标题 → 目的（为什么）→ 操作描述（做什么）→ 内容预览 → 按钮
         /// </summary>
         public static string BuildPermissionRequestJs(AgentPermissionRequest request)
         {
-            string cardId = "agent-permission-" + request.RequestId;
+            string cardId = PermissionCardIdPrefix + request.RequestId;
             string escapedCardId = EscapeJsString(cardId);
             string safeRequestId = EscapeHtmlAttribute(request.RequestId);
 
@@ -1400,15 +1438,19 @@ return "<!DOCTYPE html><html lang='" + htmlLang + "'><head><meta charset='UTF-8'
 
         /// <summary>
         /// 构建向用户提问的 UI（VisualStudio_askQuestions 工具）。
-        /// 在聊天底部注入问题卡片 + 选项/文本框 + 提交按钮。
+        /// 多个问题合并为一个卡片，并按「一页一题」分页显示：用箭头在题目间切换，
+        /// 提交按钮只在最后一题出现（回答在提交时统一收集）。
         /// </summary>
         public static string BuildAskQuestionsJs(AgentQuestionRequest request)
         {
             string safeRequestId = EscapeHtmlAttribute(request.RequestId);
+            int totalQuestions = request.Questions.Count;
+            bool hasMultipleQuestions = totalQuestions > 1;
 
-            // ── 构建问题 HTML ──
-            var questionsHtml = new StringBuilder();
-            for (int qi = 0; qi < request.Questions.Count; qi++)
+            // ── 构建题目分页 HTML（每页一道题；所有页都保留在 DOM 中，切换只是显隐，
+            //    因此用户来回翻页时已填写的选项/文本不会丢失）──
+            var pagesHtml = new StringBuilder();
+            for (int qi = 0; qi < totalQuestions; qi++)
             {
                 var q = request.Questions[qi];
                 string qId = $"aq-{qi}";
@@ -1417,9 +1459,9 @@ return "<!DOCTYPE html><html lang='" + htmlLang + "'><head><meta charset='UTF-8'
                 string escapedHeader = EscapeHtmlWithBreaks(q.Header);
                 string escapedQuestion = EscapeHtmlWithBreaks(q.Question ?? string.Empty);
 
-                questionsHtml.Append("<div style='margin-bottom:10px'>");
-                questionsHtml.Append($"<div style='color:#4fc1ff;font-size:12px;font-weight:600;margin-bottom:4px'>{escapedHeader}</div>");
-                questionsHtml.Append($"<div style='color:#D4D4D4;font-size:12px;margin-bottom:6px'>{escapedQuestion}</div>");
+                pagesHtml.Append($"<div class='aq-page' data-index='{qi}' style='display:{(qi == 0 ? "block" : "none")}'>");
+                pagesHtml.Append($"<div style='color:#4fc1ff;font-size:12px;font-weight:600;margin-bottom:4px'>{escapedHeader}</div>");
+                pagesHtml.Append($"<div style='color:#D4D4D4;font-size:12px;margin-bottom:6px'>{escapedQuestion}</div>");
 
                 if (q.Options != null && q.Options.Count > 0)
                 {
@@ -1432,20 +1474,61 @@ return "<!DOCTYPE html><html lang='" + htmlLang + "'><head><meta charset='UTF-8'
                         string descHtml = !string.IsNullOrEmpty(escapedDesc)
                             ? $"<span style='color:#888;font-size:10px;margin-left:4px'>{escapedDesc}</span>"
                             : "";
-                        questionsHtml.Append($"<label style='display:flex;align-items:center;gap:6px;margin:2px 0;cursor:pointer;font-size:11px;color:#ccc'>");
-                        questionsHtml.Append($"<input type='{inputType}' name='{qId}' value='{EscapeHtmlAttribute(opt.Label)}' style='accent-color:#4fc1ff'>");
-                        questionsHtml.Append($"{escapedLabel}{descHtml}</label>");
+                        pagesHtml.Append($"<label style='display:flex;align-items:center;gap:6px;margin:2px 0;cursor:pointer;font-size:11px;color:#ccc'>");
+                        pagesHtml.Append($"<input type='{inputType}' name='{qId}' value='{EscapeHtmlAttribute(opt.Label)}' style='accent-color:#4fc1ff'>");
+                        pagesHtml.Append($"{escapedLabel}{descHtml}</label>");
                     }
                 }
 
                 // 自由文本输入（始终提供，作为补充或替代选项）
                 if (q.AllowFreeformInput)
                 {
-                    questionsHtml.Append($"<textarea id='{qId}-free' placeholder='{L["chat.html.answerPlaceholder"]}' style='width:100%;min-height:40px;background:#1e1e1e;color:#d4d4d4;border:1px solid #3c3c3c;border-radius:4px;padding:6px 8px;font-size:11px;margin-top:4px;resize:vertical'></textarea>");
+                    pagesHtml.Append($"<textarea id='{qId}-free' placeholder='{L["chat.html.answerPlaceholder"]}' style='width:100%;min-height:40px;background:#1e1e1e;color:#d4d4d4;border:1px solid #3c3c3c;border-radius:4px;padding:6px 8px;font-size:11px;margin-top:4px;resize:vertical'></textarea>");
                 }
 
-                questionsHtml.Append("</div>");
+                pagesHtml.Append("</div>");
             }
+
+            // ── 页头：标题 + 进度（第 N / M 题；单题时不需要）──
+            string progressTemplate = L["chat.html.questionProgress"];
+            string headerHtml =
+                "<div style='display:flex;align-items:center;justify-content:space-between;margin-bottom:8px'>" +
+                $"<div style='color:#4fc1ff;font-size:12px;font-weight:600'>{EscapeHtml(L["chat.html.questionsTitle"])}</div>" +
+                (hasMultipleQuestions
+                    ? $"<div id='agent-questions-progress' data-template='{EscapeHtmlAttribute(progressTemplate)}' style='color:#888;font-size:11px'>" +
+                      $"{EscapeHtml(LocalizationService.Instance.Format("chat.html.questionProgress", 1, totalQuestions))}</div>"
+                    : "") +
+                "</div>";
+
+            // ── 页脚：上一题 / 下一题（切换箭头）+ 提交（仅最后一题）+ 跳过 ──
+            string navHtml = hasMultipleQuestions
+                ? "<button id='agent-questions-prev' type='button' " +
+                  $"onclick=\"window.__askQuestionsNav('{safeRequestId}',-1)\" " +
+                  "style='background:#243447;color:#9cc7e8;border:1px solid #3c5a75;border-radius:4px;padding:6px 14px;cursor:pointer;font-size:12px;visibility:hidden'>" +
+                  $"&#8592; {EscapeHtml(L["chat.html.questionPrev"])}</button>" +
+                  "<button id='agent-questions-next' type='button' " +
+                  $"onclick=\"window.__askQuestionsNav('{safeRequestId}',1)\" " +
+                  "style='background:#243447;color:#9cc7e8;border:1px solid #3c5a75;border-radius:4px;padding:6px 14px;cursor:pointer;font-size:12px'>" +
+                  $"{EscapeHtml(L["chat.html.questionNext"])} &#8594;</button>"
+                : "";
+
+            string submitStyle = hasMultipleQuestions ? "display:none;" : "display:inline-block;";
+
+            string cardInnerHtml =
+                headerHtml +
+                "<div id='agent-questions-pages'>" + pagesHtml + "</div>" +
+                "<div style='display:flex;align-items:center;gap:8px;margin-top:10px'>" +
+                navHtml +
+                "<div style='flex:1'></div>" +
+                $"<button id='agent-questions-submit' type='button' onclick=\"window.__answerQuestions('{safeRequestId}')\" " +
+                $"style='{submitStyle}background:#0e639c;color:#fff;border:none;border-radius:4px;padding:6px 20px;cursor:pointer;font-size:12px;font-weight:600'>" +
+                $"{EscapeHtml(L["chat.html.submitAnswer"])}</button>" +
+                $"<button type='button' onclick=\"window.__skipQuestions('{safeRequestId}')\" " +
+                "style='background:#3c3c3c;color:#aaa;border:1px solid #555;border-radius:4px;padding:6px 16px;cursor:pointer;font-size:12px'>" +
+                $"{EscapeHtml(L["chat.html.skip"])}</button>" +
+                "</div>";
+
+            string escapedInnerHtml = EscapeJsString(cardInnerHtml);
 
             return $@"
 (function(){{
@@ -1456,17 +1539,13 @@ return "<!DOCTYPE html><html lang='" + htmlLang + "'><head><meta charset='UTF-8'
         var div=document.createElement('div');
         div.id='agent-questions';
         div.style.cssText='border:1px solid #4fc1ff;border-radius:8px;background:#1a2a3a;padding:12px;margin:8px 0;animation:fadeIn .3s';
-
-        div.innerHTML=
-            '<div style=""color:#4fc1ff;font-size:12px;font-weight:600;margin-bottom:8px"">'+{EscapeJsString(LocalizationService.Instance["chat.html.questionsTitle"])}+'</div>'+{EscapeJsString(questionsHtml.ToString())}+
-            '<div style=""display:flex;gap:8px;margin-top:8px"">'+
-            '<button id=""agent-questions-submit"" onclick=""window.__answerQuestions(\'{safeRequestId}\')"" style=""background:#0e639c;color:#fff;border:none;border-radius:4px;padding:6px 20px;cursor:pointer;font-size:12px;font-weight:600"">'+{EscapeJsString(LocalizationService.Instance["chat.html.submitAnswer"])}+'</button>'+
-            '<button onclick=""window.__skipQuestions(\'{safeRequestId}\')"" style=""background:#3c3c3c;color:#aaa;border:1px solid #555;border-radius:4px;padding:6px 16px;cursor:pointer;font-size:12px"">'+{EscapeJsString(LocalizationService.Instance["chat.html.skip"])}+'</button>'+
-            '</div>';
+        div.innerHTML={escapedInnerHtml};
 
         var container=document.getElementById('chat-container');
         if(!container){{window.__sendToHost({{type:'diagnostic',msg:'questions:chat-container not found'}});return;}}
         window.__insertBeforeTaskPanel(div);
+        // 初始化分页状态：进度文本 / 箭头可见性 / 提交按钮仅在最后一题显示
+        window.__askQuestionsShowPage(div,0);
         window.__scrollToBottom('smooth');
         window.__sendToHost({{type:'diagnostic',msg:'questions:injected OK'}});
     }}catch(e){{
@@ -1481,7 +1560,7 @@ return "<!DOCTYPE html><html lang='" + htmlLang + "'><head><meta charset='UTF-8'
         /// <param name="request">权限请求，其 ActionType 应为 "file_delete"，FilePaths 包含待删除文件路径列表</param>
         public static string BuildFileDeleteConfirmationJs(AgentPermissionRequest request)
         {
-            string cardId = "file-delete-confirm-" + request.RequestId;
+            string cardId = FileDeleteCardIdPrefix + request.RequestId;
             string escapedCardId = EscapeJsString(cardId);
 
             // 构建文件列表 HTML（在 C# 侧完成，避免 JS 字符串嵌套转义）
@@ -1552,7 +1631,7 @@ return "<!DOCTYPE html><html lang='" + htmlLang + "'><head><meta charset='UTF-8'
         /// Title 为操作标题，Command 为实际命令，FilePaths[0] 为命令说明，Purpose 为操作目的。</param>
         public static string BuildTerminalApprovalJs(AgentPermissionRequest request)
         {
-            string cardId = "terminal-approval-" + request.RequestId;
+            string cardId = TerminalApprovalCardIdPrefix + request.RequestId;
             string escapedCardId = EscapeJsString(cardId);
             string explanation = (request.FilePaths != null && request.FilePaths.Count > 0)
                 ? request.FilePaths[0] : string.Empty;
@@ -1688,6 +1767,8 @@ return "<!DOCTYPE html><html lang='" + htmlLang + "'><head><meta charset='UTF-8'
             string escapedTitleStatus = EscapeJsString(titleStatus);
             string progressText = string.Format(L["chat.html.taskProgress"], completed, total);
             string closeTitle = L["chat.html.closePanelTitle"];
+            string collapseTitle = L["chat.html.collapsePanelTitle"];
+            string expandTitle = L["chat.html.expandPanelTitle"];
 
             return $@"
 (function(){{
@@ -1713,16 +1794,22 @@ return "<!DOCTYPE html><html lang='" + htmlLang + "'><head><meta charset='UTF-8'
     panel.id='agent-task-panel-{pid}';
     panel.className='agent-task-panel';
     panel.innerHTML=
-        '<div class=""agent-task-panel-header"" onclick=""var p=document.getElementById(\'agent-task-panel-{pid}\');if(p)p.classList.toggle(\'collapsed\')"">'+
+        '<div class=""agent-task-panel-header"" onclick=""window.__toggleTaskPanel(\'{pid}\')"">'+
  '<span class=""task-icon""></span>'+
         '<span class=""task-title"" id=""agent-task-title-status-{pid}"">{escapedTitleStatus}</span>'+
         '<span class=""task-progress"" id=""agent-task-progress-{pid}"">{progressText}</span>'+
+        // 向下箭头：点击收起面板（与点击头部同一套折叠逻辑，需阻止冒泡避免二次切换）
+        '<span class=""task-collapse-arrow"" id=""agent-task-arrow-{pid}"" role=""button"" tabindex=""0""'+
+        ' data-title-expanded=""{collapseTitle}"" data-title-collapsed=""{expandTitle}"" title=""{collapseTitle}""'+
+        ' onclick=""event.stopPropagation();window.__toggleTaskPanel(\'{pid}\');return false;""'+
+        ' onkeydown=""if(event.key===\'Enter\'||event.key===\' \'){{event.preventDefault();event.stopPropagation();window.__toggleTaskPanel(\'{pid}\');}}"">&#9662;</span>'+
  '<button class=""task-close"" id=""agent-task-close-{pid}"" onclick=""(function(e){{e.stopPropagation();window.__sendToHost({{type:\'dismissTaskPanel\',planId:\'{pid}\'}});var p=document.getElementById(\'agent-task-panel-{pid}\');if(p&&p.parentNode)p.parentNode.removeChild(p);}})(event);return false;"" title=""{closeTitle}"">&times;</button>'+
         '</div>'+
         '<div class=""agent-task-panel-body"" id=""agent-task-body-{pid}"">'+{escapedPlanHtml}+'</div>';
 
     var container=document.getElementById('chat-container');
     if(container)container.appendChild(panel);
+    window.__syncTaskPanelArrow(panel);
     window.__scrollToBottom('smooth');
 }})();";
         }

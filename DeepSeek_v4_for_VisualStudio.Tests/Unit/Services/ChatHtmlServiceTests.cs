@@ -180,6 +180,157 @@ public class ChatHtmlServiceTests
         html.Should().Contain("__pageReady__");
     }
 
+    [Theory]
+    [InlineData("terminal_command", "terminal-approval-")]
+    [InlineData("file_delete", "file-delete-confirm-")]
+    [InlineData("file_write", "agent-permission-")]
+    [InlineData("command", "agent-permission-")]
+    public void GetApprovalCardId_MapsActionTypeToCardIdPrefix(string actionType, string expectedPrefix)
+    {
+        string cardId = ChatHtmlService.GetApprovalCardId(actionType, "req-1");
+
+        cardId.Should().Be(expectedPrefix + "req-1");
+    }
+
+    [Fact]
+    public void GetApprovalCardId_MatchesCardIdUsedByInjectionBuilders()
+    {
+        // 注入（Builder）与移除（审批队列推进 / 看门狗）必须落在同一个 DOM id 上，
+        // 否则卡片会在聊天区残留或永远无法移除。
+        var terminal = new AgentPermissionRequest { ActionType = "terminal_command", Command = "dotnet build" };
+        var delete = new AgentPermissionRequest { ActionType = "file_delete", Title = "确认删除" };
+        var permission = new AgentPermissionRequest { ActionType = "file_write", Title = "确认修改" };
+
+        ChatHtmlService.BuildTerminalApprovalJs(terminal)
+            .Should().Contain($"div.id=\"{ChatHtmlService.GetApprovalCardId(terminal)}\"");
+        ChatHtmlService.BuildFileDeleteConfirmationJs(delete)
+            .Should().Contain($"div.id=\"{ChatHtmlService.GetApprovalCardId(delete)}\"");
+        ChatHtmlService.BuildPermissionRequestJs(permission)
+            .Should().Contain($"div.id=\"{ChatHtmlService.GetApprovalCardId(permission)}\"");
+
+        // 移除脚本使用同一 id
+        foreach (var request in new[] { terminal, delete, permission })
+        {
+            string cardId = ChatHtmlService.GetApprovalCardId(request);
+            ChatHtmlService.BuildRemoveElementJs(cardId)
+                .Should().Contain(cardId);
+        }
+    }
+
+    [Fact]
+    public void BuildAskQuestionsJs_MultipleQuestions_MergesIntoPaginatedCardWithSubmitOnLastPage()
+    {
+        var request = new AgentQuestionRequest
+        {
+            RequestId = "q-1",
+            Questions = new List<AgentQuestion>
+            {
+                new AgentQuestion
+                {
+                    Header = "范围",
+                    Question = "要改哪些文件？",
+                    Options = new List<QuestionOption>
+                    {
+                        new QuestionOption { Label = "全部" },
+                        new QuestionOption { Label = "仅当前" },
+                    },
+                },
+                new AgentQuestion { Header = "风格", Question = "注释用什么语言？", AllowFreeformInput = true },
+                new AgentQuestion
+                {
+                    Header = "确认",
+                    Question = "可以开始吗？",
+                    Options = new List<QuestionOption> { new QuestionOption { Label = "可以" } },
+                },
+            },
+        };
+
+        string js = ChatHtmlService.BuildAskQuestionsJs(request);
+
+        // 三道题合并进同一个卡片，并渲染为三个分页（每页一题）
+        CountOccurrences(js, "class='aq-page'").Should().Be(3);
+        js.Should().Contain("id='agent-questions-pages'");
+        js.Should().Contain("data-index='0'");
+        js.Should().Contain("data-index='2'");
+        js.Should().Contain("要改哪些文件？");
+        js.Should().Contain("注释用什么语言？");
+        js.Should().Contain("可以开始吗？");
+
+        // 进度提示 + 切题箭头
+        js.Should().Contain("id='agent-questions-progress'");
+        CountOccurrences(js, "window.__askQuestionsNav('q-1',").Should().Be(2);
+        js.Should().Contain("window.__askQuestionsNav('q-1',-1)");
+        js.Should().Contain("window.__askQuestionsNav('q-1',1)");
+
+        // 提交按钮只在最后一题显示：初始 display:none，由 __askQuestionsShowPage 在末页切为可见
+        js.Should().Contain("id='agent-questions-submit'");
+        js.Should().Contain("display:none;background:#0e639c");
+        js.Should().Contain("window.__askQuestionsShowPage(div,0)");
+    }
+
+    [Fact]
+    public void BuildAskQuestionsJs_SingleQuestion_HidesPagingAndShowsSubmitImmediately()
+    {
+        var request = new AgentQuestionRequest
+        {
+            RequestId = "q-2",
+            Questions = new List<AgentQuestion>
+            {
+                new AgentQuestion { Header = "继续？", Question = "是否继续？", AllowFreeformInput = true },
+            },
+        };
+
+        string js = ChatHtmlService.BuildAskQuestionsJs(request);
+
+        CountOccurrences(js, "class='aq-page'").Should().Be(1);
+        js.Should().NotContain("agent-questions-prev", "单题不需要切题箭头");
+        js.Should().NotContain("agent-questions-progress", "单题不需要进度提示");
+        js.Should().Contain("display:inline-block;background:#0e639c");
+    }
+
+    [Fact]
+    public void BuildInitialPage_DefinesAskQuestionsPagingFunctionsAndCollectsAnswersPerPage()
+    {
+        string html = ChatHtmlService.BuildInitialPage(new List<ChatMessage>());
+
+        // 卡片注入脚本会调用这些函数，必须存在于初始页面脚本中
+        html.Should().Contain("window.__askQuestionsNav=function");
+        html.Should().Contain("window.__askQuestionsShowPage=function");
+        html.Should().Contain("window.__answerQuestions=function");
+
+        // 提交时按分页顺序统一收集答案（未显示的页也要计入，避免答案与题目错位）
+        html.Should().Contain("card.querySelectorAll('.aq-page')");
+    }
+
+    [Fact]
+    public void BuildAgentTaskPanelCreateJs_RendersCollapseArrowSharingHeaderToggleLogic()
+    {
+        var plan = new AgentTaskPlan { PlanId = "p1", Title = "任务面板" };
+        plan.Steps.Add(new AgentStep { Title = "步骤一", Status = AgentStepStatus.Completed });
+
+        string js = ChatHtmlService.BuildAgentTaskPanelCreateJs(plan);
+
+        // 头部点击与向下箭头必须走同一个折叠函数，保证「点箭头」与「点面板」行为完全一致
+        js.Should().Contain(@"onclick=""window.__toggleTaskPanel(\'p1\')""");
+        js.Should().Contain("class=\"task-collapse-arrow\"");
+        js.Should().Contain(@"event.stopPropagation();window.__toggleTaskPanel(\'p1\');return false;",
+            "箭头点击需阻止冒泡，否则会与头部点击叠加成两次切换（等于没切换）");
+        js.Should().Contain("data-title-expanded=");
+        js.Should().Contain("data-title-collapsed=");
+        js.Should().Contain("&#9662;", "展开状态显示向下箭头");
+        js.Should().Contain("window.__syncTaskPanelArrow(panel)", "创建后需初始化箭头方向与提示");
+    }
+
+    [Fact]
+    public void BuildInitialPage_DefinesTaskPanelToggleFunctions()
+    {
+        string html = ChatHtmlService.BuildInitialPage(new List<ChatMessage>());
+
+        // 面板注入脚本会调用这两个函数，必须存在于初始页面脚本中
+        html.Should().Contain("window.__toggleTaskPanel=function");
+        html.Should().Contain("window.__syncTaskPanelArrow=function");
+    }
+
     [Fact]
     public void BuildTerminalApprovalJs_GeneratesCardInjectionScript()
     {

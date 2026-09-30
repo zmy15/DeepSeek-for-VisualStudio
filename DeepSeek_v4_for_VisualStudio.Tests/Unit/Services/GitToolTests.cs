@@ -134,7 +134,8 @@ public class GitToolTests
         var operations = new[]
         {
             "status", "diff", "log", "show", "describe", "tag", "rev-parse", "reflog", "ls-files",
-            "add", "commit", "branch", "checkout", "merge", "pull", "push", "stash", "reset",
+            "remote", "config", "switch", "restore", "revert", "rebase", "cherry-pick",
+            "add", "commit", "branch", "checkout", "merge", "fetch", "pull", "push", "stash", "reset",
         };
         var tool = new GitTool();
         foreach (var op in operations)
@@ -353,6 +354,108 @@ public class GitToolTests
     }
 
     [Fact]
+    public void GitTool_Definition_OperationEnumContainsNewOperations()
+    {
+        var json = JsonSerializer.Serialize(new GitTool().GetDefinition().Function.Parameters);
+        foreach (var operation in new[] { "fetch", "remote", "config", "switch", "restore", "revert", "rebase", "cherry-pick" })
+            json.Should().Contain($"\"{operation}\"");
+    }
+
+    [Fact]
+    public void IsReadOnlyOperation_Fetch_ReturnsTrue()
+    {
+        GitTool.IsReadOnlyOperation("fetch", "", "", "", false).Should().BeTrue();
+    }
+
+    [Fact]
+    public void BuildGitCommand_Fetch_WithoutArguments_BuildsFetch()
+    {
+        var args = ParseArgs("{\"operation\":\"fetch\"}");
+
+        var command = new GitTool().BuildGitCommand("fetch", args, "C:\\repo");
+
+        command.Should().Be("fetch");
+    }
+
+    [Fact]
+    public void BuildGitCommand_Fetch_WithRemoteAndBranch_BuildsScopedFetch()
+    {
+        var args = ParseArgs("{\"operation\":\"fetch\",\"remote\":\"origin\",\"branch\":\"dev\"}");
+
+        var command = new GitTool().BuildGitCommand("fetch", args, "C:\\repo");
+
+        command.Should().Be("fetch origin \"dev\"");
+    }
+
+    [Fact]
+    public void BuildGitCommand_Remote_Default_BuildsRemote()
+    {
+        var args = ParseArgs("{\"operation\":\"remote\"}");
+        new GitTool().BuildGitCommand("remote", args, "C:\\repo").Should().Be("remote");
+    }
+
+    [Fact]
+    public void BuildGitCommand_Remote_Add_BuildsRemoteAdd()
+    {
+        var args = ParseArgs("{\"operation\":\"remote\",\"mode\":\"add\",\"remote\":\"upstream\",\"url\":\"https://example.com/repo.git\"}");
+        new GitTool().BuildGitCommand("remote", args, "C:\\repo")
+            .Should().Be("remote add \"upstream\" \"https://example.com/repo.git\"");
+    }
+
+    [Fact]
+    public void BuildGitCommand_Config_Get_BuildsConfigGet()
+    {
+        var args = ParseArgs("{\"operation\":\"config\",\"mode\":\"get\",\"key\":\"user.name\"}");
+        new GitTool().BuildGitCommand("config", args, "C:\\repo")
+            .Should().Be("config --local --get \"user.name\"");
+    }
+
+    [Fact]
+    public void BuildGitCommand_Config_Set_BuildsLocalConfigSet()
+    {
+        var args = ParseArgs("{\"operation\":\"config\",\"mode\":\"set\",\"key\":\"core.autocrlf\",\"value\":\"true\"}");
+        new GitTool().BuildGitCommand("config", args, "C:\\repo")
+            .Should().Be("config --local \"core.autocrlf\" \"true\"");
+    }
+
+    [Fact]
+    public void BuildGitCommand_Switch_BuildsSwitch()
+    {
+        var args = ParseArgs("{\"operation\":\"switch\",\"branch\":\"feature/x\"}");
+        new GitTool().BuildGitCommand("switch", args, "C:\\repo")
+            .Should().Be("switch \"feature/x\"");
+    }
+
+    [Fact]
+    public void BuildGitCommand_Restore_StagedPath_BuildsRestore()
+    {
+        var args = ParseArgs("{\"operation\":\"restore\",\"path\":\"src/file.cs\",\"staged\":true}");
+        new GitTool().BuildGitCommand("restore", args, "C:\\repo")
+            .Should().Be("restore --staged -- \"src/file.cs\"");
+    }
+
+    [Fact]
+    public void BuildGitCommand_Revert_BuildsRevert()
+    {
+        var args = ParseArgs("{\"operation\":\"revert\",\"reference\":\"HEAD~1\"}");
+        new GitTool().BuildGitCommand("revert", args, "C:\\repo").Should().Be("revert HEAD~1");
+    }
+
+    [Fact]
+    public void BuildGitCommand_Rebase_BuildsRebase()
+    {
+        var args = ParseArgs("{\"operation\":\"rebase\",\"branch\":\"origin/main\"}");
+        new GitTool().BuildGitCommand("rebase", args, "C:\\repo").Should().Be("rebase origin/main");
+    }
+
+    [Fact]
+    public void BuildGitCommand_CherryPick_BuildsCherryPick()
+    {
+        var args = ParseArgs("{\"operation\":\"cherry-pick\",\"reference\":\"abc123\"}");
+        new GitTool().BuildGitCommand("cherry-pick", args, "C:\\repo").Should().Be("cherry-pick abc123");
+    }
+
+    [Fact]
     public void BuildGitCommand_WriteOperation_WithDangerousFlag_BuildsCommandForApproval()
     {
         var args = ParseArgs("{\"operation\":\"reset\",\"flags\":[\"--hard\"]}");
@@ -410,6 +513,73 @@ public class GitToolTests
 
         requiresApproval.Should().BeFalse();
         reason.Should().BeEmpty();
+    }
+
+    [Fact]
+    public void RequiresApproval_ReadOnlyAgentFetchOperation_ReturnsFalse()
+    {
+        bool requiresApproval = GitTool.RequiresApproval(
+            AgentType.Ask,
+            "fetch",
+            isReadOnly: true,
+            mode: string.Empty,
+            delete: false,
+            force: false,
+            flags: null,
+            out string reason);
+
+        requiresApproval.Should().BeFalse();
+        reason.Should().BeEmpty();
+    }
+
+    [Theory]
+    [InlineData("remote", "list", true)]
+    [InlineData("config", "get", true)]
+    [InlineData("remote", "add", false)]
+    [InlineData("config", "set", false)]
+    public void IsReadOnlyOperation_RemoteAndConfigModes(string operation, string mode, bool expected)
+    {
+        GitTool.IsReadOnlyOperation(operation, "", mode, "", false).Should().Be(expected);
+    }
+
+    [Fact]
+    public void RequiresApproval_ReadOnlyAgentRemoteList_ReturnsFalse()
+    {
+        GitTool.RequiresApproval(AgentType.Ask, "remote", isReadOnly: true, mode: "list",
+            delete: false, force: false, flags: null, out string reason).Should().BeFalse();
+        reason.Should().BeEmpty();
+    }
+
+    [Fact]
+    public void RequiresApproval_EditAgentRebase_ReturnsTrue()
+    {
+        GitTool.RequiresApproval(AgentType.Edit, "rebase", isReadOnly: false, mode: "",
+            delete: false, force: false, flags: null, out string reason).Should().BeTrue();
+        reason.Should().Be("rebase");
+    }
+
+    [Fact]
+    public void RequiresApproval_WriteAgentForceCreateSwitch_ReturnsTrue()
+    {
+        GitTool.RequiresApproval(AgentType.Edit, "switch", isReadOnly: false, mode: "force-create",
+            delete: false, force: false, flags: null, out string reason).Should().BeTrue();
+        reason.Should().Be("switch --force-create");
+    }
+
+    [Fact]
+    public void RequiresApproval_WriteAgentRemoteAdd_ReturnsTrue()
+    {
+        GitTool.RequiresApproval(AgentType.Edit, "remote", isReadOnly: false, mode: "add",
+            delete: false, force: false, flags: null, out string reason).Should().BeTrue();
+        reason.Should().Be("remote add");
+    }
+
+    [Fact]
+    public void RequiresApproval_WriteAgentConfigSet_ReturnsTrue()
+    {
+        GitTool.RequiresApproval(AgentType.Edit, "config", isReadOnly: false, mode: "set",
+            delete: false, force: false, flags: null, out string reason).Should().BeTrue();
+        reason.Should().Be("config set");
     }
 
     [Fact]

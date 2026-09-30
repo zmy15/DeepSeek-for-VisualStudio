@@ -158,7 +158,7 @@ namespace DeepSeek_v4_for_VisualStudio.Services.EditTools
                 string fileContent;
                 try
                 {
-                    fileContent = await Task.Run(() => File.ReadAllText(edit.FilePath), ct);
+                    fileContent = await Task.Run(() => FileEncodingHelper.ReadAllText(edit.FilePath), ct);
                 }
                 catch
                 {
@@ -186,7 +186,7 @@ namespace DeepSeek_v4_for_VisualStudio.Services.EditTools
                     string updatedContent;
                     try
                     {
-                        updatedContent = await Task.Run(() => File.ReadAllText(edit.FilePath), ct);
+                        updatedContent = await Task.Run(() => FileEncodingHelper.ReadAllText(edit.FilePath), ct);
                     }
                     catch
                     {

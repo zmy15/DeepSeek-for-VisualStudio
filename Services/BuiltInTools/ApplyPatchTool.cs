@@ -1,4 +1,4 @@
-﻿using DeepSeek_v4_for_VisualStudio.Models;
+using DeepSeek_v4_for_VisualStudio.Models;
 using DeepSeek_v4_for_VisualStudio.Services;
 using DeepSeek_v4_for_VisualStudio.Services.EditTools;
 using DeepSeek_v4_for_VisualStudio.Utils;
@@ -217,7 +217,7 @@ namespace DeepSeek_v4_for_VisualStudio.Services.BuiltInTools
                                     backups[filePath] = BackupService.CreateBackup(filePath);
                                 }
                                 sourceContent = File.Exists(filePath)
-                                    ? await Task.Run(() => File.ReadAllText(filePath))
+                                    ? await Task.Run(() => FileEncodingHelper.ReadAllText(filePath))
                                     : string.Empty;
                             }
 
@@ -353,7 +353,7 @@ namespace DeepSeek_v4_for_VisualStudio.Services.BuiltInTools
             }
 
             return File.Exists(targetPath)
-                ? await Task.Run(() => File.ReadAllText(targetPath))
+                ? await Task.Run(() => FileEncodingHelper.ReadAllText(targetPath))
                 : null;
         }
 

@@ -126,16 +126,6 @@ public class EditAgentTests
         EditAgent.BuildPlanProgressSnapshot(new AgentTaskPlan()).Should().BeEmpty();
     }
 
-    [Theory]
-    [InlineData("为 ChatMessage 新增「被停止」标记字段并确定持久化策略", true)]
-    [InlineData("引入新的分支查询方法", true)]
-    [InlineData("边界场景与 UI 一致性核对", false)]
-    [InlineData("分析现有重试路径", false)]
-    public void IsCodeWritingStep_PrefersExplicitWriteIntent(string title, bool expected)
-    {
-        EditAgent.IsCodeWritingStep(title).Should().Be(expected);
-    }
-
     [Fact]
     public void TruncateBuildResultForHandoff_ShortKeepsFull()
     {
@@ -382,58 +372,13 @@ public class EditAgentTests
 
     #endregion
 
-    #region EditTools Static Array
+    #region StepTools Whitelist
 
     [Fact]
-    public void EditTools_ContainsFileModificationTools()
-    {
-        EditAgent.EditTools.Should().Contain("create_file");
-        EditAgent.EditTools.Should().Contain("delete_file");
-        EditAgent.EditTools.Should().Contain("replace_string_in_file");
-        EditAgent.EditTools.Should().Contain("multi_replace_string_in_file");
-        EditAgent.EditTools.Should().Contain("apply_patch");
-        EditAgent.EditTools.Should().Contain("create_directory");
-    }
-
-    [Fact]
-    public void EditTools_ContainsReadAndDelegationTools()
-    {
-        // EditAgent keeps read_file for editing, delegates exploration via runSubagent
-        EditAgent.EditTools.Should().Contain("read_file");
-        EditAgent.EditTools.Should().Contain("get_errors");
-        EditAgent.EditTools.Should().Contain("runSubagent");
-        EditAgent.EditTools.Should().Contain("request_handoff");
-    }
-
-    [Fact]
-    public void EditTools_ContainsTerminalBuildAndMemoryTools()
-    {
-        EditAgent.EditTools.Should().Contain("run_in_terminal");
-        EditAgent.EditTools.Should().Contain("get_terminal_output");
-        EditAgent.EditTools.Should().Contain("build_solution");
-        EditAgent.EditTools.Should().Contain("memory");
-        EditAgent.EditTools.Should().NotContain("create_and_run_task");
-        EditAgent.EditTools.Should().NotContain("manage_todo_list");
-        EditAgent.EditTools.Should().NotContain("edit_notebook_file");
-    }
-
-    [Fact]
-    public void Definition_AllowedTools_MatchesEditTools()
-    {
-        var agent = new EditAgent(_apiService);
-
-        // All EditTools should be in AllowedTools
-        foreach (var tool in EditAgent.EditTools)
-        {
-            agent.Definition.AllowedTools.Should().Contain(tool);
-        }
-    }
-
-    [Fact]
-    public void CodeStepTools_AllowsBuildTerminalAndExplorationButExcludesHandoffTools()
+    public void StepTools_AreUnifiedAcrossAllStepTypes()
     {
         var field = typeof(EditAgent).GetField(
-            "CodeStepTools",
+            "StepTools",
             System.Reflection.BindingFlags.NonPublic | System.Reflection.BindingFlags.Static);
 
         var tools = (string[])field!.GetValue(null)!;
@@ -446,53 +391,12 @@ public class EditAgentTests
         tools.Should().Contain("get_terminal_output");
         tools.Should().Contain("VisualStudio_askQuestions");
         tools.Should().Contain("build_solution");
+        tools.Should().Contain("create_file");
         tools.Should().NotContain("request_handoff");
         tools.Should().NotContain("edit_notebook_file");
-    }
 
-    [Fact]
-    public void VerifyPhaseTools_ContainsBatchEditAndMemoryTools()
-    {
-        var field = typeof(EditAgent).GetField(
-            "VerifyPhaseTools",
-            System.Reflection.BindingFlags.NonPublic | System.Reflection.BindingFlags.Static);
-
-        var tools = (string[])field!.GetValue(null)!;
-
-        tools.Should().Contain("build_solution");
-        tools.Should().Contain("apply_patch");
-        tools.Should().Contain("delete_file");
-        tools.Should().Contain("create_directory");
-        tools.Should().Contain("memory");
-        tools.Should().Contain("replace_string_in_file");
-        tools.Should().Contain("multi_replace_string_in_file");
-        tools.Should().Contain("create_file");
-        tools.Should().Contain("run_in_terminal");
-        tools.Should().Contain("get_terminal_output");
-        tools.Should().Contain("git");
-        tools.Should().NotContain("runSubagent");
-        tools.Should().NotContain("request_handoff");
-    }
-
-    [Fact]
-    public void ReadOnlyExecutionTools_ExcludeAllFileWriteTools()
-    {
-        var field = typeof(EditAgent).GetField(
-            "ReadOnlyExecutionTools",
-            System.Reflection.BindingFlags.NonPublic | System.Reflection.BindingFlags.Static);
-
-        var tools = (string[])field!.GetValue(null)!;
-
-        tools.Should().Contain("read_file");
-        tools.Should().Contain("run_in_terminal");
-        tools.Should().NotContain("create_file");
-        tools.Should().NotContain("replace_string_in_file");
-        tools.Should().NotContain("multi_replace_string_in_file");
-        tools.Should().NotContain("apply_patch");
-        tools.Should().NotContain("delete_file");
-        tools.Should().NotContain("create_directory");
-        tools.Should().NotContain("build_solution");
-        tools.Should().Contain("git");
+        var agent = new EditAgent(_apiService);
+        agent.Definition.AllowedTools.Should().BeEquivalentTo(tools);
     }
 
     [Fact]
@@ -505,25 +409,8 @@ public class EditAgentTests
         field.Should().BeNull();
     }
 
-    [Theory]
-    [InlineData("构建项目", true)]
-    [InlineData("编译验证", true)]
-    [InlineData("运行测试", true)]
-    [InlineData("分析代码", false)]
-    [InlineData("修改代码", false)]
-    public void IsBuildVerificationStep_ClassifiesDirectBuildSteps(string title, bool expected)
-    {
-        var method = typeof(EditAgent).GetMethod(
-            "IsBuildVerificationStep",
-            System.Reflection.BindingFlags.NonPublic | System.Reflection.BindingFlags.Static);
-
-        var result = (bool)method!.Invoke(null, new object[] { title })!;
-
-        result.Should().Be(expected);
-    }
-
     [Fact]
-    public void BuildStepPrompt_ForCodeStep_UsesShortInstructionWithoutDuplicatedTemplates()
+    public void BuildStepPrompt_UsesUnifiedInstructionsWithoutPhaseClassification()
     {
         var agent = new EditAgent(_apiService);
         var plan = new AgentTaskPlan
@@ -534,8 +421,8 @@ public class EditAgentTests
                 new AgentStep
                 {
                     Index = 1,
-                    Title = "Modify code",
-                    Description = "Update the implementation."
+                    Title = "创建 test.txt 文件",
+                    Description = "在项目根目录创建测试文件。"
                 }
             }
         };
@@ -545,15 +432,14 @@ public class EditAgentTests
 
         var prompt = (string)method!.Invoke(agent, new object[]
         {
-            plan.Steps[0], plan, new AgentContext(), true
+            plan.Steps[0], plan, new AgentContext()
         })!;
 
-        prompt.Should().Contain("## 代码修改步骤");
-        prompt.Should().Contain("可调用一次 build_solution 验证");
-        prompt.Should().Contain("按系统提示中的编辑格式和项目文件规则执行修改");
-        prompt.Should().NotContain("本阶段可用工具");
-        prompt.Should().NotContain("*** Begin Patch");
-        prompt.Should().NotContain("项目配置文件规则");
+        prompt.Should().Contain("## 统一执行规则");
+        prompt.Should().Contain("文件修改必须通过编辑工具完成");
+        prompt.Should().Contain("需要构建或测试时调用 build_solution");
+        prompt.Should().NotContain("## 代码修改步骤");
+        prompt.Should().NotContain("这是一个分析/验证步骤");
     }
 
     #endregion
@@ -698,25 +584,25 @@ public class EditAgentTests
     }
 
     [Fact]
-    public void BuildReadOnlyExecutionContent_AppendsMissingRawOutput()
+    public void BuildToolStepContent_AppendsMissingRawOutput()
     {
         const string aiSummary = "已读取文件，以下是说明。";
         const string rawOutput = " 终端输出 (退出码: 0):\n#include <iostream>\nint main() {}";
 
-        var result = BuildReadOnlyExecutionContentPublic(aiSummary, rawOutput);
+        var result = BuildToolStepContentPublic(aiSummary, rawOutput);
 
         result.Should().Contain(aiSummary);
-        result.Should().Contain("--- 完整终端输出 ---");
+        result.Should().Contain("--- 完整工具输出 ---");
         result.Should().Contain("#include <iostream>");
-        result.Should().Contain("--- 完整终端输出结束 ---");
+        result.Should().Contain("--- 完整工具输出结束 ---");
     }
 
     [Fact]
-    public void BuildReadOnlyExecutionContent_DoesNotDuplicateCompleteOutput()
+    public void BuildToolStepContent_DoesNotDuplicateCompleteOutput()
     {
         const string rawOutput = "终端输出 (退出码: 0):\n#include <iostream>\nint main() {}";
 
-        var result = BuildReadOnlyExecutionContentPublic(rawOutput, rawOutput);
+        var result = BuildToolStepContentPublic(rawOutput, rawOutput);
 
         result.Should().Be(rawOutput);
     }
@@ -977,10 +863,10 @@ public class EditAgentTests
         return (AgentTaskPlan)method!.Invoke(null, new object[] { userMessage })!;
     }
 
-    private static string BuildReadOnlyExecutionContentPublic(string aiResult, string rawToolOutput)
+    private static string BuildToolStepContentPublic(string aiResult, string rawToolOutput)
     {
         var method = typeof(EditAgent).GetMethod(
-            "BuildReadOnlyExecutionContent",
+            "BuildToolStepContent",
             System.Reflection.BindingFlags.NonPublic | System.Reflection.BindingFlags.Static);
         return (string)method!.Invoke(null, new object[] { aiResult, rawToolOutput })!;
     }

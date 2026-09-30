@@ -58,8 +58,8 @@ namespace DeepSeek_v4_for_VisualStudio.Services.BuiltInTools
         private const int DwmTnpVisible = 0x00000008;
         private const int DwmTnpSourceClientAreaOnly = 0x00000010;
 
-        /// <summary>截图默认保存目录（系统临时目录下）。</summary>
-        private static readonly string CaptureTempDir =
+        /// <summary>截图默认保存目录（系统临时目录下）。capture_webpage 共用同一目录。</summary>
+        internal static readonly string CaptureTempDir =
             Path.Combine(Path.GetTempPath(), "DeepSeekVS_Captures");
 
         public override string Name => "capture_window";

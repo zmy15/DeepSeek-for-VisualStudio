@@ -297,7 +297,7 @@ namespace DeepSeek_v4_for_VisualStudio.Services.BuiltInTools
 
                     try
                     {
-                        var lines = File.ReadAllLines(file);
+                        var lines = FileEncodingHelper.ReadAllLines(file);
                         for (int i = 0; i < lines.Length; i++)
                         {
                             if (results.Count >= maxResults) break;

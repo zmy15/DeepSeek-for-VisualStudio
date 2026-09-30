@@ -74,17 +74,18 @@ namespace DeepSeek_v4_for_VisualStudio.Services.BuiltInTools
         // 操作分类常量
         // ═══════════════════════════════════════════════════════════════
 
+        // Git 权限策略（审查口径，判定优先级如下）：
+        // 1. 只读 Agent + 写操作           => 硬拦截，提示写操作需要移交，不通过审批绕过。
+        // 2. 只读 Agent + 危险只读操作/参数 => 审批。
+        // 3. 只读 Agent + 正常只读操作      => 放行。
+        // 4. 写 Agent + 普通 Git 写操作     => 放行。
+        // 5. 写 Agent + 危险 Git 写操作/参数 => 审批。
+
         /// <summary>只读操作 — 自动放行，无需审批</summary>
         private static readonly HashSet<string> ReadOnlyOps = new(StringComparer.OrdinalIgnoreCase)
         {
             "status", "diff", "log", "show",
-            "describe", "tag", "rev-parse", "reflog", "ls-files",
-        };
-
-        /// <summary>写操作 — 在只读 Agent 中拒绝</summary>
-        private static readonly HashSet<string> WriteOps = new(StringComparer.OrdinalIgnoreCase)
-        {
-            "add", "commit", "branch", "checkout", "merge", "pull", "stash", "reset",
+            "describe", "tag", "rev-parse", "reflog", "ls-files", "fetch",
         };
 
         /// <summary>危险操作 — 无论是否为写操作，都需要审批</summary>
@@ -110,6 +111,12 @@ namespace DeepSeek_v4_for_VisualStudio.Services.BuiltInTools
             ["branch"] = new(StringComparer.Ordinal) { "--list", "-l", "--all", "-a", "--remotes", "-r", "--verbose", "-v", "--show-current" },
             ["checkout"] = new(StringComparer.Ordinal) { "--track", "-t", "--detach", "--quiet", "-q" },
             ["merge"] = new(StringComparer.Ordinal) { "--ff-only", "--no-ff", "--squash", "--no-commit", "--abort", "--continue", "--quit" },
+            ["fetch"] = new(StringComparer.Ordinal) { "--all", "--prune", "-p", "--tags", "--no-tags", "--no-write-fetch-head", "--dry-run" },
+            ["switch"] = new(StringComparer.Ordinal) { "--create", "-c", "--force-create", "-C", "--detach", "--track", "-t", "--no-track", "--guess", "--no-guess", "--orphan" },
+            ["restore"] = new(StringComparer.Ordinal) { "--staged", "--worktree", "--merge", "--ours", "--theirs", "--ignore-unmerged", "--overlay", "--no-overlay", "--recurse-submodules", "--no-recurse-submodules" },
+            ["revert"] = new(StringComparer.Ordinal) { "--no-commit", "--edit", "-e", "--no-edit", "--continue", "--abort", "--skip", "--quit", "--allow-empty", "--allow-empty-message", "--keep-redundant-commits" },
+            ["rebase"] = new(StringComparer.Ordinal) { "--continue", "--abort", "--skip", "--quit", "--autostash", "--no-autostash", "--rebase-merges", "--no-rebase-merges", "--update-refs", "--no-update-refs", "--autosquash", "--no-autosquash", "--keep-base", "--fork-point", "--no-fork-point" },
+            ["cherry-pick"] = new(StringComparer.Ordinal) { "--no-commit", "--edit", "-e", "--no-edit", "--ff", "-x", "--allow-empty", "--allow-empty-message", "--keep-redundant-commits", "--continue", "--abort", "--skip", "--quit" },
             ["pull"] = new(StringComparer.Ordinal) { "--rebase", "--ff-only", "--no-ff", "--autostash", "--no-rebase" },
             ["push"] = new(StringComparer.Ordinal) { "--dry-run", "--set-upstream", "-u" },
             ["stash"] = new(StringComparer.Ordinal) { "--include-untracked", "-u", "--keep-index", "--staged", "--quiet" },
@@ -124,6 +131,11 @@ namespace DeepSeek_v4_for_VisualStudio.Services.BuiltInTools
             ["diff"] = new(StringComparer.Ordinal) { "--diff-filter", "--ignore-matching-lines" },
             ["describe"] = new(StringComparer.Ordinal) { "--match", "--exclude" },
             ["tag"] = new(StringComparer.Ordinal) { "--sort", "--merged", "--no-merged", "--contains", "--points-at", "--format" },
+            ["fetch"] = new(StringComparer.Ordinal) { "--depth", "--shallow-since", "--shallow-exclude", "--refmap" },
+            ["switch"] = new(StringComparer.Ordinal) { "--conflict" },
+            ["rebase"] = new(StringComparer.Ordinal) { "--onto", "--exec", "-x", "--strategy", "-s", "-X", "--empty" },
+            ["cherry-pick"] = new(StringComparer.Ordinal) { "--strategy", "-s", "-X", "--cleanup" },
+            ["revert"] = new(StringComparer.Ordinal) { "--strategy", "-s", "-X", "--cleanup" },
         };
 
         /// <summary>所有有效操作</summary>
@@ -131,7 +143,8 @@ namespace DeepSeek_v4_for_VisualStudio.Services.BuiltInTools
         {
             "status", "diff", "log", "show", "describe", "tag",
             "rev-parse", "reflog", "ls-files",
-            "add", "commit", "branch", "checkout", "merge", "pull", "push", "stash", "reset",
+            "remote", "config", "switch", "restore", "revert", "rebase", "cherry-pick",
+            "add", "commit", "branch", "checkout", "merge", "fetch", "pull", "push", "stash", "reset",
         };
 
         /// <summary>同步模式超时</summary>
@@ -161,6 +174,22 @@ namespace DeepSeek_v4_for_VisualStudio.Services.BuiltInTools
             string path,
             bool delete)
         {
+            if (string.Equals(operation, "remote", StringComparison.OrdinalIgnoreCase))
+            {
+                return mode.Length == 0
+                    || string.Equals(mode, "list", StringComparison.OrdinalIgnoreCase)
+                    || string.Equals(mode, "verbose", StringComparison.OrdinalIgnoreCase)
+                    || string.Equals(mode, "show", StringComparison.OrdinalIgnoreCase)
+                    || string.Equals(mode, "get-url", StringComparison.OrdinalIgnoreCase);
+            }
+
+            if (string.Equals(operation, "config", StringComparison.OrdinalIgnoreCase))
+            {
+                return mode.Length == 0
+                    || string.Equals(mode, "list", StringComparison.OrdinalIgnoreCase)
+                    || string.Equals(mode, "get", StringComparison.OrdinalIgnoreCase);
+            }
+
             return ReadOnlyOps.Contains(operation)
                 || (operation == "branch" && string.IsNullOrEmpty(branch) && !delete)
                 || (operation == "stash"
@@ -192,6 +221,14 @@ namespace DeepSeek_v4_for_VisualStudio.Services.BuiltInTools
         /// <param name="flags">额外 Git 参数。</param>
         /// <param name="reason">需要审批的具体参数或操作。</param>
         /// <returns>需要审批时返回 true。</returns>
+        /// <remarks>
+        /// 判定优先级：
+        /// 1. 只读 Agent + 写操作：直接交给 GitTool 执行层拦截，不进入审批，避免审批绕过职责边界。
+        /// 2. 只读 Agent + 危险只读操作或危险参数：进入审批。
+        /// 3. 只读 Agent + 正常只读操作：放行。
+        /// 4. 写 Agent + 普通 Git 写操作：放行。
+        /// 5. 写 Agent + 危险 Git 写操作或危险参数：进入审批。
+        /// </remarks>
         internal static bool RequiresApproval(
             AgentType? agentType,
             string operation,
@@ -204,17 +241,19 @@ namespace DeepSeek_v4_for_VisualStudio.Services.BuiltInTools
         {
             reason = string.Empty;
 
-            // 只读 Agent 的写操作必须在执行层阻断；审批只能放宽危险参数，
-            // 不能放宽 Agent 的职责边界。
+            // 规则 1：只读 Agent 的写操作必须在执行层阻断。
+            // 这里不返回“需要审批”，否则用户批准后会绕过只读 Agent 的职责边界。
             if (IsReadOnlyAgent(agentType) && !isReadOnly)
                 return false;
 
+            // 规则 2：只读 Agent 仍可因危险只读参数进入审批，例如 log --output=...。
             if (FlagsRequireApproval(operation, flags, out string flagReason))
             {
                 reason = flagReason;
                 return true;
             }
 
+            // 规则 4/5：写 Agent 的普通写操作放行，危险写操作进入审批。
             string dangerousReason = GetDangerousOperationReason(operation, mode, delete, force);
             if (string.IsNullOrEmpty(dangerousReason))
                 return false;
@@ -243,6 +282,21 @@ namespace DeepSeek_v4_for_VisualStudio.Services.BuiltInTools
             if (string.Equals(operation, "reset", StringComparison.OrdinalIgnoreCase)
                 && string.Equals(mode, "hard", StringComparison.OrdinalIgnoreCase))
                 return "--hard";
+
+            if (operation is "restore" or "revert" or "rebase" or "cherry-pick")
+                return operation;
+
+            if (string.Equals(operation, "switch", StringComparison.OrdinalIgnoreCase)
+                && string.Equals(mode, "force-create", StringComparison.OrdinalIgnoreCase))
+                return "switch --force-create";
+
+            if (string.Equals(operation, "remote", StringComparison.OrdinalIgnoreCase)
+                && !IsReadOnlyOperation(operation, string.Empty, mode, string.Empty, false))
+                return $"remote {mode}".Trim();
+
+            if (string.Equals(operation, "config", StringComparison.OrdinalIgnoreCase)
+                && !IsReadOnlyOperation(operation, string.Empty, mode, string.Empty, false))
+                return $"config {mode}".Trim();
 
             if (string.Equals(operation, "branch", StringComparison.OrdinalIgnoreCase)
                 && delete
@@ -280,7 +334,8 @@ namespace DeepSeek_v4_for_VisualStudio.Services.BuiltInTools
                                 {
                                     "status", "diff", "log", "show", "describe", "tag",
                                     "rev-parse", "reflog", "ls-files",
-                                    "add", "commit", "branch", "checkout", "merge", "pull", "push", "stash", "reset"
+                                    "remote", "config", "switch", "restore", "revert", "rebase", "cherry-pick",
+                                    "add", "commit", "branch", "checkout", "merge", "fetch", "pull", "push", "stash", "reset"
                                 }
                             },
                             path = new { type = "string", description = L["tool.git.param.path"] },
@@ -309,6 +364,9 @@ namespace DeepSeek_v4_for_VisualStudio.Services.BuiltInTools
                             delete = new { type = "boolean", description = L["tool.git.param.delete"] },
                             force = new { type = "boolean", description = L["tool.git.param.force"] },
                             remote = new { type = "string", description = L["tool.git.param.remote"] },
+                            url = new { type = "string", description = L["tool.git.param.url"] },
+                            key = new { type = "string", description = L["tool.git.param.key"] },
+                            value = new { type = "string", description = L["tool.git.param.value"] },
                             mode = new { type = "string", description = L["tool.git.param.mode"] },
                             purpose = new { type = "string", description = L["tool.git.param.purpose"] },
                         },
@@ -337,6 +395,14 @@ namespace DeepSeek_v4_for_VisualStudio.Services.BuiltInTools
                 "branch" => L["tool.git.displayBranch"],
                 "checkout" => L["tool.git.displayCheckout"],
                 "merge" => L["tool.git.displayMerge"],
+                "remote" => L["tool.git.displayRemote"],
+                "config" => L["tool.git.displayConfig"],
+                "switch" => L["tool.git.displaySwitch"],
+                "restore" => L["tool.git.displayRestore"],
+                "revert" => L["tool.git.displayRevert"],
+                "rebase" => L["tool.git.displayRebase"],
+                "cherry-pick" => L["tool.git.displayCherryPick"],
+                "fetch" => L["tool.git.displayFetch"],
                 "pull" => L["tool.git.displayPull"],
                 "push" => L["tool.git.displayPush"],
                 "stash" => L["tool.git.displayStash"],
@@ -389,6 +455,7 @@ namespace DeepSeek_v4_for_VisualStudio.Services.BuiltInTools
 
                 if (!isReadOnly)
                 {
+                    // 规则 1：只读 Agent 的写操作在这里硬拦截，并提示调用方移交。
                     Logger.Warn($"[GitTool] 只读 Agent 尝试执行写操作被拒绝 ({CurrentAgentType}): git {operation}");
                     return string.Format(
                         L["tool.git.agentBlocked"],
@@ -501,6 +568,14 @@ namespace DeepSeek_v4_for_VisualStudio.Services.BuiltInTools
                         "tool.git.flagInvalid",
                         operation,
                         flag);
+                    return false;
+                }
+
+                if (string.Equals(operation, "rebase", StringComparison.OrdinalIgnoreCase)
+                    && (string.Equals(flag, "--interactive", StringComparison.OrdinalIgnoreCase)
+                        || string.Equals(flag, "-i", StringComparison.OrdinalIgnoreCase)))
+                {
+                    blockedMessage = L["tool.git.rebaseInteractiveBlocked"];
                     return false;
                 }
 
@@ -821,6 +896,104 @@ namespace DeepSeek_v4_for_VisualStudio.Services.BuiltInTools
                             : $"ls-files -- \"{EscapeArg(path)}\"";
                     }
 
+                case "remote":
+                    {
+                        string mode = GetStringArg(args, "mode").ToLowerInvariant().Trim();
+                        string remote = GetStringArg(args, "remote");
+                        string url = GetStringArg(args, "url");
+                        return mode switch
+                        {
+                            "" or "list" => "remote",
+                            "verbose" => "remote -v",
+                            "show" when !string.IsNullOrEmpty(remote) => $"remote show \"{EscapeArg(remote)}\"",
+                            "get-url" when !string.IsNullOrEmpty(remote) => $"remote get-url \"{EscapeArg(remote)}\"",
+                            "add" when !string.IsNullOrEmpty(remote) && !string.IsNullOrEmpty(url) => $"remote add \"{EscapeArg(remote)}\" \"{EscapeArg(url)}\"",
+                            "remove" when !string.IsNullOrEmpty(remote) => $"remote remove \"{EscapeArg(remote)}\"",
+                            "set-url" when !string.IsNullOrEmpty(remote) && !string.IsNullOrEmpty(url) => $"remote set-url \"{EscapeArg(remote)}\" \"{EscapeArg(url)}\"",
+                            "show" or "get-url" or "add" or "remove" or "set-url" => "[BLOCKED] " + L["tool.git.remoteArgsMissing"],
+                            _ => "[BLOCKED] Unknown remote mode: " + mode,
+                        };
+                    }
+
+                case "config":
+                    {
+                        string mode = GetStringArg(args, "mode").ToLowerInvariant().Trim();
+                        string key = GetStringArg(args, "key");
+                        string value = GetStringArg(args, "value");
+                        return mode switch
+                        {
+                            "" or "list" => "config --list --local",
+                            "get" when !string.IsNullOrEmpty(key) => $"config --local --get \"{EscapeArg(key)}\"",
+                            "set" when !string.IsNullOrEmpty(key) && value.Length > 0 => $"config --local \"{EscapeArg(key)}\" \"{EscapeArg(value)}\"",
+                            "unset" when !string.IsNullOrEmpty(key) => $"config --local --unset \"{EscapeArg(key)}\"",
+                            "get" or "set" or "unset" => "[BLOCKED] " + L["tool.git.configArgsMissing"],
+                            _ => "[BLOCKED] Unknown config mode: " + mode,
+                        };
+                    }
+
+                case "switch":
+                    {
+                        string branch = GetStringArg(args, "branch");
+                        if (string.IsNullOrEmpty(branch))
+                            return "[BLOCKED] " + L["tool.git.switchNoBranch"];
+                        string mode = GetStringArg(args, "mode").ToLowerInvariant().Trim();
+                        return mode switch
+                        {
+                            "create" => $"switch -c \"{EscapeArg(branch)}\"",
+                            "force-create" => $"switch -C \"{EscapeArg(branch)}\"",
+                            "detach" => $"switch --detach \"{EscapeArg(branch)}\"",
+                            _ => $"switch \"{EscapeArg(branch)}\"",
+                        };
+                    }
+
+                case "restore":
+                    {
+                        string path = GetStringArg(args, "path");
+                        if (string.IsNullOrEmpty(path))
+                            return "[BLOCKED] " + L["tool.git.restoreNoPath"];
+                        bool staged = GetBoolArg(args, "staged");
+                        string source = GetStringArg(args, "reference");
+                        var sb = new StringBuilder("restore");
+                        if (staged) sb.Append(" --staged");
+                        if (!string.IsNullOrEmpty(source)) sb.Append($" --source \"{EscapeArg(source)}\"");
+                        sb.Append($" -- \"{EscapeArg(path)}\" ");
+                        return sb.ToString().TrimEnd();
+                    }
+
+                case "revert":
+                    {
+                        string mode = GetStringArg(args, "mode").ToLowerInvariant().Trim();
+                        if (mode is "continue" or "abort" or "skip" or "quit")
+                            return $"revert --{mode}";
+                        string reference = GetRevisionRange(args);
+                        if (string.IsNullOrEmpty(reference))
+                            return "[BLOCKED] " + L["tool.git.revertNoReference"];
+                        return $"revert {EscapeArg(reference)}";
+                    }
+
+                case "rebase":
+                    {
+                        string mode = GetStringArg(args, "mode").ToLowerInvariant().Trim();
+                        if (mode is "continue" or "abort" or "skip" or "quit")
+                            return $"rebase --{mode}";
+                        string upstream = GetStringArg(args, "branch");
+                        if (string.IsNullOrEmpty(upstream)) upstream = GetStringArg(args, "reference");
+                        if (string.IsNullOrEmpty(upstream))
+                            return "[BLOCKED] " + L["tool.git.rebaseNoUpstream"];
+                        return $"rebase {EscapeArg(upstream)}";
+                    }
+
+                case "cherry-pick":
+                    {
+                        string mode = GetStringArg(args, "mode").ToLowerInvariant().Trim();
+                        if (mode is "continue" or "abort" or "skip" or "quit")
+                            return $"cherry-pick --{mode}";
+                        string reference = GetRevisionRange(args);
+                        if (string.IsNullOrEmpty(reference))
+                            return "[BLOCKED] " + L["tool.git.cherryPickNoReference"];
+                        return $"cherry-pick {EscapeArg(reference)}";
+                    }
+
                 case "add":
                     {
                         var files = GetStringArrayArg(args, "files");
@@ -891,6 +1064,17 @@ namespace DeepSeek_v4_for_VisualStudio.Services.BuiltInTools
                             "squash" => $"merge --squash \"{EscapeArg(branch)}\"",
                             _ => $"merge \"{EscapeArg(branch)}\"",
                         };
+                    }
+
+                case "fetch":
+                    {
+                        string remote = GetStringArg(args, "remote");
+                        string branch = GetStringArg(args, "branch");
+                        if (string.IsNullOrEmpty(remote) && string.IsNullOrEmpty(branch)) return "fetch";
+                        if (string.IsNullOrEmpty(remote)) remote = "origin";
+                        return string.IsNullOrEmpty(branch)
+                            ? $"fetch {EscapeArg(remote)}"
+                            : $"fetch {EscapeArg(remote)} \"{EscapeArg(branch)}\"";
                     }
 
                 case "pull":

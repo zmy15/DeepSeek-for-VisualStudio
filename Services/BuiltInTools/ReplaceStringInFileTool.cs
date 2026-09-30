@@ -1,4 +1,4 @@
-﻿using DeepSeek_v4_for_VisualStudio.Models;
+using DeepSeek_v4_for_VisualStudio.Models;
 using DeepSeek_v4_for_VisualStudio.Services;
 using DeepSeek_v4_for_VisualStudio.Services.EditTools;
 using DeepSeek_v4_for_VisualStudio.Utils;
@@ -116,7 +116,7 @@ namespace DeepSeek_v4_for_VisualStudio.Services.BuiltInTools
             {
                 string content = Workspace != null
                     ? Workspace.ReadFile(filePath)
-                    : File.ReadAllText(filePath, Encoding.UTF8);
+                    : FileEncodingHelper.ReadAllText(filePath);
                 string normalizedContent = content.Replace("\r\n", "\n").Replace("\r", "\n");
                 string normalizedOld = oldString.Replace("\r\n", "\n").Replace("\r", "\n");
                 string normalizedNew = newString.Replace("\r\n", "\n").Replace("\r", "\n");
@@ -193,7 +193,7 @@ namespace DeepSeek_v4_for_VisualStudio.Services.BuiltInTools
             }
 
             return File.Exists(filePath)
-                ? await Task.Run(() => File.ReadAllText(filePath, Encoding.UTF8))
+                ? await Task.Run(() => FileEncodingHelper.ReadAllText(filePath))
                 : null;
         }
 

@@ -1,4 +1,4 @@
-﻿using System;
+using System;
 using System.Collections.Concurrent;
 using System.Collections.Generic;
 using System.IO;
@@ -8,11 +8,15 @@ using System.Text;
 namespace DeepSeek_v4_for_VisualStudio.Utils
 {
     /// <summary>
-    /// 文件写入编码决策辅助类。
-    /// 统一「编辑文件的工具」的写入编码策略，避免写入时无意改变文件原有编码或引入/丢失 BOM：
-    /// 1) 目标文件已存在 → 保持其原有编码（依据文件头 BOM 判定，无 BOM 视为 UTF-8 无 BOM）；
+    /// 文件编码决策辅助类：统一「读写项目文件」的编码事实源。
+    /// 读写两侧共用同一套判定，避免「读出来的内容」与「写回去的编码」不一致：
+    /// 1) 已存在文件 → 依据 BOM、严格 UTF-8 校验、无 BOM UTF-16 启发式判定其编码，
+    ///    无法按 UTF-8 解码时回退系统 ANSI 代码页（中文 Windows = GBK/936，与 VS 编辑器默认行为一致）；
     /// 2) 新建文件 → 采样项目内同类文件的编码惯例，按多数派写入；
     /// 3) 无法判定（无样本/探测失败）→ 兜底 UTF-8 无 BOM。
+    ///
+    /// 重要：编辑类工具读取待编辑文件时必须使用本类的 <see cref="ReadAllText"/>，
+    /// 否则可能出现「按 UTF-8 误读成乱码 → 按原编码写回」造成的不可逆内容损坏。
     /// </summary>
     public static class FileEncodingHelper
     {
@@ -21,6 +25,28 @@ namespace DeepSeek_v4_for_VisualStudio.Utils
 
         /// <summary>UTF-8 无 BOM 编码实例（兜底默认）。</summary>
         private static readonly Encoding Utf8NoBom = new UTF8Encoding(false);
+
+        /// <summary>
+        /// 严格 UTF-8 编码实例：遇到非法字节抛 <see cref="DecoderFallbackException"/>。
+        /// 注意 <see cref="Encoding.UTF8"/> 默认是「替换回退」（坏字节 → U+FFFD，不抛异常），
+        /// 因此编码判定必须显式使用本实例，否则永远无法发现非法 UTF-8 字节。
+        /// </summary>
+        private static readonly Encoding Utf8Strict = new UTF8Encoding(false, throwOnInvalidBytes: true);
+
+        /// <summary>UTF-16 小端无 BOM 编码实例（无 BOM 的 UTF-16 文件写回时不应凭空添加 BOM）。</summary>
+        private static readonly Encoding Utf16LeNoBom = new UnicodeEncoding(false, false);
+
+        /// <summary>UTF-16 大端无 BOM 编码实例。</summary>
+        private static readonly Encoding Utf16BeNoBom = new UnicodeEncoding(true, false);
+
+        /// <summary>
+        /// 无法按 UTF-8 解码时的回退编码：系统 ANSI 代码页（中文 Windows = GBK/936）。
+        /// 与 VS 编辑器「无法按 UTF-8 解码时使用系统区域设置编码」的默认行为保持一致。
+        /// </summary>
+        private static readonly Encoding FallbackEncoding = Encoding.Default;
+
+        /// <summary>判定编码时读取的文件头样本大小（字节）。</summary>
+        private const int HeadSampleBytes = 8 * 1024;
 
         /// <summary>UTF-16 小端带 BOM 编码实例。</summary>
         private static readonly Encoding Utf16Le = new UnicodeEncoding(false, true);
@@ -59,6 +85,123 @@ namespace DeepSeek_v4_for_VisualStudio.Utils
             File.WriteAllText(filePath, content, ResolveWriteEncoding(filePath, workspaceRoot));
         }
 
+        #region 读取
+
+        /// <summary>
+        /// 按探测到的编码读取文本文件。所有「读取用户项目文件」的场景都应走本方法，
+        /// 以保证与 <see cref="WriteAllText"/> 的编码判定完全一致（读什么编码，就写什么编码）。
+        ///
+        /// 快路径：单遍严格 UTF-8 解码且结果不含 NUL（绝大多数文件命中，无额外 I/O 开销）；
+        /// 慢路径：非法 UTF-8 或解码结果含 NUL → 无 BOM UTF-16 启发式 → 系统 ANSI 代码页回退。
+        /// （无 BOM 的 UTF-16 字节本身是合法 UTF-8——NUL 是合法字节——因此不能只靠「UTF-8 解码失败」发现它。）
+        /// </summary>
+        /// <param name="filePath">目标文件路径。</param>
+        /// <returns>文件文本内容（BOM 已被剥离）。</returns>
+        /// <exception cref="IOException">文件不存在或无法读取时由底层 IO 抛出（与 File.ReadAllText 一致）。</exception>
+        public static string ReadAllText(string filePath)
+        {
+            string? utf8Content = TryReadAllTextAsStrictUtf8(filePath);
+
+            // 含 NUL 的「合法 UTF-8」极可能是被误读的无 BOM UTF-16，需继续走启发式判定
+            if (utf8Content != null && utf8Content.IndexOf('\0') < 0)
+                return utf8Content;
+
+            byte[] head = new byte[HeadSampleBytes];
+            int read = ReadHead(filePath, head);
+            bool hasBom = DetectBomKind(head, read) != EncodingKind.Utf8NoBom;
+            if (!hasBom && TryDetectBomlessUtf16(head, read, out Encoding bomlessUtf16))
+                return ReadAllTextWith(filePath, bomlessUtf16);
+
+            // 含 NUL 但不像 UTF-16 → 维持 UTF-8 结果（无 BOM 探测空间时的原有行为）
+            if (utf8Content != null)
+                return utf8Content;
+
+            return ReadAllTextWith(filePath, FallbackEncoding);
+        }
+
+        /// <summary>
+        /// 以指定编码读取整个文件。
+        /// </summary>
+        /// <param name="filePath">目标文件路径。</param>
+        /// <param name="encoding">使用的编码。</param>
+        /// <returns>文件文本内容。</returns>
+        private static string ReadAllTextWith(string filePath, Encoding encoding)
+        {
+            using var stream = new FileStream(filePath, FileMode.Open, FileAccess.Read, FileShare.ReadWrite);
+            using var reader = new StreamReader(stream, encoding, detectEncodingFromByteOrderMarks: true);
+            return reader.ReadToEnd();
+        }
+
+        /// <summary>
+        /// 按探测到的编码读取文本文件并按行切分，语义与 <see cref="File.ReadAllLines(string)"/> 一致
+        /// （识别 CRLF/LF/CR，且行尾终止符不产生多余的空行项）。
+        /// </summary>
+        /// <param name="filePath">目标文件路径。</param>
+        /// <returns>文件各行内容。</returns>
+        public static string[] ReadAllLines(string filePath)
+        {
+            string text = ReadAllText(filePath);
+            if (text.Length == 0)
+                return Array.Empty<string>();
+
+            string[] lines = text.Split(new[] { "\r\n", "\n", "\r" }, StringSplitOptions.None);
+
+            // 文件以换行结束时不额外产生一个空行项（对齐 File.ReadAllLines 语义）
+            char last = text[text.Length - 1];
+            if ((last == '\n' || last == '\r') && lines.Length > 0 && lines[lines.Length - 1].Length == 0)
+            {
+                var trimmed = new string[lines.Length - 1];
+                Array.Copy(lines, trimmed, trimmed.Length);
+                return trimmed;
+            }
+
+            return lines;
+        }
+
+        /// <summary>
+        /// 探测已存在文件应使用的编码（读写共用）。
+        /// 判定顺序：BOM（UTF-32 → UTF-8 → UTF-16）→ 无 BOM UTF-16 启发式 → 全文件严格 UTF-8 校验 → 系统 ANSI 回退。
+        /// </summary>
+        /// <param name="filePath">目标文件路径。</param>
+        /// <returns>该文件当前的编码实例。</returns>
+        /// <exception cref="IOException">文件不存在或无法读取时由底层 IO 抛出。</exception>
+        public static Encoding DetectFileEncoding(string filePath)
+        {
+            byte[] head = new byte[HeadSampleBytes];
+            int read = ReadHead(filePath, head);
+
+            EncodingKind bomKind = DetectBomKind(head, read);
+            if (bomKind != EncodingKind.Utf8NoBom)
+                return EncodingFromKind(bomKind);
+
+            // 无 BOM 的 UTF-16 同样能通过 UTF-8 校验（NUL 是合法 UTF-8 字节），必须先排除
+            if (TryDetectBomlessUtf16(head, read, out Encoding bomlessUtf16))
+                return bomlessUtf16;
+
+            return IsValidUtf8(filePath) ? Utf8NoBom : FallbackEncoding;
+        }
+
+        /// <summary>
+        /// 单遍尝试按严格 UTF-8 解码整个文件（BOM 由 StreamReader 自动识别并切换编码）。
+        /// </summary>
+        /// <param name="filePath">目标文件路径。</param>
+        /// <returns>解码成功时返回文本；遇到非法 UTF-8 字节时返回 null（交由回退路径处理）。</returns>
+        private static string? TryReadAllTextAsStrictUtf8(string filePath)
+        {
+            try
+            {
+                using var stream = new FileStream(filePath, FileMode.Open, FileAccess.Read, FileShare.ReadWrite);
+                using var reader = new StreamReader(stream, Utf8Strict, detectEncodingFromByteOrderMarks: true);
+                return reader.ReadToEnd();
+            }
+            catch (DecoderFallbackException)
+            {
+                return null;
+            }
+        }
+
+        #endregion
+
         /// <summary>
         /// 解析写入指定文件时应使用的编码。
         /// </summary>
@@ -94,32 +237,46 @@ namespace DeepSeek_v4_for_VisualStudio.Utils
         }
 
         /// <summary>
-        /// 检测已存在文件的编码：依据文件头 BOM 字节判定；未识别到 BOM 时视为 UTF-8 无 BOM。
+        /// 检测已存在文件的编码，等价于 <see cref="DetectFileEncoding"/>（保留原公开 API）。
         /// </summary>
         /// <param name="filePath">已存在的文件路径。</param>
         /// <returns>与文件当前编码一致的编码实例。</returns>
         /// <exception cref="IOException">文件不存在或无法读取时由底层 IO 抛出。</exception>
         public static Encoding DetectExistingFileEncoding(string filePath)
         {
-            return EncodingFromKind(DetectEncodingKind(filePath));
+            return DetectFileEncoding(filePath);
         }
 
         /// <summary>
-        /// 读取文件头 4 字节判定编码类别。
-        /// 注意：UTF-32 LE 的 BOM（FF FE 00 00）以 UTF-16 LE 的 BOM（FF FE）为前缀，必须先判 4 字节再判 2 字节。
+        /// 读取文件头样本（最多 <see cref="HeadSampleBytes"/> 字节）。
         /// </summary>
         /// <param name="filePath">目标文件路径。</param>
-        /// <returns>探测出的编码类别。</returns>
-        private static EncodingKind DetectEncodingKind(string filePath)
+        /// <param name="buffer">接收样本的缓冲区。</param>
+        /// <returns>实际读入的字节数。</returns>
+        private static int ReadHead(string filePath, byte[] buffer)
         {
-            byte[] head = new byte[4];
-            int read;
+            int total = 0;
             // FileShare.ReadWrite：允许读取被编辑器/索引器持有句柄的文件
             using (var stream = new FileStream(filePath, FileMode.Open, FileAccess.Read, FileShare.ReadWrite))
             {
-                read = stream.Read(head, 0, head.Length);
+                int read;
+                while (total < buffer.Length && (read = stream.Read(buffer, total, buffer.Length - total)) > 0)
+                    total += read;
             }
 
+            return total;
+        }
+
+        /// <summary>
+        /// 依据文件头 BOM 判定编码类别。
+        /// 注意：UTF-32 LE 的 BOM（FF FE 00 00）以 UTF-16 LE 的 BOM（FF FE）为前缀，必须先判 4 字节再判 2 字节。
+        /// 无 BOM 时统一返回 <see cref="EncodingKind.Utf8NoBom"/> 作为「需要进一步判定」的哨兵值。
+        /// </summary>
+        /// <param name="head">文件头字节。</param>
+        /// <param name="read">文件头实际字节数。</param>
+        /// <returns>探测出的编码类别。</returns>
+        private static EncodingKind DetectBomKind(byte[] head, int read)
+        {
             if (read >= 4 && head[0] == 0xFF && head[1] == 0xFE && head[2] == 0x00 && head[3] == 0x00)
                 return EncodingKind.Utf32Le;
             if (read >= 4 && head[0] == 0x00 && head[1] == 0x00 && head[2] == 0xFE && head[3] == 0xFF)
@@ -132,6 +289,127 @@ namespace DeepSeek_v4_for_VisualStudio.Utils
                 return EncodingKind.Utf16Be;
 
             return EncodingKind.Utf8NoBom;
+        }
+
+        /// <summary>
+        /// 「无 BOM 的 UTF-16」启发式判定：头部样本零字节占比 ≥ 25%，
+        /// 且零字节几乎全部落在同一奇偶位（小端 → 奇数位为 0；大端 → 偶数位为 0）。
+        ///
+        /// 之所以需要该启发式：ASCII 文本的 UTF-16 字节同样能通过 UTF-8 校验（NUL 是合法 UTF-8 字节），
+        /// 不能依赖「UTF-8 校验失败」来发现无 BOM 的 UTF-16 文件。
+        /// </summary>
+        /// <param name="head">文件头样本。</param>
+        /// <param name="read">样本字节数。</param>
+        /// <param name="encoding">判定命中时的编码实例。</param>
+        /// <returns>判定为无 BOM 的 UTF-16 时返回 true。</returns>
+        private static bool TryDetectBomlessUtf16(byte[] head, int read, out Encoding encoding)
+        {
+            encoding = Utf8NoBom;
+            if (read < 16)
+                return false;
+
+            int nulCount = 0;
+            int nulOnEvenIndex = 0;
+            int nulOnOddIndex = 0;
+            for (int i = 0; i < read; i++)
+            {
+                if (head[i] != 0)
+                    continue;
+
+                nulCount++;
+                if ((i & 1) == 0)
+                    nulOnEvenIndex++;
+                else
+                    nulOnOddIndex++;
+            }
+
+            // 零字节太稀疏 → 不是 UTF-16 文本
+            if (nulCount * 4 < read)
+                return false;
+
+            if (nulOnOddIndex >= nulCount * 9 / 10)
+            {
+                encoding = Utf16LeNoBom;
+                return true;
+            }
+
+            if (nulOnEvenIndex >= nulCount * 9 / 10)
+            {
+                encoding = Utf16BeNoBom;
+                return true;
+            }
+
+            return false;
+        }
+
+        /// <summary>
+        /// 判定头部样本是否整体是合法 UTF-8。
+        /// 采样时以 flush:false 解码：样本末尾可能正好截断一个多字节序列，这种「不完整」不算非法。
+        /// </summary>
+        /// <param name="head">文件头样本。</param>
+        /// <param name="read">样本字节数。</param>
+        /// <returns>样本合法时返回 true。</returns>
+        private static bool IsSampleValidUtf8(byte[] head, int read)
+        {
+            if (read <= 0)
+                return true;
+
+            try
+            {
+                Utf8Strict.GetDecoder().GetCharCount(head, 0, read, flush: false);
+                return true;
+            }
+            catch (DecoderFallbackException)
+            {
+                return false;
+            }
+        }
+
+        /// <summary>
+        /// 全文件严格 UTF-8 校验（只校验不产出文本，逐块读取以避免整文件驻留内存）。
+        /// </summary>
+        /// <param name="filePath">目标文件路径。</param>
+        /// <returns>整个文件都是合法 UTF-8 时返回 true。</returns>
+        private static bool IsValidUtf8(string filePath)
+        {
+            try
+            {
+                using var stream = new FileStream(filePath, FileMode.Open, FileAccess.Read, FileShare.ReadWrite);
+                using var reader = new StreamReader(stream, Utf8Strict, detectEncodingFromByteOrderMarks: true);
+                char[] sink = new char[8192];
+                while (reader.Read(sink, 0, sink.Length) > 0)
+                {
+                    // 只为触发解码校验，内容丢弃
+                }
+
+                return true;
+            }
+            catch (DecoderFallbackException)
+            {
+                return false;
+            }
+        }
+
+        /// <summary>
+        /// 读取文件头样本判定编码类别（项目编码惯例采样用）。
+        /// 无 BOM 时：样本能通过 UTF-8 校验视为 UTF-8，否则视为系统 ANSI（GBK 等）。
+        /// </summary>
+        /// <remarks>
+        /// 采样只看文件头样本（<see cref="HeadSampleBytes"/> 字节）而非全文件，避免扫描大仓库过慢；
+        /// 中文注释通常出现在文件头部，判定准确度足够。
+        /// </remarks>
+        /// <param name="filePath">目标文件路径。</param>
+        /// <returns>探测出的编码类别。</returns>
+        private static EncodingKind DetectEncodingKind(string filePath)
+        {
+            byte[] head = new byte[HeadSampleBytes];
+            int read = ReadHead(filePath, head);
+
+            EncodingKind bomKind = DetectBomKind(head, read);
+            if (bomKind != EncodingKind.Utf8NoBom)
+                return bomKind;
+
+            return IsSampleValidUtf8(head, read) ? EncodingKind.Utf8NoBom : EncodingKind.Ansi;
         }
 
         /// <summary>
@@ -148,6 +426,7 @@ namespace DeepSeek_v4_for_VisualStudio.Utils
                 case EncodingKind.Utf16Be: return Utf16Be;
                 case EncodingKind.Utf32Le: return Utf32Le;
                 case EncodingKind.Utf32Be: return Utf32Be;
+                case EncodingKind.Ansi: return FallbackEncoding;
                 default: return Utf8NoBom;
             }
         }
@@ -331,6 +610,9 @@ namespace DeepSeek_v4_for_VisualStudio.Utils
             Utf16Be,
             Utf32Le,
             Utf32Be,
+
+            /// <summary>无 BOM 且无法按 UTF-8 解码 → 系统 ANSI 代码页（中文 Windows = GBK/936）。</summary>
+            Ansi,
         }
     }
 }
