@@ -2,7 +2,6 @@ using DeepSeek_v4_for_VisualStudio.Models;
 using DeepSeek_v4_for_VisualStudio.Utils;
 using System;
 using System.Collections.Generic;
-using System.IO;
 using System.Text;
 using System.Text.Json;
 using System.Threading.Tasks;
@@ -11,15 +10,20 @@ namespace DeepSeek_v4_for_VisualStudio.Services.BuiltInTools
 {
     /// <summary>
     /// capture_webpage tool - renders a URL in an off-screen browser and saves the
-    /// result as a PNG for the vision model to inspect.
+    /// result as one or more PNG bands for the vision model to inspect.
     ///
     /// Complements fetch_webpage: that tool returns markup/text, this one returns what
     /// the page actually looks like after layout and scripting.
     ///
-    /// The result text ends with a [CAPTURE_IMAGE]...[/CAPTURE_IMAGE] block holding the
-    /// local PNG path. BaseAgent parses that block, strips it from the text, and - when a
-    /// vision model is active - forwards the image as a data URI. Non-vision models never
-    /// see this tool at all (see BuiltInToolService.IsToolAvailableForCurrentModel).
+    /// A tall document is returned as several native-resolution bands rather than one
+    /// downscaled image, because squeezing e.g. 1280x11500 into a single long-edge-capped
+    /// PNG yields 228x2048 and is unreadable. Callers can walk further down a very long
+    /// page with start_y.
+    ///
+    /// The result text ends with a [CAPTURE_IMAGE]...[/CAPTURE_IMAGE] block holding one
+    /// PNG path per line. BaseAgent parses that block, strips it from the text, and - when
+    /// a vision model is active - forwards every image as a data URI. Non-vision models
+    /// never see this tool at all (see BuiltInToolService.IsToolAvailableForCurrentModel).
     /// </summary>
     public class CaptureWebpageTool : BuiltInToolBase
     {
@@ -48,6 +52,11 @@ namespace DeepSeek_v4_for_VisualStudio.Services.BuiltInTools
                             {
                                 type = "boolean",
                                 description = L["tool.captureWebpage.param.fullPage"]
+                            },
+                            start_y = new
+                            {
+                                type = "integer",
+                                description = L["tool.captureWebpage.param.startY"]
                             },
                             viewport_width = new
                             {
@@ -96,6 +105,7 @@ namespace DeepSeek_v4_for_VisualStudio.Services.BuiltInTools
                 return L.Format("tool.captureWebpage.invalidUrl", TruncateText(url, 120));
 
             bool fullPage = GetBoolArg(args, "full_page", true);
+            int startY = GetIntArg(args, "start_y", 0);
             int viewportWidth = GetIntArg(args, "viewport_width", 0);
             int maxWidth = GetIntArg(args, "max_width", 0);
             string savePathArg = GetStringArg(args, "save_path");
@@ -106,6 +116,7 @@ namespace DeepSeek_v4_for_VisualStudio.Services.BuiltInTools
                 {
                     Url = normalizedUrl,
                     FullPage = fullPage,
+                    StartY = startY,
                     ViewportWidth = viewportWidth,
                     MaxWidth = maxWidth,
                     SavePath = savePathArg,
@@ -118,17 +129,30 @@ namespace DeepSeek_v4_for_VisualStudio.Services.BuiltInTools
                 sb.AppendLine(L.Format(
                     "tool.captureWebpage.captured",
                     string.IsNullOrWhiteSpace(result.PageTitle) ? result.FinalUrl : result.PageTitle,
-                    result.Width,
-                    result.Height));
+                    result.BandCount));
                 sb.AppendLine($"- {L["tool.captureWebpage.url"]}: {result.FinalUrl}");
-                sb.AppendLine($"- {L["tool.captureWebpage.savePath"]}: {result.SavePath}");
+                sb.AppendLine($"- {L["tool.captureWebpage.docSize"]}: "
+                              + $"{result.DocumentWidth}x{result.DocumentHeight}");
+                sb.AppendLine($"- {L["tool.captureWebpage.bands"]}: "
+                              + L.Format("tool.captureWebpage.bandsValue",
+                                  result.BandCount, result.BandWidth, result.BandHeight));
+                sb.AppendLine($"- {L["tool.captureWebpage.savePath"]}: {string.Join(", ", result.SavePaths)}");
                 sb.AppendLine($"- {L["tool.captureWebpage.method"]}: {result.Method}");
                 sb.AppendLine(result.FullPage
                     ? L["tool.captureWebpage.fullPageNote"]
                     : L["tool.captureWebpage.viewportNote"]);
+
+                if (result.Truncated)
+                {
+                    int coveredTo = result.StartY + result.BandCount * WebPageCaptureService.FullPageBandHeightPx;
+                    sb.AppendLine(L.Format("tool.captureWebpage.truncatedNote",
+                        result.DocumentHeight, result.StartY, Math.Min(coveredTo, result.DocumentHeight), coveredTo));
+                }
+
                 sb.AppendLine();
                 sb.AppendLine(CaptureWindowTool.CaptureImageBlockStart);
-                sb.AppendLine(result.SavePath);
+                foreach (string path in result.SavePaths)
+                    sb.AppendLine(path);
                 sb.AppendLine(CaptureWindowTool.CaptureImageBlockEnd);
                 return sb.ToString().TrimEnd();
             }
