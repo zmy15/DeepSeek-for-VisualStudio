@@ -218,6 +218,91 @@ public class ChatHtmlServiceTests
     }
 
     [Fact]
+    public void BuildAskQuestionsJs_MultipleQuestions_MergesIntoPaginatedCardWithSubmitOnLastPage()
+    {
+        var request = new AgentQuestionRequest
+        {
+            RequestId = "q-1",
+            Questions = new List<AgentQuestion>
+            {
+                new AgentQuestion
+                {
+                    Header = "范围",
+                    Question = "要改哪些文件？",
+                    Options = new List<QuestionOption>
+                    {
+                        new QuestionOption { Label = "全部" },
+                        new QuestionOption { Label = "仅当前" },
+                    },
+                },
+                new AgentQuestion { Header = "风格", Question = "注释用什么语言？", AllowFreeformInput = true },
+                new AgentQuestion
+                {
+                    Header = "确认",
+                    Question = "可以开始吗？",
+                    Options = new List<QuestionOption> { new QuestionOption { Label = "可以" } },
+                },
+            },
+        };
+
+        string js = ChatHtmlService.BuildAskQuestionsJs(request);
+
+        // 三道题合并进同一个卡片，并渲染为三个分页（每页一题）
+        CountOccurrences(js, "class='aq-page'").Should().Be(3);
+        js.Should().Contain("id='agent-questions-pages'");
+        js.Should().Contain("data-index='0'");
+        js.Should().Contain("data-index='2'");
+        js.Should().Contain("要改哪些文件？");
+        js.Should().Contain("注释用什么语言？");
+        js.Should().Contain("可以开始吗？");
+
+        // 进度提示 + 切题箭头
+        js.Should().Contain("id='agent-questions-progress'");
+        CountOccurrences(js, "window.__askQuestionsNav('q-1',").Should().Be(2);
+        js.Should().Contain("window.__askQuestionsNav('q-1',-1)");
+        js.Should().Contain("window.__askQuestionsNav('q-1',1)");
+
+        // 提交按钮只在最后一题显示：初始 display:none，由 __askQuestionsShowPage 在末页切为可见
+        js.Should().Contain("id='agent-questions-submit'");
+        js.Should().Contain("display:none;background:#0e639c");
+        js.Should().Contain("window.__askQuestionsShowPage(div,0)");
+    }
+
+    [Fact]
+    public void BuildAskQuestionsJs_SingleQuestion_HidesPagingAndShowsSubmitImmediately()
+    {
+        var request = new AgentQuestionRequest
+        {
+            RequestId = "q-2",
+            Questions = new List<AgentQuestion>
+            {
+                new AgentQuestion { Header = "继续？", Question = "是否继续？", AllowFreeformInput = true },
+            },
+        };
+
+        string js = ChatHtmlService.BuildAskQuestionsJs(request);
+
+        CountOccurrences(js, "class='aq-page'").Should().Be(1);
+        js.Should().NotContain("agent-questions-prev", "单题不需要切题箭头");
+        js.Should().NotContain("agent-questions-progress", "单题不需要进度提示");
+        js.Should().Contain("display:inline-block;background:#0e639c");
+    }
+
+    [Fact]
+    public void BuildInitialPage_DefinesAskQuestionsPagingFunctionsAndCollectsAnswersPerPage()
+    {
+        string html = ChatHtmlService.BuildInitialPage(new List<ChatMessage>());
+
+        // 卡片注入脚本会调用这些函数，必须存在于初始页面脚本中
+        html.Should().Contain("window.__askQuestionsNav=function");
+        html.Should().Contain("window.__askQuestionsShowPage=function");
+        html.Should().Contain("window.__answerQuestions=function");
+
+        // 提交时按分页顺序统一收集答案（未显示的页也要计入，避免答案与题目错位）
+        html.Should().Contain("card.querySelectorAll('.aq-page')");
+    }
+
+    [Fact]
     public void BuildTerminalApprovalJs_GeneratesCardInjectionScript()
     {
         var request = new AgentPermissionRequest
