@@ -15,13 +15,13 @@ public class BuiltInToolServiceTests
     #region Tool Registration
 
     [Fact]
-    public void Constructor_RegistersAll24Tools()
+    public void Constructor_RegistersAll25Tools()
     {
         var service = new BuiltInToolService();
 
         var defs = service.GetFilteredToolDefinitions(null);
 
-        defs.Should().HaveCount(24);
+        defs.Should().HaveCount(25);
         defs.Select(d => d.Function.Name).Should().Contain("get_file_symbols");
     }
 
@@ -52,7 +52,7 @@ public class BuiltInToolServiceTests
 
         var defs = service.GetFilteredToolDefinitions(new List<string>());
 
-        defs.Should().HaveCount(24);
+        defs.Should().HaveCount(25);
     }
 
     [Fact]
@@ -62,13 +62,13 @@ public class BuiltInToolServiceTests
 
         var defs = service.GetFilteredToolDefinitions(null);
 
-        defs.Should().HaveCount(24);
+        defs.Should().HaveCount(25);
     }
 
     [Theory]
     [InlineData("deepseek-v4-pro", false)]
     [InlineData("deepseek-v4-flash-vision-exp", true)]
-    public void GetFilteredToolDefinitions_IncludesCaptureWindowOnlyForVisionModels(
+    public void GetFilteredToolDefinitions_IncludesVisionCaptureToolsOnlyForVisionModels(
         string model,
         bool expectedVisible)
     {
@@ -80,6 +80,8 @@ public class BuiltInToolServiceTests
         var defs = service.GetFilteredToolDefinitions(AskAgent.AskTools.ToList());
 
         defs.Any(d => d.Function.Name == "capture_window")
+            .Should().Be(expectedVisible);
+        defs.Any(d => d.Function.Name == "capture_webpage")
             .Should().Be(expectedVisible);
     }
 
@@ -98,6 +100,7 @@ public class BuiltInToolServiceTests
     [InlineData("read_skill_resource", true)]
     [InlineData("fetch_webpage", true)]
     [InlineData("capture_window", true)]
+    [InlineData("capture_webpage", true)]
     [InlineData("build_solution", true)]
     [InlineData("replace_string_in_file", true)]
     [InlineData("multi_replace_string_in_file", true)]
@@ -183,11 +186,11 @@ public class BuiltInToolServiceTests
     #region Static GetBuiltInToolDefinitions
 
     [Fact]
-    public void GetBuiltInToolDefinitions_Returns23Tools()
+    public void GetBuiltInToolDefinitions_Returns25Tools()
     {
         var defs = BuiltInToolService.GetBuiltInToolDefinitions();
 
-        defs.Should().HaveCount(24);
+        defs.Should().HaveCount(25);
     }
 
     [Fact]

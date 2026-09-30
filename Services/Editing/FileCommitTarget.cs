@@ -1,4 +1,4 @@
-﻿using DeepSeek_v4_for_VisualStudio.Models;
+using DeepSeek_v4_for_VisualStudio.Models;
 using DeepSeek_v4_for_VisualStudio.Services.EditTools;
 using DeepSeek_v4_for_VisualStudio.Utils;
 using System;
@@ -80,7 +80,7 @@ namespace DeepSeek_v4_for_VisualStudio.Services.Editing
 
                 // 3. 验证写入
                 string writtenContent = await Task.Run(
-                    () => File.ReadAllText(change.FilePath), cancellationToken);
+                    () => FileEncodingHelper.ReadAllText(change.FilePath), cancellationToken);
 
                 if (!string.Equals(
                     EditStringMatcher.NormalizeToCrLf(writtenContent),

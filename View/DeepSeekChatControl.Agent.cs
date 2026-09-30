@@ -610,7 +610,7 @@ namespace DeepSeek_v4_for_VisualStudio.View
                     {
                         // RAG-SOURCE: file-read Agent 读取文件内容（Ask/Edit/Explore/Plan Agent 上下文）
                         if (File.Exists(path))
-                            return await Task.Run(() => File.ReadAllText(path));
+                            return await Task.Run(() => FileEncodingHelper.ReadAllText(path));
                         return null;
                     },
                 };
@@ -2330,37 +2330,233 @@ namespace DeepSeek_v4_for_VisualStudio.View
                     Logger.Info($"[Agent] 审批模式=智能拦截，检测到危险命令，需要审批: {request.Command}");
                 }
 
-                try
-                {
-                    // ── v1.1.10: Toast 通知用户需要审批 ──
-                    NotifyUserActionRequired(request.Title, request.Command);
-
-                    string js;
-                    if (request.ActionType == "file_delete")
-                    {
-                        js = ChatHtmlService.BuildFileDeleteConfirmationJs(request);
-                        StatusLabel.Text = string.Format(LocalizationService.Instance["status.deleteWaitingConfirm"], request.Title);
-                    }
-                    else if (request.ActionType == "terminal_command")
-                    {
-                        js = ChatHtmlService.BuildTerminalApprovalJs(request);
-                        StatusLabel.Text = string.Format(LocalizationService.Instance["status.terminalWaitingApproval"], request.Command);
-                    }
-                    else
-                    {
-                        js = ChatHtmlService.BuildPermissionRequestJs(request);
-                        StatusLabel.Text = string.Format(LocalizationService.Instance["status.waitingConfirm"], request.Title);
-                    }
-
-                    await ChatWebView.CoreWebView2.ExecuteScriptAsync(js);
-                }
-                catch (Exception ex)
-                {
-                    Logger.Warn($"[Agent] 权限 UI 注入失败: {ex.Message}");
-                    var permAgent = _agentFactory?.FindAgentWithPendingPermission(request.RequestId) ?? _activeAgent;
-                    permAgent?.RespondToPermission(request.RequestId, false);
-                }
+                // ── 审批 UI 串行化：入队后由队列决定何时显示 ──
+                // 一轮工具调用是并行执行的，多个审批会同时到达；此处不再各自注入卡片，
+                // 否则卡片会在聊天区堆叠。当前卡片处理完成后由 AdvanceApprovalQueue 显示下一个。
+                EnqueueApprovalRequest(request);
             });
+        }
+
+        /// <summary>
+        /// 审批请求入队：同一时刻只显示一个审批卡片，处理完再显示下一个。
+        /// </summary>
+        private void EnqueueApprovalRequest(AgentPermissionRequest request)
+        {
+            if (!_approvalQueue.Enqueue(request))
+            {
+                Logger.Warn($"[Agent] 忽略重复的审批请求: RequestId={request.RequestId}");
+                return;
+            }
+
+            ShowNextApprovalIfIdle();
+        }
+
+        /// <summary>
+        /// 若当前没有正在显示的审批卡片，则取队首请求注入 UI。
+        /// 排队期间已失效（取消/已响应）的请求由队列自动跳过。
+        /// </summary>
+        private void ShowNextApprovalIfIdle()
+        {
+            var next = _approvalQueue.TakeNext();
+            if (next == null)
+            {
+                StopApprovalWatchdog();
+                return;
+            }
+
+            EnsureApprovalWatchdog();
+            _ = InjectApprovalCardAsync(next);
+        }
+
+        /// <summary>
+        /// 注入单个审批卡片（Toast + 卡片 + 状态栏提示）。
+        /// </summary>
+        private async Task InjectApprovalCardAsync(AgentPermissionRequest request)
+        {
+            await ThreadHelper.JoinableTaskFactory.SwitchToMainThreadAsync();
+
+            if (ChatWebView.CoreWebView2 == null)
+            {
+                Logger.Warn($"[Agent] CoreWebView2 未就绪，自动拒绝权限请求: {request.Title}");
+                var permAgent = _agentFactory?.FindAgentWithPendingPermission(request.RequestId) ?? _activeAgent;
+                permAgent?.RespondToPermission(request.RequestId, false);
+                AdvanceApprovalQueue(request.RequestId, removeCard: true);
+                return;
+            }
+
+            try
+            {
+                // Toast 在卡片真正显示时才提醒：并发审批时通知不再一次性叠加
+                NotifyUserActionRequired(request.Title, request.Command);
+
+                string js;
+                if (request.ActionType == "file_delete")
+                {
+                    js = ChatHtmlService.BuildFileDeleteConfirmationJs(request);
+                    StatusLabel.Text = string.Format(LocalizationService.Instance["status.deleteWaitingConfirm"], request.Title);
+                }
+                else if (request.ActionType == "terminal_command")
+                {
+                    js = ChatHtmlService.BuildTerminalApprovalJs(request);
+                    StatusLabel.Text = string.Format(LocalizationService.Instance["status.terminalWaitingApproval"], request.Command);
+                }
+                else
+                {
+                    js = ChatHtmlService.BuildPermissionRequestJs(request);
+                    StatusLabel.Text = string.Format(LocalizationService.Instance["status.waitingConfirm"], request.Title);
+                }
+
+                await ChatWebView.CoreWebView2.ExecuteScriptAsync(js);
+                AppendPendingApprovalCountToStatus();
+            }
+            catch (Exception ex)
+            {
+                Logger.Warn($"[Agent] 权限 UI 注入失败: {ex.Message}");
+                var permAgent = _agentFactory?.FindAgentWithPendingPermission(request.RequestId) ?? _activeAgent;
+                permAgent?.RespondToPermission(request.RequestId, false);
+                AdvanceApprovalQueue(request.RequestId, removeCard: true);
+            }
+        }
+
+        /// <summary>
+        /// 状态栏补充「还有 N 项待审批」，让用户知道当前卡片之后仍有排队项。
+        /// </summary>
+        private void AppendPendingApprovalCountToStatus()
+        {
+            int pending = _approvalQueue.PendingCount;
+            if (pending <= 0)
+                return;
+
+            StatusLabel.Text = StatusLabel.Text + " " +
+                LocalizationService.Instance.Format("status.approvalQueuePending", pending);
+        }
+
+        /// <summary>
+        /// 审批请求已结束（用户响应 / 取消 / 超时）：清除当前显示项，并显示队列中的下一个。
+        /// </summary>
+        /// <param name="requestId">已结束的请求 ID。</param>
+        /// <param name="removeCard">是否由本方法移除卡片（UI 点击路径已自行移除时传 false）。</param>
+        private void AdvanceApprovalQueue(string requestId, bool removeCard = false)
+        {
+            var completed = _approvalQueue.Complete(requestId);
+
+            // 未显示过的排队项：留在队列中，后续由 TakeNext 依据失效状态自动跳过
+            if (!removeCard || completed == null)
+            {
+                ShowNextApprovalIfIdle();
+                return;
+            }
+
+            string cardId = ChatHtmlService.GetApprovalCardId(completed);
+            _ = ThreadHelper.JoinableTaskFactory.RunAsync(async () =>
+            {
+                await ThreadHelper.JoinableTaskFactory.SwitchToMainThreadAsync();
+                await RemoveApprovalCardAsync(cardId);
+                ShowNextApprovalIfIdle();
+            });
+        }
+
+        /// <summary>
+        /// 清空审批显示队列并移除当前残留卡片（停止生成 / 清空会话 / 切换会话）。
+        /// </summary>
+        private void ResetApprovalQueue()
+        {
+            var displayed = _approvalQueue.Reset();
+            StopApprovalWatchdog();
+
+            if (displayed == null)
+                return;
+
+            string cardId = ChatHtmlService.GetApprovalCardId(displayed);
+            _ = ThreadHelper.JoinableTaskFactory.RunAsync(async () =>
+            {
+                await ThreadHelper.JoinableTaskFactory.SwitchToMainThreadAsync();
+                await RemoveApprovalCardAsync(cardId);
+            });
+        }
+
+        /// <summary>
+        /// 从聊天区移除指定审批卡片（元素不存在时无副作用）。
+        /// </summary>
+        private async Task RemoveApprovalCardAsync(string cardId)
+        {
+            if (string.IsNullOrEmpty(cardId) || ChatWebView.CoreWebView2 == null)
+                return;
+
+            try
+            {
+                await ChatWebView.CoreWebView2.ExecuteScriptAsync(ChatHtmlService.BuildRemoveElementJs(cardId));
+            }
+            catch (Exception ex)
+            {
+                Logger.Warn($"[Agent] 移除审批卡片失败 {cardId}: {ex.Message}");
+            }
+        }
+
+        /// <summary>
+        /// 启动审批看门狗：仅在有待显示/正在显示的审批时运行。
+        /// </summary>
+        private void EnsureApprovalWatchdog()
+        {
+            if (_approvalQueueWatchdog != null)
+                return;
+
+            // DispatcherTimer 必须在 UI 线程创建（调用方可能来自后台线程，如停止生成的路径）
+            if (!Dispatcher.CheckAccess())
+            {
+                Dispatcher.BeginInvoke(new Action(EnsureApprovalWatchdog));
+                return;
+            }
+
+            var timer = new System.Windows.Threading.DispatcherTimer(
+                System.Windows.Threading.DispatcherPriority.Background, Dispatcher)
+            {
+                Interval = TimeSpan.FromMilliseconds(800),
+            };
+            timer.Tick += (_, __) => OnApprovalWatchdogTick();
+            _approvalQueueWatchdog = timer;
+            timer.Start();
+        }
+
+        /// <summary>
+        /// 停止审批看门狗。
+        /// </summary>
+        private void StopApprovalWatchdog()
+        {
+            if (_approvalQueueWatchdog == null)
+                return;
+
+            // DispatcherTimer 只能在 UI 线程停止（清空会话/停止生成可能来自后台线程）
+            if (!Dispatcher.CheckAccess())
+            {
+                Dispatcher.BeginInvoke(new Action(StopApprovalWatchdog));
+                return;
+            }
+
+            var timer = _approvalQueueWatchdog;
+            _approvalQueueWatchdog = null;
+            timer?.Stop();
+        }
+
+        /// <summary>
+        /// 看门狗：当前卡片的请求可能因超时/取消/Agent 异常结束而不再等待用户响应
+        /// （此类路径不会产生 UI 点击事件）。此时必须让位给队列中的下一个，
+        /// 否则审批会被永久阻塞、后续审批永远不显示。
+        /// </summary>
+        private void OnApprovalWatchdogTick()
+        {
+            var current = _approvalQueue.Current;
+            if (current == null)
+            {
+                StopApprovalWatchdog();
+                return;
+            }
+
+            if (ApprovalRequestQueue.IsStillPending(current))
+                return;
+
+            Logger.Info($"[Agent] 审批请求已结束（取消/超时），显示下一个: RequestId={current.RequestId}");
+            AdvanceApprovalQueue(current.RequestId, removeCard: true);
         }
 
         /// <summary>

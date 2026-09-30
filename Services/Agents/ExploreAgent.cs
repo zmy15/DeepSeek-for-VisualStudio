@@ -118,6 +118,7 @@ namespace DeepSeek_v4_for_VisualStudio.Services.Agents
             "get_file_symbols", // 单文件符号定义列表
             "read_file",        // 读取文件内容
             "capture_window",   // 捕获窗口截图（视觉模型直接查看）
+            "capture_webpage",  // 离屏渲染 URL 截图（视觉模型直接查看）
             "list_dir",         // 列出目录内容
             "get_errors",       // 获取编译错误
             "fetch_webpage",    // 获取网页内容
@@ -822,7 +823,7 @@ namespace DeepSeek_v4_for_VisualStudio.Services.Agents
                 if (!SourceFileExtensions.Contains(ext)) return score;
 
                 // 读取文件内容并在行级别搜索
-                var lines = File.ReadAllLines(filePath);
+                var lines = FileEncodingHelper.ReadAllLines(filePath);
                 const int maxLineScore = 30; // 内容搜索最高30分
                 int lineHitCount = 0;
 

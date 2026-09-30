@@ -111,4 +111,27 @@ public class AgentFactoryTests
 
         result.Should().NotBeNull();
     }
+
+    /// <summary>
+    /// 需求：两个截图工具（capture_window / capture_webpage）必须在所有 Agent 的白名单里
+    /// 可用，并保持对称——不能让某个 Agent 出现「能截网页却截不了窗口」这类漂移。
+    /// 「仅视觉模型提供」是另一层门控，由 BuiltInToolService.IsToolAvailableForCurrentModel
+    /// 在工具定义下发前过滤，与本测试无关。
+    /// </summary>
+    [Theory]
+    [InlineData(AgentType.Ask)]
+    [InlineData(AgentType.Explore)]
+    [InlineData(AgentType.Plan)]
+    [InlineData(AgentType.Edit)]
+    [InlineData(AgentType.Build)]
+    public void AllAgents_ExposeBothCaptureTools(AgentType agentType)
+    {
+        var apiService = new DeepSeekApiService("test-key");
+        var factory = new AgentFactory(apiService);
+
+        var agent = factory.GetAgent(agentType);
+
+        agent.Definition.AllowedTools.Should().Contain("capture_window");
+        agent.Definition.AllowedTools.Should().Contain("capture_webpage");
+    }
 }

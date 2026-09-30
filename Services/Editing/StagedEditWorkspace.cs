@@ -1,4 +1,4 @@
-﻿using DeepSeek_v4_for_VisualStudio.Models;
+using DeepSeek_v4_for_VisualStudio.Models;
 using DeepSeek_v4_for_VisualStudio.Utils;
 using System;
 using System.Collections.Generic;
@@ -96,7 +96,7 @@ namespace DeepSeek_v4_for_VisualStudio.Services.Editing
                 }
             }
 
-            return File.Exists(normalizedPath) ? File.ReadAllText(normalizedPath) : string.Empty;
+            return File.Exists(normalizedPath) ? FileEncodingHelper.ReadAllText(normalizedPath) : string.Empty;
         }
 
         /// <summary>
@@ -142,7 +142,7 @@ namespace DeepSeek_v4_for_VisualStudio.Services.Editing
                 {
                     string baselineContent = isNewFile
                         ? string.Empty
-                        : (openBufferContent ?? File.ReadAllText(normalizedPath));
+                        : (openBufferContent ?? FileEncodingHelper.ReadAllText(normalizedPath));
                     _trackedFiles[normalizedPath] = new StagedFile
                     {
                         FilePath = normalizedPath,
@@ -235,8 +235,8 @@ namespace DeepSeek_v4_for_VisualStudio.Services.Editing
                     _trackedFiles[normalizedPath] = new StagedFile
                     {
                         FilePath = normalizedPath,
-                        BaselineContent = File.ReadAllText(normalizedPath),
-                        BaselineHash = ComputeSha256(File.ReadAllText(normalizedPath)),
+                        BaselineContent = FileEncodingHelper.ReadAllText(normalizedPath),
+                        BaselineHash = ComputeSha256(FileEncodingHelper.ReadAllText(normalizedPath)),
                         BaselineLastWriteTimeUtc = File.GetLastWriteTimeUtc(normalizedPath),
                         Operation = ProposedFileOperation.Delete,
                         DiskBackupPath = BackupService.CreateBackup(normalizedPath),
@@ -258,7 +258,7 @@ namespace DeepSeek_v4_for_VisualStudio.Services.Editing
         public string? GetStagedContent(string filePath)
         {
             var normalizedPath = NormalizePath(filePath);
-            return File.Exists(normalizedPath) ? File.ReadAllText(normalizedPath) : string.Empty;
+            return File.Exists(normalizedPath) ? FileEncodingHelper.ReadAllText(normalizedPath) : string.Empty;
         }
 
         /// <summary>
@@ -272,7 +272,7 @@ namespace DeepSeek_v4_for_VisualStudio.Services.Editing
                     .Select(f =>
                     {
                         string currentContent = File.Exists(f.FilePath)
-                            ? File.ReadAllText(f.FilePath)
+                            ? FileEncodingHelper.ReadAllText(f.FilePath)
                             : string.Empty;
                         return new PreparedChangeSet
                         {
@@ -444,7 +444,7 @@ namespace DeepSeek_v4_for_VisualStudio.Services.Editing
                     return Array.Empty<DiffHunkInfo>();
 
                 string currentContent = File.Exists(normalizedPath)
-                    ? File.ReadAllText(normalizedPath)
+                    ? FileEncodingHelper.ReadAllText(normalizedPath)
                     : string.Empty;
 
                 // 重算 hunks（若内容已变化如部分撤销后）
@@ -502,7 +502,7 @@ namespace DeepSeek_v4_for_VisualStudio.Services.Editing
                     return false;
 
                 string currentContent = File.Exists(normalizedPath)
-                    ? File.ReadAllText(normalizedPath)
+                    ? FileEncodingHelper.ReadAllText(normalizedPath)
                     : string.Empty;
 
                 revertedContent = ApplyHunkRevert(currentContent, hunk);
@@ -583,7 +583,7 @@ namespace DeepSeek_v4_for_VisualStudio.Services.Editing
             lock (_lock)
             {
                 string currentContent = File.Exists(normalizedPath)
-                    ? File.ReadAllText(normalizedPath)
+                    ? FileEncodingHelper.ReadAllText(normalizedPath)
                     : string.Empty;
 
                 if (!_trackedFiles.TryGetValue(normalizedPath, out var file))

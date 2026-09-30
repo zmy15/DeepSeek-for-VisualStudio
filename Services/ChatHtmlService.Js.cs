@@ -368,6 +368,31 @@ window.__insertBeforeTaskPanel=function(element){
     }
 };
 
+// 任务面板折叠/展开：面板头部点击与头部右侧的向下箭头共用同一份逻辑
+window.__toggleTaskPanel=function(planId){
+    var panel=planId?document.getElementById('agent-task-panel-'+planId):null;
+    if(!panel){
+        var container=document.getElementById('chat-container');
+        panel=container?container.querySelector('[id^=""agent-task-panel-""]'):null;
+    }
+    if(!panel)return;
+    panel.classList.toggle('collapsed');
+    window.__syncTaskPanelArrow(panel);
+};
+
+// 同步箭头方向与提示文案：展开时显示向下箭头（点击向下收起），收起时显示向右箭头（点击展开）
+window.__syncTaskPanelArrow=function(panel){
+    if(!panel)return;
+    var arrow=panel.querySelector('.task-collapse-arrow');
+    if(!arrow)return;
+    var collapsed=panel.classList.contains('collapsed');
+    arrow.textContent=collapsed?'\u25B8':'\u25BE';
+    arrow.setAttribute('aria-expanded',collapsed?'false':'true');
+    var titleExpanded=arrow.getAttribute('data-title-expanded')||'';
+    var titleCollapsed=arrow.getAttribute('data-title-collapsed')||'';
+    arrow.title=collapsed?titleCollapsed:titleExpanded;
+};
+
 window.__appendMessageHtml=function(html){
     var container=document.getElementById('chat-container');
     if(!container)return;
@@ -451,27 +476,20 @@ window.__terminalSkip=function(requestId){
     window.__sendToHost({type:'terminalSkip',requestId:requestId});
 };
 window.__answerQuestions=function(requestId){
+    // 分页模式下所有题目都在 DOM 中（仅显隐切换），因此提交时按页顺序统一收集答案
     var answers=[];
-    var questionDivs=document.querySelectorAll('#agent-questions > div');
-    // 遍历所有问题，收集答案
-    var qIndex=0;
-    var container=document.getElementById('agent-questions');
-    if(container){
-        var children=container.children;
-        for(var i=0;i<children.length;i++){
-            var child=children[i];
-            // 跳过标题和按钮行
-            if(child.tagName==='DIV' && child.querySelector('input')){
-                // 获取选项值
-                var inputs=child.querySelectorAll('input[type=radio]:checked,input[type=checkbox]:checked');
-                var selected=[];
-                for(var j=0;j<inputs.length;j++) selected.push(inputs[j].value);
-                // 获取自由文本
-                var freeText='';
-                var textarea=child.querySelector('textarea');
-                if(textarea) freeText=textarea.value.trim();
-                answers.push({selectedOptions:selected,freeText:freeText});
-            }
+    var card=document.getElementById('agent-questions');
+    if(card){
+        var pages=card.querySelectorAll('.aq-page');
+        for(var i=0;i<pages.length;i++){
+            var page=pages[i];
+            var inputs=page.querySelectorAll('input[type=radio]:checked,input[type=checkbox]:checked');
+            var selected=[];
+            for(var j=0;j<inputs.length;j++) selected.push(inputs[j].value);
+            var freeText='';
+            var textarea=page.querySelector('textarea');
+            if(textarea) freeText=textarea.value.trim();
+            answers.push({selectedOptions:selected,freeText:freeText});
         }
     }
     var answersJson=JSON.stringify(answers);
@@ -479,6 +497,49 @@ window.__answerQuestions=function(requestId){
     var el=document.getElementById('agent-questions');
     if(el) el.remove();
     window.__sendToHost({type:'answerQuestions',requestId:requestId,answers:answersJson});
+};
+window.__askQuestionsNav=function(requestId,delta){
+    var card=document.getElementById('agent-questions');
+    if(!card)return;
+    var pages=card.querySelectorAll('.aq-page');
+    if(!pages.length)return;
+    var current=parseInt(card.getAttribute('data-index')||'0',10);
+    if(isNaN(current))current=0;
+    var target=current+delta;
+    if(target<0)target=0;
+    if(target>pages.length-1)target=pages.length-1;
+    window.__askQuestionsShowPage(card,target);
+};
+window.__askQuestionsShowPage=function(card,index){
+    if(!card)return;
+    var pages=card.querySelectorAll('.aq-page');
+    if(!pages.length)return;
+    if(index<0)index=0;
+    if(index>pages.length-1)index=pages.length-1;
+
+    for(var i=0;i<pages.length;i++){
+        pages[i].style.display=(i===index)?'block':'none';
+    }
+    card.setAttribute('data-index',String(index));
+
+    var isLast=(index===pages.length-1);
+
+    // 进度：第 N / M 题
+    var progress=document.getElementById('agent-questions-progress');
+    if(progress){
+        var template=progress.getAttribute('data-template')||'{0} / {1}';
+        progress.textContent=template.replace('{0}',String(index+1)).replace('{1}',String(pages.length));
+    }
+
+    // 切换箭头：首页隐藏「上一题」，末页隐藏「下一题」（末页改用提交按钮）
+    var prev=document.getElementById('agent-questions-prev');
+    if(prev)prev.style.visibility=(index===0)?'hidden':'visible';
+    var next=document.getElementById('agent-questions-next');
+    if(next)next.style.display=isLast?'none':'inline-block';
+
+    // 提交按钮只在最后一题显示
+    var submit=document.getElementById('agent-questions-submit');
+    if(submit)submit.style.display=isLast?'inline-block':'none';
 };
 window.__skipQuestions=function(requestId){
     var el=document.getElementById('agent-questions');

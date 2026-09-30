@@ -59,6 +59,12 @@ public class BuiltInToolsTests
     }
 
     [Fact]
+    public void CaptureWebpageTool_HasCorrectName()
+    {
+        new CaptureWebpageTool().Name.Should().Be("capture_webpage");
+    }
+
+    [Fact]
     public void BuildSolutionTool_HasCorrectName()
     {
         new BuildSolutionTool().Name.Should().Be("build_solution");
