@@ -417,13 +417,35 @@ public class BaseAgentTests
         var expected = new HashSet<string>(StringComparer.OrdinalIgnoreCase)
         {
             "list_dir", "read_file", "file_search", "grep_search", "symbol_search", "get_file_symbols", "get_errors",
-            "fetch_webpage", "build_solution", "replace_string_in_file", "multi_replace_string_in_file",
+            "fetch_webpage", "capture_window", "capture_webpage", "build_solution",
+            "replace_string_in_file", "multi_replace_string_in_file",
             "create_file", "delete_file", "apply_patch", "create_directory", "run_in_terminal",
-            "get_terminal_output", "VisualStudio_askQuestions", "runSubagent", "request_handoff",
+            "get_terminal_output", "load_skill", "read_skill_resource",
+            "VisualStudio_askQuestions", "runSubagent", "request_handoff",
             "git", "memory"
         };
 
         names.Should().BeEquivalentTo(expected);
+    }
+
+    /// <summary>
+    /// 防漂移：新增内置工具时必须同步登记到 KnownBuiltInToolNames，
+    /// 否则同名 MCP 工具会被重复自动注入 Agent 白名单。
+    /// </summary>
+    [Fact]
+    public void KnownBuiltInToolNames_CoversEveryRegisteredBuiltInTool()
+    {
+        var field = typeof(BaseAgent).GetField(
+            "KnownBuiltInToolNames",
+            System.Reflection.BindingFlags.NonPublic | System.Reflection.BindingFlags.Static);
+
+        var names = (HashSet<string>)field!.GetValue(null)!;
+
+        var registered = DeepSeek_v4_for_VisualStudio.Services.BuiltInToolService
+            .GetBuiltInToolDefinitions()
+            .Select(d => d.Function.Name);
+
+        names.Should().Contain(registered);
     }
 
     [Theory]

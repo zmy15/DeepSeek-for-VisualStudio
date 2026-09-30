@@ -100,6 +100,7 @@ namespace DeepSeek_v4_for_VisualStudio.Services.Agents
             "read_file",
             "get_file_symbols",
             "capture_window",      // 视觉模型直接查看窗口截图
+            "capture_webpage",     // 离屏渲染 URL 截图（视觉模型直接查看）
             "get_errors",
             // 终端与构建
             "run_in_terminal",
@@ -128,6 +129,7 @@ namespace DeepSeek_v4_for_VisualStudio.Services.Agents
             // 探索工具
             "read_file",
             "capture_window",
+            "capture_webpage",
             "file_search",
             "grep_search",
             "symbol_search",
@@ -159,6 +161,7 @@ namespace DeepSeek_v4_for_VisualStudio.Services.Agents
             "build_solution",
             "read_file",
             "capture_window",
+            "capture_webpage",
             "get_errors",
             "replace_string_in_file",
             "multi_replace_string_in_file",
@@ -179,6 +182,7 @@ namespace DeepSeek_v4_for_VisualStudio.Services.Agents
         {
             "read_file",
             "capture_window",
+            "capture_webpage",
             "file_search",
             "grep_search",
             "symbol_search",
