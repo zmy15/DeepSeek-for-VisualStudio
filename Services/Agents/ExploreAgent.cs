@@ -118,6 +118,7 @@ namespace DeepSeek_v4_for_VisualStudio.Services.Agents
             "get_file_symbols", // 单文件符号定义列表
             "read_file",        // 读取文件内容
             "capture_window",   // 捕获窗口截图（视觉模型直接查看）
+            "capture_webpage",  // 离屏渲染 URL 截图（视觉模型直接查看）
             "list_dir",         // 列出目录内容
             "get_errors",       // 获取编译错误
             "fetch_webpage",    // 获取网页内容

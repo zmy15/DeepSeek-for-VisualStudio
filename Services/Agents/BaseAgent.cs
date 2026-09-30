@@ -38,9 +38,11 @@ namespace DeepSeek_v4_for_VisualStudio.Services.Agents
         protected static readonly HashSet<string> KnownBuiltInToolNames = new(StringComparer.OrdinalIgnoreCase)
         {
             "list_dir", "read_file", "file_search", "grep_search", "symbol_search", "get_file_symbols", "get_errors",
-            "fetch_webpage", "build_solution", "replace_string_in_file", "multi_replace_string_in_file",
+            "fetch_webpage", "capture_window", "capture_webpage", "build_solution",
+            "replace_string_in_file", "multi_replace_string_in_file",
             "create_file", "delete_file", "apply_patch", "create_directory", "run_in_terminal",
-            "get_terminal_output", "VisualStudio_askQuestions", "runSubagent", "request_handoff",
+            "get_terminal_output", "load_skill", "read_skill_resource",
+            "VisualStudio_askQuestions", "runSubagent", "request_handoff",
             "git", "memory"
         };
 
@@ -1805,7 +1807,8 @@ namespace DeepSeek_v4_for_VisualStudio.Services.Agents
                         string toolResult = toolResults[i];
 
                         // ── 视觉工具：剥离图片块，视觉模型时提取图片直传给视觉模型 ──
-                        // fetch_webpage 提取网页图片 URL；capture_window / read_file 提取本地图片 data URI。
+                        // fetch_webpage 提取网页图片 URL；
+                        // capture_window（窗口截图）/ capture_webpage（网页截图）/ read_file 提取本地图片 data URI。
                         List<string>? imageUrls = null;
                         string resultText = toolResult;
                         if (tc.Function.Name == "fetch_webpage")
@@ -1819,7 +1822,8 @@ namespace DeepSeek_v4_for_VisualStudio.Services.Agents
                                 imageUrls = WebSearchService.FilterVisionImageUrls(fetchedImageUrls);
                             }
                         }
-                        else if (tc.Function.Name == "capture_window")
+                        else if (tc.Function.Name == "capture_window"
+                              || tc.Function.Name == "capture_webpage")
                         {
                             var (cleanText, imageUris) = CaptureWindowTool.ParseImageBlock(toolResult);
                             resultText = cleanText;
@@ -3846,7 +3850,7 @@ namespace DeepSeek_v4_for_VisualStudio.Services.Agents
         }
 
         /// <summary>
-        /// 构建工具结果消息。视觉工具（fetch_webpage / capture_window / read_file）
+        /// 构建工具结果消息。视觉工具（fetch_webpage / capture_window / capture_webpage / read_file）
         /// 会把图片作为 image_url 内容块附加；否则只返回纯文本。
         /// </summary>
         private static ChatApiMessage BuildToolResultMessage(

@@ -148,6 +148,7 @@ public class AskAgentTests
         AskAgent.AskTools.Should().Contain("request_handoff");
         AskAgent.AskTools.Should().Contain("fetch_webpage");
         AskAgent.AskTools.Should().Contain("capture_window");
+        AskAgent.AskTools.Should().Contain("capture_webpage");
         AskAgent.AskTools.Should().Contain("memory");
         AskAgent.AskTools.Should().Contain("git");
         AskAgent.AskTools.Should().Contain("run_in_terminal");
