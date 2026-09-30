@@ -1,4 +1,4 @@
-﻿using DeepSeek_v4_for_VisualStudio.Models;
+using DeepSeek_v4_for_VisualStudio.Models;
 using DeepSeek_v4_for_VisualStudio.Services;
 using DeepSeek_v4_for_VisualStudio.Services.Agents;
 using DeepSeek_v4_for_VisualStudio.Services.EditTools;
@@ -206,7 +206,7 @@ namespace DeepSeek_v4_for_VisualStudio.View
                     {
                         // RAG-SOURCE: file-read EditAgent 读取文件内容（Handoff 执行上下文）
                         if (File.Exists(path))
-                            return await Task.Run(() => File.ReadAllText(path));
+                            return await Task.Run(() => FileEncodingHelper.ReadAllText(path));
                         return null;
                     },
                 };

@@ -610,7 +610,7 @@ namespace DeepSeek_v4_for_VisualStudio.View
                     {
                         // RAG-SOURCE: file-read Agent 读取文件内容（Ask/Edit/Explore/Plan Agent 上下文）
                         if (File.Exists(path))
-                            return await Task.Run(() => File.ReadAllText(path));
+                            return await Task.Run(() => FileEncodingHelper.ReadAllText(path));
                         return null;
                     },
                 };

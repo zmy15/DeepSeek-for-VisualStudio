@@ -1,4 +1,4 @@
-﻿using DeepSeek_v4_for_VisualStudio.Models;
+using DeepSeek_v4_for_VisualStudio.Models;
 using DeepSeek_v4_for_VisualStudio.Services;
 using DeepSeek_v4_for_VisualStudio.Utils;
 using System;
@@ -212,7 +212,7 @@ namespace DeepSeek_v4_for_VisualStudio.Services.EditTools
                     else
                     {
                         original = File.Exists(resolvedPath)
-                            ? await Task.Run(() => File.ReadAllText(resolvedPath), ct)
+                            ? await Task.Run(() => FileEncodingHelper.ReadAllText(resolvedPath), ct)
                             : string.Empty;
                     }
                     fileState[resolvedPath] = original;
@@ -307,7 +307,7 @@ namespace DeepSeek_v4_for_VisualStudio.Services.EditTools
             }
 
             // ── 磁盘内容一致性校验：检测文件是否在 AI 读取后被修改 ──
-            var currentDiskContent = File.ReadAllText(filePath);
+            var currentDiskContent = FileEncodingHelper.ReadAllText(filePath);
             if (!string.Equals(currentDiskContent, fileContent, StringComparison.Ordinal))
             {
                 // 文件在 patch 准备期间被外部修改 → 提取上下文行做快速验证
@@ -1361,7 +1361,7 @@ namespace DeepSeek_v4_for_VisualStudio.Services.EditTools
                     // ── 日志：记录删除前的文件内容（前 20 行）──
                     try
                     {
-                        string beforeContent = File.ReadAllText(filePath);
+                        string beforeContent = FileEncodingHelper.ReadAllText(filePath);
                         // Logger.LogToFile("applypatch", $"[ApplyPatch]  删除文件: {filePath}\n删除前内容（前20行）:\n{GetTruncatedContent(beforeContent, 20)}");
                     }
                     catch { /* 读取失败不影响主流程 */ }
@@ -1450,7 +1450,7 @@ namespace DeepSeek_v4_for_VisualStudio.Services.EditTools
 
             try
             {
-                string diskContent = File.ReadAllText(filePath);
+                string diskContent = FileEncodingHelper.ReadAllText(filePath);
 
                 // ── v1.1.11: 仅校验磁盘写入一致性，结构完整性检查交由
                 //     EditAgent.编辑后健全性检查统一处理，避免重复校验。
@@ -1543,7 +1543,7 @@ namespace DeepSeek_v4_for_VisualStudio.Services.EditTools
                             BackupService.RestoreFromBackup(resolvedPath, backupPath);
                             backups[resolvedPath] = BackupService.CreateBackup(resolvedPath);
                             currentContent = File.Exists(resolvedPath)
-                                ? File.ReadAllText(resolvedPath) : string.Empty;
+                                ? FileEncodingHelper.ReadAllText(resolvedPath) : string.Empty;
                             Logger.Info($"[Validate] 已回退 {Path.GetFileName(resolvedPath)}，准备重试");
                         }
 

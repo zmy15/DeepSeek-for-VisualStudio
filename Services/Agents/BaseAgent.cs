@@ -4446,7 +4446,7 @@ namespace DeepSeek_v4_for_VisualStudio.Services.Agents
                 try
                 {
                     // RAG-SOURCE: file-read 读取文件原始内容（计算变更行数）
-                    string oldContent = System.IO.File.ReadAllText(filePath);
+                    string oldContent = FileEncodingHelper.ReadAllText(filePath);
                     // 使用精确的逐行差异算法（CodeDiffService），而非简单行数减法
                     CountDiffLines(oldContent, newContent, out int added, out int removed);
                     linesAdded = added;

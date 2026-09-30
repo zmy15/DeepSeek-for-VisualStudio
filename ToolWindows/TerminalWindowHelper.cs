@@ -83,7 +83,7 @@ namespace DeepSeek_v4_for_VisualStudio.ToolWindows
                 && !Utils.CodeContentValidator.IsProbablySourceCode(filePath, newContent))
                 return null;
 
-            string baselineText = File.Exists(filePath) ? File.ReadAllText(filePath) : string.Empty;
+            string baselineText = File.Exists(filePath) ? Utils.FileEncodingHelper.ReadAllText(filePath) : string.Empty;
             if (baselineText == newContent) return null;
 
             bool isNewFile = !File.Exists(filePath);
@@ -285,8 +285,8 @@ namespace DeepSeek_v4_for_VisualStudio.ToolWindows
                 }
 
                 // ── 回退方案：所有 VS SDK API 都不可用时 ──
-                Logger.Warn($"[WriteCode] VS SDK 写入不可用，回退到 File.WriteAllText: {Path.GetFileName(filePath)}");
-                await Task.Run(() => File.WriteAllText(filePath, newContent, System.Text.Encoding.UTF8));
+                Logger.Warn($"[WriteCode] VS SDK 写入不可用，回退到 FileEncodingHelper.WriteAllText: {Path.GetFileName(filePath)}");
+                await Task.Run(() => Utils.FileEncodingHelper.WriteAllText(filePath, newContent, null));
                 return null;
             }
             catch (Exception ex)

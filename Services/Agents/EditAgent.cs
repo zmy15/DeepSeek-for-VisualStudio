@@ -719,7 +719,7 @@ namespace DeepSeek_v4_for_VisualStudio.Services.Agents
                     {
                         // RAG-SOURCE: file-read 读取最终文件内容（计算变更统计）
                         string final = File.Exists(r.FilePath)
-                            ? File.ReadAllText(r.FilePath)
+                            ? FileEncodingHelper.ReadAllText(r.FilePath)
                             : (r.FinalContent ?? string.Empty);
                         CountDiffLines(original, final, out realAdded, out realRemoved);
                     }
@@ -728,7 +728,7 @@ namespace DeepSeek_v4_for_VisualStudio.Services.Agents
                         // 新文件（未在 originalContents 中）：读取实际文件内容计算行数
                         if (File.Exists(r.FilePath))
                         {
-                            string content = File.ReadAllText(r.FilePath);
+                            string content = FileEncodingHelper.ReadAllText(r.FilePath);
                             realAdded = CountLines(content);
                         }
                         else if (!string.IsNullOrEmpty(r.FinalContent))
@@ -777,7 +777,7 @@ namespace DeepSeek_v4_for_VisualStudio.Services.Agents
                 {
                     if (!File.Exists(ch.FilePath)) continue;
                     // RAG-SOURCE: file-read 读取变更文件内容（括号匹配检查）
-                    string content = await Task.Run(() => File.ReadAllText(ch.FilePath), ct);
+                    string content = await Task.Run(() => FileEncodingHelper.ReadAllText(ch.FilePath), ct);
                     int openBraces = content.Count(c => c == '{');
                     int closeBraces = content.Count(c => c == '}');
                     int openParens = content.Count(c => c == '(');
@@ -837,7 +837,7 @@ namespace DeepSeek_v4_for_VisualStudio.Services.Agents
 
                     try
                     {
-                        var content = await Task.Run(() => File.ReadAllText(path), ct);
+                        var content = await Task.Run(() => FileEncodingHelper.ReadAllText(path), ct);
                         latestContents.Add(new KeyValuePair<string, string>(path, content));
                     }
                     catch (Exception ex)
@@ -875,7 +875,7 @@ namespace DeepSeek_v4_for_VisualStudio.Services.Agents
                 foreach (var kvp in originalContents)
                 {
                     string finalContent = File.Exists(kvp.Key)
-                        ? await Task.Run(() => File.ReadAllText(kvp.Key), ct)
+                        ? await Task.Run(() => FileEncodingHelper.ReadAllText(kvp.Key), ct)
                         : string.Empty;
                     if (kvp.Value != finalContent)
                     {
@@ -1406,7 +1406,7 @@ namespace DeepSeek_v4_for_VisualStudio.Services.Agents
                         // 使用最终文件行数作为变更量估算
                         try
                         {
-                            string content = await Task.Run(() => File.ReadAllText(resolvedPath), ct);
+                            string content = await Task.Run(() => FileEncodingHelper.ReadAllText(resolvedPath), ct);
                             added = CountLines(content);
                         }
                         catch { added = 1; }
@@ -2834,7 +2834,7 @@ namespace DeepSeek_v4_for_VisualStudio.Services.Agents
                             // 读取实际文件内容计算行数
                             if (File.Exists(filePath))
                             {
-                                string content = File.ReadAllText(filePath);
+                                string content = FileEncodingHelper.ReadAllText(filePath);
                                 linesAdded = CountLines(content);
                             }
                             else
