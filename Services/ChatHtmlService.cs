@@ -1438,15 +1438,19 @@ return "<!DOCTYPE html><html lang='" + htmlLang + "'><head><meta charset='UTF-8'
 
         /// <summary>
         /// 构建向用户提问的 UI（VisualStudio_askQuestions 工具）。
-        /// 在聊天底部注入问题卡片 + 选项/文本框 + 提交按钮。
+        /// 多个问题合并为一个卡片，并按「一页一题」分页显示：用箭头在题目间切换，
+        /// 提交按钮只在最后一题出现（回答在提交时统一收集）。
         /// </summary>
         public static string BuildAskQuestionsJs(AgentQuestionRequest request)
         {
             string safeRequestId = EscapeHtmlAttribute(request.RequestId);
+            int totalQuestions = request.Questions.Count;
+            bool hasMultipleQuestions = totalQuestions > 1;
 
-            // ── 构建问题 HTML ──
-            var questionsHtml = new StringBuilder();
-            for (int qi = 0; qi < request.Questions.Count; qi++)
+            // ── 构建题目分页 HTML（每页一道题；所有页都保留在 DOM 中，切换只是显隐，
+            //    因此用户来回翻页时已填写的选项/文本不会丢失）──
+            var pagesHtml = new StringBuilder();
+            for (int qi = 0; qi < totalQuestions; qi++)
             {
                 var q = request.Questions[qi];
                 string qId = $"aq-{qi}";
@@ -1455,9 +1459,9 @@ return "<!DOCTYPE html><html lang='" + htmlLang + "'><head><meta charset='UTF-8'
                 string escapedHeader = EscapeHtmlWithBreaks(q.Header);
                 string escapedQuestion = EscapeHtmlWithBreaks(q.Question ?? string.Empty);
 
-                questionsHtml.Append("<div style='margin-bottom:10px'>");
-                questionsHtml.Append($"<div style='color:#4fc1ff;font-size:12px;font-weight:600;margin-bottom:4px'>{escapedHeader}</div>");
-                questionsHtml.Append($"<div style='color:#D4D4D4;font-size:12px;margin-bottom:6px'>{escapedQuestion}</div>");
+                pagesHtml.Append($"<div class='aq-page' data-index='{qi}' style='display:{(qi == 0 ? "block" : "none")}'>");
+                pagesHtml.Append($"<div style='color:#4fc1ff;font-size:12px;font-weight:600;margin-bottom:4px'>{escapedHeader}</div>");
+                pagesHtml.Append($"<div style='color:#D4D4D4;font-size:12px;margin-bottom:6px'>{escapedQuestion}</div>");
 
                 if (q.Options != null && q.Options.Count > 0)
                 {
@@ -1470,20 +1474,61 @@ return "<!DOCTYPE html><html lang='" + htmlLang + "'><head><meta charset='UTF-8'
                         string descHtml = !string.IsNullOrEmpty(escapedDesc)
                             ? $"<span style='color:#888;font-size:10px;margin-left:4px'>{escapedDesc}</span>"
                             : "";
-                        questionsHtml.Append($"<label style='display:flex;align-items:center;gap:6px;margin:2px 0;cursor:pointer;font-size:11px;color:#ccc'>");
-                        questionsHtml.Append($"<input type='{inputType}' name='{qId}' value='{EscapeHtmlAttribute(opt.Label)}' style='accent-color:#4fc1ff'>");
-                        questionsHtml.Append($"{escapedLabel}{descHtml}</label>");
+                        pagesHtml.Append($"<label style='display:flex;align-items:center;gap:6px;margin:2px 0;cursor:pointer;font-size:11px;color:#ccc'>");
+                        pagesHtml.Append($"<input type='{inputType}' name='{qId}' value='{EscapeHtmlAttribute(opt.Label)}' style='accent-color:#4fc1ff'>");
+                        pagesHtml.Append($"{escapedLabel}{descHtml}</label>");
                     }
                 }
 
                 // 自由文本输入（始终提供，作为补充或替代选项）
                 if (q.AllowFreeformInput)
                 {
-                    questionsHtml.Append($"<textarea id='{qId}-free' placeholder='{L["chat.html.answerPlaceholder"]}' style='width:100%;min-height:40px;background:#1e1e1e;color:#d4d4d4;border:1px solid #3c3c3c;border-radius:4px;padding:6px 8px;font-size:11px;margin-top:4px;resize:vertical'></textarea>");
+                    pagesHtml.Append($"<textarea id='{qId}-free' placeholder='{L["chat.html.answerPlaceholder"]}' style='width:100%;min-height:40px;background:#1e1e1e;color:#d4d4d4;border:1px solid #3c3c3c;border-radius:4px;padding:6px 8px;font-size:11px;margin-top:4px;resize:vertical'></textarea>");
                 }
 
-                questionsHtml.Append("</div>");
+                pagesHtml.Append("</div>");
             }
+
+            // ── 页头：标题 + 进度（第 N / M 题；单题时不需要）──
+            string progressTemplate = L["chat.html.questionProgress"];
+            string headerHtml =
+                "<div style='display:flex;align-items:center;justify-content:space-between;margin-bottom:8px'>" +
+                $"<div style='color:#4fc1ff;font-size:12px;font-weight:600'>{EscapeHtml(L["chat.html.questionsTitle"])}</div>" +
+                (hasMultipleQuestions
+                    ? $"<div id='agent-questions-progress' data-template='{EscapeHtmlAttribute(progressTemplate)}' style='color:#888;font-size:11px'>" +
+                      $"{EscapeHtml(LocalizationService.Instance.Format("chat.html.questionProgress", 1, totalQuestions))}</div>"
+                    : "") +
+                "</div>";
+
+            // ── 页脚：上一题 / 下一题（切换箭头）+ 提交（仅最后一题）+ 跳过 ──
+            string navHtml = hasMultipleQuestions
+                ? "<button id='agent-questions-prev' type='button' " +
+                  $"onclick=\"window.__askQuestionsNav('{safeRequestId}',-1)\" " +
+                  "style='background:#243447;color:#9cc7e8;border:1px solid #3c5a75;border-radius:4px;padding:6px 14px;cursor:pointer;font-size:12px;visibility:hidden'>" +
+                  $"&#8592; {EscapeHtml(L["chat.html.questionPrev"])}</button>" +
+                  "<button id='agent-questions-next' type='button' " +
+                  $"onclick=\"window.__askQuestionsNav('{safeRequestId}',1)\" " +
+                  "style='background:#243447;color:#9cc7e8;border:1px solid #3c5a75;border-radius:4px;padding:6px 14px;cursor:pointer;font-size:12px'>" +
+                  $"{EscapeHtml(L["chat.html.questionNext"])} &#8594;</button>"
+                : "";
+
+            string submitStyle = hasMultipleQuestions ? "display:none;" : "display:inline-block;";
+
+            string cardInnerHtml =
+                headerHtml +
+                "<div id='agent-questions-pages'>" + pagesHtml + "</div>" +
+                "<div style='display:flex;align-items:center;gap:8px;margin-top:10px'>" +
+                navHtml +
+                "<div style='flex:1'></div>" +
+                $"<button id='agent-questions-submit' type='button' onclick=\"window.__answerQuestions('{safeRequestId}')\" " +
+                $"style='{submitStyle}background:#0e639c;color:#fff;border:none;border-radius:4px;padding:6px 20px;cursor:pointer;font-size:12px;font-weight:600'>" +
+                $"{EscapeHtml(L["chat.html.submitAnswer"])}</button>" +
+                $"<button type='button' onclick=\"window.__skipQuestions('{safeRequestId}')\" " +
+                "style='background:#3c3c3c;color:#aaa;border:1px solid #555;border-radius:4px;padding:6px 16px;cursor:pointer;font-size:12px'>" +
+                $"{EscapeHtml(L["chat.html.skip"])}</button>" +
+                "</div>";
+
+            string escapedInnerHtml = EscapeJsString(cardInnerHtml);
 
             return $@"
 (function(){{
@@ -1494,17 +1539,13 @@ return "<!DOCTYPE html><html lang='" + htmlLang + "'><head><meta charset='UTF-8'
         var div=document.createElement('div');
         div.id='agent-questions';
         div.style.cssText='border:1px solid #4fc1ff;border-radius:8px;background:#1a2a3a;padding:12px;margin:8px 0;animation:fadeIn .3s';
-
-        div.innerHTML=
-            '<div style=""color:#4fc1ff;font-size:12px;font-weight:600;margin-bottom:8px"">'+{EscapeJsString(LocalizationService.Instance["chat.html.questionsTitle"])}+'</div>'+{EscapeJsString(questionsHtml.ToString())}+
-            '<div style=""display:flex;gap:8px;margin-top:8px"">'+
-            '<button id=""agent-questions-submit"" onclick=""window.__answerQuestions(\'{safeRequestId}\')"" style=""background:#0e639c;color:#fff;border:none;border-radius:4px;padding:6px 20px;cursor:pointer;font-size:12px;font-weight:600"">'+{EscapeJsString(LocalizationService.Instance["chat.html.submitAnswer"])}+'</button>'+
-            '<button onclick=""window.__skipQuestions(\'{safeRequestId}\')"" style=""background:#3c3c3c;color:#aaa;border:1px solid #555;border-radius:4px;padding:6px 16px;cursor:pointer;font-size:12px"">'+{EscapeJsString(LocalizationService.Instance["chat.html.skip"])}+'</button>'+
-            '</div>';
+        div.innerHTML={escapedInnerHtml};
 
         var container=document.getElementById('chat-container');
         if(!container){{window.__sendToHost({{type:'diagnostic',msg:'questions:chat-container not found'}});return;}}
         window.__insertBeforeTaskPanel(div);
+        // 初始化分页状态：进度文本 / 箭头可见性 / 提交按钮仅在最后一题显示
+        window.__askQuestionsShowPage(div,0);
         window.__scrollToBottom('smooth');
         window.__sendToHost({{type:'diagnostic',msg:'questions:injected OK'}});
     }}catch(e){{
