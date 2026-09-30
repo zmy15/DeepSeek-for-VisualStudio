@@ -1767,6 +1767,8 @@ return "<!DOCTYPE html><html lang='" + htmlLang + "'><head><meta charset='UTF-8'
             string escapedTitleStatus = EscapeJsString(titleStatus);
             string progressText = string.Format(L["chat.html.taskProgress"], completed, total);
             string closeTitle = L["chat.html.closePanelTitle"];
+            string collapseTitle = L["chat.html.collapsePanelTitle"];
+            string expandTitle = L["chat.html.expandPanelTitle"];
 
             return $@"
 (function(){{
@@ -1792,16 +1794,22 @@ return "<!DOCTYPE html><html lang='" + htmlLang + "'><head><meta charset='UTF-8'
     panel.id='agent-task-panel-{pid}';
     panel.className='agent-task-panel';
     panel.innerHTML=
-        '<div class=""agent-task-panel-header"" onclick=""var p=document.getElementById(\'agent-task-panel-{pid}\');if(p)p.classList.toggle(\'collapsed\')"">'+
+        '<div class=""agent-task-panel-header"" onclick=""window.__toggleTaskPanel(\'{pid}\')"">'+
  '<span class=""task-icon""></span>'+
         '<span class=""task-title"" id=""agent-task-title-status-{pid}"">{escapedTitleStatus}</span>'+
         '<span class=""task-progress"" id=""agent-task-progress-{pid}"">{progressText}</span>'+
+        // 向下箭头：点击收起面板（与点击头部同一套折叠逻辑，需阻止冒泡避免二次切换）
+        '<span class=""task-collapse-arrow"" id=""agent-task-arrow-{pid}"" role=""button"" tabindex=""0""'+
+        ' data-title-expanded=""{collapseTitle}"" data-title-collapsed=""{expandTitle}"" title=""{collapseTitle}""'+
+        ' onclick=""event.stopPropagation();window.__toggleTaskPanel(\'{pid}\');return false;""'+
+        ' onkeydown=""if(event.key===\'Enter\'||event.key===\' \'){{event.preventDefault();event.stopPropagation();window.__toggleTaskPanel(\'{pid}\');}}"">&#9662;</span>'+
  '<button class=""task-close"" id=""agent-task-close-{pid}"" onclick=""(function(e){{e.stopPropagation();window.__sendToHost({{type:\'dismissTaskPanel\',planId:\'{pid}\'}});var p=document.getElementById(\'agent-task-panel-{pid}\');if(p&&p.parentNode)p.parentNode.removeChild(p);}})(event);return false;"" title=""{closeTitle}"">&times;</button>'+
         '</div>'+
         '<div class=""agent-task-panel-body"" id=""agent-task-body-{pid}"">'+{escapedPlanHtml}+'</div>';
 
     var container=document.getElementById('chat-container');
     if(container)container.appendChild(panel);
+    window.__syncTaskPanelArrow(panel);
     window.__scrollToBottom('smooth');
 }})();";
         }

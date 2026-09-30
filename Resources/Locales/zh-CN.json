@@ -449,6 +449,8 @@
     "chat.html.taskAllSuccess": "{0}/{1} 步全部成功",
     "chat.html.taskProgress": "{0}/{1} 步",
     "chat.html.closePanelTitle": "关闭面板",
+    "chat.html.collapsePanelTitle": "收起面板",
+    "chat.html.expandPanelTitle": "展开面板",
     "═══ Diff Viewer ═══": "═══ Diff Viewer ═══",
  "diff.windowTitle": "代码差异对比",
  "diff.inlineMode": "内联",
