@@ -1,6 +1,7 @@
 using DeepSeek_v4_for_VisualStudio.Utils;
 using Microsoft.Web.WebView2.Core;
 using System;
+using System.Collections.Generic;
 using System.Drawing;
 using System.Drawing.Drawing2D;
 using System.Drawing.Imaging;
@@ -30,8 +31,15 @@ namespace DeepSeek_v4_for_VisualStudio.Services
         /// <summary>Viewport height in pixels. Zero selects the default.</summary>
         public int ViewportHeight { get; set; }
 
-        /// <summary>Optional maximum output width. Zero means only the long-edge cap applies.</summary>
+        /// <summary>Optional maximum band width. Zero keeps the rendered width.</summary>
         public int MaxWidth { get; set; }
+
+        /// <summary>
+        /// Document Y offset (CSS pixels) where a full-page capture starts. Lets a caller
+        /// walk past the first <see cref="MaxFullPageBands"/> bands of an extremely long
+        /// page instead of shrinking the page into illegibility.
+        /// </summary>
+        public int StartY { get; set; }
 
         /// <summary>Destination PNG path. Empty selects a file in the capture temp folder.</summary>
         public string SavePath { get; set; } = string.Empty;
@@ -44,19 +52,35 @@ namespace DeepSeek_v4_for_VisualStudio.Services
     }
 
     /// <summary>
-    /// Outcome of a web page capture.
+    /// Outcome of a web page capture. A full-page capture comes back as one or more
+    /// vertically stacked bands, each saved as its own PNG: a tall document is never
+    /// squeezed into a single long-edge-capped image, because that turns e.g.
+    /// 1280x11500 into 228x2048 and makes the text unreadable.
     /// </summary>
     public sealed class WebPageCaptureResult
     {
-        public string SavePath { get; set; } = string.Empty;
+        /// <summary>One PNG per band, in top-to-bottom page order.</summary>
+        public List<string> SavePaths { get; } = new List<string>();
+
         public string PageTitle { get; set; } = string.Empty;
         public string FinalUrl { get; set; } = string.Empty;
         public string Method { get; set; } = string.Empty;
-        public int Width { get; set; }
-        public int Height { get; set; }
-        public int SourceWidth { get; set; }
-        public int SourceHeight { get; set; }
+
+        /// <summary>Pixel size of one band. All bands share the width.</summary>
+        public int BandWidth { get; set; }
+        public int BandHeight { get; set; }
+
+        /// <summary>Full document size, and the Y offset this result starts at.</summary>
+        public int DocumentWidth { get; set; }
+        public int DocumentHeight { get; set; }
+        public int StartY { get; set; }
+
+        /// <summary>True when the document extends past the captured bands.</summary>
+        public bool Truncated { get; set; }
+
         public bool FullPage { get; set; }
+
+        public int BandCount => SavePaths.Count;
     }
 
     /// <summary>
@@ -68,9 +92,12 @@ namespace DeepSeek_v4_for_VisualStudio.Services
     ///    far off-screen. The window must be SHOWN (not merely created) and must stay
     ///    visible to the compositor, otherwise Chromium throttles rendering and the
     ///    capture comes back blank. Parking it off-screen keeps it invisible to the user.
-    ///  - Full-page capture uses the DevTools protocol (Page.captureScreenshot with
-    ///    captureBeyondViewport) which returns the whole document in one image.
-    ///    CapturePreviewAsync is the viewport-only fallback.
+    ///  - Full-page capture walks the document in fixed-height bands via the DevTools
+    ///    protocol (Page.captureScreenshot + clip + captureBeyondViewport), one PNG per
+    ///    band at native resolution. Collapsing a tall document into a single image and
+    ///    then applying a long-edge cap is deliberately NOT done: it turns 1280x11500
+    ///    into 228x2048 and makes the text unreadable. CapturePreviewAsync is the
+    ///    viewport-only fallback.
     ///  - The WebView2 environment prefers a fixed-version runtime placed next to the
     ///    assembly (that folder exists in the build output but is NOT packaged into the
     ///    VSIX), so in a deployed extension this falls back to the Evergreen runtime -
@@ -84,6 +111,18 @@ namespace DeepSeek_v4_for_VisualStudio.Services
         public const int DefaultViewportWidth = 1280;
         public const int DefaultViewportHeight = 900;
         public const int DefaultMaxLongEdgePx = 2048;
+
+        /// <summary>
+        /// Height of one full-page band. Bands are captured at native resolution instead of
+        /// shrinking the whole document to satisfy a long-edge cap.
+        /// </summary>
+        public const int FullPageBandHeightPx = 2048;
+
+        /// <summary>
+        /// Upper bound on bands per call. Past this the capture stops and reports truncation
+        /// rather than downscaling the page into illegibility; callers continue with StartY.
+        /// </summary>
+        private const int MaxFullPageBands = 8;
         public const int DefaultNavigationTimeoutMs = 30000;
         public const int DefaultSettleDelayMs = 700;
 
@@ -361,27 +400,49 @@ namespace DeepSeek_v4_for_VisualStudio.Services
                 if (string.IsNullOrWhiteSpace(finalUrl))
                     finalUrl = url;
 
-                (byte[] pngBytes, string method) = await CapturePngAsync(core, request.FullPage);
+                List<CapturedImage> images;
+                string method;
+                int documentWidth;
+                int documentHeight;
+                int startY;
+                bool truncated;
 
-                string savePath = ResolveSavePath(request.SavePath);
-                ScaleAndSavePng(pngBytes, savePath, request.MaxWidth,
-                    out int width, out int height, out int sourceWidth, out int sourceHeight);
-
-                Logger.Info($"[webcapture] Captured {finalUrl} via {method}: "
-                            + $"{sourceWidth}x{sourceHeight} -> {width}x{height}");
-
-                return new WebPageCaptureResult
+                if (request.FullPage)
                 {
-                    SavePath = savePath,
+                    (images, method, documentWidth, documentHeight, startY, truncated) =
+                        await CaptureFullPageBandsAsync(core, request, viewportWidth);
+                }
+                else
+                {
+                    images = new List<CapturedImage> { await CaptureViewportAsync(core, request.MaxWidth) };
+                    method = "viewport";
+                    documentWidth = images[0].Width;
+                    documentHeight = images[0].Height;
+                    startY = 0;
+                    truncated = false;
+                }
+
+                List<string> savePaths = ResolveSavePaths(request.SavePath, images.Count);
+                SaveImages(images, savePaths);
+
+                Logger.Info($"[webcapture] Captured {finalUrl} via {method}: {images.Count} band(s), "
+                            + $"each {images[0].Width}x{images[0].Height}, document {documentWidth}x{documentHeight}");
+
+                var result = new WebPageCaptureResult
+                {
                     PageTitle = pageTitle,
                     FinalUrl = finalUrl,
                     Method = method,
-                    Width = width,
-                    Height = height,
-                    SourceWidth = sourceWidth,
-                    SourceHeight = sourceHeight,
+                    BandWidth = images[0].Width,
+                    BandHeight = images[0].Height,
+                    DocumentWidth = documentWidth,
+                    DocumentHeight = documentHeight,
+                    StartY = startY,
+                    Truncated = truncated,
                     FullPage = request.FullPage,
                 };
+                result.SavePaths.AddRange(savePaths);
+                return result;
             }
             finally
             {
@@ -461,32 +522,111 @@ namespace DeepSeek_v4_for_VisualStudio.Services
         }
 
         /// <summary>
-        /// Produce the PNG bytes. Full-page capture goes through the DevTools protocol and
-        /// falls back to a viewport capture if that channel is unavailable.
+        /// Capture the document as fixed-height, native-resolution bands starting at
+        /// request.StartY. Always returns at least one image: if the DevTools band channel
+        /// fails it degrades to a single viewport capture rather than failing the tool.
         /// </summary>
-        private static async Task<(byte[] Png, string Method)> CapturePngAsync(CoreWebView2 core, bool fullPage)
+        private async Task<(List<CapturedImage> Images, string Method, int DocumentWidth,
+                            int DocumentHeight, int StartY, bool Truncated)>
+            CaptureFullPageBandsAsync(CoreWebView2 core, WebPageCaptureRequest request, int viewportWidth)
         {
-            if (fullPage)
+            int documentHeight = await ReadScriptIntAsync(core, "document.documentElement.scrollHeight");
+            int layoutWidth = await ReadScriptIntAsync(core, "document.documentElement.clientWidth");
+            if (layoutWidth <= 0)
+                layoutWidth = viewportWidth;
+
+            if (documentHeight <= 0)
             {
+                CapturedImage fallback = await CaptureViewportAsync(core, request.MaxWidth);
+                return (new List<CapturedImage> { fallback }, "viewport", layoutWidth, 0, 0, false);
+            }
+
+            (int startY, int bandCount, _) = PlanBands(documentHeight, request.StartY);
+
+            var images = new List<CapturedImage>();
+            for (int i = 0; i < bandCount; i++)
+            {
+                int y = startY + i * FullPageBandHeightPx;
+                int height = Math.Min(FullPageBandHeightPx, documentHeight - y);
+                if (height <= 0)
+                    break;
+
                 try
                 {
-                    string json = await core.CallDevToolsProtocolMethodAsync(
-                        "Page.captureScreenshot",
-                        "{\"format\":\"png\",\"captureBeyondViewport\":true}");
-
-                    return (ExtractCdpImageData(json), "cdp-fullpage");
+                    byte[] png = await CaptureBandAsync(core, y, layoutWidth, height);
+                    images.Add(PrepareImage(png, request.MaxWidth));
                 }
                 catch (Exception ex)
                 {
-                    Logger.Warn($"[webcapture] Full-page CDP capture failed, using viewport: {ex.Message}");
+                    Logger.Warn($"[webcapture] Band y={y} h={height} failed: {ex.Message}");
+                    break;
                 }
             }
 
-            using (var stream = new MemoryStream())
+            if (images.Count == 0)
             {
-                await core.CapturePreviewAsync(CoreWebView2CapturePreviewImageFormat.Png, stream);
-                return (stream.ToArray(), fullPage ? "viewport-fallback" : "viewport");
+                Logger.Warn("[webcapture] Every band failed; falling back to a viewport capture");
+                CapturedImage fallback = await CaptureViewportAsync(core, request.MaxWidth);
+                return (new List<CapturedImage> { fallback }, "viewport-fallback",
+                        layoutWidth, documentHeight, 0, false);
             }
+
+            // Derived from the requested band geometry, not from the (possibly downscaled)
+            // saved pixels, so maxWidth cannot distort the truncation report.
+            int coveredTo = Math.Min(documentHeight, startY + images.Count * FullPageBandHeightPx);
+            bool truncated = coveredTo < documentHeight;
+
+            return (images,
+                    truncated ? "cdp-bands-truncated" : "cdp-bands",
+                    layoutWidth, documentHeight, startY, truncated);
+        }
+
+        /// <summary>
+        /// Decide the band window for a full-page capture: where to start, how many bands to
+        /// take (capped at <see cref="MaxFullPageBands"/>) and whether the document continues
+        /// past them. Pure geometry, so it is unit-tested without a browser. Truncating and
+        /// telling the caller is deliberate: the alternative - downscaling until the whole
+        /// page fits - is what produced unreadable 228x2048 strips.
+        /// </summary>
+        internal static (int StartY, int BandCount, bool Truncated) PlanBands(
+            int documentHeight, int requestedStartY)
+        {
+            if (documentHeight <= 0)
+                return (0, 1, false);
+
+            int startY = Clamp(requestedStartY, 0, Math.Max(0, documentHeight - 1));
+            int remaining = documentHeight - startY;
+            int bandCount = Math.Min(
+                MaxFullPageBands,
+                Math.Max(1, (int)Math.Ceiling((double)remaining / FullPageBandHeightPx)));
+
+            int coveredTo = Math.Min(documentHeight, startY + bandCount * FullPageBandHeightPx);
+            return (startY, bandCount, coveredTo < documentHeight);
+        }
+
+        /// <summary>
+        /// One native-resolution band via the DevTools protocol. clip + captureBeyondViewport
+        /// is verified to return the requested region (different bands hash differently, so
+        /// it is not a repeated viewport frame) and never materialises the whole document,
+        /// which would cost hundreds of MB on a very long page.
+        /// </summary>
+        private static async Task<byte[]> CaptureBandAsync(CoreWebView2 core, int y, int width, int height)
+        {
+            string clip = string.Format(
+                CultureInfo.InvariantCulture,
+                "{{\"format\":\"png\",\"captureBeyondViewport\":true,"
+                + "\"clip\":{{\"x\":0,\"y\":{0},\"width\":{1},\"height\":{2},\"scale\":1}}}}",
+                y, width, height);
+
+            string json = await core.CallDevToolsProtocolMethodAsync("Page.captureScreenshot", clip);
+            return ExtractCdpImageData(json);
+        }
+
+        private static async Task<CapturedImage> CaptureViewportAsync(CoreWebView2 core, int maxWidth)
+        {
+            using var stream = new MemoryStream();
+            await core.CapturePreviewAsync(CoreWebView2CapturePreviewImageFormat.Png, stream);
+            return PrepareImage(stream.ToArray(), maxWidth);
         }
 
         private static byte[] ExtractCdpImageData(string cdpJson)
@@ -533,35 +673,77 @@ namespace DeepSeek_v4_for_VisualStudio.Services
 
         #region Output
 
-        private static string ResolveSavePath(string requestedPath)
+        /// <summary>
+        /// Build one destination path per band. A single image keeps the requested path
+        /// verbatim; multiple bands get a _pN suffix so page order is obvious.
+        /// </summary>
+        private static List<string> ResolveSavePaths(string requestedPath, int count)
         {
+            var paths = new List<string>();
+            int wanted = Math.Max(1, count);
+
             if (!string.IsNullOrWhiteSpace(requestedPath))
             {
                 string full = Path.GetFullPath(requestedPath);
                 string? directory = Path.GetDirectoryName(full);
                 if (!string.IsNullOrEmpty(directory))
                     Directory.CreateDirectory(directory);
-                return full;
+
+                if (wanted == 1)
+                {
+                    paths.Add(full);
+                    return paths;
+                }
+
+                string stem = Path.GetFileNameWithoutExtension(full);
+                string extension = Path.GetExtension(full);
+                if (extension.Length == 0)
+                    extension = ".png";
+                string parent = directory ?? string.Empty;
+
+                for (int i = 1; i <= wanted; i++)
+                    paths.Add(Path.Combine(parent, $"{stem}_p{i}{extension}"));
+                return paths;
             }
 
             Directory.CreateDirectory(BuiltInTools.CaptureWindowTool.CaptureTempDir);
-            return Path.Combine(
-                BuiltInTools.CaptureWindowTool.CaptureTempDir,
-                $"webpage_{DateTime.Now:yyyyMMdd_HHmmss_fff}.png");
+            string stamp = DateTime.Now.ToString("yyyyMMdd_HHmmss_fff");
+            for (int i = 1; i <= wanted; i++)
+            {
+                string name = wanted == 1
+                    ? $"webpage_{stamp}.png"
+                    : $"webpage_{stamp}_p{i}.png";
+                paths.Add(Path.Combine(BuiltInTools.CaptureWindowTool.CaptureTempDir, name));
+            }
+            return paths;
+        }
+
+        private static void SaveImages(List<CapturedImage> images, List<string> paths)
+        {
+            for (int i = 0; i < images.Count && i < paths.Count; i++)
+                File.WriteAllBytes(paths[i], images[i].Png);
+        }
+
+        /// <summary>One captured band: PNG bytes plus the pixel size they encode.</summary>
+        private sealed class CapturedImage
+        {
+            public byte[] Png = Array.Empty<byte>();
+            public int Width;
+            public int Height;
         }
 
         /// <summary>
-        /// Proportionally downscale (bounded by maxWidth and the long-edge cap) and save as PNG.
+        /// Decode, optionally downscale (explicit maxWidth, or the long-edge safety cap) and
+        /// re-encode as PNG. Bands are already 2048px tall and viewport-wide, so in practice
+        /// this is a pass-through - which is exactly what keeps full-page text legible.
         /// </summary>
-        private static void ScaleAndSavePng(
-            byte[] pngBytes, string savePath, int maxWidth,
-            out int width, out int height, out int sourceWidth, out int sourceHeight)
+        private static CapturedImage PrepareImage(byte[] pngBytes, int maxWidth)
         {
             using var source = new MemoryStream(pngBytes);
             using var bitmap = new Bitmap(source);
 
-            sourceWidth = bitmap.Width;
-            sourceHeight = bitmap.Height;
+            int sourceWidth = bitmap.Width;
+            int sourceHeight = bitmap.Height;
 
             double scale = 1.0;
             if (maxWidth > 0 && sourceWidth > maxWidth)
@@ -572,12 +754,7 @@ namespace DeepSeek_v4_for_VisualStudio.Services
                 scale = Math.Min(scale, (double)DefaultMaxLongEdgePx / longEdge);
 
             if (scale >= 1.0)
-            {
-                bitmap.Save(savePath, ImageFormat.Png);
-                width = sourceWidth;
-                height = sourceHeight;
-                return;
-            }
+                return new CapturedImage { Png = pngBytes, Width = sourceWidth, Height = sourceHeight };
 
             int targetWidth = Math.Max(1, (int)Math.Round(sourceWidth * scale));
             int targetHeight = Math.Max(1, (int)Math.Round(sourceHeight * scale));
@@ -592,9 +769,9 @@ namespace DeepSeek_v4_for_VisualStudio.Services
                 graphics.DrawImage(bitmap, 0, 0, targetWidth, targetHeight);
             }
 
-            scaled.Save(savePath, ImageFormat.Png);
-            width = targetWidth;
-            height = targetHeight;
+            using var buffer = new MemoryStream();
+            scaled.Save(buffer, ImageFormat.Png);
+            return new CapturedImage { Png = buffer.ToArray(), Width = targetWidth, Height = targetHeight };
         }
 
         private static int Clamp(int value, int min, int max)
