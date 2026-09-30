@@ -134,7 +134,7 @@ public class GitToolTests
         var operations = new[]
         {
             "status", "diff", "log", "show", "describe", "tag", "rev-parse", "reflog", "ls-files",
-            "add", "commit", "branch", "checkout", "merge", "pull", "push", "stash", "reset",
+            "add", "commit", "branch", "checkout", "merge", "fetch", "pull", "push", "stash", "reset",
         };
         var tool = new GitTool();
         foreach (var op in operations)
@@ -353,6 +353,39 @@ public class GitToolTests
     }
 
     [Fact]
+    public void GitTool_Definition_OperationEnumContainsFetch()
+    {
+        var json = JsonSerializer.Serialize(new GitTool().GetDefinition().Function.Parameters);
+        json.Should().Contain("\"fetch\"");
+    }
+
+    [Fact]
+    public void IsReadOnlyOperation_Fetch_ReturnsTrue()
+    {
+        GitTool.IsReadOnlyOperation("fetch", "", "", "", false).Should().BeTrue();
+    }
+
+    [Fact]
+    public void BuildGitCommand_Fetch_WithoutArguments_BuildsFetch()
+    {
+        var args = ParseArgs("{\"operation\":\"fetch\"}");
+
+        var command = new GitTool().BuildGitCommand("fetch", args, "C:\\repo");
+
+        command.Should().Be("fetch");
+    }
+
+    [Fact]
+    public void BuildGitCommand_Fetch_WithRemoteAndBranch_BuildsScopedFetch()
+    {
+        var args = ParseArgs("{\"operation\":\"fetch\",\"remote\":\"origin\",\"branch\":\"dev\"}");
+
+        var command = new GitTool().BuildGitCommand("fetch", args, "C:\\repo");
+
+        command.Should().Be("fetch origin \"dev\"");
+    }
+
+    [Fact]
     public void BuildGitCommand_WriteOperation_WithDangerousFlag_BuildsCommandForApproval()
     {
         var args = ParseArgs("{\"operation\":\"reset\",\"flags\":[\"--hard\"]}");
@@ -406,6 +439,23 @@ public class GitToolTests
             delete: false,
             force: false,
             flags: new[] { "--hard" },
+            out string reason);
+
+        requiresApproval.Should().BeFalse();
+        reason.Should().BeEmpty();
+    }
+
+    [Fact]
+    public void RequiresApproval_ReadOnlyAgentFetchOperation_ReturnsFalse()
+    {
+        bool requiresApproval = GitTool.RequiresApproval(
+            AgentType.Ask,
+            "fetch",
+            isReadOnly: true,
+            mode: string.Empty,
+            delete: false,
+            force: false,
+            flags: null,
             out string reason);
 
         requiresApproval.Should().BeFalse();
