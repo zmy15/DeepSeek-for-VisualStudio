@@ -111,4 +111,25 @@ public class AgentFactoryTests
 
         result.Should().NotBeNull();
     }
+
+    /// <summary>
+    /// 需求：capture_webpage 必须在所有 Agent 的白名单里可用。
+    /// 「仅视觉模型提供」是另一层门控——由 BuiltInToolService.IsToolAvailableForCurrentModel
+    /// 在工具定义下发前过滤，与本测试无关。
+    /// </summary>
+    [Theory]
+    [InlineData(AgentType.Ask)]
+    [InlineData(AgentType.Explore)]
+    [InlineData(AgentType.Plan)]
+    [InlineData(AgentType.Edit)]
+    [InlineData(AgentType.Build)]
+    public void AllAgents_ExposeCaptureWebpage(AgentType agentType)
+    {
+        var apiService = new DeepSeekApiService("test-key");
+        var factory = new AgentFactory(apiService);
+
+        var agent = factory.GetAgent(agentType);
+
+        agent.Definition.AllowedTools.Should().Contain("capture_webpage");
+    }
 }

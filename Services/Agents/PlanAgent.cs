@@ -90,6 +90,7 @@ namespace DeepSeek_v4_for_VisualStudio.Services.Agents
                     "runSubagent",               // 调用 Explore 子代理进行代码库探索
                     "VisualStudio_askQuestions",  // 向用户提问澄清
                     "fetch_webpage",              // 用户提供 URL 时获取网页内容
+                    "capture_webpage",            // 离屏渲染 URL 截图（仅视觉模型提供）
                     "memory",                     // 记忆管理
                     "list_dir",                   // 列出目录（对齐阶段快速查阅）
                     "read_file",                  // 读取文件（对齐阶段快速查阅）
