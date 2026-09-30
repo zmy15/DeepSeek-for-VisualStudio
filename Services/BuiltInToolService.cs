@@ -1,4 +1,4 @@
-﻿using DeepSeek_v4_for_VisualStudio.Models;
+using DeepSeek_v4_for_VisualStudio.Models;
 using DeepSeek_v4_for_VisualStudio.Services.BuiltInTools;
 using DeepSeek_v4_for_VisualStudio.Utils;
 using System;
@@ -215,11 +215,20 @@ namespace DeepSeek_v4_for_VisualStudio.Services
         /// </summary>
         private bool IsToolAvailableForCurrentModel(string toolName)
         {
-            if (!string.Equals(toolName, "capture_window", StringComparison.OrdinalIgnoreCase))
+            if (!IsVisionOnlyTool(toolName))
                 return true;
 
             return _apiService == null ||
                 _apiService.CurrentIsVision;
+        }
+
+        /// <summary>
+        /// 仅在视觉模型下可用的内置工具（截图类：结果以图片直传模型）。
+        /// </summary>
+        private static bool IsVisionOnlyTool(string toolName)
+        {
+            return string.Equals(toolName, "capture_window", StringComparison.OrdinalIgnoreCase)
+                || string.Equals(toolName, "capture_webpage", StringComparison.OrdinalIgnoreCase);
         }
 
         /// <summary>
@@ -280,6 +289,7 @@ namespace DeepSeek_v4_for_VisualStudio.Services
             Register(new GetErrorsTool(_buildService));
             Register(new FetchWebpageTool(_webSearchService));
             Register(new CaptureWindowTool());
+            Register(new CaptureWebpageTool());
 
             // 构建工具
             Register(new BuildSolutionTool(_buildService));
@@ -433,6 +443,7 @@ namespace DeepSeek_v4_for_VisualStudio.Services
                 new GetErrorsTool(),
                 new FetchWebpageTool(),
                 new CaptureWindowTool(),
+                new CaptureWebpageTool(),
                 new BuildSolutionTool(),
                 new ReplaceStringInFileTool(),
                 new MultiReplaceStringInFileTool(),
@@ -555,7 +566,7 @@ namespace DeepSeek_v4_for_VisualStudio.Services
                     ?? new Dictionary<string, JsonElement>();
 
                 if (!IsToolAvailableForCurrentModel(tool.Name))
-                    return LocalizationService.Instance["tool.captureWindow.visionModelOnly"];
+                    return LocalizationService.Instance.Format("tool.service.visionModelOnly", tool.Name);
 
                 tool.CancellationToken = cancellationToken;
                 return await tool.ExecuteAsync(args, workspaceRoot);
@@ -574,7 +585,7 @@ namespace DeepSeek_v4_for_VisualStudio.Services
             return toolName switch
             {
                 "list_dir" or "read_file" or "file_search" or "grep_search" or "symbol_search" or "get_file_symbols" or "get_errors"
-                    or "fetch_webpage" or "capture_window" or "build_solution"
+                    or "fetch_webpage" or "capture_window" or "capture_webpage" or "build_solution"
                     or "replace_string_in_file" or "multi_replace_string_in_file" or "create_file" or "delete_file"
                     or "apply_patch" or "create_directory"
                     or "load_skill" or "read_skill_resource"
