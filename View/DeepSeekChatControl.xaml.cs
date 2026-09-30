@@ -139,6 +139,7 @@ namespace DeepSeek_v4_for_VisualStudio.View
 
         /// <summary>
         /// 线程安全地取消当前流式操作。
+        /// 取消会让仍在等待的审批请求失效（TCS 立即置位），因此同时清空审批显示队列。
         /// </summary>
         private void CancelStreaming()
         {
@@ -146,6 +147,8 @@ namespace DeepSeek_v4_for_VisualStudio.View
             {
                 _currentStreamingCts?.Cancel();
             }
+
+            ResetApprovalQueue();
         }
 
         /// <summary>
@@ -464,6 +467,10 @@ namespace DeepSeek_v4_for_VisualStudio.View
         // ── 已创建的计划 ID 集合（防止重复创建计划消息）──
         private readonly HashSet<string> _createdPlanIds = new();
         private readonly HashSet<string> _presentedQuestionRequests = new();
+
+        // ── 审批 UI 串行队列：同一时刻只显示一个审批卡片，处理完再显示下一个 ──
+        private readonly ApprovalRequestQueue _approvalQueue = new();
+        private System.Windows.Threading.DispatcherTimer? _approvalQueueWatchdog;
 
         // ── 待回放的 Agent 日志条目（面板因全量刷新被销毁时用于恢复）──
         private readonly List<AgentLogEntry> _pendingLogEntries = new();
