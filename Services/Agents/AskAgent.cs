@@ -72,14 +72,17 @@ namespace DeepSeek_v4_for_VisualStudio.Services.Agents
             };
         }
 
+        /// <summary>
+        /// 构建 Ask Agent 专属系统提示词。
+        /// 
+        /// 说明：Git/终端只读边界、各工具的参数与使用条件已下沉到对应工具的
+        /// description（见 tool.git.desc / tool.run_in_terminal.desc 等），
+        /// 这里只保留角色定位、探索策略、记忆与移交规则，避免与工具描述重复而浪费 token。
+        /// </summary>
         private static string BuildSystemPrompt()
         {
             return LocalizationService.Instance["agent.ask.systemPromptFragment"]
                 + AiPrompts.AskAgentPromptFragment
-                + "\n\n" + AiPrompts.AskGitInstructions
-                + "\n\n" + AiPrompts.AskGitHandoffFirstRule
-                + "\n\n" + AiPrompts.AskTerminalInstructions
-                + "\n\n" + AiPrompts.AskTerminalNoRepeatRule
                 + AiPrompts.AgentConclusionStopRule;
         }
 
@@ -573,10 +576,14 @@ namespace DeepSeek_v4_for_VisualStudio.Services.Agents
                 // 后者仍会把 read_file 等定义暴露给模型，模型一旦调用就会被白名单拦截，
                 // 拦截警告会替代润色摘要成为最终内容；
                 // 且完整上下文现含工具调用记录，显式禁用工具可防止模型模仿历史发起工具调用。
+                // maxTokens 传 null（不发送 max_tokens 字段）→ 不限制输出长度。
+                // 此前硬编码 1024 会让携带完整 handoff 上下文（数千 KB、上百条消息）的
+                // 润色请求频繁以 finish_reason=length 被截断，总结只剩开头几行；
+                // 且截断发生在 thinking 之后时，reasoning 会挤占全部额度，正文仅剩数百字符。
                 string result = await CallAiWithMessagesAsync(
                     messages,
                     ct,
-                    maxTokens: 1024,
+                    maxTokens: null,
                     toolChoice: "none");
 
                 result = StripToolCallMarkers(result);

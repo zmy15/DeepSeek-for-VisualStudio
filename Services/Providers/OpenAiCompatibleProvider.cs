@@ -198,8 +198,8 @@ namespace DeepSeek_v4_for_VisualStudio.Services.Providers
         /// <param name="effectiveModel">本次调用实际使用的模型；为空时使用实例当前模型</param>
         protected void AccumulateStats(DeepSeekUsage usage, string? effectiveModel = null)
         {
-            Interlocked.Add(ref _totalCacheHitTokens, usage.PromptCacheHitTokens);
-            Interlocked.Add(ref _totalCacheMissTokens, usage.PromptCacheMissTokens);
+            Interlocked.Add(ref _totalCacheHitTokens, usage.EffectiveHitTokens);
+            Interlocked.Add(ref _totalCacheMissTokens, usage.EffectiveMissTokens);
             Interlocked.Add(ref _totalPromptTokens, usage.PromptTokens);
             Interlocked.Add(ref _totalCompletionTokens, usage.CompletionTokens);
             AccumulateProviderCost(usage, effectiveModel);
@@ -1019,8 +1019,8 @@ namespace DeepSeek_v4_for_VisualStudio.Services.Providers
                 try
                 {
                     if (LastUsage == null) return;
-                    int hit = LastUsage.PromptCacheHitTokens;
-                    int miss = LastUsage.PromptCacheMissTokens;
+                    int hit = LastUsage.EffectiveHitTokens;
+                    int miss = LastUsage.EffectiveMissTokens;
                     int cacheableTotal = hit + miss;
                     if (cacheableTotal <= 0)
                     {
@@ -1030,6 +1030,12 @@ namespace DeepSeek_v4_for_VisualStudio.Services.Providers
 
                     double rate = (double)hit / cacheableTotal;
                     string level = rate >= 0.90 ? "🟢" : rate >= 0.50 ? "🟡" : rate >= 0.20 ? "🟠" : "🔴";
+
+                    // 非 DeepSeek 原生命名（cached_tokens 别名或守恒回退）时标注来源，
+                    // 便于排查第三方端点的 usage 字段命名差异。
+                    string compatNote = LastUsage.UsesCompatCacheFields
+                        ? " [来源: OpenAI 语义 cached_tokens / 守恒回退]"
+                        : "";
 
                     const int bytesPerToken = 3;
                     int msg0TokenEstimate = msg0Length / bytesPerToken;
@@ -1041,7 +1047,7 @@ namespace DeepSeek_v4_for_VisualStudio.Services.Providers
                     else
                         missBoundary = "（无分段数据）";
 
-                    Logger.Info($"[Cache] {level} API调用完成: 命中率={rate * 100:F1}% (命中 {hit:N0} / 未命中 {miss:N0} / 可缓存 {cacheableTotal:N0} / prompt {LastUsage.PromptTokens:N0} tokens)\n" +
+                    Logger.Info($"[Cache] {level} API调用完成: 命中率={rate * 100:F1}% (命中 {hit:N0} / 未命中 {miss:N0} / 可缓存 {cacheableTotal:N0} / prompt {LastUsage.PromptTokens:N0} tokens){compatNote}\n" +
                         $"        ↳ 边界: {missBoundary}");
                     }
                 catch (Exception ex)
@@ -1126,7 +1132,7 @@ namespace DeepSeek_v4_for_VisualStudio.Services.Providers
                     {
                         LastUsage = chunk.Usage;
                         AccumulateStats(chunk.Usage, model);
-                        cacheInfo = $"{chunk.Usage.PromptCacheHitTokens}|{chunk.Usage.PromptCacheMissTokens}|{chunk.Usage.PromptTokens}|{chunk.Usage.CompletionTokens}";
+                        cacheInfo = $"{chunk.Usage.EffectiveHitTokens}|{chunk.Usage.EffectiveMissTokens}|{chunk.Usage.PromptTokens}|{chunk.Usage.CompletionTokens}";
                     }
                 }
                 catch (Exception ex) when (ex is JsonException || ex is FormatException || ex is InvalidOperationException)

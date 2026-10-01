@@ -88,6 +88,175 @@ public class ChatHtmlServiceTests
         result.Should().Be("\"a\\\"b\\nc中文\"");
     }
 
+    // ── 过程折叠块：程序化收起不得被误判为用户手动开合 ──
+    // details 的 toggle 事件对 JS 赋值引发的 open 变化同样会触发，
+    // 若不加抑制标记，自动收回会把自己伪装成用户操作并永久锁定该块。
+    [Fact]
+    public void BuildTurnProcessJsFunction_GuardsProgrammaticCollapseFromUserToggle()
+    {
+        string js = InvokePrivateStaticString("BuildTurnProcessJsFunction");
+
+        // 必须存在抑制机制，且在收起前被置位
+        js.Should().Contain("__suppressTurnToggle");
+        js.Should().Contain("__beginTurnToggleSuppress");
+        int suppressIdx = js.IndexOf("__beginTurnToggleSuppress();", StringComparison.Ordinal);
+        int openIdx = js.IndexOf("el.open=false", StringComparison.Ordinal);
+        suppressIdx.Should().BeGreaterThanOrEqualTo(0);
+        openIdx.Should().BeGreaterThan(suppressIdx,
+            "抑制必须在 el.open=false 之前置位，否则排队的 toggle 回调会漏判");
+
+        // 抑制标记须为计数器：重绘等场景可能连续多次收起，
+        // 布尔量会被后一次覆盖，导致前一次排队的 toggle 回调漏判并被误报为用户操作
+        js.Should().Contain("window.__suppressTurnToggle++");
+        js.Should().Contain("window.__suppressTurnToggle--");
+
+        // 已收起视为成功（幂等）：默认收起渲染下应直接命中，不产生多余 DOM 变更
+        int idempotentIdx = js.IndexOf("if(el.open===false)return true;", StringComparison.Ordinal);
+        idempotentIdx.Should().BeGreaterThanOrEqualTo(0);
+        idempotentIdx.Should().BeLessThan(suppressIdx,
+            "幂等判断必须早于抑制置位，否则每次兜底收起都会触发一次无谓的 toggle");
+
+        // toggle 处理器必须检查抑制标记，且该分支不得上报用户意图
+        int handlerIdx = js.IndexOf("document.addEventListener('toggle'", StringComparison.Ordinal);
+        handlerIdx.Should().BeGreaterThan(openIdx);
+        // 注意：测试项目目标为 net472，不可使用 C# 范围语法（System.Range 不可用）
+        string handlerBody = js.Substring(handlerIdx);
+        handlerBody.Should().Contain("__suppressTurnToggle");
+        handlerBody.IndexOf("__suppressTurnToggle", StringComparison.Ordinal)
+            .Should().BeLessThan(
+                handlerBody.IndexOf("turnProcessToggled", StringComparison.Ordinal),
+                "抑制检查必须早于上报，否则程序化收起仍会被当成用户操作回写");
+    }
+
+    [Fact]
+    public void BuildStreamEndJson_ProcessTurn_RendersBlockCollapsedByDefault()
+    {
+        // 回归：streamEnd 是本气泡内容的最终覆盖，必须以「收起态」渲染过程块。
+        // 此前按展开渲染再依赖宿主随后下发收起指令，会与 innerHTML 覆盖竞态，
+        // 实测出现「找不到节点」以及界面停留在展开态（用户要求默认不展开）。
+        string json = ChatHtmlService.BuildStreamEndJson(
+            1,
+            "最终总结",
+            string.Empty,
+            extraFooterHtml: null,
+            timelineContent: "移交 Edit\n创建文件 leetcode.cpp\n构建解决方案",
+            turnId: "4e9831ea",
+            isProcessMessage: true);
+
+        // 取出 html 字段后检查 details 开标签不含 open
+        json.Should().Contain("turn-process");
+        int detailsStart = json.IndexOf("<details class='turn-process'", StringComparison.Ordinal);
+        detailsStart.Should().BeGreaterThanOrEqualTo(0);
+        int detailsTagEnd = json.IndexOf(">", detailsStart, StringComparison.Ordinal);
+        string openTag = json.Substring(detailsStart, detailsTagEnd - detailsStart + 1);
+        openTag.Should().NotContain("open", "过程块默认应为收起态");
+        openTag.Should().Contain("data-turn-id");
+        json.Should().Contain("最终总结");
+    }
+
+    [Fact]
+    public void BuildTurnProcessProbeJs_TargetsTurnSpecificElement()
+    {
+        string js = ChatHtmlService.BuildTurnProcessProbeJs("turn123");
+
+        js.Should().Contain("details.turn-process");
+        js.Should().Contain("turn123");
+        // 探测需返回布尔值，供宿主判定节点是否已挂上 DOM
+        js.Should().Contain("!!document.querySelector");
+    }
+
+    [Fact]
+    public void BuildCollapseTurnProcessJs_EscapesTurnId()
+    {
+        string js = ChatHtmlService.BuildCollapseTurnProcessJs("a'b");
+
+        js.Should().Contain("__collapseTurnProcess");
+        // 轮次标识中的引号必须转义，否则会截断选择器字符串
+        js.Should().NotContain("'a'b'");
+    }
+
+    [Fact]
+    public void AppendAssistantMessageHtml_HandoffChainTurn_WithProcess_RendersCollapsibleBlock()
+    {
+        // 回归：Handoff 链（Ask→Edit→Ask）全程共用一个气泡，末尾由 Ask 收尾，
+        // 因此 msg.AgentType 可能是 Ask。若用「AgentType != Ask」判定是否可折叠，
+        // 这种「Ask 收尾但确实跑过工具」的轮次就会被整轮漏掉（实测时间线长达 5790 字符仍不折叠）。
+        // 判定必须依据轮次是否产生过过程输出（IsProcessMessage），而非收尾 Agent 类型。
+        var message = new ChatMessage
+        {
+            Role = "assistant",
+            AgentType = AgentType.Ask,          // 末尾 Ask 收尾（Handoff 链第 2 棒）
+            TurnId = "81361469",
+            IsProcessMessage = true,            // 本轮确实产生过过程
+            TimelineContent = "移交 Edit\n创建文件 leetcode.cpp\n构建解决方案",  // 过程
+            Content = "LeetCode 22「括号生成」已完成",                        // 最终总结
+        };
+
+        string html = ChatHtmlService.BuildAssistantMessageHtml(message, 1);
+
+        html.Should().Contain("details class='turn-process'",
+            "Ask 收尾但有过程的轮次同样应渲染折叠块");
+        html.Should().Contain("data-turn-id='81361469'");
+        // 过程在折叠块内，最终总结必须留在折叠块之外
+        int detailsEnd = html.IndexOf("</details>", StringComparison.Ordinal);
+        int summaryIdx = html.IndexOf("已完成", StringComparison.Ordinal);
+        detailsEnd.Should().BeGreaterThanOrEqualTo(0);
+        summaryIdx.Should().BeGreaterThan(detailsEnd, "最终总结必须在折叠块之外，才是「只保留总结」");
+    }
+
+    [Fact]
+    public void AppendAssistantMessageHtml_AskPureQa_NoProcess_RendersNoCollapsibleBlock()
+    {
+        // Ask 纯问答（从未调用工具）不得出现折叠块，界面与折叠功能上线前一致。
+        var message = new ChatMessage
+        {
+            Role = "assistant",
+            AgentType = AgentType.Ask,
+            IsProcessMessage = false,           // 从未产生过程
+            TimelineContent = string.Empty,
+            Content = "这是纯问答回答",
+        };
+
+        string html = ChatHtmlService.BuildAssistantMessageHtml(message, 1);
+
+        html.Should().NotContain("turn-process", "Ask 纯问答不应产生折叠块");
+        html.Should().Contain("这是纯问答回答");
+    }
+
+    [Fact]
+    public void AppendAssistantMessageHtml_CollapsibleBlock_CollapsesWhenTurnFinished()
+    {
+        var message = new ChatMessage
+        {
+            Role = "assistant",
+            AgentType = AgentType.Ask,
+            TurnId = "abc12345",
+            IsProcessMessage = true,
+            TimelineContent = "步骤 1: 写入文件",
+            Content = "最终总结",
+            IsStreaming = false,
+        };
+
+        string html = ChatHtmlService.BuildAssistantMessageHtml(message, 1);
+
+        // 已结束的轮次默认收起：details 不输出 open 属性
+        int detailsStart = html.IndexOf("<details class='turn-process'", StringComparison.Ordinal);
+        detailsStart.Should().BeGreaterThanOrEqualTo(0);
+        int detailsTagEnd = html.IndexOf('>', detailsStart);
+        string openTag = html.Substring(detailsStart, detailsTagEnd - detailsStart + 1);
+        openTag.Should().NotContain("open", "已结束的轮次应以收起态渲染");
+    }
+
+    private static string InvokePrivateStaticString(string methodName)
+    {
+        var method = typeof(ChatHtmlService).GetMethod(
+            methodName,
+            BindingFlags.NonPublic | BindingFlags.Static);
+
+        method.Should().NotBeNull($"{methodName} 应存在");
+        return (string)method!.Invoke(null, null)!;
+    }
+
     [Fact]
     public void BuildInitialPage_EditFork_RendersBranchNavInsideAssistantActionsRow()
     {

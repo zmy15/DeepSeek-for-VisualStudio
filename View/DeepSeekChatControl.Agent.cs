@@ -34,6 +34,130 @@ namespace DeepSeek_v4_for_VisualStudio.View
         #region Coding Agent Workflow
 
         /// <summary>
+        /// 为新一轮 Agent 任务分配唯一的轮次标识。任务开始时调用一次，
+        /// 该轮内的过程消息与最终总结共享同一 TurnId，供前端聚合为同一折叠分组。
+        /// </summary>
+        /// <returns>新生成的轮次标识（8 位十六进制串）。</returns>
+        private string BeginAgentTurn()
+        {
+            _currentAgentTurnId = Guid.NewGuid().ToString("N").Substring(0, 8);
+            // 新轮次默认尚未产生过程；待本轮真正跑了工具/步骤后再置位。
+            // 该标记跟随轮次而非消息，因此 Handoff 链上任意一棒（含末尾的 Ask 总结）
+            // 都能正确判断「这一轮到底有没有过程可折叠」。
+            _currentAgentTurnProducedProcess = false;
+            return _currentAgentTurnId;
+        }
+
+        /// <summary>
+        /// 将当前轮次标识与「过程消息」标记写入助理消息，
+        /// 作为前端识别「哪些内容属于可折叠中间过程」的唯一判定依据。
+        /// 仅 Agent 协作模式调用；Ask 模式不调用，字段保持 null / false。
+        /// </summary>
+        /// <param name="message">待打标的助理消息。</param>
+        /// <param name="isProcess">
+        /// 是否为过程消息（工具调用行、每步预告文本、工具返回结果），
+        /// 由调用方依据本轮是否产生了时间线内容判定。
+        /// </param>
+        private void TagMessageForWebView(ChatMessage message, bool isProcess)
+        {
+            // 仅标记属于当前轮次的过程消息；Ask 模式不会调用此处，字段保持默认值
+            message.TurnId = _currentAgentTurnId;
+            message.IsProcessMessage = isProcess;
+        }
+
+        /// <summary>
+        /// 一轮 Agent 任务结束后，通知前端收起该轮的过程折叠块，仅保留最终总结。
+        /// 必须晚于 streamEnd 的 innerHTML 渲染下发，否则折叠目标节点尚不存在。
+        /// </summary>
+        /// <param name="msgIndex">本轮最终总结所在的消息下标。</param>
+        private void CollapseTurnProcessAfterFinalize(int msgIndex)
+        {
+            string? turnId;
+            lock (_lock)
+            {
+                turnId = msgIndex >= 0 && msgIndex < _messages.Count
+                    ? _messages[msgIndex].TurnId
+                    : null;
+            }
+
+            // 非 Agent 轮次（Ask 纯问答）没有轮次标识，无需折叠
+            if (string.IsNullOrEmpty(turnId)) return;
+
+            string probeJs = ChatHtmlService.BuildTurnProcessProbeJs(turnId);
+            string collapseJs = ChatHtmlService.BuildCollapseTurnProcessJs(turnId);
+
+            _ = Dispatcher.InvokeAsync(async () =>
+            {
+                try
+                {
+                    // ── 兜底收起 ──
+                    // streamEnd 已按「默认收起」渲染，正常情况下这里无需再做任何事；
+                    // 保留该兜底是为了覆盖页面被全量重绘、或历史节点未按收起态渲染的情形。
+                    bool ready = false;
+                    for (int attempt = 0; attempt < 20 && !ready; attempt++)
+                    {
+                        await Task.Delay(50);
+                        if (ChatWebView?.CoreWebView2 == null) return;
+                        string probe = await ChatWebView.CoreWebView2.ExecuteScriptAsync(probeJs);
+                        ready = probe?.Trim().Equals("true", StringComparison.OrdinalIgnoreCase) == true;
+                    }
+
+                    if (!ready)
+                    {
+                        // 节点未出现属正常：默认收起渲染下命中即跳过，页面已导航/切走时更是如此。
+                        // 此处不改模型，留待下次全量重绘按已持久化的折叠态还原。
+                        Logger.Info($"[Render] 过程折叠块未出现在当前页面，无需兜底收起 ({turnId})");
+                        return;
+                    }
+
+                    string result = await ChatWebView.CoreWebView2.ExecuteScriptAsync(collapseJs);
+                    bool collapsed = result?.Trim().Equals("true", StringComparison.OrdinalIgnoreCase) == true;
+
+                    // ── 仅在确认收起后才写回模型 ──
+                    // 返回 false 表示用户已手动展开（受 data-user-toggled 保护），
+                    // 此时必须尊重其意图，不得覆盖为已折叠。
+                    if (collapsed)
+                        MarkTurnProcessCollapsed(turnId, collapsed: true);
+                    else
+                        Logger.Info($"[Render] 过程折叠块保持展开（用户已手动展开）: turn={turnId}");
+                }
+                catch (Exception ex)
+                {
+                    Logger.Warn($"[Render] 收起过程折叠块失败 ({turnId}): {ex.Message}");
+                }
+            }, System.Windows.Threading.DispatcherPriority.Background);
+        }
+
+        /// <summary>
+        /// 把指定轮次的折叠态写回消息模型，供全量重绘与会话切换时还原。
+        /// </summary>
+        /// <param name="turnId">目标轮次标识。</param>
+        /// <param name="collapsed">true 表示收起，false 表示展开。</param>
+        private void MarkTurnProcessCollapsed(string turnId, bool collapsed)
+        {
+            lock (_lock)
+            {
+                foreach (var msg in _messages)
+                {
+                    if (string.Equals(msg.TurnId, turnId, StringComparison.Ordinal))
+                        msg.IsTurnProcessCollapsed = collapsed;
+                }
+            }
+        }
+
+        /// <summary>
+        /// 处理前端上报的过程折叠块开合：写回模型，使「用户手动展开过」的轮次
+        /// 在切走会话或重开面板后仍保持展开，而不被自动折叠重置。
+        /// </summary>
+        /// <param name="turnId">发生开合变化的轮次标识。</param>
+        /// <param name="collapsed">true 表示已收起，false 表示用户手动展开。</param>
+        private void HandleTurnProcessToggled(string turnId, bool collapsed)
+        {
+            MarkTurnProcessCollapsed(turnId, collapsed);
+            Logger.Info($"[Render] 过程折叠块状态已记录: turn={turnId}, collapsed={collapsed}");
+        }
+
+        /// <summary>
         /// 获取最近几轮对话文本作为 Discover 的附加上下文，帮助 ExploreAgent 生成更精准的关键词。
         /// </summary>
         [RagSource("conversation-history", "获取对话历史作为 Discover 附加上下文")]
@@ -591,6 +715,10 @@ namespace DeepSeek_v4_for_VisualStudio.View
                 _lastReportedStepIndex = 0;
                 _lastReportedStepStatus = string.Empty;
                 _pendingHandoff = null;
+
+                // ── 为本轮分配轮次标识：必须早于消息创建，该轮过程与最终总结共用此值，
+                //    否则 TurnId 恒为 null，收尾时的过程折叠会因无标识而静默跳过 ──
+                BeginAgentTurn();
 
                 var context = new AgentContext
                 {
@@ -1324,6 +1452,17 @@ namespace DeepSeek_v4_for_VisualStudio.View
                     msg.ReasoningContent = reasoning;
                     msg.IsStreaming = false;
                     msg.IsRendered = true;
+
+                    // ── 判定本轮是否产生「可折叠过程」──
+                    // 关键：不能用「收尾 Agent 是不是 Ask」来判定。Handoff 链（如 Ask→Edit→Ask）
+                    // 全程共用一个气泡，真正干活的 Edit 阶段结束后会移交 Ask 生成变更总结，
+                    // 此时 msg.AgentType 已是 Ask，过程会被整轮误判为「纯问答」而不折叠——
+                    // 这正是「LeetCode 22」那轮时间线长达 5790 字符却始终不折叠的原因。
+                    // 正确依据是本轮是否真的跑过工具/步骤（由轮次标识记录），
+                    // 而非哪一棒收尾；Ask 纯问答没有轮次标识，天然保持原样。
+                    bool hasAgentProcess = timelineContent.Length > 0
+                        && _currentAgentTurnProducedProcess;
+                    TagMessageForWebView(msg, isProcess: hasAgentProcess);
                 }
                 displayContent = ChatHtmlService.BuildAssistantDisplayContent(timelineContent, content);
             }
@@ -1334,6 +1473,9 @@ namespace DeepSeek_v4_for_VisualStudio.View
 
             // ── 使用非阻塞 PostWebMessageAsString 发送最终渲染 ──
             PostStreamEnd(msgIndex, content, reasoning, combinedFooter);
+
+            // ── 任务结束：待最终总结渲染完成后收起本轮过程块，仅保留结论 ──
+            CollapseTurnProcessAfterFinalize(msgIndex);
         }
 
         /// <summary>
@@ -1749,6 +1891,13 @@ namespace DeepSeek_v4_for_VisualStudio.View
                 previousMessage.IsStreaming = false;
                 previousMessage.IsRendered = true;
 
+                // ── 同轮补充指令（guidance）：上一气泡在此就地定稿，
+                //    与 FinalizeAgentMessage 用同一判定（本轮是否产生过过程），
+                //    不能用「AgentType != Ask」——Handoff 链末尾由 Ask 收尾会误判 ──
+                TagMessageForWebView(previousMessage,
+                    isProcess: previousMessage.TimelineContent.Length > 0
+                        && _currentAgentTurnProducedProcess);
+
                 if (_tree != null && string.IsNullOrEmpty(previousMessage.NodeId))
                     _tree.AddChildMessage(previousMessage);
 
@@ -2049,6 +2198,11 @@ namespace DeepSeek_v4_for_VisualStudio.View
                 if (_agentTimelineContent.Length > 0)
                     _agentTimelineContent.Append('\n');
                 _agentTimelineContent.Append(line.Trim());
+
+                // 本轮确实产生了过程内容（步骤预告 / 工具调用行 / 工具返回），
+                // 以此作为「该轮可折叠」的依据，而非收尾 Agent 的类型
+                if (!string.IsNullOrWhiteSpace(line))
+                    _currentAgentTurnProducedProcess = true;
 
                 msgIndex = _agentStreamingMsgIndex;
                 var msg = _messages[msgIndex];
