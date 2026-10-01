@@ -1,4 +1,4 @@
-﻿using System.Text.Json;
+using System.Text.Json;
 
 namespace DeepSeek_v4_for_VisualStudio.Tests.Unit.Models;
 
@@ -173,6 +173,109 @@ public class DeepSeekModelsTests
         usage!.PromptCacheHitTokens.Should().Be(80);
         usage.PromptCacheMissTokens.Should().Be(20);
         usage.PromptTokens.Should().Be(100);
+    }
+
+    // ── OpenAI 语义 usage（prompt_tokens_details.cached_tokens）兼容 ──
+    // 回归：第三方网关走 OpenAI 命名，只报命中量、不报 prompt_cache_miss_tokens。
+    // 修复前 miss 被当成 0，命中率虚报为 100%、未命中 token 按命中价计费。
+    [Fact]
+    public void DeepSeekUsage_OpenAiCachedTokens_DerivesMissFromPromptTotal()
+    {
+        // 实测抓包帧：vLLM 风格端点，hit+miss 字段缺席，只有 cached_tokens。
+        var json = """
+        {
+            "prompt_tokens": 14276,
+            "completion_tokens": 115,
+            "total_tokens": 14391,
+            "prompt_tokens_details": { "cached_tokens": 8192 },
+            "reasoning_tokens": 21
+        }
+        """;
+
+        var usage = JsonSerializer.Deserialize<DeepSeekUsage>(json, JsonOpts);
+
+        usage.Should().NotBeNull();
+        usage!.PromptCacheHitTokens.Should().Be(0);          // 原生命名为空
+        usage.EffectiveHitTokens.Should().Be(8192);          // 经别名归一
+        usage.EffectiveMissTokens.Should().Be(6084);         // 守恒回退 = 14276 - 8192
+        usage.CacheHitRate.Should().BeApproximately(0.5738, 0.0001);
+        usage.CacheHitRatePercent.Should().Be("57.4%");
+        usage.UsesCompatCacheFields.Should().BeTrue();       // 标注非原生命名来源
+    }
+
+    [Fact]
+    public void DeepSeekUsage_OpenAiCachedZero_TreatsAllAsMiss()
+    {
+        var json = """
+        {
+            "prompt_tokens": 1000,
+            "completion_tokens": 10,
+            "prompt_tokens_details": { "cached_tokens": 0 }
+        }
+        """;
+
+        var usage = JsonSerializer.Deserialize<DeepSeekUsage>(json, JsonOpts);
+
+        usage!.EffectiveHitTokens.Should().Be(0);
+        usage.EffectiveMissTokens.Should().Be(0);            // 无命中即无可缓存量，不虚报
+        usage.CacheHitRate.Should().Be(0);
+    }
+
+    [Fact]
+    public void DeepSeekUsage_NativeFields_TakePrecedenceOverAlias()
+    {
+        // 同时出现两种命名时以 DeepSeek 原生字段为准。
+        var json = """
+        {
+            "prompt_tokens": 100,
+            "completion_tokens": 5,
+            "prompt_cache_hit_tokens": 80,
+            "prompt_cache_miss_tokens": 20,
+            "prompt_tokens_details": { "cached_tokens": 12 }
+        }
+        """;
+
+        var usage = JsonSerializer.Deserialize<DeepSeekUsage>(json, JsonOpts);
+
+        usage!.EffectiveHitTokens.Should().Be(80);
+        usage.EffectiveMissTokens.Should().Be(20);
+        usage.CacheHitRate.Should().BeApproximately(0.80, 0.0001);
+    }
+
+    [Fact]
+    public void DeepSeekUsage_UnknownCacheFieldNames_MatchedBySuffix()
+    {
+        // 容错网：网关把字段改名成 *_cached_tokens / *_hit_tokens 也能识别。
+        var json = """
+        {
+            "prompt_tokens": 500,
+            "completion_tokens": 7,
+            "prompt_cached_tokens": 400
+        }
+        """;
+
+        var usage = JsonSerializer.Deserialize<DeepSeekUsage>(json, JsonOpts);
+
+        usage!.EffectiveHitTokens.Should().Be(400);
+        usage.EffectiveMissTokens.Should().Be(100);
+        usage.CacheHitRate.Should().BeApproximately(0.80, 0.0001);
+    }
+
+    [Fact]
+    public void DeepSeekUsage_NoCacheInfo_ReportsZeroRate()
+    {
+        var json = """
+        {
+            "prompt_tokens": 200,
+            "completion_tokens": 3
+        }
+        """;
+
+        var usage = JsonSerializer.Deserialize<DeepSeekUsage>(json, JsonOpts);
+
+        usage!.EffectiveHitTokens.Should().Be(0);
+        usage.EffectiveMissTokens.Should().Be(0);
+        usage.CacheHitRate.Should().Be(0);
     }
 
     [Fact]
