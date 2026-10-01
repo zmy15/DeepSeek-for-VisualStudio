@@ -947,20 +947,47 @@ namespace DeepSeek_v4_for_VisualStudio.Services
         /// <returns>可直接内联进页面的 JS 片段。</returns>
         private static string BuildTurnProcessJsFunction()
         {
+            // ── 程序化收起与用户手动开合的区分 ──
+            // details 的 toggle 事件对「任何」open 变化都会触发（含 JS 赋值），且是异步排队派发。
+            // 若不设标记，自动收起会把自己伪装成用户操作，既把状态错误写回宿主，
+            // 又给元素打上 data-user-toggled 使其此后再也不接受自动收起。
+            // 因此收起前先置 __suppressTurnToggle，并让 toggle 处理器在下一轮事件循环才清除它，
+            // 确保被排队的那次 toggle 回调仍能看到标记（用同步清除会漏掉异步派发）。
             return
+                "window.__suppressTurnToggle=false;" +
                 "window.__collapseTurnProcess=function(turnId){try{" +
                 "var el=document.querySelector(\"details.turn-process[data-turn-id='\"+turnId+\"']\");" +
                 "if(!el)return false;" +
+                // 用户手动开合过的块尊重其意图，不再自动收起
                 "if(el.getAttribute('data-user-toggled')==='1')return false;" +
-                "el.open=false;el.setAttribute('data-collapsed','1');return true;" +
-                "}catch(e){return false;}};" +
+                "if(el.open===false)return true;" +   // 已收起视为成功（幂等，避免误报失败）
+                "window.__suppressTurnToggle=true;" +
+                "el.open=false;el.setAttribute('data-collapsed','1');" +
+                "setTimeout(function(){window.__suppressTurnToggle=false;},0);" +
+                "return true;" +
+                "}catch(e){window.__suppressTurnToggle=false;return false;}};" +
                 // toggle 事件不冒泡，必须在捕获阶段监听才能记录用户的手动展开/收起
                 "document.addEventListener('toggle',function(e){var el=e.target;" +
                 "if(!el||!el.classList||!el.classList.contains('turn-process'))return;" +
+                // 程序化收起引发的 toggle 不计入用户意图
+                "if(window.__suppressTurnToggle){el.setAttribute('data-collapsed','1');return;}" +
                 "el.setAttribute('data-user-toggled','1');" +
                 // 回写宿主：用户意图需随会话持久化，才能做到切走/重开面板后仍保持
                 "if(window.__sendToHost)window.__sendToHost({type:'turnProcessToggled',turnId:el.getAttribute('data-turn-id'),collapsed:(el.open?false:true)});" +
                 "},true);";
+        }
+
+        /// <summary>
+        /// 构建「过程折叠块是否已就绪」的探测脚本。
+        /// 用于替代固定的等待时长：streamEnd 的 innerHTML 覆盖与收起指令之间存在竞态，
+        /// 靠 Task.Delay 猜时间在繁忙或大 DOM 下并不可靠。
+        /// </summary>
+        /// <param name="turnId">目标轮次标识。</param>
+        /// <returns>返回布尔值的 JS 表达式（ExecuteScriptAsync 结果为 "true" / "false"）。</returns>
+        public static string BuildTurnProcessProbeJs(string turnId)
+        {
+            return "(function(){try{return !!document.querySelector(\"details.turn-process[data-turn-id='\""
+                + EscapeJsString(turnId) + "']\");}catch(e){return false;}})()";
         }
 
         /// <summary>

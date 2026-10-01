@@ -41,6 +41,10 @@ namespace DeepSeek_v4_for_VisualStudio.View
         private string BeginAgentTurn()
         {
             _currentAgentTurnId = Guid.NewGuid().ToString("N").Substring(0, 8);
+            // 新轮次默认尚未产生过程；待本轮真正跑了工具/步骤后再置位。
+            // 该标记跟随轮次而非消息，因此 Handoff 链上任意一棒（含末尾的 Ask 总结）
+            // 都能正确判断「这一轮到底有没有过程可折叠」。
+            _currentAgentTurnProducedProcess = false;
             return _currentAgentTurnId;
         }
 
@@ -79,19 +83,43 @@ namespace DeepSeek_v4_for_VisualStudio.View
             // 非 Agent 轮次（Ask 纯问答）没有轮次标识，无需折叠
             if (string.IsNullOrEmpty(turnId)) return;
 
-            string js = ChatHtmlService.BuildCollapseTurnProcessJs(turnId);
+            string probeJs = ChatHtmlService.BuildTurnProcessProbeJs(turnId);
+            string collapseJs = ChatHtmlService.BuildCollapseTurnProcessJs(turnId);
 
             _ = Dispatcher.InvokeAsync(async () =>
             {
                 try
                 {
-                    // 等 streamEnd 的 innerHTML 与页脚注入完成后再收起，避免与 DOM 覆盖竞争
-                    await Task.Delay(150);
-                    if (ChatWebView?.CoreWebView2 == null) return;
-                    await ChatWebView.CoreWebView2.ExecuteScriptAsync(js);
+                    // ── 等待折叠块真正挂上 DOM，而非靠固定延时猜时间 ──
+                    // PostWebMessageAsString 是非阻塞的，innerHTML 覆盖何时完成没有保证；
+                    // 轮询探测可把「节点尚不存在」这一唯一失败原因消掉。
+                    bool ready = false;
+                    for (int attempt = 0; attempt < 20 && !ready; attempt++)
+                    {
+                        await Task.Delay(50);
+                        if (ChatWebView?.CoreWebView2 == null) return;
+                        string probe = await ChatWebView.CoreWebView2.ExecuteScriptAsync(probeJs);
+                        ready = probe?.Trim().Equals("true", StringComparison.OrdinalIgnoreCase) == true;
+                    }
 
-                    // 收起成功即写回模型：后续全量重绘与切换会话按此状态还原
-                    MarkTurnProcessCollapsed(turnId, collapsed: true);
+                    if (!ready)
+                    {
+                        // 节点始终未出现（页面已导航/会话已切走）：不改模型，留待下次全量重绘按内容推断
+                        Logger.Warn($"[Render] 未找到过程折叠块，跳过收起 ({turnId})");
+                        return;
+                    }
+
+                    string result = await ChatWebView.CoreWebView2.ExecuteScriptAsync(collapseJs);
+                    bool collapsed = result?.Trim().Equals("true", StringComparison.OrdinalIgnoreCase) == true;
+
+                    // ── 仅在确认收起后才写回模型 ──
+                    // 否则会出现「模型记成已折叠、界面实际展开」的不一致：
+                    // 全量重绘会按模型藏起过程，而用户此前看到的是展开态。
+                    // 返回 false 亦可能是用户已手动展开（受 data-user-toggled 保护），此时同样不该覆盖其意图。
+                    if (collapsed)
+                        MarkTurnProcessCollapsed(turnId, collapsed: true);
+                    else
+                        Logger.Info($"[Render] 过程折叠块未收起（可能已被用户展开）: turn={turnId}");
                 }
                 catch (Exception ex)
                 {
@@ -687,6 +715,10 @@ namespace DeepSeek_v4_for_VisualStudio.View
                 _lastReportedStepIndex = 0;
                 _lastReportedStepStatus = string.Empty;
                 _pendingHandoff = null;
+
+                // ── 为本轮分配轮次标识：必须早于消息创建，该轮过程与最终总结共用此值，
+                //    否则 TurnId 恒为 null，收尾时的过程折叠会因无标识而静默跳过 ──
+                BeginAgentTurn();
 
                 var context = new AgentContext
                 {
@@ -1421,12 +1453,15 @@ namespace DeepSeek_v4_for_VisualStudio.View
                     msg.IsStreaming = false;
                     msg.IsRendered = true;
 
-                    // 仅 Agent 协作模式（Plan/Edit/Build/Explore）产生「可折叠过程」：
-                    // Ask 纯问答即使有进度日志也保持与折叠功能上线前一致的渲染，
-                    // 保证 Ask 模式界面不变（可作回归基线）
+                    // ── 判定本轮是否产生「可折叠过程」──
+                    // 关键：不能用「收尾 Agent 是不是 Ask」来判定。Handoff 链（如 Ask→Edit→Ask）
+                    // 全程共用一个气泡，真正干活的 Edit 阶段结束后会移交 Ask 生成变更总结，
+                    // 此时 msg.AgentType 已是 Ask，过程会被整轮误判为「纯问答」而不折叠——
+                    // 这正是「LeetCode 22」那轮时间线长达 5790 字符却始终不折叠的原因。
+                    // 正确依据是本轮是否真的跑过工具/步骤（由轮次标识记录），
+                    // 而非哪一棒收尾；Ask 纯问答没有轮次标识，天然保持原样。
                     bool hasAgentProcess = timelineContent.Length > 0
-                        && msg.AgentType.HasValue
-                        && msg.AgentType.Value != AgentType.Ask;
+                        && _currentAgentTurnProducedProcess;
                     TagMessageForWebView(msg, isProcess: hasAgentProcess);
                 }
                 displayContent = ChatHtmlService.BuildAssistantDisplayContent(timelineContent, content);
@@ -1856,6 +1891,13 @@ namespace DeepSeek_v4_for_VisualStudio.View
                 previousMessage.IsStreaming = false;
                 previousMessage.IsRendered = true;
 
+                // ── 同轮补充指令（guidance）：上一气泡在此就地定稿，
+                //    与 FinalizeAgentMessage 用同一判定（本轮是否产生过过程），
+                //    不能用「AgentType != Ask」——Handoff 链末尾由 Ask 收尾会误判 ──
+                TagMessageForWebView(previousMessage,
+                    isProcess: previousMessage.TimelineContent.Length > 0
+                        && _currentAgentTurnProducedProcess);
+
                 if (_tree != null && string.IsNullOrEmpty(previousMessage.NodeId))
                     _tree.AddChildMessage(previousMessage);
 
@@ -2156,6 +2198,11 @@ namespace DeepSeek_v4_for_VisualStudio.View
                 if (_agentTimelineContent.Length > 0)
                     _agentTimelineContent.Append('\n');
                 _agentTimelineContent.Append(line.Trim());
+
+                // 本轮确实产生了过程内容（步骤预告 / 工具调用行 / 工具返回），
+                // 以此作为「该轮可折叠」的依据，而非收尾 Agent 的类型
+                if (!string.IsNullOrWhiteSpace(line))
+                    _currentAgentTurnProducedProcess = true;
 
                 msgIndex = _agentStreamingMsgIndex;
                 var msg = _messages[msgIndex];
