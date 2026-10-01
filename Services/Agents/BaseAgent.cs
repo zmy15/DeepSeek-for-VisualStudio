@@ -445,7 +445,7 @@ namespace DeepSeek_v4_for_VisualStudio.Services.Agents
         /// <summary>
         /// 调用 AI 进行长回答（用于代码生成、分析等）。
         /// </summary>
-        protected async Task<string> CallAiLongAsync(string systemPrompt, string userPrompt, CancellationToken ct, int maxTokens = 4096, double? temperature = null, string? responseFormat = null, Action<string>? onThinking = null)
+        protected async Task<string> CallAiLongAsync(string systemPrompt, string userPrompt, CancellationToken ct, int? maxTokens = null, double? temperature = null, string? responseFormat = null, Action<string>? onThinking = null)
         {
             var messages = BuildContextAwareMessages(systemPrompt, userPrompt);
 
@@ -473,7 +473,7 @@ namespace DeepSeek_v4_for_VisualStudio.Services.Agents
             string userPrompt,
             List<ChatApiMessage> extraSystemMessages,
             CancellationToken ct,
-            int maxTokens = 4096,
+            int? maxTokens = null,
             string? toolChoice = null,
             double? temperature = null,
             string? responseFormat = null,
@@ -504,7 +504,7 @@ namespace DeepSeek_v4_for_VisualStudio.Services.Agents
         /// </summary>
         /// <param name="messages">预构建的完整消息列表（含 system + 历史 + user）</param>
         /// <param name="ct">取消令牌</param>
-        /// <param name="maxTokens">最大输出 token 数</param>
+        /// <param name="maxTokens">最大输出 token 数；传 null 表示不限制（不发送 max_tokens 字段）。</param>
         /// <param name="toolChoice">工具调用策略（"none" 禁用工具调用）</param>
         /// <param name="temperature">采样温度（0.0 = 确定性输出）</param>
         /// <param name="responseFormat">JSON Output 模式: "json_object" 启用，null 不启用</param>
@@ -515,7 +515,7 @@ namespace DeepSeek_v4_for_VisualStudio.Services.Agents
         public async Task<string> CallAiWithMessagesAsync(
             List<ChatApiMessage> messages,
             CancellationToken ct,
-            int maxTokens = 4096,
+            int? maxTokens = null,
             string? toolChoice = null,
             double? temperature = null,
             string? responseFormat = null,
