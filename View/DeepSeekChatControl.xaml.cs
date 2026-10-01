@@ -484,6 +484,14 @@ namespace DeepSeek_v4_for_VisualStudio.View
         /// 最终总结共享此值，供前端把过程输出聚合为可折叠分组。Ask 模式下为 null。
         /// </summary>
         private string? _currentAgentTurnId;
+
+        /// <summary>
+        /// 当前轮次是否已产生「过程内容」（步骤预告 / 工具调用行 / 工具返回）。
+        /// 与 <see cref="_currentAgentTurnId"/> 同为轮次级状态：Handoff 链（Ask→Edit→Ask）
+        /// 全程共用一个气泡，末尾由 Ask 收尾，故不能用收尾 Agent 类型判断该轮是否可折叠，
+        /// 只能依据本轮是否真的产生过过程输出。Ask 纯问答从不置位，界面保持原样。
+        /// </summary>
+        private bool _currentAgentTurnProducedProcess;
         private readonly StringBuilder _streamingContent = new();
         private readonly StringBuilder _streamingReasoning = new();
         private int _lastReportedStepIndex;

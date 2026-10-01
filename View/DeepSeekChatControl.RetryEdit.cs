@@ -159,6 +159,10 @@ namespace DeepSeek_v4_for_VisualStudio.View
                 _lastReportedStepIndex = 0;
                 _lastReportedStepStatus = string.Empty;
 
+                // ── 本轮同样分配独立轮次标识：迁移到 Edit 阶段后不能复用旧轮次，
+                //    否则新过程会被并入上一轮已折叠的块，收尾时无法单独收起 ──
+                BeginAgentTurn();
+
                 // ── 创建新的流式思考气泡（重启后 _agentStreamingMsgIndex 为 -1）──
                 await ThreadHelper.JoinableTaskFactory.SwitchToMainThreadAsync();
                 var thinkingMsg = new ChatMessage
