@@ -38,9 +38,6 @@ namespace DeepSeek_v4_for_VisualStudio.Services.Agents
         /// <summary>发现阶段工具循环的硬性上限，避免重复探索阻塞后续规划阶段。</summary>
         internal const int DiscoveryMaxToolRounds = 20;
 
-        /// <summary>可直接复用前序 Agent 探索结果所需的最少有效工具结果数量。</summary>
-        internal const int MinReusableExplorationResults = 3;
-
         /// <summary>可跨 Handoff 复用的只读探索工具。</summary>
         private static readonly HashSet<string> ReusableExplorationTools = new(StringComparer.OrdinalIgnoreCase)
         {
@@ -266,19 +263,6 @@ namespace DeepSeek_v4_for_VisualStudio.Services.Agents
         {
             var L = LocalizationService.Instance;
 
-            // Handoff 已携带前序 Agent 的只读探索时，直接复用结果并跳过 Plan 的二次扫描。
-            List<ChatApiMessage>? reusableMessages = GetReusableExplorationMessages(context);
-            if (reusableMessages != null)
-            {
-                string reusedDiscoveryContext = ExtractDiscoveryContextFromMessages(reusableMessages);
-                if (!string.IsNullOrWhiteSpace(reusedDiscoveryContext))
-                {
-                    int reusedResultCount = reusableMessages.Count(IsExplorationToolResult);
-                    AddLog("INFO", $"跳过 Plan 探索：复用前一 Agent 的 {reusedResultCount} 条只读探索结果。");
-                    return (reusedDiscoveryContext, new List<ChatApiMessage>());
-                }
-            }
-
             // ── 缓存检查：如 ExploreAgent 已有结构缓存，注入摘要跳过重复扫描 ──
             var extraSystemMessages = new List<ChatApiMessage>();
             string? structureCache = null;
@@ -364,9 +348,9 @@ namespace DeepSeek_v4_for_VisualStudio.Services.Agents
             }
 
             // ── 上下文充足判定 ──
+            // 注：不再统计 Handoff 前序探索结果数量来硬跳过，是否跳过交由 AI 自行判断。
             bool hasSufficientContext = !string.IsNullOrEmpty(context.FileContext)
-                || !string.IsNullOrEmpty(structureCache)
-                || HasReusableExplorationResults(context);
+                || !string.IsNullOrEmpty(structureCache);
             if (hasSufficientContext)
             {
                 sb.AppendLine();
@@ -443,35 +427,6 @@ namespace DeepSeek_v4_for_VisualStudio.Services.Agents
                 sb.AppendLine("\n>  前序探索结果较多，已按总量上限截断。");
 
             return sb.ToString().Trim();
-        }
-
-        /// <summary>
-        /// 判断 Handoff 上下文是否已包含足够的前序只读探索结果，可以跳过 Plan 再次扫描。
-        /// </summary>
-        internal static bool HasReusableExplorationResults(AgentContext context)
-        {
-            return GetReusableExplorationMessages(context) != null;
-        }
-
-        /// <summary>
-        /// 获取满足最低数量要求的前序探索消息列表。
-        /// 仅使用 Handoff 转发的消息，避免把当前会话中无关的旧工具结果误判为本轮探索。
-        /// </summary>
-        private static List<ChatApiMessage>? GetReusableExplorationMessages(AgentContext context)
-        {
-            List<ChatApiMessage>?[] candidates =
-            {
-                context.ForwardedMessages,
-                context.ConsumedForwardedMessages,
-            };
-
-            foreach (var candidate in candidates)
-            {
-                if (candidate != null && candidate.Count(IsExplorationToolResult) >= MinReusableExplorationResults)
-                    return candidate;
-            }
-
-            return null;
         }
 
         /// <summary>
