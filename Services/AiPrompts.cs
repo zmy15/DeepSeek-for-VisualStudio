@@ -1,4 +1,4 @@
-﻿using System;
+using System;
 
 namespace DeepSeek_v4_for_VisualStudio.Services
 {
@@ -267,9 +267,6 @@ namespace DeepSeek_v4_for_VisualStudio.Services
 
         #region Edit Agent Prompts
 
-        /// <summary>Edit Agent — 强制使用原生编辑工具的规则。</summary>
-        public static string EditToolCallRule => L["system.agent.editToolCallRule"];
-
         /// <summary>
         /// Edit Agent 主体提示词；仅描述原生编辑工具工作流。
         /// </summary>
@@ -326,8 +323,8 @@ namespace DeepSeek_v4_for_VisualStudio.Services
         /// 始终放在 messages[0]，确保跨 Agent 切换时 DeepSeek Prefix Cache 永远命中。
         /// Agent 专属行为指令不在此前缀中，而是作为最后一条 system 消息注入。
         /// 
-        /// 内容 = CommonSystemPromptPrefixCore（角色定义 + 工具说明 + 文件规则 + 终端规则 +
-        /// Handoff 规则）+ 语言指令。
+        /// 内容 = CommonSystemPromptPrefixCore（终端规则 + Handoff 规则）+ 语言指令
+        ///        + 可导航引用规则。
         /// 
         /// 此属性同时被 BaseAgent.BuildContextAwareMessages（Agent 内部调用）和
         /// ConversationContextManager.BuildApiMessages（主流程 API 调用）使用，
@@ -349,21 +346,6 @@ namespace DeepSeek_v4_for_VisualStudio.Services
 
         /// <summary>Ask Agent — 代码库探索策略 + 记忆系统 + 移交规则</summary>
         public static string AskAgentPromptFragment => L["system.agent.askPromptFragment"];
-
-        /// <summary>Ask Agent — Git 只读操作规则</summary>
-        public static string AskGitInstructions => L["system.agent.askGitInstructions"];
-
-        /// <summary>Ask Agent — 终端只读规则（不修改文件的命令）</summary>
-        public static string AskTerminalInstructions => L["system.agent.askTerminalInstructions"];
-
-        /// <summary>Ask Agent — Git/终端写任务先移交、移交前不预核实的规则</summary>
-        public static string AskGitHandoffFirstRule => L["system.agent.askGitHandoffFirstRule"];
-
-        /// <summary>Ask Agent — 移交前禁止用终端重复核实的规则</summary>
-        public static string AskTerminalNoRepeatRule => L["system.agent.askTerminalNoRepeatRule"];
-
-        /// <summary>Edit Agent — 信任 Handoff 携带的 Git 状态快照的规则</summary>
-        public static string EditTrustHandoffGitStateRule => L["system.agent.editTrustHandoffGitStateRule"];
 
         /// <summary>Explore Agent — 深度检索模式完整系统提示</summary>
         public static string ExploreAgentSystemPrompt =>

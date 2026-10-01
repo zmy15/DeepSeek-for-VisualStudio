@@ -72,14 +72,17 @@ namespace DeepSeek_v4_for_VisualStudio.Services.Agents
             };
         }
 
+        /// <summary>
+        /// 构建 Ask Agent 专属系统提示词。
+        /// 
+        /// 说明：Git/终端只读边界、各工具的参数与使用条件已下沉到对应工具的
+        /// description（见 tool.git.desc / tool.run_in_terminal.desc 等），
+        /// 这里只保留角色定位、探索策略、记忆与移交规则，避免与工具描述重复而浪费 token。
+        /// </summary>
         private static string BuildSystemPrompt()
         {
             return LocalizationService.Instance["agent.ask.systemPromptFragment"]
                 + AiPrompts.AskAgentPromptFragment
-                + "\n\n" + AiPrompts.AskGitInstructions
-                + "\n\n" + AiPrompts.AskGitHandoffFirstRule
-                + "\n\n" + AiPrompts.AskTerminalInstructions
-                + "\n\n" + AiPrompts.AskTerminalNoRepeatRule
                 + AiPrompts.AgentConclusionStopRule;
         }
 
