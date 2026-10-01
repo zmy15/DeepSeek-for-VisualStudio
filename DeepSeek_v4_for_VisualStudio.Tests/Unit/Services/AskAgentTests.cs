@@ -54,8 +54,8 @@ public class AskAgentTests
 
         agent.Definition.SystemPrompt.Should().NotBeNullOrEmpty();
         agent.Definition.SystemPrompt.Should().Contain("Ask");
-        agent.Definition.SystemPrompt.Should().Contain("git");
-        agent.Definition.SystemPrompt.Should().Contain("只读");
+        // 只读边界与 Git/终端能力说明已下沉到各工具的 description，
+        // Agent 专属提示词只保留角色定位与移交规则（见 tool.git.desc / tool.run_in_terminal.desc）。
         agent.Definition.SystemPrompt.Should().Contain("VisualStudio_askQuestions");
         agent.Definition.SystemPrompt.Should().Contain("必须直接调用");
         agent.Definition.SystemPrompt.Should().Contain(
@@ -211,7 +211,9 @@ public class AskAgentTests
         messages.Last(m => m.Role == "user").Content.Should().Be(prefix + "你好");
         messages.Last().Role.Should().Be("system");
         messages.Last().Content.Should().Be("AskAgent system prompt");
-        messages.Count(m => m.Role == "system" && m.Content!.Contains("文件读取规则"))
+        // 文件读取规则已从共享前缀下沉到 read_file 工具描述；
+        // 共享前缀仍必须作为稳定 messages[0] 注入，并保留 Windows 终端红线。
+        messages.Count(m => m.Role == "system" && m.Content!.Contains("PowerShell 语法"))
             .Should().Be(1);
     }
 

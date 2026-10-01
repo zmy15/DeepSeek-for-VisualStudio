@@ -355,17 +355,18 @@ public class EditAgentTests
         agent.Definition.SystemPrompt.Should().Contain("Edit");
         agent.Definition.SystemPrompt.Should().Contain(
             global::DeepSeek_v4_for_VisualStudio.Services.AiPrompts.AgentConclusionStopRule);
-        agent.Definition.SystemPrompt.Should().Contain(
-            global::DeepSeek_v4_for_VisualStudio.Services.AiPrompts.EditToolCallRule);
+        // 编辑工具调用细则已下沉到各工具的 description（apply_patch / replace_string_in_file 等），
+        // Edit 专属提示词只保留「必须通过真实工具调用完成修改」这一行为约束。
+        agent.Definition.SystemPrompt.Should().Contain("编辑工具");
         global::DeepSeek_v4_for_VisualStudio.Services.AiPrompts.EditSystemPromptFragment
             .Should().Contain("apply_patch")
             .And.Contain("replace_string_in_file")
             .And.Contain("delete_file")
             .And.Contain("工具会返回删除结果")
             .And.NotContain("```file:");
-        global::DeepSeek_v4_for_VisualStudio.Services.AiPrompts.EditToolCallRule
-            .Should().Contain("终态")
-            .And.Contain("不要再次读取");
+        // 「终态」「不要再次读取」等编辑工具幂等性说明改由工具描述承载。
+        global::DeepSeek_v4_for_VisualStudio.Services.LocalizationService.Instance["tool.replace_string_in_file.desc"]
+            .Should().Contain("oldString");
         global::DeepSeek_v4_for_VisualStudio.Services.AiPrompts.AgentConclusionStopRule
             .Should().Contain("不要质疑用户给出的明确操作");
     }

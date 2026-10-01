@@ -497,7 +497,9 @@ public class BaseAgentTests
     {
         var prefix = GetCommonSystemPromptPrefixPublic();
         prefix.Should().NotBeNullOrEmpty();
-        prefix.Should().Contain("文件读取规则");
+        // 文件读取规则已下沉到 read_file 工具描述；共享前缀保留 Windows 终端红线与 Handoff 规则。
+        prefix.Should().Contain("PowerShell 语法");
+        prefix.Should().Contain("Handoff");
     }
 
     #endregion

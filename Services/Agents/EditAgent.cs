@@ -134,16 +134,21 @@ namespace DeepSeek_v4_for_VisualStudio.Services.Agents
             };
         }
 
+        /// <summary>
+        /// 构建 Edit Agent 专属系统提示词。
+        /// 
+        /// 说明：编辑类工具的选择与幂等性细则、Git 验证优先级、Handoff Git 状态信任等
+        /// 均已下沉到对应工具的 description（见 tool.apply_patch.desc、
+        /// tool.replace_string_in_file.desc、tool.git.desc 等），
+        /// 这里只保留角色定义、构建信任与工具执行约束。
+        /// </summary>
         private static string BuildSystemPrompt()
         {
             return AiPrompts.EditSystemPromptFragment
                 + LocalizationService.Instance["agent.edit.mcpSystemPrompt"]
                 + LocalizationService.Instance["system.agent.editBuildTrustRule"]
                 + LocalizationService.Instance["system.agent.editPhaseToolOverride"]
-                + AiPrompts.AgentConclusionStopRule
-                + AiPrompts.EditToolCallRule
-                + "\n\n" + LocalizationService.Instance["system.agent.editVerificationPrecedenceRule"]
-                + "\n\n" + AiPrompts.EditTrustHandoffGitStateRule;
+                + AiPrompts.AgentConclusionStopRule;
         }
 
         #endregion
