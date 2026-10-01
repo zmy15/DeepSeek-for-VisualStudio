@@ -303,11 +303,17 @@ namespace DeepSeek_v4_for_VisualStudio.View
         {
             AttachedFilesControl.ItemsSource = null;
             AttachedFilesControl.ItemsSource = _attachedFilePaths
-                .Select(path => new AttachedFileItem
+                .Select(path =>
                 {
-                    FilePath = path,
-                    FileName = System.IO.Path.GetFileName(path),
-                    ThumbnailSource = OcrService.IsImageFile(path) ? CreateThumbnail(path) : null,
+                    // 只判定一次图片类型，供图标/缩略图互斥显示与缩略图生成共用
+                    bool isImage = OcrService.IsImageFile(path);
+                    return new AttachedFileItem
+                    {
+                        FilePath = path,
+                        FileName = System.IO.Path.GetFileName(path),
+                        IsImage = isImage,
+                        ThumbnailSource = isImage ? CreateThumbnail(path) : null,
+                    };
                 })
                 .ToList();
         }
