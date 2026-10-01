@@ -281,8 +281,14 @@ namespace DeepSeek_v4_for_VisualStudio.Services
                 string finalHtml = string.IsNullOrWhiteSpace(fullContent)
                     ? string.Empty
                     : RenderMarkdownToHtml(fullContent);
-                // 流式结束阶段仍展开渲染，随后由宿主下发收起指令（避免折叠与 innerHTML 覆盖竞争）
-                bodyHtml = RenderTurnProcessPanelHtml(processHtml, processTimeline, turnId, collapsed: false) + finalHtml;
+
+                // ── 默认收起渲染 ──
+                // streamEnd 是本气泡内容的最终覆盖，直接以收起态渲染即可：
+                // 过程块从出现的那一刻就是收起的，不再依赖宿主随后下发收起指令。
+                // 这样既消除了「innerHTML 覆盖 vs 收起指令」的竞态（此前会出现
+                // 找不到节点、或用户看到展开态一闪），也避免了程序化收起触发的
+                // toggle 事件被误记为用户操作。最终总结始终留在折叠块之外。
+                bodyHtml = RenderTurnProcessPanelHtml(processHtml, processTimeline, turnId, collapsed: true) + finalHtml;
             }
             else
             {
@@ -948,29 +954,35 @@ namespace DeepSeek_v4_for_VisualStudio.Services
         private static string BuildTurnProcessJsFunction()
         {
             // ── 程序化收起与用户手动开合的区分 ──
-            // details 的 toggle 事件对「任何」open 变化都会触发（含 JS 赋值），且是异步排队派发。
-            // 若不设标记，自动收起会把自己伪装成用户操作，既把状态错误写回宿主，
-            // 又给元素打上 data-user-toggled 使其此后再也不接受自动收起。
-            // 因此收起前先置 __suppressTurnToggle，并让 toggle 处理器在下一轮事件循环才清除它，
-            // 确保被排队的那次 toggle 回调仍能看到标记（用同步清除会漏掉异步派发）。
+            // details 的 toggle 事件对「任何」open 变化都会触发（含 JS 赋值与 innerHTML 注入），
+            // 且是异步排队派发。若不设标记，程序化收起会把自己伪装成用户操作，
+            // 既把状态错误写回宿主，又给元素打上 data-user-toggled 使其此后再也不接受自动收起。
+            //
+            // 抑制标记用「计数器 + 定时清除」而非布尔量：一次程序化收起只会触发一次 toggle，
+            // 但在重绘等场景下可能连续多次收起，布尔量会被后一次覆盖导致前一次的回调漏判。
             return
-                "window.__suppressTurnToggle=false;" +
+                "window.__suppressTurnToggle=0;" +
+                // 建立抑制窗口：置位后于下一轮事件循环清除，确保被排队的那次 toggle 仍能看到标记
+                "window.__beginTurnToggleSuppress=function(){" +
+                "window.__suppressTurnToggle++;" +
+                "setTimeout(function(){if(window.__suppressTurnToggle>0)window.__suppressTurnToggle--;},0);};" +
                 "window.__collapseTurnProcess=function(turnId){try{" +
                 "var el=document.querySelector(\"details.turn-process[data-turn-id='\"+turnId+\"']\");" +
                 "if(!el)return false;" +
                 // 用户手动开合过的块尊重其意图，不再自动收起
                 "if(el.getAttribute('data-user-toggled')==='1')return false;" +
-                "if(el.open===false)return true;" +   // 已收起视为成功（幂等，避免误报失败）
-                "window.__suppressTurnToggle=true;" +
+                // 已收起视为成功（幂等）：默认收起渲染后这里通常直接命中，
+                // 不会产生多余的 DOM 变更，也就不会再触发 toggle
+                "if(el.open===false)return true;" +
+                "window.__beginTurnToggleSuppress();" +
                 "el.open=false;el.setAttribute('data-collapsed','1');" +
-                "setTimeout(function(){window.__suppressTurnToggle=false;},0);" +
                 "return true;" +
-                "}catch(e){window.__suppressTurnToggle=false;return false;}};" +
+                "}catch(e){return false;}};" +
                 // toggle 事件不冒泡，必须在捕获阶段监听才能记录用户的手动展开/收起
                 "document.addEventListener('toggle',function(e){var el=e.target;" +
                 "if(!el||!el.classList||!el.classList.contains('turn-process'))return;" +
-                // 程序化收起引发的 toggle 不计入用户意图
-                "if(window.__suppressTurnToggle){el.setAttribute('data-collapsed','1');return;}" +
+                // 程序化变更（宿主收起、或流式渲染注入 content）不计入用户意图
+                "if(window.__suppressTurnToggle>0){el.setAttribute('data-collapsed','1');return;}" +
                 "el.setAttribute('data-user-toggled','1');" +
                 // 回写宿主：用户意图需随会话持久化，才能做到切走/重开面板后仍保持
                 "if(window.__sendToHost)window.__sendToHost({type:'turnProcessToggled',turnId:el.getAttribute('data-turn-id'),collapsed:(el.open?false:true)});" +

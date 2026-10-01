@@ -96,13 +96,25 @@ public class ChatHtmlServiceTests
     {
         string js = InvokePrivateStaticString("BuildTurnProcessJsFunction");
 
-        // 必须存在抑制标记，且在收起前被置位
+        // 必须存在抑制机制，且在收起前被置位
         js.Should().Contain("__suppressTurnToggle");
-        int suppressIdx = js.IndexOf("window.__suppressTurnToggle=true", StringComparison.Ordinal);
+        js.Should().Contain("__beginTurnToggleSuppress");
+        int suppressIdx = js.IndexOf("__beginTurnToggleSuppress();", StringComparison.Ordinal);
         int openIdx = js.IndexOf("el.open=false", StringComparison.Ordinal);
         suppressIdx.Should().BeGreaterThanOrEqualTo(0);
         openIdx.Should().BeGreaterThan(suppressIdx,
-            "抑制标记必须在 el.open=false 之前置位，否则排队的 toggle 回调会漏判");
+            "抑制必须在 el.open=false 之前置位，否则排队的 toggle 回调会漏判");
+
+        // 抑制标记须为计数器：重绘等场景可能连续多次收起，
+        // 布尔量会被后一次覆盖，导致前一次排队的 toggle 回调漏判并被误报为用户操作
+        js.Should().Contain("window.__suppressTurnToggle++");
+        js.Should().Contain("window.__suppressTurnToggle--");
+
+        // 已收起视为成功（幂等）：默认收起渲染下应直接命中，不产生多余 DOM 变更
+        int idempotentIdx = js.IndexOf("if(el.open===false)return true;", StringComparison.Ordinal);
+        idempotentIdx.Should().BeGreaterThanOrEqualTo(0);
+        idempotentIdx.Should().BeLessThan(suppressIdx,
+            "幂等判断必须早于抑制置位，否则每次兜底收起都会触发一次无谓的 toggle");
 
         // toggle 处理器必须检查抑制标记，且该分支不得上报用户意图
         int handlerIdx = js.IndexOf("document.addEventListener('toggle'", StringComparison.Ordinal);
@@ -114,6 +126,32 @@ public class ChatHtmlServiceTests
             .Should().BeLessThan(
                 handlerBody.IndexOf("turnProcessToggled", StringComparison.Ordinal),
                 "抑制检查必须早于上报，否则程序化收起仍会被当成用户操作回写");
+    }
+
+    [Fact]
+    public void BuildStreamEndJson_ProcessTurn_RendersBlockCollapsedByDefault()
+    {
+        // 回归：streamEnd 是本气泡内容的最终覆盖，必须以「收起态」渲染过程块。
+        // 此前按展开渲染再依赖宿主随后下发收起指令，会与 innerHTML 覆盖竞态，
+        // 实测出现「找不到节点」以及界面停留在展开态（用户要求默认不展开）。
+        string json = ChatHtmlService.BuildStreamEndJson(
+            1,
+            "最终总结",
+            string.Empty,
+            extraFooterHtml: null,
+            timelineContent: "移交 Edit\n创建文件 leetcode.cpp\n构建解决方案",
+            turnId: "4e9831ea",
+            isProcessMessage: true);
+
+        // 取出 html 字段后检查 details 开标签不含 open
+        json.Should().Contain("turn-process");
+        int detailsStart = json.IndexOf("<details class='turn-process'", StringComparison.Ordinal);
+        detailsStart.Should().BeGreaterThanOrEqualTo(0);
+        int detailsTagEnd = json.IndexOf(">", detailsStart, StringComparison.Ordinal);
+        string openTag = json.Substring(detailsStart, detailsTagEnd - detailsStart + 1);
+        openTag.Should().NotContain("open", "过程块默认应为收起态");
+        openTag.Should().Contain("data-turn-id");
+        json.Should().Contain("最终总结");
     }
 
     [Fact]
