@@ -1,4 +1,4 @@
-﻿using System;
+using System;
 using System.Collections.Generic;
 using System.ComponentModel;
 using System.Linq;
@@ -321,6 +321,18 @@ namespace DeepSeek_v4_for_VisualStudio.Models
         public List<ToolCallDelta>? ToolCalls { get; set; }
     }
 
+    /// <summary>
+    /// OpenAI 兼容的 usage 明细对象（prompt_tokens_details）。
+    /// OpenAI / vLLM / SGLang / 部分中转网关把缓存命中量放在 cached_tokens，
+    /// 而非 DeepSeek 原生的 prompt_cache_hit_tokens。
+    /// </summary>
+    public class PromptTokensDetails
+    {
+        /// <summary>被前缀缓存命中的 prompt token 数。</summary>
+        [JsonPropertyName("cached_tokens")]
+        public int CachedTokens { get; set; }
+    }
+
     public class DeepSeekUsage
     {
         [JsonPropertyName("prompt_tokens")]
@@ -332,21 +344,109 @@ namespace DeepSeek_v4_for_VisualStudio.Models
         [JsonPropertyName("total_tokens")]
         public int TotalTokens { get; set; }
 
-        // ── Prompt Cache 相关字段（DeepSeek Context Caching）──
+        // ── Prompt Cache 相关字段（DeepSeek Context Caching 原生命名）──
         [JsonPropertyName("prompt_cache_hit_tokens")]
         public int PromptCacheHitTokens { get; set; }
 
         [JsonPropertyName("prompt_cache_miss_tokens")]
         public int PromptCacheMissTokens { get; set; }
 
+        // ── OpenAI 语义别名（cached_tokens）──
         /// <summary>
-        /// Cache 命中率（0.0 ~ 1.0）。当 prompt_tokens 为 0 时返回 0。
+        /// OpenAI 兼容端点的 usage.prompt_tokens_details。
+        /// 只发 cached_tokens、不发 prompt_cache_miss_tokens 的端点靠此归一到统一口径。
+        /// </summary>
+        [JsonPropertyName("prompt_tokens_details")]
+        [JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)]
+        public PromptTokensDetails? PromptTokensDetails { get; set; }
+
+        // ── 未识别字段兜底（容错网关闭门造车的自定义命名）──
+        /// <summary>
+        /// 反序列化时未被上面字段消费的其余 usage 字段。
+        /// 供 <see cref="EffectiveHitTokens"/> 做宽容匹配，避免字段改名即静默丢失统计。
+        /// 序列化（发往 API 的请求）不受影响，因为 usage 只出现在响应中。
+        /// </summary>
+        [JsonExtensionData]
+        public Dictionary<string, JsonElement>? ExtraFields { get; set; }
+
+        /// <summary>
+        /// 归一化后的缓存命中 token 数。
+        /// 优先 DeepSeek 原生字段，其次 OpenAI 的 cached_tokens，最后宽容扫描未识别字段。
         /// </summary>
         [JsonIgnore]
-        public double CacheHitRate =>
-            PromptCacheHitTokens + PromptCacheMissTokens > 0
-                ? (double)PromptCacheHitTokens / (PromptCacheHitTokens + PromptCacheMissTokens)
-                : 0;
+        public int EffectiveHitTokens
+        {
+            get
+            {
+                if (PromptCacheHitTokens > 0) return PromptCacheHitTokens;
+                if (PromptTokensDetails?.CachedTokens > 0) return PromptTokensDetails.CachedTokens;
+                int? guess = TryReadIntBySuffix("hit_tokens", "cached_tokens");
+                return guess ?? 0;
+            }
+        }
+
+        /// <summary>
+        /// 归一化后的缓存未命中 token 数。
+        /// 优先 DeepSeek 原生字段；端点只报命中量时用 prompt_tokens - hit 守恒回退，
+        /// 避免把未命中量当成 0 从而把命中率虚报成 100%。
+        /// </summary>
+        [JsonIgnore]
+        public int EffectiveMissTokens
+        {
+            get
+            {
+                if (PromptCacheMissTokens > 0) return PromptCacheMissTokens;
+                int? guess = TryReadIntBySuffix("miss_tokens");
+                if (guess.HasValue && guess.Value > 0) return guess.Value;
+
+                // 守恒回退：可缓存总量就是 prompt_tokens
+                int hit = EffectiveHitTokens;
+                if (PromptTokens > 0 && hit > 0) return Math.Max(0, PromptTokens - hit);
+                return 0;
+            }
+        }
+
+        /// <summary>
+        /// 命中量或未命中量是否来自别名/回退推导（而非 DeepSeek 原生字段）。
+        /// 供诊断日志标注数据来源，便于排查第三方端点的字段命名差异。
+        /// </summary>
+        [JsonIgnore]
+        public bool UsesCompatCacheFields =>
+            PromptCacheHitTokens <= 0 && EffectiveHitTokens > 0
+            || PromptCacheMissTokens <= 0 && EffectiveMissTokens > 0;
+
+        /// <summary>
+        /// 在未识别字段中按后缀宽容匹配整数（如 foo_hit_tokens / prompt_cached_tokens）。
+        /// </summary>
+        private int? TryReadIntBySuffix(params string[] suffixes)
+        {
+            if (ExtraFields == null || ExtraFields.Count == 0) return null;
+
+            foreach (var kv in ExtraFields)
+            {
+                if (string.IsNullOrEmpty(kv.Key)) continue;
+                string key = kv.Key.ToLowerInvariant();
+                if (!suffixes.Any(s => key.EndsWith(s, StringComparison.Ordinal))) continue;
+                if (kv.Value.ValueKind == JsonValueKind.Number && kv.Value.TryGetInt32(out int n))
+                    return n;
+            }
+            return null;
+        }
+
+        /// <summary>
+        /// Cache 命中率（0.0 ~ 1.0）。
+        /// 分母为可缓存总量（命中 + 未命中）；两者都取不到时返回 0。
+        /// </summary>
+        [JsonIgnore]
+        public double CacheHitRate
+        {
+            get
+            {
+                int hit = EffectiveHitTokens;
+                int total = hit + EffectiveMissTokens;
+                return total > 0 ? (double)hit / total : 0;
+            }
+        }
 
         /// <summary>
         /// Cache 命中率百分比字符串，如 "98.5%"。

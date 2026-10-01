@@ -1424,8 +1424,8 @@ namespace DeepSeek_v4_for_VisualStudio.Services.Agents
                     metrics.EndTurn(round,
                         turnUsage?.PromptTokens ?? 0,
                         turnUsage?.CompletionTokens ?? 0,
-                        turnUsage?.PromptCacheHitTokens ?? 0,
-                        turnUsage?.PromptCacheMissTokens ?? 0);
+                        turnUsage?.EffectiveHitTokens ?? 0,
+                        turnUsage?.EffectiveMissTokens ?? 0);
                 }
 
                 var usageDecision = executionGuard.RecordUsage(
@@ -2171,8 +2171,8 @@ namespace DeepSeek_v4_for_VisualStudio.Services.Agents
                 var usage = _apiService?.LastUsage;
                 if (usage == null) return;
 
-                int hit = usage.PromptCacheHitTokens;
-                int miss = usage.PromptCacheMissTokens;
+                int hit = usage.EffectiveHitTokens;
+                int miss = usage.EffectiveMissTokens;
                 int total = hit + miss;
                 double rate = usage.CacheHitRate;
 

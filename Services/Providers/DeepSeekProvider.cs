@@ -167,11 +167,11 @@ namespace DeepSeek_v4_for_VisualStudio.Services.Providers
             var (missCny, hitCny, outputCny) = GetPricing(model, isPeak, "CNY");
             var (missUsd, hitUsd, outputUsd) = GetPricing(model, isPeak, "USD");
             AddAccumulatedCost(
-                usage.PromptCacheMissTokens / 1_000_000.0 * missCny
-                + usage.PromptCacheHitTokens / 1_000_000.0 * hitCny
+                usage.EffectiveMissTokens / 1_000_000.0 * missCny
+                + usage.EffectiveHitTokens / 1_000_000.0 * hitCny
                 + usage.CompletionTokens / 1_000_000.0 * outputCny,
-                usage.PromptCacheMissTokens / 1_000_000.0 * missUsd
-                + usage.PromptCacheHitTokens / 1_000_000.0 * hitUsd
+                usage.EffectiveMissTokens / 1_000_000.0 * missUsd
+                + usage.EffectiveHitTokens / 1_000_000.0 * hitUsd
                 + usage.CompletionTokens / 1_000_000.0 * outputUsd);
         }
 
