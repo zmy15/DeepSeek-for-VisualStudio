@@ -34,6 +34,102 @@ namespace DeepSeek_v4_for_VisualStudio.View
         #region Coding Agent Workflow
 
         /// <summary>
+        /// 为新一轮 Agent 任务分配唯一的轮次标识。任务开始时调用一次，
+        /// 该轮内的过程消息与最终总结共享同一 TurnId，供前端聚合为同一折叠分组。
+        /// </summary>
+        /// <returns>新生成的轮次标识（8 位十六进制串）。</returns>
+        private string BeginAgentTurn()
+        {
+            _currentAgentTurnId = Guid.NewGuid().ToString("N").Substring(0, 8);
+            return _currentAgentTurnId;
+        }
+
+        /// <summary>
+        /// 将当前轮次标识与「过程消息」标记写入助理消息，
+        /// 作为前端识别「哪些内容属于可折叠中间过程」的唯一判定依据。
+        /// 仅 Agent 协作模式调用；Ask 模式不调用，字段保持 null / false。
+        /// </summary>
+        /// <param name="message">待打标的助理消息。</param>
+        /// <param name="isProcess">
+        /// 是否为过程消息（工具调用行、每步预告文本、工具返回结果），
+        /// 由调用方依据本轮是否产生了时间线内容判定。
+        /// </param>
+        private void TagMessageForWebView(ChatMessage message, bool isProcess)
+        {
+            // 仅标记属于当前轮次的过程消息；Ask 模式不会调用此处，字段保持默认值
+            message.TurnId = _currentAgentTurnId;
+            message.IsProcessMessage = isProcess;
+        }
+
+        /// <summary>
+        /// 一轮 Agent 任务结束后，通知前端收起该轮的过程折叠块，仅保留最终总结。
+        /// 必须晚于 streamEnd 的 innerHTML 渲染下发，否则折叠目标节点尚不存在。
+        /// </summary>
+        /// <param name="msgIndex">本轮最终总结所在的消息下标。</param>
+        private void CollapseTurnProcessAfterFinalize(int msgIndex)
+        {
+            string? turnId;
+            lock (_lock)
+            {
+                turnId = msgIndex >= 0 && msgIndex < _messages.Count
+                    ? _messages[msgIndex].TurnId
+                    : null;
+            }
+
+            // 非 Agent 轮次（Ask 纯问答）没有轮次标识，无需折叠
+            if (string.IsNullOrEmpty(turnId)) return;
+
+            string js = ChatHtmlService.BuildCollapseTurnProcessJs(turnId);
+
+            _ = Dispatcher.InvokeAsync(async () =>
+            {
+                try
+                {
+                    // 等 streamEnd 的 innerHTML 与页脚注入完成后再收起，避免与 DOM 覆盖竞争
+                    await Task.Delay(150);
+                    if (ChatWebView?.CoreWebView2 == null) return;
+                    await ChatWebView.CoreWebView2.ExecuteScriptAsync(js);
+
+                    // 收起成功即写回模型：后续全量重绘与切换会话按此状态还原
+                    MarkTurnProcessCollapsed(turnId, collapsed: true);
+                }
+                catch (Exception ex)
+                {
+                    Logger.Warn($"[Render] 收起过程折叠块失败 ({turnId}): {ex.Message}");
+                }
+            }, System.Windows.Threading.DispatcherPriority.Background);
+        }
+
+        /// <summary>
+        /// 把指定轮次的折叠态写回消息模型，供全量重绘与会话切换时还原。
+        /// </summary>
+        /// <param name="turnId">目标轮次标识。</param>
+        /// <param name="collapsed">true 表示收起，false 表示展开。</param>
+        private void MarkTurnProcessCollapsed(string turnId, bool collapsed)
+        {
+            lock (_lock)
+            {
+                foreach (var msg in _messages)
+                {
+                    if (string.Equals(msg.TurnId, turnId, StringComparison.Ordinal))
+                        msg.IsTurnProcessCollapsed = collapsed;
+                }
+            }
+        }
+
+        /// <summary>
+        /// 处理前端上报的过程折叠块开合：写回模型，使「用户手动展开过」的轮次
+        /// 在切走会话或重开面板后仍保持展开，而不被自动折叠重置。
+        /// </summary>
+        /// <param name="turnId">发生开合变化的轮次标识。</param>
+        /// <param name="collapsed">true 表示已收起，false 表示用户手动展开。</param>
+        private void HandleTurnProcessToggled(string turnId, bool collapsed)
+        {
+            MarkTurnProcessCollapsed(turnId, collapsed);
+            Logger.Info($"[Render] 过程折叠块状态已记录: turn={turnId}, collapsed={collapsed}");
+        }
+
+        /// <summary>
         /// 获取最近几轮对话文本作为 Discover 的附加上下文，帮助 ExploreAgent 生成更精准的关键词。
         /// </summary>
         [RagSource("conversation-history", "获取对话历史作为 Discover 附加上下文")]
@@ -1324,6 +1420,14 @@ namespace DeepSeek_v4_for_VisualStudio.View
                     msg.ReasoningContent = reasoning;
                     msg.IsStreaming = false;
                     msg.IsRendered = true;
+
+                    // 仅 Agent 协作模式（Plan/Edit/Build/Explore）产生「可折叠过程」：
+                    // Ask 纯问答即使有进度日志也保持与折叠功能上线前一致的渲染，
+                    // 保证 Ask 模式界面不变（可作回归基线）
+                    bool hasAgentProcess = timelineContent.Length > 0
+                        && msg.AgentType.HasValue
+                        && msg.AgentType.Value != AgentType.Ask;
+                    TagMessageForWebView(msg, isProcess: hasAgentProcess);
                 }
                 displayContent = ChatHtmlService.BuildAssistantDisplayContent(timelineContent, content);
             }
@@ -1334,6 +1438,9 @@ namespace DeepSeek_v4_for_VisualStudio.View
 
             // ── 使用非阻塞 PostWebMessageAsString 发送最终渲染 ──
             PostStreamEnd(msgIndex, content, reasoning, combinedFooter);
+
+            // ── 任务结束：待最终总结渲染完成后收起本轮过程块，仅保留结论 ──
+            CollapseTurnProcessAfterFinalize(msgIndex);
         }
 
         /// <summary>

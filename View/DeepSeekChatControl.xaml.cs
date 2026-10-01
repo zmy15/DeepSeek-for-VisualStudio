@@ -478,6 +478,12 @@ namespace DeepSeek_v4_for_VisualStudio.View
         // ── Agent 实时思考气泡 ──
         private int _agentStreamingMsgIndex = -1;
         private readonly StringBuilder _agentTimelineContent = new();
+
+        /// <summary>
+        /// 当前 Agent 任务的轮次标识：一轮任务开始时分配，该轮内所有过程消息与
+        /// 最终总结共享此值，供前端把过程输出聚合为可折叠分组。Ask 模式下为 null。
+        /// </summary>
+        private string? _currentAgentTurnId;
         private readonly StringBuilder _streamingContent = new();
         private readonly StringBuilder _streamingReasoning = new();
         private int _lastReportedStepIndex;
@@ -948,7 +954,8 @@ namespace DeepSeek_v4_for_VisualStudio.View
 
             if (!CanQueryBalance)
             {
-                HideBalanceDisplay();
+                // 非官方端点不查余额，但用量/上下文仍需显示
+                RefreshConsumptionDisplay();
                 return;
             }
 
@@ -1091,7 +1098,8 @@ namespace DeepSeek_v4_for_VisualStudio.View
 
             if (!CanQueryBalance)
             {
-                HideBalanceDisplay();
+                // 非官方端点无余额；回退显示本会话 token 与上下文占用
+                ShowConsumptionFallback();
                 return;
             }
 
@@ -1278,19 +1286,14 @@ namespace DeepSeek_v4_for_VisualStudio.View
             if (balanceLabel == null || balanceBar == null) return;
 
             // ── 基于缓存余额重建完整标签（避免脆弱的字符串解析）──
-            if (_lastBalance != null)
+            // 自定义端点不查询余额：即使残留官方端点的余额缓存也不复用，直接回退到用量/上下文显示
+            if (_lastBalance != null && CanQueryBalance)
             {
                 UpdateBalanceDisplay(_lastBalance);
             }
             else
             {
-                // 无余额缓存：仅更新消费部分
-                string consumptionText = FormatSessionConsumption();
-                if (!string.IsNullOrEmpty(consumptionText))
-                {
-                    balanceLabel.Text = consumptionText;
-                    balanceBar.Visibility = System.Windows.Visibility.Visible;
-                }
+                ShowConsumptionFallback();
             }
         }
 
@@ -1379,6 +1382,33 @@ namespace DeepSeek_v4_for_VisualStudio.View
                 BalanceLabel.Text = string.Empty;
             if (BalanceBar != null)
                 BalanceBar.Visibility = System.Windows.Visibility.Collapsed;
+        }
+
+        /// <summary>
+        /// 余额不可用（非官方端点，或官方端点尚未查询到余额）时的回退显示：
+        /// 仍然展示本会话 token 消耗与上下文窗口占用，仅当两者均无内容时才折叠整条标签。
+        /// </summary>
+        private void ShowConsumptionFallback()
+        {
+            if (!Dispatcher.CheckAccess())
+            {
+                Dispatcher.Invoke(ShowConsumptionFallback);
+                return;
+            }
+
+            var balanceBar = BalanceBar;
+            var balanceLabel = BalanceLabel;
+            if (balanceBar == null || balanceLabel == null) return;
+
+            string consumptionText = FormatSessionConsumption();
+            if (string.IsNullOrEmpty(consumptionText))
+            {
+                HideBalanceDisplay();
+                return;
+            }
+
+            balanceLabel.Text = consumptionText;
+            balanceBar.Visibility = System.Windows.Visibility.Visible;
         }
 
         #endregion
@@ -1818,6 +1848,9 @@ namespace DeepSeek_v4_for_VisualStudio.View
             if (!IsOfficialSource)
             {
                 StopBalanceTimer();
+                // 切离官方端点后丢弃余额缓存：否则残留缓存会让刷新走到余额分支并折叠整条标签，
+                // 导致自定义端点下 token 与上下文信息一并消失
+                _lastBalance = null;
                 RefreshConsumptionDisplay();
                 return;
             }
@@ -2179,9 +2212,20 @@ namespace DeepSeek_v4_for_VisualStudio.View
 
         internal sealed class AttachedFileItem
         {
+            /// <summary>附件在磁盘上的绝对路径。</summary>
             public string FilePath { get; set; } = string.Empty;
+
+            /// <summary>展示在附件标签上的文件名（不含目录部分）。</summary>
             public string FileName { get; set; } = string.Empty;
+
+            /// <summary>图片附件的缩略图；非图片附件为 null。</summary>
             public BitmapImage? ThumbnailSource { get; set; }
+
+            /// <summary>
+            /// 标识该附件是否为图片类型，用于附件模板中「类型图标」与「缩略图」互斥显示，
+            /// 避免两者在同一个 Grid 单元格内叠加。
+            /// </summary>
+            public bool IsImage { get; set; }
         }
     }
 }

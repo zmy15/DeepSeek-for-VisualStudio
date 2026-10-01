@@ -266,10 +266,28 @@ namespace DeepSeek_v4_for_VisualStudio.Services
         /// </summary>
         public static string BuildStreamEndJson(int messageIndex, string fullContent,
             string reasoningContent, string? extraFooterHtml = null,
-            string? timelineContent = null)
+            string? timelineContent = null,
+            string? turnId = null, bool isProcessMessage = false)
         {
             string displayContent = BuildAssistantDisplayContent(timelineContent, fullContent);
-            string bodyHtml = RenderMarkdownToHtml(displayContent);
+
+            // ── 过程内容与最终总结分开渲染：与静态渲染路径（AppendAssistantMessageHtml）保持一致，
+            //    否则流式结束的 innerHTML 覆盖会丢掉折叠块结构，导致过程无法收起 ──
+            string bodyHtml;
+            string processTimeline = (timelineContent ?? string.Empty).Trim();
+            if (isProcessMessage && processTimeline.Length > 0)
+            {
+                string processHtml = RenderMarkdownToHtml(processTimeline);
+                string finalHtml = string.IsNullOrWhiteSpace(fullContent)
+                    ? string.Empty
+                    : RenderMarkdownToHtml(fullContent);
+                // 流式结束阶段仍展开渲染，随后由宿主下发收起指令（避免折叠与 innerHTML 覆盖竞争）
+                bodyHtml = RenderTurnProcessPanelHtml(processHtml, processTimeline, turnId, collapsed: false) + finalHtml;
+            }
+            else
+            {
+                bodyHtml = RenderMarkdownToHtml(displayContent);
+            }
             string reasoningHtml = string.IsNullOrWhiteSpace(reasoningContent)
                 ? string.Empty
                 : RenderReasoningContentHtml(reasoningContent);
@@ -292,6 +310,12 @@ namespace DeepSeek_v4_for_VisualStudio.Services
             // 原始内容（供复制按钮读取，避免复制渲染后的 HTML 文本）
             sb.Append(",\"rawContent\":");
             AppendJsonString(sb, displayContent);
+            // 轮次标识：供宿主在任务结束后定位并收起该轮的过程折叠块
+            if (!string.IsNullOrEmpty(turnId))
+            {
+                sb.Append(",\"turnId\":");
+                AppendJsonString(sb, turnId);
+            }
             // 本地化按钮文本
             sb.Append(",\"retryLabel\":");
             AppendJsonString(sb, L["chat.html.retryButton"]);
@@ -794,24 +818,48 @@ namespace DeepSeek_v4_for_VisualStudio.Services
         private static void AppendAssistantMessageHtml(
             StringBuilder sb, ChatMessage msg, int idx, string branchNavHtml = "")
         {
+            // ── 过程内容（Agent 时间线）与最终总结分开渲染：
+            //    时间线包进可折叠块，最终总结留在折叠块之外，实现「归档过程、只留结论」──
+            string timelineContent = (msg.TimelineContent ?? string.Empty).Trim();
+            bool hasProcessPanel = msg.IsProcessMessage && timelineContent.Length > 0;
+
+            // 复制/重试按钮与 data-raw-content 使用「过程 + 总结」的完整文本，保持原有语义
             string displayContent = BuildAssistantDisplayContent(msg.TimelineContent, msg.Content);
+
             string bodyHtml;
             bool isStreaming = msg.IsStreaming;
 
-            if (!string.IsNullOrEmpty(displayContent))
+            if (hasProcessPanel)
             {
-                if (msg.IsHtml && string.IsNullOrWhiteSpace(msg.TimelineContent))
-                    bodyHtml = msg.Content;
-                else
-                    bodyHtml = RenderMarkdownToHtml(displayContent);
-            }
-            else if (isStreaming)
-            {
-                bodyHtml = "<span style='color:#888;font-style:italic'>Thinking…</span>";
+                string processHtml = RenderMarkdownToHtml(timelineContent);
+                string finalHtml = string.IsNullOrWhiteSpace(msg.Content)
+                    ? string.Empty
+                    : msg.IsHtml ? msg.Content : RenderMarkdownToHtml(msg.Content);
+
+                // 持久化的折叠态优先；旧会话没有该字段（false）时按「该轮已结束」推断为折叠，
+                // 未结束/中断的轮次保持过程可见，避免恢复历史时信息被藏起来
+                bool turnCollapsed = msg.IsTurnProcessCollapsed
+                    || (!msg.IsStreaming && !string.IsNullOrWhiteSpace(msg.Content));
+
+                bodyHtml = RenderTurnProcessPanelHtml(processHtml, timelineContent, msg.TurnId, turnCollapsed) + finalHtml;
             }
             else
             {
-                bodyHtml = string.Empty;
+                if (!string.IsNullOrEmpty(displayContent))
+                {
+                    if (msg.IsHtml && string.IsNullOrWhiteSpace(msg.TimelineContent))
+                        bodyHtml = msg.Content;
+                    else
+                        bodyHtml = RenderMarkdownToHtml(displayContent);
+                }
+                else if (isStreaming)
+                {
+                    bodyHtml = "<span style='color:#888;font-style:italic'>Thinking…</span>";
+                }
+                else
+                {
+                    bodyHtml = string.Empty;
+                }
             }
 
             string reasoningHtml = RenderReasoningPanelHtml(msg.ReasoningContent, idx);
@@ -859,6 +907,70 @@ namespace DeepSeek_v4_for_VisualStudio.Services
             }
             sb.Append("</div>");  // closes msg-bubble
             sb.Append("</div>");  // closes msg-wrapper
+        }
+
+        /// <summary>
+        /// 构建一轮 Agent 任务的「过程折叠块」HTML。
+        /// 复用页面已有的 details/summary 折叠机制（与思考面板同构），
+        /// 折叠态由浏览器原生维护，无需额外脚本；data-turn-id 供宿主按轮次定位元素。
+        /// </summary>
+        /// <param name="processHtml">已完成 Markdown 渲染的过程内容 HTML（工具调用、中间文本、工具返回）。</param>
+        /// <param name="timelineContent">过程原文，用于统计步骤数生成摘要文案。</param>
+        /// <param name="turnId">所属轮次标识；为空时不输出 data-turn-id 属性。</param>
+        /// <param name="collapsed">是否以折叠态渲染（已结束的轮次默认收起，仅保留摘要行）。</param>
+        /// <returns>折叠块 HTML 片段。</returns>
+        private static string RenderTurnProcessPanelHtml(string processHtml, string timelineContent, string? turnId, bool collapsed)
+        {
+            // 摘要计数：时间线中每个非空行代表一次过程事件（工具调用 / 进度 / 中间文本），
+            // 避免依赖具体工具调用标记文本，兼容中英界面
+            int stepCount = timelineContent
+                .Split('\n')
+                .Count(line => !string.IsNullOrWhiteSpace(line));
+
+            string summaryText = L.Format("chat.html.turnProcessSummary", stepCount);
+            string turnIdAttr = string.IsNullOrEmpty(turnId)
+                ? string.Empty
+                : " data-turn-id='" + EscapeHtmlAttribute(turnId) + "'";
+
+            // 折叠态不输出 open 属性，由浏览器按 details 语义默认收起
+            string openAttr = collapsed ? string.Empty : " open='true'";
+            return "<details class='turn-process'" + turnIdAttr + openAttr + ">" +
+                   "<summary>" + EscapeHtml(summaryText) + "</summary>" +
+                   "<div class='turn-process-body'>" + processHtml + "</div>" +
+                   "</details>";
+        }
+
+        /// <summary>
+        /// 构建「过程折叠块」的前端脚本：提供收起指定轮次的入口，并记录用户手动展开意图。
+        /// 折叠态由 details 原生维护；用户手动展开过的块不会被后续自动收起重置。
+        /// </summary>
+        /// <returns>可直接内联进页面的 JS 片段。</returns>
+        private static string BuildTurnProcessJsFunction()
+        {
+            return
+                "window.__collapseTurnProcess=function(turnId){try{" +
+                "var el=document.querySelector(\"details.turn-process[data-turn-id='\"+turnId+\"']\");" +
+                "if(!el)return false;" +
+                "if(el.getAttribute('data-user-toggled')==='1')return false;" +
+                "el.open=false;el.setAttribute('data-collapsed','1');return true;" +
+                "}catch(e){return false;}};" +
+                // toggle 事件不冒泡，必须在捕获阶段监听才能记录用户的手动展开/收起
+                "document.addEventListener('toggle',function(e){var el=e.target;" +
+                "if(!el||!el.classList||!el.classList.contains('turn-process'))return;" +
+                "el.setAttribute('data-user-toggled','1');" +
+                // 回写宿主：用户意图需随会话持久化，才能做到切走/重开面板后仍保持
+                "if(window.__sendToHost)window.__sendToHost({type:'turnProcessToggled',turnId:el.getAttribute('data-turn-id'),collapsed:(el.open?false:true)});" +
+                "},true);";
+        }
+
+        /// <summary>
+        /// 构建「收起指定轮次过程折叠块」的可执行 JS 片段。
+        /// </summary>
+        /// <param name="turnId">目标轮次标识。</param>
+        /// <returns>供 ExecuteScriptAsync 直接执行的 JS。</returns>
+        public static string BuildCollapseTurnProcessJs(string turnId)
+        {
+            return "(function(){try{return window.__collapseTurnProcess('" + EscapeJsString(turnId) + "');}catch(e){return false;}})();";
         }
 
         /// <summary>
@@ -1244,6 +1356,7 @@ return "<!DOCTYPE html><html lang='" + htmlLang + "'><head><meta charset='UTF-8'
        BuildRetryEditJsFunctions() +
        BuildRenderMathJsFunction() +
        BuildRenderMermaidJsFunction() +
+       BuildTurnProcessJsFunction() +
        // ── 页面就绪信号 ──
        BuildDetoxEmojisJs() +
        "window.__pageReady=true;" +

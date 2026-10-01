@@ -805,15 +805,38 @@
                                             Tag="{Binding FilePath}"
                                             ToolTip="{Binding FileName}">
                                         <Grid Width="38" Height="38">
+                                            <!-- 图标与缩略图互斥显示：图片附件显示缩略图，非图片附件显示类型图标，避免同格叠加 -->
                                             <TextBlock Text="&#xE7C3;" FontFamily="{StaticResource IconFontFamily}"
                                                        FontSize="20"
                                                        Foreground="#C8C8C8"
                                                        HorizontalAlignment="Center"
-                                                       VerticalAlignment="Center" />
+                                                       VerticalAlignment="Center">
+                                                <TextBlock.Style>
+                                                    <Style TargetType="TextBlock">
+                                                        <Setter Property="Visibility" Value="Visible" />
+                                                        <Style.Triggers>
+                                                            <DataTrigger Binding="{Binding IsImage}" Value="True">
+                                                                <Setter Property="Visibility" Value="Collapsed" />
+                                                            </DataTrigger>
+                                                        </Style.Triggers>
+                                                    </Style>
+                                                </TextBlock.Style>
+                                            </TextBlock>
                                             <Image Source="{Binding ThumbnailSource}"
                                                    Stretch="Uniform"
                                                    Width="38"
-                                                   Height="38" />
+                                                   Height="38">
+                                                <Image.Style>
+                                                    <Style TargetType="Image">
+                                                        <Setter Property="Visibility" Value="Collapsed" />
+                                                        <Style.Triggers>
+                                                            <DataTrigger Binding="{Binding IsImage}" Value="True">
+                                                                <Setter Property="Visibility" Value="Visible" />
+                                                            </DataTrigger>
+                                                        </Style.Triggers>
+                                                    </Style>
+                                                </Image.Style>
+                                            </Image>
                                         </Grid>
                                     </Button>
                                     <TextBlock Text="{Binding FileName}"
