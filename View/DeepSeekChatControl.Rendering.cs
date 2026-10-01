@@ -332,17 +332,26 @@ namespace DeepSeek_v4_for_VisualStudio.View
             try
             {
                 string? timelineContent = null;
+                string? turnId = null;
+                bool isProcessMessage = false;
                 lock (_lock)
                 {
                     if (messageIndex >= 0 && messageIndex < _messages.Count)
-                        timelineContent = _messages[messageIndex].TimelineContent;
+                    {
+                        var finalizedMsg = _messages[messageIndex];
+                        timelineContent = finalizedMsg.TimelineContent;
+                        turnId = finalizedMsg.TurnId;
+                        isProcessMessage = finalizedMsg.IsProcessMessage;
+                    }
                 }
                 string json = ChatHtmlService.BuildStreamEndJson(
                     messageIndex,
                     fullContent,
                     reasoningContent,
                     extraFooterHtml,
-                    timelineContent);
+                    timelineContent,
+                    turnId,
+                    isProcessMessage);
                 ChatWebView.CoreWebView2.PostWebMessageAsString(json);
             }
             catch (Exception ex)

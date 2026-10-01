@@ -418,6 +418,7 @@
     "chat.html.codeInsertButton": "Insert Code",
     "chat.html.codeSaveButton": "Save to File",
     "chat.html.thinkingTitle": "Thinking Process",
+    "chat.html.turnProcessSummary": "Ran {0} steps · click to expand",
     "chat.html.thinkingLoading": "Thinking...",
     "chat.html.fileAttached": "Files attached",
     "chat.html.imageAttached": "Images attached",

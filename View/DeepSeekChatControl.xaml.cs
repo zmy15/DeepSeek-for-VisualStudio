@@ -478,6 +478,12 @@ namespace DeepSeek_v4_for_VisualStudio.View
         // ── Agent 实时思考气泡 ──
         private int _agentStreamingMsgIndex = -1;
         private readonly StringBuilder _agentTimelineContent = new();
+
+        /// <summary>
+        /// 当前 Agent 任务的轮次标识：一轮任务开始时分配，该轮内所有过程消息与
+        /// 最终总结共享此值，供前端把过程输出聚合为可折叠分组。Ask 模式下为 null。
+        /// </summary>
+        private string? _currentAgentTurnId;
         private readonly StringBuilder _streamingContent = new();
         private readonly StringBuilder _streamingReasoning = new();
         private int _lastReportedStepIndex;
