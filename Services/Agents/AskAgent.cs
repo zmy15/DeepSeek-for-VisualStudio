@@ -573,10 +573,14 @@ namespace DeepSeek_v4_for_VisualStudio.Services.Agents
                 // 后者仍会把 read_file 等定义暴露给模型，模型一旦调用就会被白名单拦截，
                 // 拦截警告会替代润色摘要成为最终内容；
                 // 且完整上下文现含工具调用记录，显式禁用工具可防止模型模仿历史发起工具调用。
+                // maxTokens 传 null（不发送 max_tokens 字段）→ 不限制输出长度。
+                // 此前硬编码 1024 会让携带完整 handoff 上下文（数千 KB、上百条消息）的
+                // 润色请求频繁以 finish_reason=length 被截断，总结只剩开头几行；
+                // 且截断发生在 thinking 之后时，reasoning 会挤占全部额度，正文仅剩数百字符。
                 string result = await CallAiWithMessagesAsync(
                     messages,
                     ct,
-                    maxTokens: 1024,
+                    maxTokens: null,
                     toolChoice: "none");
 
                 result = StripToolCallMarkers(result);
