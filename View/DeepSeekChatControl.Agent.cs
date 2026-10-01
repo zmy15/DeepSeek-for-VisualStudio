@@ -90,9 +90,9 @@ namespace DeepSeek_v4_for_VisualStudio.View
             {
                 try
                 {
-                    // ── 等待折叠块真正挂上 DOM，而非靠固定延时猜时间 ──
-                    // PostWebMessageAsString 是非阻塞的，innerHTML 覆盖何时完成没有保证；
-                    // 轮询探测可把「节点尚不存在」这一唯一失败原因消掉。
+                    // ── 兜底收起 ──
+                    // streamEnd 已按「默认收起」渲染，正常情况下这里无需再做任何事；
+                    // 保留该兜底是为了覆盖页面被全量重绘、或历史节点未按收起态渲染的情形。
                     bool ready = false;
                     for (int attempt = 0; attempt < 20 && !ready; attempt++)
                     {
@@ -104,8 +104,9 @@ namespace DeepSeek_v4_for_VisualStudio.View
 
                     if (!ready)
                     {
-                        // 节点始终未出现（页面已导航/会话已切走）：不改模型，留待下次全量重绘按内容推断
-                        Logger.Warn($"[Render] 未找到过程折叠块，跳过收起 ({turnId})");
+                        // 节点未出现属正常：默认收起渲染下命中即跳过，页面已导航/切走时更是如此。
+                        // 此处不改模型，留待下次全量重绘按已持久化的折叠态还原。
+                        Logger.Info($"[Render] 过程折叠块未出现在当前页面，无需兜底收起 ({turnId})");
                         return;
                     }
 
@@ -113,13 +114,12 @@ namespace DeepSeek_v4_for_VisualStudio.View
                     bool collapsed = result?.Trim().Equals("true", StringComparison.OrdinalIgnoreCase) == true;
 
                     // ── 仅在确认收起后才写回模型 ──
-                    // 否则会出现「模型记成已折叠、界面实际展开」的不一致：
-                    // 全量重绘会按模型藏起过程，而用户此前看到的是展开态。
-                    // 返回 false 亦可能是用户已手动展开（受 data-user-toggled 保护），此时同样不该覆盖其意图。
+                    // 返回 false 表示用户已手动展开（受 data-user-toggled 保护），
+                    // 此时必须尊重其意图，不得覆盖为已折叠。
                     if (collapsed)
                         MarkTurnProcessCollapsed(turnId, collapsed: true);
                     else
-                        Logger.Info($"[Render] 过程折叠块未收起（可能已被用户展开）: turn={turnId}");
+                        Logger.Info($"[Render] 过程折叠块保持展开（用户已手动展开）: turn={turnId}");
                 }
                 catch (Exception ex)
                 {
