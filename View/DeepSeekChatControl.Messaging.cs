@@ -1,4 +1,4 @@
-﻿using DeepSeek_v4_for_VisualStudio.Models;
+using DeepSeek_v4_for_VisualStudio.Models;
 using DeepSeek_v4_for_VisualStudio.Services;
 using DeepSeek_v4_for_VisualStudio.Services.Agents;
 using DeepSeek_v4_for_VisualStudio.Utils;
@@ -1135,8 +1135,8 @@ namespace DeepSeek_v4_for_VisualStudio.View
                 var usage = _apiService?.LastUsage;
                 if (usage == null) return;
 
-                int hit = usage.PromptCacheHitTokens;
-                int miss = usage.PromptCacheMissTokens;
+                int hit = usage.EffectiveHitTokens;
+                int miss = usage.EffectiveMissTokens;
                 int total = hit + miss;
                 double rate = usage.CacheHitRate;
 

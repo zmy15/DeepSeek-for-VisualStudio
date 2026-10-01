@@ -67,7 +67,8 @@ public class ConversationContextManagerTests
         messages[0].Role.Should().Be("system");
         messages[0].Content.Should().StartWith("You are helpful.");
         messages[0].Content.Should().Contain("You are helpful.");
-        messages[0].Content.Should().Contain("文件读取规则");
+        // 共享不可变前缀仍须追加在 fixedPrompt 之后；文件读取规则已下沉到 read_file 工具描述。
+        messages[0].Content.Should().Contain("PowerShell 语法");
         messages[1].Role.Should().Be("user");
         messages[1].Content.Should().Be("Hi");
     }

@@ -355,17 +355,18 @@ public class EditAgentTests
         agent.Definition.SystemPrompt.Should().Contain("Edit");
         agent.Definition.SystemPrompt.Should().Contain(
             global::DeepSeek_v4_for_VisualStudio.Services.AiPrompts.AgentConclusionStopRule);
-        agent.Definition.SystemPrompt.Should().Contain(
-            global::DeepSeek_v4_for_VisualStudio.Services.AiPrompts.EditToolCallRule);
+        // 编辑工具调用细则已下沉到各工具的 description（apply_patch / replace_string_in_file 等），
+        // Edit 专属提示词只保留「必须通过真实工具调用完成修改」这一行为约束。
+        agent.Definition.SystemPrompt.Should().Contain("编辑工具");
         global::DeepSeek_v4_for_VisualStudio.Services.AiPrompts.EditSystemPromptFragment
             .Should().Contain("apply_patch")
             .And.Contain("replace_string_in_file")
             .And.Contain("delete_file")
             .And.Contain("工具会返回删除结果")
             .And.NotContain("```file:");
-        global::DeepSeek_v4_for_VisualStudio.Services.AiPrompts.EditToolCallRule
-            .Should().Contain("终态")
-            .And.Contain("不要再次读取");
+        // 「终态」「不要再次读取」等编辑工具幂等性说明改由工具描述承载。
+        global::DeepSeek_v4_for_VisualStudio.Services.LocalizationService.Instance["tool.replace_string_in_file.desc"]
+            .Should().Contain("oldString");
         global::DeepSeek_v4_for_VisualStudio.Services.AiPrompts.AgentConclusionStopRule
             .Should().Contain("不要质疑用户给出的明确操作");
     }
@@ -846,6 +847,151 @@ public class EditAgentTests
         forwardedEntry!.Message.Should().Be("探索中...");
         forwardedEntry!.Level.Should().Be("INFO");
     }
+
+    #region Step Satisfaction — 前序步骤已代劳（方案 1 / 方案 2 的判定核心）
+
+    private static readonly DateTime PlanStart = new(2026, 1, 1, 10, 0, 0, DateTimeKind.Utc);
+
+    private static AgentStep NewStep(int index, string title, string description = "")
+        => new() { Index = index, Title = title, Description = description };
+
+    private static List<FileChangeSummary> ChangedFiles(params string[] paths)
+        => paths.Select(p => new FileChangeSummary { FilePath = p }).ToList();
+
+    [Fact]
+    public void ExtractDeclaredFiles_PicksCodeAndConfigFileNames()
+    {
+        var step = NewStep(2, "解耦余额与用量显示",
+            @"修改 Services\Agents\EditAgent.cs 与 DeepSeek_v4_for_VisualStudio.csproj");
+
+        var files = EditAgent.ExtractDeclaredFiles(step);
+
+        files.Should().BeEquivalentTo(new[] { "EditAgent.cs", "DeepSeek_v4_for_VisualStudio.csproj" });
+    }
+
+    [Fact]
+    public void ExtractDeclaredFiles_WithoutFileReference_ReturnsEmpty()
+    {
+        var step = NewStep(2, "解耦余额与用量显示", "把用量显示从余额门控中解耦，并在端点切换时清空残留");
+
+        EditAgent.ExtractDeclaredFiles(step).Should().BeEmpty();
+    }
+
+    [Fact]
+    public void IsStepCoveredByModifiedFiles_TargetModifiedThisRun_ClaimsStepWithEvidence()
+    {
+        var step = NewStep(3, "清理缓存残留", @"修改 Services\Agents\EditAgent.cs");
+        var changed = ChangedFiles(@"F:\repo\Services\Agents\EditAgent.cs");
+
+        bool covered = EditAgent.IsStepCoveredByModifiedFiles(
+            step, changed, PlanStart, _ => PlanStart.AddMinutes(1), out string evidence);
+
+        covered.Should().BeTrue();
+        evidence.Should().Be("EditAgent.cs");
+    }
+
+    [Fact]
+    public void IsStepCoveredByModifiedFiles_CompoundExtension_StillClaims()
+    {
+        // 步骤描述写 a.xaml.cs，提取正则只能截到 a.xaml —— 判定必须仍能匹配真实文件 a.xaml.cs
+        var step = NewStep(3, "清理缓存残留", @"修改 View\DeepSeekChatControl.xaml.cs");
+        var changed = ChangedFiles(@"F:\repo\View\DeepSeekChatControl.xaml.cs");
+
+        bool covered = EditAgent.IsStepCoveredByModifiedFiles(
+            step, changed, PlanStart, _ => PlanStart.AddMinutes(1), out string evidence);
+
+        covered.Should().BeTrue();
+        evidence.Should().Be("DeepSeekChatControl.xaml");
+    }
+
+    [Fact]
+    public void IsStepCoveredByModifiedFiles_StaleChangeFromPreviousRun_DoesNotClaim()
+    {
+        var step = NewStep(3, "清理缓存残留", @"修改 Services\Agents\EditAgent.cs");
+        var changed = ChangedFiles(@"F:\repo\Services\Agents\EditAgent.cs");
+
+        bool covered = EditAgent.IsStepCoveredByModifiedFiles(
+            step, changed, PlanStart, _ => PlanStart.AddHours(-1), out _);
+
+        covered.Should().BeFalse();
+    }
+
+    [Fact]
+    public void IsStepCoveredByModifiedFiles_DeclaredFileNotModified_DoesNotClaim()
+    {
+        var step = NewStep(3, "清理缓存残留", @"修改 Services\Agents\EditAgent.cs");
+        var changed = ChangedFiles(@"F:\repo\Services\Agents\OtherAgent.cs");
+
+        EditAgent.IsStepCoveredByModifiedFiles(
+            step, changed, PlanStart, _ => PlanStart.AddMinutes(1), out _).Should().BeFalse();
+    }
+
+    [Fact]
+    public void IsStepCoveredByModifiedFiles_WithoutFileReference_DoesNotClaim()
+    {
+        var step = NewStep(2, "解耦余额与用量显示", "把用量显示从余额门控中解耦");
+        var changed = ChangedFiles(@"F:\repo\Services\Agents\EditAgent.cs");
+
+        EditAgent.IsStepCoveredByModifiedFiles(
+            step, changed, PlanStart, _ => PlanStart.AddMinutes(1), out _).Should().BeFalse();
+    }
+
+    [Fact]
+    public void IsStepCoveredByModifiedFiles_FileMissingOnDisk_DoesNotClaim()
+    {
+        var step = NewStep(3, "清理缓存残留", @"修改 Services\Agents\EditAgent.cs");
+        var changed = ChangedFiles(@"F:\repo\Services\Agents\EditAgent.cs");
+
+        EditAgent.IsStepCoveredByModifiedFiles(
+            step, changed, PlanStart, _ => default, out _).Should().BeFalse();
+    }
+
+    [Theory]
+    [InlineData("构建验证并汇报")]
+    [InlineData("运行单元测试")]
+    [InlineData("提交并推送修复")]
+    [InlineData("Build and verify the fix")]
+    public void IsStepCoveredByModifiedFiles_StepWithOwnAction_DoesNotClaim(string title)
+    {
+        var step = NewStep(4, title, @"修改 Services\Agents\EditAgent.cs");
+        var changed = ChangedFiles(@"F:\repo\Services\Agents\EditAgent.cs");
+
+        EditAgent.IsStepCoveredByModifiedFiles(
+            step, changed, PlanStart, _ => PlanStart.AddMinutes(1), out _).Should().BeFalse();
+    }
+
+    // 英文标记按整词匹配：标识符里的 test/restore 等子串不应把纯改文件步骤误判为"必须亲自执行"。
+    // 注意标题只点同一个目标文件，避免引入"点名了别的文件"这一无关失败原因。
+    [Theory]
+    [InlineData("重构 EditAgent.cs 的 TestData 处理")]
+    [InlineData("调整 EditAgent.cs 里 RestorePoint 的断言")]
+    [InlineData("修正 EditAgent.cs 的 ParseTestResult 逻辑")]
+    public void IsStepCoveredByModifiedFiles_IdentifierSubstring_StillClaims(string title)
+    {
+        var step = NewStep(4, title, @"修改 Services\Agents\EditAgent.cs");
+        var changed = ChangedFiles(@"F:\repo\Services\Agents\EditAgent.cs");
+
+        EditAgent.IsStepCoveredByModifiedFiles(
+            step, changed, PlanStart, _ => PlanStart.AddMinutes(1), out _).Should().BeTrue();
+    }
+
+    [Theory]
+    [InlineData("", false, EditAgent.StepNoToolCallOutcome.EmptyResponse)]
+    [InlineData("   ", false, EditAgent.StepNoToolCallOutcome.EmptyResponse)]
+    [InlineData("无需修改", false, EditAgent.StepNoToolCallOutcome.ConfirmedNoChange)]
+    [InlineData("", true, EditAgent.StepNoToolCallOutcome.SatisfiedByPrevious)]
+    [InlineData("本步骤目标已由前序步骤完成，因此未做改动。", true, EditAgent.StepNoToolCallOutcome.SatisfiedByPrevious)]
+    [InlineData("已完成", true, EditAgent.StepNoToolCallOutcome.SatisfiedByPrevious)]
+    [InlineData("无需修改", true, EditAgent.StepNoToolCallOutcome.SatisfiedByPrevious)]
+    [InlineData("已提交", false, EditAgent.StepNoToolCallOutcome.ConfirmedNoChange)]
+    [InlineData("由于前序步骤已经把两处修复全部落盘，且构建已通过，因此不再重复读取或构建，仅说明本轮情况即可，无需再次执行任何操作。", false, EditAgent.StepNoToolCallOutcome.TextOnlyFailure)]
+    public void ClassifyNoToolCallStep_SplitsEmptySatisfiedAndTextOnly(
+        string result, bool coveredByPrevious, EditAgent.StepNoToolCallOutcome expected)
+    {
+        EditAgent.ClassifyNoToolCallStep(result, coveredByPrevious).Should().Be(expected);
+    }
+
+    #endregion
 
     // ──────────── Reflection helpers for testing private methods ────────────
 

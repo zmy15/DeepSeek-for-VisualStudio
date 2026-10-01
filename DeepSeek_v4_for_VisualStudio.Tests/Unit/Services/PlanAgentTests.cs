@@ -270,8 +270,9 @@ public class PlanAgentTests
     }
 
     [Fact]
-    public void HasReusableExplorationResults_WithThreeForwardedResults_ReturnsTrue()
+    public void IsExplorationToolResult_ForwardedReadOnlyResults_AreRecognized()
     {
+        // 硬跳过已移除，但"有效只读探索结果"的判定仍用于提取发现上下文。
         var context = new AgentContext
         {
             ForwardedMessages = new List<ChatApiMessage>
@@ -282,22 +283,24 @@ public class PlanAgentTests
             },
         };
 
-        PlanAgent.HasReusableExplorationResults(context).Should().BeTrue();
+        context.ForwardedMessages.Count(PlanAgent.IsExplorationToolResult).Should().Be(3);
     }
 
     [Fact]
-    public void HasReusableExplorationResults_WithTwoForwardedResults_ReturnsFalse()
+    public void IsExplorationToolResult_ErrorAndNonWhitelistResults_AreRejected()
     {
         var context = new AgentContext
         {
             ForwardedMessages = new List<ChatApiMessage>
             {
-                new() { Role = "tool", Name = "read_file", Content = "file content" },
-                new() { Role = "tool", Name = "grep_search", Content = "grep result" },
+                new() { Role = "tool", Name = "read_file", Content = "ok" },
+                new() { Role = "tool", Name = "read_file", Content = "Error: file not found" },
+                new() { Role = "tool", Name = "write_file", Content = "written" },
+                new() { Role = "assistant", Name = "read_file", Content = "text" },
             },
         };
 
-        PlanAgent.HasReusableExplorationResults(context).Should().BeFalse();
+        context.ForwardedMessages.Count(PlanAgent.IsExplorationToolResult).Should().Be(1);
     }
 
     [Fact]
