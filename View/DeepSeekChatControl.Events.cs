@@ -2489,6 +2489,19 @@ namespace DeepSeek_v4_for_VisualStudio.View
                             ? labelProp.GetString() ?? LocalizationService.Instance["plan.handoff.label"] : LocalizationService.Instance["plan.handoff.label"];
                         _ = ExecuteAgentHandoffAsync(targetAgent, label);
                     }
+                    // ── 过程折叠块开合：持久化用户意图，切走/重开面板后仍保持 ──
+                    else if (type == "turnProcessToggled")
+                    {
+                        string? toggleTurnId = obj.TryGetProperty("turnId", out var turnIdProp)
+                            ? turnIdProp.GetString() : null;
+                        if (!string.IsNullOrEmpty(toggleTurnId))
+                        {
+                            // 仅当明确回传 true 才视为收起，避免字段缺失时被误判
+                            bool collapsed = obj.TryGetProperty("collapsed", out var collapsedProp)
+                                && collapsedProp.ValueKind == System.Text.Json.JsonValueKind.True;
+                            HandleTurnProcessToggled(toggleTurnId!, collapsed);
+                        }
+                    }
                     // ── 关闭任务面板：清除持久化的 PlanJson，防止重启后重新显示 ──
                     else if (type == "dismissTaskPanel")
                     {
