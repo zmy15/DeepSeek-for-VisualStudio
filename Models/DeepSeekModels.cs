@@ -658,6 +658,28 @@ namespace DeepSeek_v4_for_VisualStudio.Models
         public bool IsHtml { get; set; }
 
         /// <summary>
+        /// 该消息所属的 Agent 任务轮次标识：一轮任务开始时分配，轮内所有消息共用。
+        /// 供前端把同一轮的过程输出聚合为可折叠分组；Ask 模式与历史旧数据为 null。
+        /// </summary>
+        [DataMember]
+        public string? TurnId { get; set; }
+
+        /// <summary>
+        /// 是否为「过程消息」：true 表示属于可折叠的中间过程
+        /// （工具调用行、每步预告文本、工具返回结果），false 表示普通回答或最终总结。
+        /// Ask 模式下恒为 false，因此不会产生折叠块。
+        /// </summary>
+        [DataMember]
+        public bool IsProcessMessage { get; set; }
+
+        /// <summary>
+        /// 该轮过程折叠块是否处于折叠态。随会话持久化，用于记住用户的展开/收起意图：
+        /// 由宿主在自动收起后置 true，用户手动展开时由前端上报后置 false。
+        /// </summary>
+        [DataMember]
+        public bool IsTurnProcessCollapsed { get; set; }
+
+        /// <summary>
         /// Agent 任务计划的 JSON 序列化数据。
         /// 用于重启后重建任务面板，null 表示无关联计划。
         /// </summary>

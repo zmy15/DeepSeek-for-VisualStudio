@@ -403,6 +403,11 @@ table{border-collapse:collapse;margin:8px 0;width:100%}th,td{border:1px solid #4
 .reasoning-panel summary{cursor:pointer;padding:8px 14px;color:#9b9bd4;font-size:12px;font-weight:600;background:#252540;user-select:none;list-style:none}
 .reasoning-panel summary::-webkit-details-marker{display:none}
 .reasoning-panel .reasoning-content{padding:10px 14px;color:#8a8ab4;font-size:12px;font-style:italic;line-height:1.5;white-space:pre-wrap;max-height:300px;overflow-y:auto}
+.turn-process{margin:8px 0;border:1px solid #3a4a5a;border-radius:8px;background:#20242c;overflow:hidden}
+.turn-process summary{cursor:pointer;padding:6px 12px;color:#8fa8c0;font-size:11px;font-weight:600;background:#252b36;user-select:none;list-style:none}
+.turn-process summary::-webkit-details-marker{display:none}
+.turn-process summary:hover{background:#2c3340;color:#a8c4dc}
+.turn-process .turn-process-body{padding:8px 12px;color:#a8b4c0;font-size:12px;line-height:1.55;max-height:340px;overflow-y:auto}
 .search-results-card{margin:8px 0 12px;border:1px solid #3a5a8a;border-radius:8px;background:#1a2636}
 .search-results-card summary{cursor:pointer;padding:8px 14px;color:#7eb8e0;font-size:12px;font-weight:600;background:#253545;list-style:none}
 .search-results-card summary::-webkit-details-marker{display:none}
@@ -516,6 +521,11 @@ table{border-collapse:collapse;margin:8px 0;width:100%}th,td{border:1px solid #d
 .reasoning-panel summary{cursor:pointer;padding:8px 14px;color:#5555aa;font-size:12px;font-weight:600;background:#e8e8f0;user-select:none;list-style:none}
 .reasoning-panel summary::-webkit-details-marker{display:none}
 .reasoning-panel .reasoning-content{padding:10px 14px;color:#6666aa;font-size:12px;font-style:italic;line-height:1.5;white-space:pre-wrap;max-height:300px;overflow-y:auto}
+.turn-process{margin:8px 0;border:1px solid #c8d4e0;border-radius:8px;background:#f7f9fb;overflow:hidden}
+.turn-process summary{cursor:pointer;padding:6px 12px;color:#3a6a8f;font-size:11px;font-weight:600;background:#e8eef5;user-select:none;list-style:none}
+.turn-process summary::-webkit-details-marker{display:none}
+.turn-process summary:hover{background:#dce7f2;color:#2a5578}
+.turn-process .turn-process-body{padding:8px 12px;color:#444;font-size:12px;line-height:1.55;max-height:340px;overflow-y:auto}
 .search-results-card{margin:8px 0 12px;border:1px solid #c0d8ee;border-radius:8px;background:#f0f6fc}
 .search-results-card summary{cursor:pointer;padding:8px 14px;color:#3a7abf;font-size:12px;font-weight:600;background:#e6f0fa;list-style:none}
 .search-results-card summary::-webkit-details-marker{display:none}
