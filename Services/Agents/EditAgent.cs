@@ -54,6 +54,12 @@ namespace DeepSeek_v4_for_VisualStudio.Services.Agents
         // ── 本轮已修改文件追踪（用于步骤间重读提示）──
         private readonly HashSet<string> _lastModifiedFiles = new(StringComparer.OrdinalIgnoreCase);
 
+        // ── 本轮计划开始时刻（UTC）──
+        // 用于判定"某步骤的目标文件是否在本轮被前序步骤修改过"：
+        // 只有最后写入时间晚于该时刻的文件才算"本轮改的"，避免把上一轮残留的
+        // plan.ChangedFiles 误判为"前序步骤已代劳"。
+        private DateTime _planStartedUtc;
+
         // ── Agent 多步编辑 Workspace ──
         private Editing.StagedEditWorkspace? _stagedWorkspace;
 
@@ -243,6 +249,9 @@ namespace DeepSeek_v4_for_VisualStudio.Services.Agents
         {
             CurrentPlan = plan;
             _agentCts = CancellationTokenSource.CreateLinkedTokenSource(context.CancellationToken);
+
+            // ── 记录本轮计划开始时刻：供"前序步骤已代劳"判定区分本轮改动与上一轮残留 ──
+            _planStartedUtc = DateTime.UtcNow;
 
             // ── P0-6: 新计划开始，重置跨计划状态（防止前一个计划的 CodeMemory/AccumulatedContext 泄漏）──
             context.CodeMemory = null;
@@ -554,15 +563,37 @@ namespace DeepSeek_v4_for_VisualStudio.Services.Agents
                 bool hasToolCalls = stepMessages.Any(m => m.ToolCalls != null && m.ToolCalls.Count > 0);
                 if (!hasToolCalls)
                 {
-                    if (IsNoChangesResponse(result))
-                    {
-                        step.ResultSummary = LocalizationService.Instance["agent.log.editNoChangesConfirmed"];
-                        AddLog("INFO", LocalizationService.Instance["agent.log.editNoChange"]);
-                        return;
-                    }
+                    // ── 本步骤一个工具调用都没有：区分四种结局（见 ClassifyNoToolCallStep）──
+                    // ① 明确声明"无需修改" → 成功；
+                    // ② 目标文件已由前序步骤修改（工作区客观事实）→ 认领为已完成，不再判失败；
+                    // ③ 真·空响应（无内容、无工具调用）→ 失败，但走专用诊断文案；
+                    // ④ 仅文字说明、未调用任何工具 → 失败（原文案，已改为准确表述）。
+                    bool coveredByPreviousSteps = IsStepCoveredByModifiedFiles(
+                        step, plan.ChangedFiles, _planStartedUtc, GetFileWriteTimeUtcSafe,
+                        out string coveredFiles);
 
-                    throw new InvalidOperationException(
-                        LocalizationService.Instance["agent.log.editNoEditsProduced"]);
+                    switch (ClassifyNoToolCallStep(result, coveredByPreviousSteps))
+                    {
+                        case StepNoToolCallOutcome.ConfirmedNoChange:
+                            step.ResultSummary = LocalizationService.Instance["agent.log.editNoChangesConfirmed"];
+                            AddLog("INFO", LocalizationService.Instance["agent.log.editNoChange"]);
+                            return;
+
+                        case StepNoToolCallOutcome.SatisfiedByPrevious:
+                            step.ResultSummary = LocalizationService.Instance.Format(
+                                "agent.log.editStepClaimedSummary", coveredFiles);
+                            AddLog("INFO", LocalizationService.Instance.Format(
+                                "agent.log.editStepClaimedNoTool", step.Index, coveredFiles));
+                            return;
+
+                        case StepNoToolCallOutcome.EmptyResponse:
+                            throw new InvalidOperationException(
+                                LocalizationService.Instance["agent.log.editEmptyResponse"]);
+
+                        default:
+                            throw new InvalidOperationException(
+                                LocalizationService.Instance["agent.log.editNoEditsProduced"]);
+                    }
                 }
 
                 bool hasBuildCall = stepMessages.Any(m =>
@@ -768,9 +799,7 @@ namespace DeepSeek_v4_for_VisualStudio.Services.Agents
                 return;
 
             // 从步骤描述中提取文件引用（匹配常见代码文件扩展名）
-            var filePattern = @"\b(\w+\.(?:cs|ts|js|py|java|cpp|h|hpp|xml|json|yaml|yml|md|csproj|sln|vb|fs|cshtml|razor|css|scss|html|xaml|config|props|targets))\b";
-            var matches = System.Text.RegularExpressions.Regex.Matches(step.Description, filePattern,
-                System.Text.RegularExpressions.RegexOptions.IgnoreCase);
+            var matches = StepFileReferenceRegex.Matches(step.Description);
 
             if (matches.Count == 0) return;
 
@@ -801,6 +830,198 @@ namespace DeepSeek_v4_for_VisualStudio.Services.Agents
                     string.Join(", ", untouched)));
             }
         }
+
+        #region Step Satisfaction — "前序步骤已代劳"判定
+
+        /// <summary>
+        /// 步骤/计划描述中出现的文件引用（含常见代码与配置文件扩展名）。
+        /// 供步骤完整性自检、计划变更追踪与"前序步骤已代劳"判定共用，避免三处正则各自漂移。
+        /// </summary>
+        private static readonly System.Text.RegularExpressions.Regex StepFileReferenceRegex = new(
+            @"\b(\w+\.(?:cs|ts|js|py|java|cpp|h|hpp|xml|json|yaml|yml|md|csproj|sln|vb|fs|cshtml|razor|css|scss|html|xaml|config|props|targets))\b",
+            System.Text.RegularExpressions.RegexOptions.IgnoreCase
+                | System.Text.RegularExpressions.RegexOptions.Compiled);
+
+        /// <summary>
+        /// 中文自有动作标记（构建、测试、Git、终端等）。
+        /// 中文字面量不会与英文标识符混淆，可直接子串匹配。
+        /// </summary>
+        private static readonly string[] OwnExecutionMarkersCn = new[]
+        {
+            "构建", "编译", "测试", "验证", "运行", "终端", "回滚", "提交", "推送",
+        };
+
+        /// <summary>
+        /// 英文自有动作标记（构建、测试、Git、终端等）。
+        /// 必须按整词匹配，否则被标识符子串误伤：例如描述里的 "TestData"/"CacheHelper.restore"
+        /// 含 test/restore，会把本可认领的纯改文件步骤判成"需要亲自执行"，令新功能失效。
+        /// 命中即为保守执行（照常调用模型），不会造成漏改。
+        /// </summary>
+        private static readonly System.Text.RegularExpressions.Regex OwnExecutionRegex = new(
+            @"\b(?:build|compile|test|verify|validate|run|terminal|git|commit|push|revert|msbuild|dotnet|npm|restore)\b",
+            System.Text.RegularExpressions.RegexOptions.IgnoreCase
+                | System.Text.RegularExpressions.RegexOptions.Compiled);
+
+        /// <summary>
+        /// 从步骤标题与描述中提取被点名的文件名（仅文件名，不含目录）。
+        /// 描述未点名任何文件时返回空集合 —— 此时无法用文件覆盖判定"已满足"。
+        /// </summary>
+        internal static HashSet<string> ExtractDeclaredFiles(AgentStep step)
+        {
+            var files = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
+            if (step == null) return files;
+
+            string text = $"{step.Title} {step.Description}";
+            foreach (System.Text.RegularExpressions.Match m in StepFileReferenceRegex.Matches(text))
+                files.Add(m.Groups[1].Value);
+
+            return files;
+        }
+
+        /// <summary>
+        /// 本步骤是否必须由模型亲自执行（标题/描述含构建、测试、Git、终端等独立动作）。
+        /// </summary>
+        internal static bool RequiresOwnExecution(AgentStep step)
+        {
+            if (step == null) return true;
+
+            string text = $"{step.Title} {step.Description}";
+            foreach (var marker in OwnExecutionMarkersCn)
+            {
+                if (text.Contains(marker, StringComparison.OrdinalIgnoreCase))
+                    return true;
+            }
+            return OwnExecutionRegex.IsMatch(text);
+        }
+
+        /// <summary>
+        /// 判定"本步骤的目标文件已由本轮的前序步骤修改"。
+        /// 该判定驱动两处行为：① 步骤提示词中注入"前序步骤已修改"提醒，避免模型重放已生效的补丁；
+        /// ② 该步骤最终一个工具调用都没有时，作为客观依据认定为"已由前序步骤完成"而非失败。
+        ///
+        /// 双重门槛（缺一不可）：
+        /// ① 步骤标题/描述必须点名文件，且这些文件全部出现在 changedFiles 中（有声明文件未改 → 不认领）；
+        /// ② 文件在磁盘上的最后写入时间必须晚于本轮计划开始时刻（排除上一轮已落盘的残留改动）。
+        ///
+        /// 注意：文件级覆盖不能证明语义完成 —— 前序步骤可能只改了同一文件的另一部分。
+        /// 因此本判定不用于"跳过模型直接判完成"，只用于提示模型与兜底认定，剩余改动仍由模型补齐。
+        /// </summary>
+        /// <param name="step">待判定的步骤</param>
+        /// <param name="changedFiles">本轮累计变更文件（plan.ChangedFiles）</param>
+        /// <param name="planStartedUtc">本轮计划开始时刻（UTC）</param>
+        /// <param name="lastWriteTimeUtc">取文件最后写入时间的委托（便于测试注入）</param>
+        /// <param name="evidence">命中时输出被覆盖的文件名列表</param>
+        internal static bool IsStepCoveredByModifiedFiles(
+            AgentStep step,
+            IReadOnlyCollection<FileChangeSummary>? changedFiles,
+            DateTime planStartedUtc,
+            Func<string, DateTime> lastWriteTimeUtc,
+            out string evidence)
+        {
+            evidence = string.Empty;
+            if (step == null || changedFiles == null || changedFiles.Count == 0) return false;
+
+            var declared = ExtractDeclaredFiles(step);
+            if (declared.Count == 0) return false;      // 描述没点名文件 → 无客观依据
+            if (RequiresOwnExecution(step)) return false;
+
+            var covered = new List<string>();
+            foreach (var name in declared)
+            {
+                string? path = changedFiles
+                    .FirstOrDefault(c => FileNameMatches(Path.GetFileName(c.FilePath), name))
+                    ?.FilePath;
+                if (string.IsNullOrEmpty(path)) return false;
+
+                DateTime stamp;
+                try { stamp = lastWriteTimeUtc(path); }
+                catch { return false; }
+
+                // 允许 2 秒容差：FAT/UNC 等文件系统的最后写入时间精度为 2 秒
+                if (stamp == default || stamp < planStartedUtc.AddSeconds(-2)) return false;
+
+                covered.Add(name);
+            }
+
+            evidence = string.Join(", ", covered.OrderBy(n => n, StringComparer.OrdinalIgnoreCase));
+            return true;
+        }
+
+        /// <summary>
+        /// 文件名匹配（大小写不敏感），并兼容复合扩展名：
+        /// 步骤描述里的 "View\DeepSeekChatControl.xaml.cs" 经 <see cref="StepFileReferenceRegex"/>
+        /// 只能截到 "DeepSeekChatControl.xaml"（正则首个命中的已知扩展名即 xaml），
+        /// 若用严格等值比较会漏判 .xaml.cs / .cshtml / .d.ts 等文件，导致"已代劳"判定失效。
+        /// </summary>
+        private static bool FileNameMatches(string changedFileName, string declaredName)
+        {
+            if (string.Equals(changedFileName, declaredName, StringComparison.OrdinalIgnoreCase))
+                return true;
+
+            // 仅允许"真实文件名以声明名加一个点号开头"这一方向：
+            // 步骤写 a.xaml.cs 时正则只截到 a.xaml，真实文件 a.xaml.cs 需命中。
+            // 反向放宽会把 a.cs 误配到 a.cs.bak / a.xaml.csproj 等近似名，故不采用。
+            return changedFileName.StartsWith(declaredName + ".", StringComparison.OrdinalIgnoreCase);
+        }
+
+        /// <summary>
+        /// 读取文件最后写入时间（UTC）。文件不存在或读取失败返回 default，
+        /// 由 <see cref="IsStepCoveredByModifiedFiles"/> 判为"未覆盖"（保守）。
+        /// </summary>
+        private static DateTime GetFileWriteTimeUtcSafe(string path)
+        {
+            try
+            {
+                return File.Exists(path) ? File.GetLastWriteTimeUtc(path) : default;
+            }
+            catch
+            {
+                return default;
+            }
+        }
+
+        /// <summary>本步骤一个工具调用都没有时的结局分类。</summary>
+        public enum StepNoToolCallOutcome
+        {
+            /// <summary>模型明确声明无需修改 → 视为已完成（原行为）。</summary>
+            ConfirmedNoChange,
+
+            /// <summary>目标文件已由前序步骤修改 → 认领为已完成（新增出口，修复误判失败）。</summary>
+            SatisfiedByPrevious,
+
+            /// <summary>真·空响应（无内容、无工具调用）→ 失败，走专用诊断文案。</summary>
+            EmptyResponse,
+
+            /// <summary>仅文字说明、未调用任何工具 → 失败。</summary>
+            TextOnlyFailure,
+        }
+
+        /// <summary>
+        /// 分类"本步骤一个工具调用都没有"的结局。
+        /// 优先级：客观的"文件已被前序步骤改过"证据 → 明确的"无需修改"声明 → 空响应诊断 → 纯文字失败。
+        ///
+        /// 客观证据必须优先于声明，原因有二：
+        /// ① 模型常以"已由前序步骤完成"收尾，而 <see cref="IsNoChangesResponse"/> 里的"已完成/已经.*完成"
+        ///    会先把这类回复误归为 ConfirmedNoChange，使新出口与专用日志永不触发、归因失真；
+        /// ② 该函数还包含"已提交/已推送/暂存成功"等 Git 动作模式，若这些回复先被判为 ConfirmedNoChange，
+        ///    零工具调用会被静默当作成功 —— 那本是要判失败的场景。
+        /// </summary>
+        internal static StepNoToolCallOutcome ClassifyNoToolCallStep(
+            string? result, bool coveredByPreviousSteps)
+        {
+            if (coveredByPreviousSteps)
+                return StepNoToolCallOutcome.SatisfiedByPrevious;
+
+            if (IsNoChangesResponse(result ?? string.Empty))
+                return StepNoToolCallOutcome.ConfirmedNoChange;
+
+            if (string.IsNullOrWhiteSpace(result))
+                return StepNoToolCallOutcome.EmptyResponse;
+
+            return StepNoToolCallOutcome.TextOnlyFailure;
+        }
+
+        #endregion
 
         /// <summary>
         /// 从 AI 响应中检测是否声明了后续步骤也已完成（v1.1.10）。
@@ -933,14 +1154,12 @@ namespace DeepSeek_v4_for_VisualStudio.Services.Agents
                 return;
 
             // 从所有步骤描述中提取文件引用
-            var filePattern = @"\b(\w+\.(?:cs|ts|js|py|java|cpp|h|hpp|xml|json|yaml|yml|md|csproj|sln|vb|fs|cshtml|razor|css|scss|html|xaml|config|props|targets))\b";
             var allMentioned = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
 
             foreach (var step in plan.Steps)
             {
                 if (string.IsNullOrWhiteSpace(step.Description)) continue;
-                var matches = System.Text.RegularExpressions.Regex.Matches(step.Description, filePattern,
-                    System.Text.RegularExpressions.RegexOptions.IgnoreCase);
+                var matches = StepFileReferenceRegex.Matches(step.Description);
                 foreach (System.Text.RegularExpressions.Match m in matches)
                 {
                     allMentioned.Add(m.Groups[1].Value);
@@ -1398,6 +1617,24 @@ namespace DeepSeek_v4_for_VisualStudio.Services.Agents
             sb.AppendLine(string.Format(LocalizationService.Instance["agent.step.currentStepPrompt"], step.Index, plan.Steps.Count, step.Title));
             sb.AppendLine($"步骤详情: {step.Description}");
             sb.AppendLine();
+
+            // ── 前序步骤已代劳提示（v1.1.13）──
+            // 背景：模型常在执行步骤 N 时顺手做完步骤 N+1 的改动，却不在回复里声明"步骤 N+1 已完成"，
+            // DetectAndAutoCompleteLaterSteps 因此不触发；步骤 N+1 单独执行时无事可做、不调用任何工具，
+            // 被判为"AI 空响应"而失败。
+            // 处理：用工作区客观事实（目标文件已在本轮被前序步骤修改）明确告知模型，避免它盲目重放
+            // 已生效的补丁；模型若判定确已完成，调用只读工具核实后一句话结束即可。
+            // 兜底：该步骤若最终一个工具调用都没有，由 ClassifyNoToolCallStep 依据同一客观事实
+            // 认定为"已由前序步骤完成"，而不是判失败。
+            if (IsStepCoveredByModifiedFiles(
+                    step, plan.ChangedFiles, _planStartedUtc, GetFileWriteTimeUtcSafe, out string alreadyModifiedFiles))
+            {
+                sb.AppendLine(LocalizationService.Instance.Format(
+                    "agent.step.alreadyModifiedHint", alreadyModifiedFiles));
+                sb.AppendLine();
+                AddLog("INFO", LocalizationService.Instance.Format(
+                    "agent.log.editStepClaimedSkipped", step.Index, step.Title, alreadyModifiedFiles));
+            }
 
             // ── 计划进度快照：避免模型把历史中的“当前步骤”提示误认为新指令 ──
             string progressSnapshot = BuildPlanProgressSnapshot(plan);
