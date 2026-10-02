@@ -171,6 +171,11 @@ namespace DeepSeek_v4_for_VisualStudio.Settings
             string? baseUrl,
             string? apiKey)
         {
+            // 保存自定义端点与密钥，供「+ 添加模型 → 从端点获取」复用；
+            // 遗漏赋值会导致下游回退到官方默认地址。
+            _baseUrl = baseUrl;
+            _apiKey = apiKey;
+
             var l = LocalizationService.Instance;
             Text = l["settings.modelCatalog.title"];
             StartPosition = FormStartPosition.CenterParent;
