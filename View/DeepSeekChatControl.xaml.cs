@@ -489,6 +489,13 @@ namespace DeepSeek_v4_for_VisualStudio.View
         private readonly StringBuilder _agentTimelineContent = new();
 
         /// <summary>
+        /// 本轮实际发生的工具调用次数，与 <see cref="_agentTimelineContent"/> 同生命周期：
+        /// 轮次开始时归零，每收到一条 <c>Level == "TOOL"</c> 的日志累加一次。
+        /// 过程折叠块的摘要文案取自该值，而非时间线的行数。
+        /// </summary>
+        private int _agentTurnToolCallCount;
+
+        /// <summary>
         /// 当前 Agent 任务的轮次标识：一轮任务开始时分配，该轮内所有过程消息与
         /// 最终总结共享此值，供前端把过程输出聚合为可折叠分组。Ask 模式下为 null。
         /// </summary>
