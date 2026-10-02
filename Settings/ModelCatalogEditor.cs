@@ -175,6 +175,9 @@ namespace DeepSeek_v4_for_VisualStudio.Settings
             // 遗漏赋值会导致下游回退到官方默认地址。
             _baseUrl = baseUrl;
             _apiKey = apiKey;
+            // 官方模型由远端目录动态提供、删除无处落盘，下次打开必然重现，
+            // 故预先构建集合，用于标注来源并拦截对官方行的删除操作。
+            _officialSet = new HashSet<string>(officialModels, StringComparer.OrdinalIgnoreCase);
 
             var l = LocalizationService.Instance;
             Text = l["settings.modelCatalog.title"];
@@ -229,21 +232,30 @@ namespace DeepSeek_v4_for_VisualStudio.Settings
                 Name = "model",
                 HeaderText = l["settings.modelCatalog.modelColumn"],
                 AutoSizeMode = DataGridViewAutoSizeColumnMode.Fill,
-                FillWeight = 46,
+                FillWeight = 40,
+            });
+            // 只读「来源」列：标注该行来自官方远端目录还是用户自定义/手动添加。
+            _grid.Columns.Add(new DataGridViewTextBoxColumn
+            {
+                Name = "source",
+                HeaderText = l["settings.modelCatalog.sourceColumn"],
+                ReadOnly = true,
+                AutoSizeMode = DataGridViewAutoSizeColumnMode.Fill,
+                FillWeight = 14,
             });
             _grid.Columns.Add(new DataGridViewTextBoxColumn
             {
                 Name = "tokens",
                 HeaderText = l["settings.modelCatalog.contextColumn"],
                 AutoSizeMode = DataGridViewAutoSizeColumnMode.Fill,
-                FillWeight = 30,
+                FillWeight = 26,
             });
             _grid.Columns.Add(new DataGridViewCheckBoxColumn
             {
                 Name = "vision",
                 HeaderText = l["settings.modelCatalog.visionColumn"],
                 AutoSizeMode = DataGridViewAutoSizeColumnMode.Fill,
-                FillWeight = 12,
+                FillWeight = 8,
             });
             _grid.Columns.Add(new DataGridViewButtonColumn
             {
@@ -295,13 +307,19 @@ namespace DeepSeek_v4_for_VisualStudio.Settings
         /// <summary>用给定的行集合重建表格内容（先清空再逐行填充）。</summary>
         private void ReplaceRows(IReadOnlyList<ModelCatalogRow> rows)
         {
+            var l = LocalizationService.Instance;
+            string officialText = l["settings.modelCatalog.sourceOfficial"];
+            string customText = l["settings.modelCatalog.sourceCustom"];
+
             _grid.Rows.Clear();
             foreach (var row in rows)
             {
                 string tokenText = row.MaxTokens > 0
                     ? ModelTokenLimitService.FormatTokenCount(row.MaxTokens)
                     : string.Empty;
-                _grid.Rows.Add(row.Model, tokenText, row.IsVision, string.Empty);
+                // 来源由官方模型集合判定：命中即官方，否则视为自定义/手动添加。
+                string sourceText = _officialSet.Contains(row.Model) ? officialText : customText;
+                _grid.Rows.Add(row.Model, sourceText, tokenText, row.IsVision, string.Empty);
             }
         }
 
@@ -324,7 +342,7 @@ namespace DeepSeek_v4_for_VisualStudio.Settings
             foreach (string model in dialog.AddedModels)
             {
                 if (existing.Add(model))
-                    _grid.Rows.Add(model, string.Empty, false, string.Empty);
+                    _grid.Rows.Add(model, l["settings.modelCatalog.sourceCustom"], string.Empty, false, string.Empty);
             }
         }
 
@@ -335,6 +353,20 @@ namespace DeepSeek_v4_for_VisualStudio.Settings
                 return;
             if (_grid.Columns[e.ColumnIndex].Name != "delete")
                 return;
+
+            // 官方模型由远端目录动态提供、删除无处落盘，若放行会在下次打开时重现，
+            // 故直接拦截并提示，避免用户误以为已删除。
+            string model = _grid.Rows[e.RowIndex].Cells["model"].Value?.ToString()?.Trim() ?? string.Empty;
+            if (model.Length > 0 && _officialSet.Contains(model))
+            {
+                MessageBox.Show(
+                    this,
+                    LocalizationService.Instance["settings.modelCatalog.officialNotDeletable"],
+                    Text,
+                    MessageBoxButtons.OK,
+                    MessageBoxIcon.Information);
+                return;
+            }
 
             _grid.Rows.RemoveAt(e.RowIndex);
         }
@@ -408,6 +440,9 @@ namespace DeepSeek_v4_for_VisualStudio.Settings
         /// <summary>把 DataGridView 复选单元格的值安全地转换为布尔值。</summary>
         private static bool ReadCheckBox(object? value)
             => value is bool flag && flag;
+
+        /// <summary>官方模型名集合（忽略大小写），用于标注来源并拦截官方行的删除。</summary>
+        private readonly HashSet<string> _officialSet;
 
         private readonly string? _baseUrl;
         private readonly string? _apiKey;
