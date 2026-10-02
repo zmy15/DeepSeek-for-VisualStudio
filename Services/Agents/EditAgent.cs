@@ -1236,6 +1236,14 @@ namespace DeepSeek_v4_for_VisualStudio.Services.Agents
         /// 检测 AI 是否明确表示没有需要更改的内容。
         /// 空响应可能来自 token 截断，不能据此跳过整个编辑步骤。
         /// </summary>
+        /// <remarks>
+        /// 长度闸门（短回复才算数）是为了挡住「长篇辩解自己为何没干活」——见
+        /// <c>ClassifyNoToolCallStep_SplitsEmptySatisfiedAndTextOnly</c> 里那条长文本必须判失败的用例。
+        /// 但它会误伤另一类步骤：像「回归风险清单与手动验证」这种<em>以文字交付物为目的</em>的收尾步骤，
+        /// 本来就不产生文件修改，回复又长又有结构，于是被冤判 TextOnlyFailure 而整轮失败。
+        /// 因此对长回复补一条出口：<em>有结构</em>（标题/列表/表格）且声明了完成即视为已完成；
+        /// 纯粹的流水叙述即使很长也不算，闸门对「辩解」仍然有效。
+        /// </remarks>
         private static bool IsNoChangesResponse(string aiResult)
         {
             if (string.IsNullOrWhiteSpace(aiResult)) return false;
@@ -1267,17 +1275,61 @@ namespace DeepSeek_v4_for_VisualStudio.Services.Agents
                 @"^(?:OK|Done|完成|好了|搞定|成功|已执行|已处理)[。！!.\s]*$",
             };
 
+            bool matched = false;
             foreach (var pattern in noChangesPatterns)
             {
                 if (System.Text.RegularExpressions.Regex.IsMatch(clean, pattern,
-                    System.Text.RegularExpressions.RegexOptions.IgnoreCase)
-                    && clean.Trim().Length < 200)
+                    System.Text.RegularExpressions.RegexOptions.IgnoreCase))
                 {
-                    return true;
+                    matched = true;
+                    break;
                 }
             }
 
-            return false;
+            if (!matched) return false;
+
+            // 短回复：维持原判定（含 Git 动作等一次性声明）。
+            if (clean.Trim().Length < 200) return true;
+
+            // 长回复：仅当它是「有结构的交付物」时才认，纯叙述仍判失败。
+            return IsStructuredDeliverable(clean);
+        }
+
+        /// <summary>
+        /// 长回复是否为「有结构的交付物」：含 Markdown 标题、有序/无序列表或表格。
+        /// 用于把「以文字交付为目的」的收尾步骤（风险清单、验证步骤、后续操作说明）
+        /// 与「长篇辩解自己为何没干活」区分开。判定只看结构，不猜语义。
+        /// </summary>
+        /// <param name="clean">已剥离代码块与思考标记的回复正文。</param>
+        private static bool IsStructuredDeliverable(string clean)
+        {
+            if (string.IsNullOrWhiteSpace(clean)) return false;
+
+            string[] structuralPatterns =
+            {
+                @"^\s{0,3}#{1,6}\s+\S",          // Markdown 标题
+                @"^\s{0,3}[-*+]\s+\S",           // 无序列表
+                @"^\s{0,3}\d+[.)]\s+\S",         // 有序列表
+                @"^\s{0,3}\|\s*\S.*\|",          // 表格行
+            };
+
+            int signals = 0;
+            foreach (string line in clean.Split('\n'))
+            {
+                foreach (string pattern in structuralPatterns)
+                {
+                    if (System.Text.RegularExpressions.Regex.IsMatch(
+                            line, pattern,
+                            System.Text.RegularExpressions.RegexOptions.Multiline))
+                    {
+                        signals++;
+                        break;   // 同一行只计一次
+                    }
+                }
+            }
+
+            // 至少两条结构性线索，避免单行「- 无」这类噪声被当成交付物。
+            return signals >= 2;
         }
 
         #region Tool-Made Edit Detection (v1.1.10)
