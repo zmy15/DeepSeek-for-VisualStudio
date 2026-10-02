@@ -99,10 +99,11 @@ namespace DeepSeek_v4_for_VisualStudio.Services.BuiltInTools
                     if (selectedErrors.Count > 0)
                     {
                         var sb = new StringBuilder();
-                        sb.AppendLine(LocalizationService.Instance["tool.getErrors.selectedErrors"]);
+                        var L = LocalizationService.Instance;
+                        sb.AppendLine(L["tool.getErrors.selectedErrors"]);
                         sb.AppendLine();
-                        sb.AppendLine($"| # | 描述 | 文件 | 行 | 列 | 错误码 | 项目 |");
-                        sb.AppendLine("|---|------|------|----|----|--------|------|");
+                        sb.AppendLine(L["tool.getErrors.tableHeader"]);
+                        sb.AppendLine(L["tool.getErrors.tableSeparator"]);
                         for (int i = 0; i < selectedErrors.Count; i++)
                         {
                             var e = selectedErrors[i];
@@ -112,11 +113,12 @@ namespace DeepSeek_v4_for_VisualStudio.Services.BuiltInTools
                             string col = e.Column > 0 ? e.Column.ToString() : "-";
                             string code = e.ErrorCode ?? "-";
                             string proj = e.Project ?? "-";
-                            sb.AppendLine($"| {i + 1} | {desc} | {file} | {line} | {col} | {code} | {proj} |");
+                            sb.AppendLine(L.Format("tool.getErrors.tableRow",
+                                i + 1, desc, file, line, col, code, proj));
                         }
                         sb.AppendLine();
                         sb.AppendLine("---");
-                        sb.AppendLine("### 详细错误信息");
+                        sb.AppendLine(L["tool.getErrors.detailHeader"]);
                         sb.AppendLine();
                         foreach (var e in selectedErrors)
                         {
@@ -126,9 +128,9 @@ namespace DeepSeek_v4_for_VisualStudio.Services.BuiltInTools
                                     (e.Line > 0 ? $":{e.Line}" : "") +
                                     (e.Column > 0 ? $":{e.Column}" : ""));
                             if (!string.IsNullOrEmpty(e.Project))
-                                sb.AppendLine($"项目: {e.Project}");
+                                sb.AppendLine(L.Format("tool.getErrors.project", e.Project));
                             if (!string.IsNullOrEmpty(e.SubCategory))
-                                sb.AppendLine($"子类别: {e.SubCategory}");
+                                sb.AppendLine(L.Format("tool.getErrors.subCategory", e.SubCategory));
                             sb.AppendLine();
                         }
                         return sb.ToString().TrimEnd();
@@ -205,9 +207,11 @@ namespace DeepSeek_v4_for_VisualStudio.Services.BuiltInTools
                     sb.AppendLine($"- {(string.IsNullOrEmpty(file) ? "(no file)" : file + loc)}{code}: {e.Description}");
                 }
                 if (errors.Count > shown.Count)
-                    sb.AppendLine($"(共 {errors.Count} 条错误，已显示前 {shown.Count} 条)");
+                    sb.AppendLine(LocalizationService.Instance.Format(
+                        "tool.getErrors.truncated", errors.Count, shown.Count));
                 else if (items.Count > errors.Count)
-                    sb.AppendLine($"(已过滤 {items.Count - errors.Count} 条 warnings/others)");
+                    sb.AppendLine(LocalizationService.Instance.Format(
+                        "tool.getErrors.filteredOut", items.Count - errors.Count));
             }
             catch (Exception ex)
             {

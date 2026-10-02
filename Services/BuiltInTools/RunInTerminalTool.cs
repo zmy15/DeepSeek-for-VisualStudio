@@ -1058,7 +1058,7 @@ namespace DeepSeek_v4_for_VisualStudio.Services.BuiltInTools
                     var sb = new StringBuilder();
                     if (!string.IsNullOrEmpty(warningPrefix))
                         sb.Append(warningPrefix);
-                    sb.AppendLine($"终端输出 (退出码: {exitCode}):");
+                    sb.AppendLine(LocalizationService.Instance.Format("tool.runInTerminal.outputHeader", exitCode));
                     if (!string.IsNullOrWhiteSpace(stdout))
                         sb.AppendLine(stdout);
                     if (!string.IsNullOrWhiteSpace(stderr))

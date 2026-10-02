@@ -128,10 +128,10 @@ namespace DeepSeek_v4_for_VisualStudio.Services.BuiltInTools
             string reason = GetStringArg(args, "reason");
             string taskDescription = GetStringArg(args, "taskDescription");
             if (string.IsNullOrWhiteSpace(targetAgentStr))
-                return "Error: request_handoff: 缺少 targetAgent 参数。可选值: Edit, Ask, Plan, Build, Explore";
+                return LocalizationService.Instance["tool.requestHandoff.missingTargetAgent"];
 
             if (string.IsNullOrWhiteSpace(taskDescription))
-                return "Error: request_handoff: 缺少 taskDescription 参数。请描述目标 Agent 需要执行的任务。";
+                return LocalizationService.Instance["tool.requestHandoff.missingTaskDescription"];
 
             bool chainBack = args.TryGetValue("chainBack", out var chainBackNode)
                 && chainBackNode.ValueKind == JsonValueKind.True;
@@ -253,7 +253,7 @@ namespace DeepSeek_v4_for_VisualStudio.Services.BuiltInTools
 
         public override string GetResultSummary(string toolResult)
         {
-            if (string.IsNullOrEmpty(toolResult)) return "移交完成";
+            if (string.IsNullOrEmpty(toolResult)) return LocalizationService.Instance["tool.requestHandoff.handedOff"];
             if (toolResult.StartsWith("HANDOFF_REQUESTED", StringComparison.Ordinal)) return LocalizationService.Instance["tool.requestHandoff.completed"];
             return toolResult;
         }

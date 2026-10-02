@@ -753,7 +753,8 @@ namespace DeepSeek_v4_for_VisualStudio.Services.Agents
             string repairedJson = TryRepairTruncatedJson(json);
             if (repairedJson != json)
             {
-                AddLog("INFO", $"[Plan] JSON 截断修复已应用 (原={json.Length} chars, 修复后={repairedJson.Length} chars)");
+                AddLog("INFO", "[Plan] " + LocalizationService.Instance.Format(
+                    "agent.log.planJsonRepaired", json.Length, repairedJson.Length));
                 json = repairedJson;
             }
 

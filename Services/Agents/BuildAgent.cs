@@ -416,11 +416,11 @@ namespace DeepSeek_v4_for_VisualStudio.Services.Agents
                     catch { /* 单文件清理失败不影响整体 */ }
                 }
 
-                AddLog("INFO", "[Memory] 已清理旧计划摘要，最终总结将使用最新构建结果");
+                AddLog("INFO", $"[Memory] {LocalizationService.Instance["agent.log.memoryPlanSummaryCleared"]}");
             }
             catch (Exception ex)
             {
-                AddLog("WARN", $"[Memory] 清理计划摘要失败: {ex.Message}");
+                AddLog("WARN", $"[Memory] {LocalizationService.Instance.Format("agent.log.memoryPlanSummaryClearFailed", ex.Message)}");
             }
         }
         #endregion
