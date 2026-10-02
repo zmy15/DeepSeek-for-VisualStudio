@@ -368,8 +368,16 @@ namespace DeepSeek_v4_for_VisualStudio.View
         /// WebView2 控件（程序化创建，替代 XAML 中的 wv2:WebView2）。
         /// 不在 XAML 中声明以避免 ReSharper 等第三方扩展预加载不同版本的
         /// Microsoft.Web.WebView2.Wpf.dll 导致 XamlParseException (GitHub issue #18)。
+        /// <para>
+        /// 使用视觉托管（Composition）的 <see cref="Microsoft.Web.WebView2.Wpf.WebView2CompositionControl"/>，
+        /// 而非窗口式（Windowed）的 <c>WebView2</c>：窗口式控件在 HwndHost 内创建 Chromium 子 HWND，
+        /// 受 Win32「空域(airspace)」限制，子 HWND 永远绘制在 WPF 合成内容之上——
+        /// 当 VS 自动隐藏的工具窗口（如右侧「Git 更改」弹窗）滑出时，聊天页面的渲染内容
+        /// 会覆盖在弹窗之上 (GitHub issue #31)。组合控件把浏览器画面合成进 WPF 视觉树，
+        /// 参与 VS Shell 的正常 z-order，弹窗可以正确地覆盖聊天窗口。
+        /// </para>
         /// </summary>
-        internal Microsoft.Web.WebView2.Wpf.WebView2 ChatWebView = null!;
+        internal Microsoft.Web.WebView2.Wpf.WebView2CompositionControl ChatWebView = null!;
         /// <summary>抑制 CoreWebView2InitializationCompleted 中的 UpdateBrowser（由 LoadAndShowAsync 显式接管）</summary>
         private bool _suppressWebViewUpdate;
         private int _lastRenderedMessagesLength;
@@ -599,8 +607,11 @@ namespace DeepSeek_v4_for_VisualStudio.View
         /// - XAML 中的 xmlns:wv2 声明会在 BAML 加载时强制 CLR 解析 WebView2 类型。
         /// - 若 ReSharper 已加载不同版本的同名程序集，CLR 可能返回 ReSharper 的版本，
         ///   导致 BAML 类型不匹配 → XamlParseException。
-        /// - 程序化 new WebView2() 避免了 BAML 类型的编译时绑定差异，
+        /// - 程序化 new WebView2CompositionControl() 避免了 BAML 类型的编译时绑定差异，
         ///   即使 ReSharper 版本被加载，其构造函数也足够兼容以创建控件实例。
+        /// - 选用视觉托管（Composition）控件而非窗口式 WebView2：窗口式控件的
+        ///   Chromium 子 HWND 受 Win32 空域限制，始终覆盖 VS 自动隐藏弹窗等 WPF 内容
+        ///   (GitHub issue #31)；组合控件参与 WPF z-order，弹窗可正常置顶。
         /// </summary>
         private void InitializeChatWebView()
         {
@@ -630,7 +641,9 @@ namespace DeepSeek_v4_for_VisualStudio.View
                 }
 
                 // ── 2. 创建 WebView2 控件并放入占位符 ──
-                ChatWebView = new Microsoft.Web.WebView2.Wpf.WebView2();
+                // 视觉托管（Composition）：浏览器画面合成进 WPF 视觉树，无子 HWND，
+                // 修复 VS 自动隐藏弹窗（如「Git 更改」）被聊天内容覆盖的问题 (issue #31)。
+                ChatWebView = new Microsoft.Web.WebView2.Wpf.WebView2CompositionControl();
                 ChatWebViewHost.Content = ChatWebView;
 
                 // ── 3. 订阅初始化完成事件（原在构造函数中直接订阅 ChatWebView）──
@@ -640,7 +653,7 @@ namespace DeepSeek_v4_for_VisualStudio.View
                 ChatWebView.PreviewKeyDown += ChatWebView_PreviewKeyDown;
                 ChatWebView.KeyDown += ChatWebView_PreviewKeyDown;
 
-                Logger.Info("[ChatWebView] WebView2 control created and placed in ChatWebViewHost");
+                Logger.Info("[ChatWebView] WebView2CompositionControl (visual hosting) created and placed in ChatWebViewHost");
             }
             catch (Exception ex)
             {
