@@ -770,6 +770,13 @@ const y = 2;
 
     // ──────────── Reflection helpers for testing private methods ────────────
 
+    private static string SummarizeForLogPublic(string? message)
+    {
+        var method = typeof(AskAgent).GetMethod("SummarizeForLog",
+            System.Reflection.BindingFlags.NonPublic | System.Reflection.BindingFlags.Static);
+        return (string)method!.Invoke(null, new object?[] { message })!;
+    }
+
     private static string BuildSummaryMarkdownPublic(AgentTaskPlan plan, string? aiSummary)
     {
         var method = typeof(AskAgent).GetMethod("BuildSummaryMarkdown",
@@ -796,5 +803,64 @@ const y = 2;
         var method = typeof(AskAgent).GetMethod("StripToolCallMarkers",
             System.Reflection.BindingFlags.NonPublic | System.Reflection.BindingFlags.Static);
         return (string)method!.Invoke(null, new object[] { text })!;
+    }
+
+    // ──────────── 提示词回显压缩（不进 UI 时间线） ────────────
+
+    /// <summary>
+    /// 回归：askStarted 的占位符是整段提示词，最长数 KB。
+    /// 它以 INFO 级别广播给 UI 后会被渲染进过程折叠块，泄漏内部脚手架文案
+    /// （如「自由生成面向用户的最终总结」）并撑大折叠块。
+    /// 现改为只写日志文件，且日志内容压缩为首行 + 长度统计。
+    /// </summary>
+    [Fact]
+    public void SummarizeForLog_MultiLinePrompt_KeepsFirstLineAndStats()
+    {
+        string prompt = string.Join("\n", new[]
+        {
+            "代码修改已完成。请自由生成面向用户的最终总结：不要求固定结构。",
+            "",
+            "**任务**: 输入框与聊天记录中 @ / 蓝色渲染实现计划",
+            "## 步骤执行情况",
+            "- ✅ 步骤 1: 抽取纯函数分词器 + 单元测试 — 修改 2 个文件",
+        });
+
+        string result = SummarizeForLogPublic(prompt);
+
+        result.Should().StartWith("代码修改已完成。");
+        result.Should().Contain("字符");
+        result.Should().Contain("行");
+        // 关键：只保留首行，后续脚手架内容（任务标题、步骤清单）不得带入
+        result.Should().NotContain("步骤执行情况");
+        result.Should().NotContain("步骤 1: 抽取纯函数分词器");
+        result.Should().NotContain("**任务**");
+        // 首行本身被保留（它是提示词的入口句），但整段不得原样透出
+        result.Length.Should().BeLessThan(prompt.Length);
+    }
+
+    [Fact]
+    public void SummarizeForLog_SingleLineShortMessage_ReturnsAsIs()
+    {
+        SummarizeForLogPublic("把@和/都加上蓝色渲染").Should().Be("把@和/都加上蓝色渲染");
+    }
+
+    [Fact]
+    public void SummarizeForLog_VeryLongFirstLine_IsTruncated()
+    {
+        string longLine = new string('长', 500);
+
+        string result = SummarizeForLogPublic(longLine);
+
+        result.Length.Should().BeLessThan(200, "首行过长必须截断，避免日志刷屏");
+        result.Should().Contain("…");
+    }
+
+    [Theory]
+    [InlineData("")]
+    [InlineData("   ")]
+    [InlineData(null)]
+    public void SummarizeForLog_EmptyInput_ReturnsPlaceholder(string? input)
+    {
+        SummarizeForLogPublic(input).Should().Be("(empty)");
     }
 }

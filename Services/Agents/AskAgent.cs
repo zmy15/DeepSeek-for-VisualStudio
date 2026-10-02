@@ -112,7 +112,14 @@ namespace DeepSeek_v4_for_VisualStudio.Services.Agents
                 return await ExecuteSummaryOnlyAsync(userMessage, context);
             }
 
-            AddLog("INFO", string.Format(LocalizationService.Instance["agent.log.askStarted"], userMessage));
+            // ── 提示词回显只进日志，不进 UI 时间线 ──
+            // askStarted 的占位符是整段用户消息/Handoff 提示词，最长可达数 KB。
+            // 它以 INFO 级别发出，会被时间线接住并渲染进过程折叠块，造成两个问题：
+            //   ① 界面泄漏大段内部提示词（含「自由生成面向用户的最终总结」等脚手架文案）；
+            //   ② 这行内容只存在于时间线、不属于模型回答，会把折叠块撑得很大。
+            // 因此改为直接写日志文件，不经过 AddLog（AddLog 会广播给 UI 订阅者）。
+            Logger.Info(string.Format(LocalizationService.Instance["agent.log.askStarted"],
+                SummarizeForLog(userMessage)));
 
             var result = new AgentResult
             {
@@ -204,7 +211,8 @@ namespace DeepSeek_v4_for_VisualStudio.Services.Agents
         private async Task<AgentResult> ExecuteSummaryOnlyAsync(string userMessage, AgentContext context)
         {
             var L = LocalizationService.Instance;
-            AddLog("INFO", string.Format(L["agent.log.askStarted"], userMessage));
+            // 同 ExecuteAsync：提示词回显只写日志文件，不广播给 UI 时间线。
+            Logger.Info(string.Format(L["agent.log.askStarted"], SummarizeForLog(userMessage)));
 
             var result = new AgentResult
             {
@@ -271,6 +279,31 @@ namespace DeepSeek_v4_for_VisualStudio.Services.Agents
         {
             return context.ActivePlan != null
                 && context.ActivePlan.IsCompleted;
+        }
+
+        /// <summary>
+        /// 把用于日志的提示词压缩成一行摘要。
+        /// 提示词常达数 KB（含步骤清单、复用历史提示、模板说明），
+        /// 原文写日志既刷屏又难以定位，故只保留首行与总长度。
+        /// </summary>
+        /// <param name="message">原始用户消息或 Handoff 提示词。</param>
+        private static string SummarizeForLog(string? message)
+        {
+            if (string.IsNullOrWhiteSpace(message))
+                return "(empty)";
+
+            string normalized = message.Replace("\r\n", "\n").Trim();
+            int newlineIdx = normalized.IndexOf('\n');
+            string firstLine = newlineIdx >= 0 ? normalized.Substring(0, newlineIdx).Trim() : normalized;
+
+            const int maxFirstLine = 120;
+            if (firstLine.Length > maxFirstLine)
+                firstLine = firstLine.Substring(0, maxFirstLine) + "…";
+
+            int totalLines = normalized.Split('\n').Length;
+            return totalLines > 1
+                ? $"{firstLine} …(共 {normalized.Length} 字符 / {totalLines} 行)"
+                : firstLine;
         }
 
         /// <summary>
