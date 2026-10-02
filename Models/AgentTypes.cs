@@ -241,15 +241,6 @@ namespace DeepSeek_v4_for_VisualStudio.Models
         public List<string>? DiscoveredFiles { get; set; }
 
         /// <summary>
-        /// 代码记忆 — 跨步骤持久化的关键代码片段。
-        /// 每个步骤完成后，从文件读取缓存中提取未被修改的关键文件内容存入此处。
-        /// 后续步骤可直接使用这些代码片段，无需重复 read_file。
-        /// 格式: Markdown 代码块，按文件分组，总量控制在 ~12KB 以内。
-        /// </summary>
-        [JsonIgnore]
-        public string? CodeMemory { get; set; }
-
-        /// <summary>
         ///  Handoff 时源 Agent 的最终工具循环消息列表（v1.1.10 缓存优化）。
         /// 设置后，目标 Agent 的 BuildContextAwareMessages 将复用此列表作为前缀，
         /// 而非从 ContextManager 重建，确保 Handoff 前后消息结构一致，
@@ -258,6 +249,15 @@ namespace DeepSeek_v4_for_VisualStudio.Models
         /// </summary>
         [JsonIgnore]
         public List<ChatApiMessage>? ForwardedMessages { get; set; }
+
+        /// <summary>
+        /// 是否允许 BuildContextAwareMessages 走 Handoff 复用分支（复用 ForwardedMessages 前缀）。
+        /// 仅真正的跨 Agent 移交应置 true；同一 Agent 内部（如 Edit 计划推进到下一步骤）
+        /// 必须为 false，否则会误走移交分支插入身份边界提示与移交上下文块。
+        /// 一次性语义：消费后由 BaseAgent 复位为 false。
+        /// </summary>
+        [JsonIgnore]
+        public bool AllowForwardedMessageReuse { get; set; }
 
         /// <summary>
         /// 已消费的 Handoff 转发消息诊断副本。

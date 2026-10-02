@@ -411,12 +411,13 @@ public class EditAgentTests
     }
 
     [Fact]
-    public void BuildStepPrompt_UsesUnifiedInstructionsWithoutPhaseClassification()
+    public void BuildStepPrompt_ContainsOnlyCurrentStepAndPlanSection()
     {
         var agent = new EditAgent(_apiService);
         var plan = new AgentTaskPlan
         {
             Title = "Implement feature",
+            TaskDescription = "## 背景\n这是一段很长的移交任务描述，步骤推进时不应逐条重发。",
             Steps =
             {
                 new AgentStep
@@ -436,11 +437,34 @@ public class EditAgentTests
             plan.Steps[0], plan, new AgentContext()
         })!;
 
-        prompt.Should().Contain("## 统一执行规则");
-        prompt.Should().Contain("文件修改必须通过编辑工具完成");
-        prompt.Should().Contain("需要构建或测试时调用 build_solution");
+        // 只保留：plan 标题前缀 + 当前步骤标题 + plan.md 章节 + 复用历史约束
+        prompt.Should().Contain("创建 test.txt 文件");
+        prompt.Should().Contain("1/1");
+
+        // 代码记忆移除后，跨步骤文件内容只能靠对话历史承接，必须显式提示复用
+        prompt.Should().Contain("优先复用对话历史中已读取的文件内容");
+
+        // 精简后不再逐步骤重发的冗余块（代码记忆功能已移除）
+        prompt.Should().NotContain("## 任务描述（Handoff 携带，必须严格按此执行）");
+        prompt.Should().NotContain("这是一段很长的移交任务描述");
+        prompt.Should().NotContain("代码记忆");
+        prompt.Should().NotContain("## 前面步骤的缓存文件内容");
+        prompt.Should().NotContain("## 前面步骤的执行结果");
+        prompt.Should().NotContain("## 计划进度");
+        prompt.Should().NotContain("## 统一执行规则");
+        prompt.Should().NotContain("## 重要提示");
         prompt.Should().NotContain("## 代码修改步骤");
-        prompt.Should().NotContain("这是一个分析/验证步骤");
+    }
+
+    [Fact]
+    public void SystemPrompt_DeclaresSubsequentStepCompletionRule()
+    {
+        // 步骤提示精简后，"顺带完成后续步骤需声明" 规则移至常驻 system 提示词，
+        // 否则 DetectAndAutoCompleteLaterSteps 失去触发来源。
+        var agent = new EditAgent(_apiService);
+
+        agent.Definition.SystemPrompt.Should().Contain("也完成了步骤X、Y");
+        agent.Definition.SystemPrompt.Should().Contain("also completed step X, Y");
     }
 
     #endregion

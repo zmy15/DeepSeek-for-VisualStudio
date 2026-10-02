@@ -289,11 +289,6 @@ namespace DeepSeek_v4_for_VisualStudio.Services
         #region Handoff & Context Prompts
 
         /// <summary>
-        /// Handoff 上下文提示 — 告知接手 Agent 优先从对话历史获取上下文。
-        /// </summary>
-        public static string HandoffContextPrompt => L["system.handoffContextPrompt"];
-
-        /// <summary>
         /// Handoff 身份边界提示 — 历史消息中的来源 Agent 身份不能覆盖当前模式。
         /// </summary>
         public static string HandoffRoleBoundaryPrompt => L["system.handoffRoleBoundaryPrompt"];

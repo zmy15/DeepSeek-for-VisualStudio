@@ -720,8 +720,17 @@ namespace DeepSeek_v4_for_VisualStudio.Services.Agents
             //    直接复用作为前缀，不再从 ContextManager 重建。
             //    这确保 Handoff 前后消息结构完全一致，DeepSeek Prefix Cache 可直接命中。
             List<ChatApiMessage>? forwarded = Context?.ForwardedMessages;
-            if (forwarded != null && forwarded.Count > 0)
+            // ── Handoff 消息复用（v1.1.10）：若源 Agent 传递了工具循环消息列表，
+            //    直接复用作为前缀，不再从 ContextManager 重建。
+            //    这确保 Handoff 前后消息结构完全一致，DeepSeek Prefix Cache 可直接命中。
+            // ── 仅真移交允许复用：AllowForwardedMessageReuse 由 ExecuteHandoffAsync /
+            //    子 Agent 派发路径显式置位。同一 Agent 内部推进（Edit 计划进入下一步骤）
+            //    保持 false —— 此时 ForwardedMessages 只是缓存快照残留（如 build_solution
+            //    成功提前终止循环时保存），若误走本分支会插入身份边界提示与移交上下文块，
+            //    并把当前 user 变成"第二次任务下发"，污染同 Agent 的步骤语义。
+            if (forwarded != null && forwarded.Count > 0 && Context!.AllowForwardedMessageReuse)
             {
+                Context.AllowForwardedMessageReuse = false; // 一次性消费，防下次误用
                 Context!.ConsumedForwardedMessages = forwarded;
                 Context!.ForwardedMessages = null; // 消费后清空，防止下次误用
                 var result = new List<ChatApiMessage>(forwarded);
@@ -2367,6 +2376,8 @@ namespace DeepSeek_v4_for_VisualStudio.Services.Agents
                             //  子Agent缓存优化：继承父Agent当前消息列表作为前缀，
                             //    使ExploreAgent的首轮API调用可复用父Agent的缓存前缀。
                             ForwardedMessages = ctx.ForwardedMessages,
+                            //  子Agent派发属于跨 Agent 边界，允许复用移交前缀。
+                            AllowForwardedMessageReuse = ctx.ForwardedMessages is { Count: > 0 },
                         };
                         exploreAgent.Context = exploreCtx;
 
@@ -3002,103 +3013,29 @@ namespace DeepSeek_v4_for_VisualStudio.Services.Agents
             if (context.ForwardedMessages == null && handoff.ForwardedMessages != null)
                 context.ForwardedMessages = CloneApiMessages(handoff.ForwardedMessages);
 
+            // ── 真移交：允许目标 Agent 首轮复用移交前缀（含身份边界提示语义）──
+            context.AllowForwardedMessageReuse = context.ForwardedMessages is { Count: > 0 };
+
             // ──  缓存边界快照（v1.1.10）：在 Handoff 前保存 ContextManager 状态 ──
             //     目标 Agent 通过 BuildApiMessages 读取历史时，仅包含边界前的条目，
             //     排除 Handoff 过渡消息（步骤完成通知、最终构建结果等），
             //     使 DeepSeek Prefix Cache 在跨 Agent 切换时仍能命中。
             context.ContextManager?.SnapshotForCache();
 
-            // ── 构建 Handoff prompt（包含完整计划上下文）──
+            // ── 构建 Handoff prompt ──
+            // 精简原则（v1.1.14）：handoff 只承载「目标 Agent 是谁」+「移交方要求做什么」
+            // +「复用历史不要再读一遍」。handoff.Prompt 已包含 "[移交自 X] 原因 + 完整任务描述"。
+            // 以下内容不再注入，因为移交前缀（ForwardedMessages / 对话历史）里已有原始信息，
+            // 目标 Agent 可从历史中的 read_file / runSubagent 结果直接获取，重复注入属于冗余：
+            //   · 结构化步骤列表（Edit 每步会通过步骤提示给出当前步骤 + plan.md 对应章节）
+            //   · plan.md 概述（计划执行器按需读取）
+            //   · 前一 Agent 的探索结果、Git 状态
             var sb = new StringBuilder();
             sb.AppendLine(handoff.Prompt);
             sb.AppendLine();
-
-            // ──  Handoff 上下文提示：避免重复探索 ──
-            sb.AppendLine(AiPrompts.HandoffContextPrompt);
-            sb.AppendLine();
-
-            if (effectivePlan != null)
-            {
-                sb.AppendLine();
-                sb.AppendLine(string.Format(LocalizationService.Instance["plan.format.title"], effectivePlan.Title));
-                sb.AppendLine(string.Format(LocalizationService.Instance["plan.format.stepCount"], effectivePlan.Steps.Count));
-                sb.AppendLine();
-
-                foreach (var s in effectivePlan.Steps)
-                {
-                    sb.AppendLine(string.Format(LocalizationService.Instance["plan.format.stepItem"], s.Index, s.Title));
-                    sb.AppendLine(s.Description);
-                    sb.AppendLine();
-                }
-            }
-
-            // ── 注入 plan.md 概述（仅开头部分，避免完整文档占用过多 token）──
-            //     完整步骤详情已通过上方结构化列表提供，无需重复注入全部 plan.md
-            string? planFilePath = context.PlanFilePath ?? effectivePlan?.PlanFilePath;
-            if (!string.IsNullOrEmpty(planFilePath) && File.Exists(planFilePath))
-            {
-                try
-                {
-                    string planMd = await Task.Run(() => File.ReadAllText(planFilePath));
-                    if (planMd.Length > 0)
-                    {
-                        // 按章节截断：找到 ## 标题边界，在 ~3000 字符附近最近的一个 ## 之前切断
-                        const int maxPlanMdChars = 3000;
-                        string planOverview = TruncatePlanMdBySection(planMd, maxPlanMdChars);
-                        sb.AppendLine("##  计划概述 (plan.md 开头部分)");
-                        sb.AppendLine(planOverview);
-                    }
-                }
-                catch (Exception ex)
-                {
-                    Logger.Warn($"[{Definition.Name}] 读取 plan.md 失败: {ex.Message}");
-                }
-            }
-
-            // ── 注入源 Agent 的探索结果（从对话历史中提取 runSubagent tool 结果）──
-            // Handoff 时 maxRecentTurns 限制可能导致目标 Agent 看不到源 Agent 的早期探索结果
-            string explorationContext = ExtractRunSubagentResults(context.ConversationHistory);
-            if (!string.IsNullOrWhiteSpace(explorationContext))
-            {
-                sb.AppendLine();
-                sb.AppendLine("##  前一 Agent 的探索结果");
-                sb.AppendLine(explorationContext);
-            }
-
-            // ── 注入跨步骤代码记忆（EditAgent 多步骤间持久化的关键代码片段）──
-            if (!string.IsNullOrWhiteSpace(context.CodeMemory))
-            {
-                sb.AppendLine();
-                sb.AppendLine("##  代码记忆（跨步骤持久化）");
-                sb.AppendLine(context.CodeMemory);
-            }
-
-            // ── 注入移交方已核实的 Git 状态（结构化契约，避免目标 Agent 重复核实）──
-            if (handoff.GitState != null)
-            {
-                sb.AppendLine();
-                sb.AppendLine(LocalizationService.Instance["handoff.gitState.header"]);
-                if (!string.IsNullOrWhiteSpace(handoff.GitState.Branch))
-                    sb.AppendLine(string.Format(
-                        LocalizationService.Instance["handoff.gitState.branch"],
-                        handoff.GitState.Branch));
-                if (!string.IsNullOrWhiteSpace(handoff.GitState.HeadSha))
-                    sb.AppendLine(string.Format(
-                        LocalizationService.Instance["handoff.gitState.head"],
-                        handoff.GitState.HeadSha));
-                sb.AppendLine(handoff.GitState.IsClean
-                    ? LocalizationService.Instance["handoff.gitState.clean"]
-                    : LocalizationService.Instance["handoff.gitState.dirty"]);
-                if (handoff.GitState.Refs is { Count: > 0 })
-                {
-                    string refs = string.Join(", ", handoff.GitState.Refs
-                        .OrderBy(kv => kv.Key, StringComparer.OrdinalIgnoreCase)
-                        .Select(kv => $"{kv.Key}={kv.Value}"));
-                    sb.AppendLine(string.Format(
-                        LocalizationService.Instance["handoff.gitState.refs"], refs));
-                }
-                sb.AppendLine(LocalizationService.Instance["handoff.gitState.trustRule"]);
-            }
+            // 复用历史约束：与 Edit 步骤提示共用同一文案，避免接手 Agent 重复读取
+            // 历史中已存在的文件内容（代码记忆移除后，跨 Agent 的文件内容只能靠历史承接）。
+            sb.AppendLine(LocalizationService.Instance["agent.step.reuseHistoryHint"]);
 
             string handoffMessage = sb.ToString();
             // ── 保留 context 中已有的 ActivePlan，仅在非 null 时覆盖 ──
@@ -4960,176 +4897,6 @@ namespace DeepSeek_v4_for_VisualStudio.Services.Agents
             if (string.IsNullOrEmpty(filePath)) return filePath;
             return filePath.Replace('/', '\\').Trim().TrimEnd('\\');
         }
-
-        #region CodeMemory — 跨步骤代码记忆
-
-        /// <summary>
-        /// 语言感知的文件类型权重表。
-        /// 头文件/接口类文件加权，在 LRU 淘汰中更难被移除。
-        /// 未列出的扩展名默认权重 1.0。
-        /// </summary>
-        protected static readonly Dictionary<string, double> CodeMemoryTypeWeights = new(StringComparer.OrdinalIgnoreCase)
-        {
-            // C/C++ headers — 被多个源文件引用，高价值
-            { ".h", 2.0 }, { ".hpp", 2.0 }, { ".hxx", 2.0 }, { ".h++", 2.0 },
-            // Interface / type-definition files in other languages
-            { ".cs", 1.5 },   // C# — 接口与实现在同一扩展名，适度加权
-            { ".ts", 1.3 },   // TypeScript — 类型定义重要
-            { ".d.ts", 1.5 }, // TypeScript 声明文件
-            // Build / config files — 影响全局
-            { ".csproj", 1.8 }, { ".props", 1.8 }, { ".targets", 1.8 },
-            { ".sln", 1.5 }, { ".slnx", 1.5 },
-            { ".json", 1.2 }, { ".yaml", 1.2 }, { ".yml", 1.2 },
-            { ".cmake", 1.3 }, { ".mak", 1.3 },
-            // Others at default 1.0
-        };
-
-        /// <summary>
-        /// 从文件读取缓存刷新跨步骤代码记忆（供所有 Agent 调用）。
-        /// 使用 LRU + 类型权重 + 步骤关键词加分的淘汰算法。
-        /// 总量控制在 ~12KB 以内。
-        /// </summary>
-        /// <param name="context">执行上下文</param>
-        /// <param name="modifiedPaths">已修改文件路径集合（这些文件被排除）</param>
-        /// <param name="stepKeywords">步骤关键词（可选，匹配到的文件获加分）</param>
-        protected void RefreshCodeMemory(
-            AgentContext context,
-            HashSet<string> modifiedPaths,
-            HashSet<string>? stepKeywords = null)
-        {
-            if (BuiltInTools == null) return;
-
-            var fileCache = BuiltInTools.GetFileReadCacheSnapshot();
-            var roundCache = BuiltInTools.GetFileReadCacheRoundSnapshot();
-            if (fileCache.Count == 0) return;
-
-            int currentRound = BuiltInTools.CurrentRound;
-            bool noRoundInfo = currentRound <= 0;
-            if (noRoundInfo) currentRound = int.MaxValue;
-
-            // ── 构建候选列表：排除已修改文件，计算加权 LRU 分数 ──
-            var candidates = new List<(string Path, string Content, double Score)>();
-
-            foreach (var kvp in fileCache)
-            {
-                if (modifiedPaths.Contains(NormalizePath(kvp.Key))) continue;
-
-                string ext = Path.GetExtension(kvp.Key).ToLowerInvariant();
-                double typeWeight = CodeMemoryTypeWeights.TryGetValue(ext, out double w) ? w : 1.0;
-
-                int lastRound = roundCache.TryGetValue(kvp.Key, out int lr) ? lr : 0;
-                int roundsAgo = (lastRound > 0 && currentRound > lastRound)
-                    ? currentRound - lastRound
-                    : 0;
-
-                // 分数 = 距今轮数 / 类型权重（越小越优先）
-                double score = roundsAgo / typeWeight;
-
-                // ── P1-4: 首轮退化 tiebreaker ──
-                // 当所有文件 roundsAgo=0 时，小文件优先（更高的信息密度）
-                if (roundsAgo == 0)
-                {
-                    score = (kvp.Value.Length / 1000.0) / typeWeight;
-                }
-
-                // ── P2-9: 步骤关键词加分 ──
-                if (stepKeywords != null && stepKeywords.Count > 0)
-                {
-                    string fileName = Path.GetFileName(kvp.Key).ToLowerInvariant();
-                    if (stepKeywords.Any(kw => fileName.Contains(kw)))
-                    {
-                        score -= 0.5; // 负值提升排名
-                    }
-                }
-
-                candidates.Add((kvp.Key, kvp.Value, score));
-            }
-
-            // ── 按分数升序排列（分数越低越优先）──
-            candidates.Sort((a, b) => a.Score.CompareTo(b.Score));
-
-            // ── 按优先级填充 CodeMemory，12KB 封顶 ──
-            var sb = new StringBuilder();
-            const int maxTotalChars = 12000;
-            const int maxHeaderChars = 3000;
-            const int maxImplChars = 1500;
-            int totalChars = 0;
-
-            foreach (var (path, content, score) in candidates)
-            {
-                if (totalChars >= maxTotalChars) break;
-
-                string ext = Path.GetExtension(path).ToLowerInvariant();
-                bool isHeader = ext == ".h" || ext == ".hpp" || ext == ".hxx" || ext == ".h++";
-                int maxChars = isHeader ? maxHeaderChars : maxImplChars;
-
-                string snippet = content;
-                if (snippet.Length > maxChars)
-                    snippet = snippet.Substring(0, maxChars) + "\n// ... (截断)";
-
-                int estimatedChars = snippet.Length + Path.GetFileName(path).Length + 60;
-                if (totalChars + estimatedChars > maxTotalChars && totalChars > 0)
-                    break;
-
-                sb.AppendLine($"###  `{Path.GetFileName(path)}`");
-                sb.AppendLine("```cpp");
-                sb.AppendLine(snippet.TrimEnd());
-                sb.AppendLine("```");
-                sb.AppendLine();
-                totalChars += estimatedChars;
-            }
-
-            // ── P2-7: 贪心填空 — 用小文件填充剩余空间 ──
-            if (totalChars < maxTotalChars && totalChars > 0)
-            {
-                int remaining = maxTotalChars - totalChars;
-                var includedNames = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
-                var nameMatches = Regex.Matches(sb.ToString(), @"###  `([^`]+)`");
-                foreach (Match m in nameMatches)
-                    includedNames.Add(m.Groups[1].Value);
-
-                foreach (var (path, content, score) in candidates)
-                {
-                    if (includedNames.Contains(Path.GetFileName(path))) continue;
-
-                    string ext = Path.GetExtension(path).ToLowerInvariant();
-                    bool isHeader = ext == ".h" || ext == ".hpp" || ext == ".hxx" || ext == ".h++";
-                    int maxChars = isHeader ? maxHeaderChars : maxImplChars;
-                    int available = Math.Min(maxChars, remaining - 60);
-                    if (available <= 100) continue; // 太小无意义
-
-                    string snippet = content.Length > available
-                        ? content.Substring(0, available) + "\n// ..."
-                        : content;
-                    sb.AppendLine($"###  `{Path.GetFileName(path)}`");
-                    sb.AppendLine("```cpp");
-                    sb.AppendLine(snippet.TrimEnd());
-                    sb.AppendLine("```");
-                    sb.AppendLine();
-                    totalChars += snippet.Length + 60;
-                    includedNames.Add(Path.GetFileName(path));
-                    if (totalChars >= maxTotalChars) break;
-                }
-            }
-
-            context.CodeMemory = sb.Length > 0 ? sb.ToString().TrimEnd() : null;
-
-            // ── P2-8: 精确计数（用正则提取文件名，避免 Contains 误匹配）──
-            if (!string.IsNullOrEmpty(context.CodeMemory))
-            {
-                var includedNames = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
-                var nameMatches = Regex.Matches(context.CodeMemory!, @"###  `([^`]+)`");
-                foreach (Match m in nameMatches)
-                    includedNames.Add(m.Groups[1].Value);
-
-                int fileCount = candidates.Count(c => includedNames.Contains(Path.GetFileName(c.Path)));
-                AddLog("INFO", string.Format(
-                    LocalizationService.Instance["agent.log.codeMemoryUpdated"] ?? "代码记忆已更新 ({0} 字符, {1} 个文件)",
-                    context.CodeMemory!.Length, fileCount));
-            }
-        }
-
-        #endregion
 
         /// <summary>
         /// 判断两次工具调用结果是否实质相同（用于循环检测）。

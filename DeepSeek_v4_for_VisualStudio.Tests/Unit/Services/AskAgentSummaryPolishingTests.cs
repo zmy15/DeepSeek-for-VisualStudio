@@ -1,4 +1,4 @@
-﻿using DeepSeek_v4_for_VisualStudio.Services.Agents;
+using DeepSeek_v4_for_VisualStudio.Services.Agents;
 using System.Net;
 using System.Net.Http;
 using System.Text;
@@ -108,6 +108,8 @@ public class AskAgentSummaryPolishingTests
         {
             IsExplicitRoute = true,
             ExplicitRouteTarget = AgentType.Ask,
+            // 模拟真实 Handoff：允许复用移交前缀（走 Handoff 消息复用分支）
+            AllowForwardedMessageReuse = true,
             ForwardedMessages = new List<ChatApiMessage>
             {
                 new() { Role = "system", Content = "SharedImmutablePrefix" },
