@@ -505,24 +505,14 @@ namespace DeepSeek_v4_for_VisualStudio.View
                     }
                     catch { }
 
-                    // ── 将 Cache 统计 HTML 追加到最终内容末尾，确保持久化后可恢复显示 ──
-                    // 注意：cacheFooter 是原始 HTML，不应嵌入 msg.Content（Markdown 渲染会转义），
-                    //       而是通过 PostStreamEnd 的 extraFooterHtml 参数发送。
-                    string persistedContent = finalContent;
+                    // ── Cache 统计 HTML 以纯 footer 形式下发，不嵌入 msg.Content（Markdown 渲染会转义）──
 
-                    // ── 更新现有的流式思考气泡为最终内容 ──
-                    string boundedReasoning = ReasoningTextPolicy.ClampStored(_streamingReasoning.ToString())
-                        ?? string.Empty;
+                    // ── 只做 FinalizeAgentMessage 不负责的三项持久化，正文/时间线/推理与渲染统一交给它 ──
                     lock (_lock)
                     {
                         if (_agentStreamingMsgIndex >= 0 && _agentStreamingMsgIndex < _messages.Count)
                         {
                             var msg = _messages[_agentStreamingMsgIndex];
-                            msg.Content = persistedContent;
-                            msg.TimelineContent = _agentTimelineContent.ToString().Trim();
-                            msg.ReasoningContent = boundedReasoning;
-                            msg.IsStreaming = false;
-                            msg.IsRendered = true;
                             // ── 持久化任务计划 JSON，重启后可重建任务面板 ──
                             try { msg.PlanJson = JsonSerializer.Serialize(plan, new JsonSerializerOptions { PropertyNamingPolicy = JsonNamingPolicy.CamelCase }); } catch { }
                             // ── 持久化 Handoff JSON，会话切换后可重建"开始执行"按钮 ──
@@ -536,21 +526,15 @@ namespace DeepSeek_v4_for_VisualStudio.View
                         }
                     }
 
-                    // ── 强制刷新 DOM 显示最终结果 ──
-                    string reasoningForRender = boundedReasoning;
-                    string displayContent;
-                    lock (_lock)
-                    {
-                        displayContent = ChatHtmlService.BuildAssistantDisplayContent(
-                            _agentStreamingMsgIndex >= 0 && _agentStreamingMsgIndex < _messages.Count
-                                ? _messages[_agentStreamingMsgIndex].TimelineContent
-                                : null,
-                            persistedContent);
-                    }
-                    BatchStreamingUpdate(_agentStreamingMsgIndex, displayContent, reasoningForRender, isComplete: true);
-
-                    // ── 发送最终渲染：缓存统计作为纯 HTML footer ──
-                    PostStreamEnd(_agentStreamingMsgIndex, finalContent, reasoningForRender, cacheFooter);
+                    // ── 收尾必须复用主链路 FinalizeAgentMessage ──
+                    // 它会写入 Content/TimelineContent/ReasoningContent、调用 TagMessageForWebView 打上
+                    // TurnId + IsProcessMessage 标记、渲染 streamEnd，并收起本轮过程块。
+                    // 此前这里手写字段赋值后直接 PostStreamEnd，导致 Handoff（Plan→Edit）路径的消息
+                    // 既无 TurnId 也无 IsProcessMessage，前端根本不生成「过程折叠块」，
+                    // 工具调用过程便一直平铺展开；而 Ask→Edit 走 RunAgentWorkflowAsync 的正规收尾，故正常。
+                    string boundedReasoning = ReasoningTextPolicy.ClampStored(_streamingReasoning.ToString())
+                        ?? string.Empty;
+                    FinalizeAgentMessage(_agentStreamingMsgIndex, finalContent, boundedReasoning, cacheFooter);
 
                     StatusLabel.Text = plan.IsCancelled
                         ? LocalizationService.Instance["status.stopped"]
