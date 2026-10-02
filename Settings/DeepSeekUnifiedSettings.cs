@@ -140,6 +140,7 @@ namespace DeepSeek_v4_for_VisualStudio
                 GeneralCategory,
                 new[]
                 {
+                    new EnumSettingEntry("low", "Low"),
                     new EnumSettingEntry("high", "High"),
                     new EnumSettingEntry("max", "Max"),
                 },

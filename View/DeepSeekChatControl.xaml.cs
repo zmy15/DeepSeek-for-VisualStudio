@@ -544,9 +544,10 @@ namespace DeepSeek_v4_for_VisualStudio.View
             ModelComboBox.ItemsSource = BuildModelListItems();
             ModelComboBox.SelectedIndex = 0;
 
-            EffortComboBox.ItemsSource = new[] { "high", "max" };
+            EffortComboBox.ItemsSource = new[] { "low", "high", "max" };
             // 推理强度初始值稍后在 StartControl 中从设置恢复（此时 _options 尚未赋值）
-            EffortComboBox.SelectedIndex = 0;
+            // 默认档位是 high，在 ItemsSource 中排第 2 位。
+            EffortComboBox.SelectedIndex = 1;
 
             // 初始化审批模式下拉框
             InitializeApprovalModeComboBox();
@@ -1791,7 +1792,8 @@ namespace DeepSeek_v4_for_VisualStudio.View
         {
             if (EffortComboBox == null || _options == null) return;
             string savedEffort = _options.ReasoningEffort ?? "high";
-            EffortComboBox.SelectedItem = savedEffort == "max" ? "max" : "high";
+            // 只允许下拉框中真实存在的档位，避免设置里残留的非法值让选中项为空。
+            EffortComboBox.SelectedItem = savedEffort is "low" or "high" or "max" ? savedEffort : "high";
         }
 
         /// <summary>

@@ -216,7 +216,7 @@
     "settings.enableThinking.displayName": "07. Enable Deep Thinking",
     "settings.enableThinking.description": "Enable deep thinking mode (Reasoning)",
     "settings.reasoningEffort.displayName": "08. Reasoning Effort",
-    "settings.reasoningEffort.description": "Reasoning intensity: high or max",
+    "settings.reasoningEffort.description": "Reasoning intensity: low, high or max",
     "settings.enableWebSearch.displayName": "Enable Web Search",
     "settings.enableWebSearch.description": "Enable web search functionality. When enabled, a web search toggle will appear in the chat window.",
     "settings.searchProvider.displayName": "Search Provider",

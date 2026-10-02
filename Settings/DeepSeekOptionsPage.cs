@@ -1127,7 +1127,7 @@ namespace DeepSeek_v4_for_VisualStudio.Settings
     {
         public override bool GetStandardValuesSupported(ITypeDescriptorContext? context) => true;
         public override StandardValuesCollection GetStandardValues(ITypeDescriptorContext? context)
-            => new(new[] { "high", "max" });
+            => new(new[] { "low", "high", "max" });
     }
 
     /// <summary>

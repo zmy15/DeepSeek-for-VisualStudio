@@ -216,7 +216,7 @@
     "settings.enableThinking.displayName": "07. 启用深度思考",
     "settings.enableThinking.description": "启用深度思考模式 (Reasoning)",
     "settings.reasoningEffort.displayName": "08. 推理强度",
-    "settings.reasoningEffort.description": "推理强度: high 或 max",
+    "settings.reasoningEffort.description": "推理强度: low、high 或 max",
     "settings.enableWebSearch.displayName": "启用联网搜索",
     "settings.enableWebSearch.description": "启用联网搜索功能。启用后可在聊天窗口中使用联网搜索开关。",
     "settings.searchProvider.displayName": "搜索引擎",
