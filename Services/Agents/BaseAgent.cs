@@ -805,9 +805,21 @@ namespace DeepSeek_v4_for_VisualStudio.Services.Agents
 
                 result.Add(new ChatApiMessage { Role = "system", Content = AiPrompts.HandoffRoleBoundaryPrompt });
 
-                string? handoffVolatileBlock = Context?.ContextManager?.BuildVolatileContextBlock();
-                if (!string.IsNullOrWhiteSpace(handoffVolatileBlock))
-                    result.Add(new ChatApiMessage { Role = "system", Content = handoffVolatileBlock });
+                // ── 身份边界提示固化进 _entries（持久化）──
+                //   上述 result 是「发射即焚」的局部列表：只参与本次 API 请求，不回写
+                //   ContextManager，故 GetFullContext()/ApiHistory 都导不出它。重启或切换会话后，
+                //   _entries 里仍保留着带来源 Agent 身份的历史（如「你是一个 Edit Agent」的任务
+                //   提示与工具调用记录），却没有对应的边界提示来中和，模型可能沿用旧身份。
+                //   这里同步写一份到 _entries，使边界提示随会话持久化，重启后仍然生效。
+                Context?.ContextManager?.AddCustomMessage("system", AiPrompts.HandoffRoleBoundaryPrompt);
+
+                // ── 不再在 Handoff 分支注入易变上下文块（IDE Context / 工作区快照）──
+                //   易变块只应在「用户发起一次提问」时注入一次：主对话路径由
+                //   AskAgent.ExecuteAsync → BuildContextAwareMessages(persistVolatileToHistory:true)
+                //   → PersistCurrentVolatileSnapshot() 完成该轮固化，Handoff 只是同一轮内的
+                //   Agent 交接，再次注入会产生同一轮内重复的 IDE 快照（曾出现同一请求内
+                //   两份逐字符相同的 361 字符块），既浪费 token 又稀释身份边界提示。
+                //   目标 Agent 需要实时 IDE 态时可经历史中已固化的快照获取。
 
                 result.Add(CreateCurrentUserMessage(userPrompt));
 
@@ -824,11 +836,27 @@ namespace DeepSeek_v4_for_VisualStudio.Services.Agents
             var messages = new List<ChatApiMessage>();
             var ctxManager = Context?.ContextManager;
             bool volatilePersisted = false;
+
+            // ── 易变上下文块固化（IDE Context / 工作区快照）──
+            //   调用方显式要求（persistVolatileToHistory=true，AskAgent 主流程）时必须固化；
+            //   即便未显式要求，也尝试固化一次——@agent 显式路由等场景不经 AskAgent，
+            //   若此处不固化，易变块只会临时进入本次请求而不落 _entries，重启后即丢失。
+            //   PersistCurrentVolatileSnapshot 自带同轮幂等保护（重复调用返回 false），
+            //   故对所有调用方默认尝试是安全的：同一轮内始终只有一份快照。
+            //   注意必须在选取历史之前完成，快照需插在本轮 user 之前。
+            if (ctxManager != null && maxRecentTurns > 0)
+            {
+                volatilePersisted = ctxManager.PersistCurrentVolatileSnapshot();
+
+                if (persistVolatileToHistory && !volatilePersisted)
+                {
+                    // 调用方要求固化但未成功（如无易变内容可固化），保持原语义记录日志便于排查
+                    Logger.Debug("[Agent] 易变上下文固化未生效（无可固化内容或同轮已固化）");
+                }
+            }
+
             if (ctxManager != null && !ctxManager.IsEmpty && maxRecentTurns > 0)
             {
-                if (persistVolatileToHistory)
-                    volatilePersisted = ctxManager.PersistCurrentVolatileSnapshot();
-
                 var recentMessages = ctxManager.BuildApiMessagesRecentTurns(maxRecentTurns);
                 if (recentMessages.Count > 0)
                 {
