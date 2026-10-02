@@ -1302,6 +1302,14 @@ namespace DeepSeek_v4_for_VisualStudio.View
                     // ── 未完成轮标记：失败轮一律标记（含 AskAgent「回答已取消」）──
                     MarkAssistantMessageIncomplete(_agentStreamingMsgIndex);
                 }
+
+                // ── 兜底收尾：确保「模型已产出正文」却因分支未命中而丢失 ──
+                // 上面三个分支各自调用 FinalizeAgentMessage，条件分别要求
+                // Plan != null / Content 非空 / Success == false。当 Agent 返回了非空正文、
+                // 但既没有 Plan 也没走到对应分支时（实测：计划含失败步骤导致摘要路径被跳过，
+                // 节点 content 为空、最终总结整体丢失），气泡会永远停留在流式中间态。
+                // 这里以「消息仍是流式态 且 已有可展示正文」为准做一次兜底，保证正文必达。
+                await EnsureAssistantMessageFinalizedAsync(agentResult);
             }
             catch (Exception ex)
             {
@@ -1481,6 +1489,68 @@ namespace DeepSeek_v4_for_VisualStudio.View
 
             // ── 任务结束：待最终总结渲染完成后收起本轮过程块，仅保留结论 ──
             CollapseTurnProcessAfterFinalize(msgIndex);
+        }
+
+        /// <summary>
+        /// 兜底收尾：若本轮消息仍处于流式态且已有可展示正文，则补一次最终化。
+        /// </summary>
+        /// <remarks>
+        /// 存在的意义是「正文必达」：正常路径由调用方的分支各自 finalize，但分支条件是
+        /// Plan != null / Content 非空 / !Success 的组合，存在都命中不了的缝隙。
+        /// 实测一次 Ask 收尾（计划第 6 步失败）即落进该缝隙：
+        /// 节点 <c>content</c> 为空、<c>timelineContent</c> 只留下提示词回显，
+        /// 用户看到的就是「总结被吞了」。此处只做补齐，不改变任何既有分支行为。
+        /// </remarks>
+        /// <param name="agentResult">本轮 Agent 结果，用于取最终正文。</param>
+        private async Task EnsureAssistantMessageFinalizedAsync(AgentResult agentResult)
+        {
+            try
+            {
+                int msgIndex = _agentStreamingMsgIndex;
+                if (msgIndex < 0 || msgIndex >= _messages.Count)
+                    return;
+
+                // 已 finalize 的气泡不再是流式态，直接跳过，避免覆盖正常收尾结果
+                bool stillStreaming;
+                lock (_lock)
+                {
+                    stillStreaming = _messages[msgIndex].IsStreaming;
+                }
+                if (!stillStreaming)
+                    return;
+
+                // 正文优先级：消息已有 content > agentResult.Content > 时间线
+                string body;
+                lock (_lock)
+                {
+                    body = _messages[msgIndex].Content ?? string.Empty;
+                }
+                if (string.IsNullOrWhiteSpace(body))
+                    body = agentResult.Content ?? string.Empty;
+                if (string.IsNullOrWhiteSpace(body))
+                    body = _agentTimelineContent.ToString().Trim();
+                if (string.IsNullOrWhiteSpace(body))
+                    return;
+
+                await ThreadHelper.JoinableTaskFactory.SwitchToMainThreadAsync();
+
+                Logger.Warn($"[AgentFlow] 兜底收尾：消息 #{msgIndex} 仍为流式态，"
+                    + $"以 {body.Length} 字符正文补做最终化（可能命中收尾分支缝隙）");
+
+                string reasoning;
+                lock (_lock)
+                {
+                    reasoning = ReasoningTextPolicy.ClampStored(_streamingReasoning.ToString())
+                        ?? string.Empty;
+                }
+                string cacheFooter = BuildCacheFooterAndPersist(msgIndex);
+                FinalizeAgentMessage(msgIndex, body, reasoning, cacheFooter);
+                StatusLabel.Text = LocalizationService.Instance["status.ready"];
+            }
+            catch (Exception ex)
+            {
+                Logger.Error($"[AgentFlow] 兜底收尾失败: {ex.Message}", ex);
+            }
         }
 
         /// <summary>
