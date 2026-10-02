@@ -470,7 +470,7 @@ namespace DeepSeek_v4_for_VisualStudio.Services.Agents
             }
             catch (Exception ex)
             {
-                AddLog("WARN", $"[Memory] 读取步骤摘要失败: {ex.Message}");
+                AddLog("WARN", $"[Memory] {LocalizationService.Instance.Format("agent.log.memoryReadStepSummaryFailed", ex.Message)}");
                 return string.Empty;
             }
         }
@@ -530,11 +530,12 @@ namespace DeepSeek_v4_for_VisualStudio.Services.Agents
                         : "(无)";
                     sb.AppendLine($"- {icon} **{step.Title}**: {summary}");
 
-                    // 当 ResultSummary 仅为机械统计时，补充 Description 展示实际修改内容
+                    // 当 ResultSummary 仅为机械统计时，补充 Description 展示实际修改内容。
+                    // 前缀从本地化键派生（而非硬编码字面量）：键值随语言变化，
+                    // 硬编码 "修改了 " 与当前中文键值 "修改 N 个文件…" 并不匹配，会导致该分支静默失效。
                     if (!string.IsNullOrWhiteSpace(step.Description)
                         && (string.IsNullOrWhiteSpace(step.ResultSummary)
-                            || step.ResultSummary.StartsWith("修改了 ")
-                            || step.ResultSummary.StartsWith("Modified ")))
+                            || IsMechanicalEditSummary(step.ResultSummary)))
                     {
                         string desc = step.Description;
                         sb.AppendLine($"  > {desc}");
@@ -634,7 +635,7 @@ namespace DeepSeek_v4_for_VisualStudio.Services.Agents
             }
             catch (Exception ex)
             {
-                AddLog("WARN", $"[AskAgent] AI 润色失败，使用直接摘要: {ex.Message}");
+                AddLog("WARN", $"[AskAgent] {LocalizationService.Instance.Format("agent.log.askPolishFailed", ex.Message)}");
                 return string.Empty;
             }
         }
@@ -736,9 +737,9 @@ namespace DeepSeek_v4_for_VisualStudio.Services.Agents
                     foreach (var step in completedSteps)
                     {
                         sb.AppendLine($"-  **{step.Title}**: {step.ResultSummary}");
-                        // 当 ResultSummary 仅为机械统计时，补充 Description
+                        // 当 ResultSummary 仅为机械统计时，补充 Description（前缀由本地化键派生）
                         if (!string.IsNullOrWhiteSpace(step.Description)
-                            && (step.ResultSummary!.StartsWith("修改了 ") || step.ResultSummary.StartsWith("Modified ")))
+                            && IsMechanicalEditSummary(step.ResultSummary!))
                         {
                             string desc = step.Description;
                             sb.AppendLine($"  > {desc}");
@@ -827,6 +828,30 @@ namespace DeepSeek_v4_for_VisualStudio.Services.Agents
                 string.Empty, System.Text.RegularExpressions.RegexOptions.Singleline);
 
             return text.Trim();
+        }
+
+        /// <summary>
+        /// 判断步骤结果摘要是否为「机械统计」式文本（如「修改 N 个文件（格式: …）」），
+        /// 这类摘要不含具体改动内容，需要额外补充 Description。
+        /// 匹配前缀由本地化键 <c>agent.log.editFilesModified</c> 的占位符之前部分派生，
+        /// 避免硬编码字面量与键值漂移导致判断静默失效。
+        /// </summary>
+        private static bool IsMechanicalEditSummary(string? resultSummary)
+        {
+            if (string.IsNullOrWhiteSpace(resultSummary))
+                return false;
+
+            // 兼容历史英文/中文遗留前缀（旧版本写入的摘要可能仍以这些文本开头）
+            if (resultSummary.StartsWith("Modified ", StringComparison.Ordinal)
+                || resultSummary.StartsWith("修改了 ", StringComparison.Ordinal))
+                return true;
+
+            string template = LocalizationService.Instance["agent.log.editFilesModified"];
+            int placeholder = template.IndexOf('{');
+            string prefix = placeholder > 0 ? template.Substring(0, placeholder) : template;
+
+            return prefix.Length > 0
+                && resultSummary.StartsWith(prefix, StringComparison.Ordinal);
         }
 
         #endregion

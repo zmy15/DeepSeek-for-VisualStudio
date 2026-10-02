@@ -481,7 +481,7 @@ namespace DeepSeek_v4_for_VisualStudio.Services.Agents
             if (context.ForwardedMessages != null)
             {
                 context.ForwardedMessages = null;
-                AddLog("INFO", "[EditAgent] 已清理上一步残留的移交前缀（步骤推进非移交）");
+                AddLog("INFO", "[EditAgent] " + LocalizationService.Instance["agent.log.editHandoffPrefixCleared"]);
             }
             context.AllowForwardedMessageReuse = false;
 
@@ -636,21 +636,25 @@ namespace DeepSeek_v4_for_VisualStudio.Services.Agents
                     step.ResultSummary = buildSucceeded
                         ? LocalizationService.Instance["agent.log.editBuildStepPassed"]
                         : LocalizationService.Instance["agent.log.editBuildStepFailed"];
+                    // 保留 [EditAgent] 前缀：FormatLogForThinking 依赖该前缀判定透传，
+// 去掉前缀会导致本条日志被过滤器静默丢弃、不再显示在思考气泡中。
                     AddLog(buildSucceeded ? "INFO" : "WARN",
-                        buildSucceeded
-                            ? "[EditAgent] 工具步骤构建通过"
-                            : "[EditAgent] 工具步骤构建失败");
+                        "[EditAgent] " + (buildSucceeded
+                            ? LocalizationService.Instance["agent.log.editBuildStepPassed"]
+                            : LocalizationService.Instance["agent.log.editBuildStepFailed"]));
                 }
                 else
                 {
                     step.ResultSummary = LocalizationService.Instance["agent.step.completed"];
-                    AddLog("INFO", "[EditAgent] 工具步骤执行完成，无需文件变更");
+                    AddLog("INFO", "[EditAgent] " + LocalizationService.Instance["agent.log.editToolStepNoChange"]);
                 }
 
                 return;
             }
 
-            AddLog("INFO", $"[EditAgent] 检测到步骤内 {toolMadeEdits.Count} 个工具编辑: {string.Join(", ", toolMadeEdits.Select(e => Path.GetFileName(e.FilePath)).Distinct())}");
+            AddLog("INFO", "[EditAgent] " + LocalizationService.Instance.Format(
+                "agent.log.editToolEditsDetected", toolMadeEdits.Count,
+                string.Join(", ", toolMadeEdits.Select(e => Path.GetFileName(e.FilePath)).Distinct())));
 
             // ── 保存原始文件内容（用于最终 diff 比较）──
             var originalContents = new Dictionary<string, string>(StringComparer.OrdinalIgnoreCase);
@@ -1130,8 +1134,10 @@ namespace DeepSeek_v4_for_VisualStudio.Services.Agents
             foreach (var s in toAutoComplete)
             {
                 s.Status = AgentStepStatus.Completed;
-                s.ResultSummary = $"(由步骤{completedStep.Index}的 AI 输出自动标记完成)";
-                AddLog("INFO", $"[EditAgent]  步骤{s.Index}「{s.Title}」由 AI 声明完成，自动标记");
+                s.ResultSummary = LocalizationService.Instance.Format(
+                    "agent.log.editStepClaimedByAiSummary", completedStep.Index);
+                AddLog("INFO", "[EditAgent] " + LocalizationService.Instance.Format(
+                    "agent.log.editStepClaimedByAi", s.Index, s.Title));
             }
 
             if (toAutoComplete.Count > 0)
@@ -1211,8 +1217,7 @@ namespace DeepSeek_v4_for_VisualStudio.Services.Agents
             if (neverTouched.Count > 0)
             {
                 AddLog("WARN", string.Format(
- "[EditAgent]  Plan 追踪：计划步骤中引用了 {0} 个文件，其中 {1} 个文件在所有步骤中均未被修改: {2}。" +
-                    "请确认这些文件是否确实无需修改，或是否存在遗漏。",
+                    "[EditAgent] " + LocalizationService.Instance["agent.log.editPlanTrackingNeverTouched"],
                     allMentioned.Count, neverTouched.Count,
                     string.Join(", ", neverTouched.Take(10))));
             }
@@ -1220,15 +1225,15 @@ namespace DeepSeek_v4_for_VisualStudio.Services.Agents
             if (extraModified.Count > 0)
             {
                 AddLog("INFO", string.Format(
- "[EditAgent]  Plan 追踪：实际修改了 {0} 个计划中未明确列出的文件: {1}。" +
-                    "这可能是合理的关联修改，也可能是范围蔓延。",
+                    "[EditAgent] " + LocalizationService.Instance["agent.log.editPlanTrackingExtraModified"],
                     extraModified.Count,
                     string.Join(", ", extraModified.Take(10))));
             }
 
             if (neverTouched.Count == 0 && extraModified.Count == 0)
             {
-                AddLog("INFO", $"[EditAgent]  Plan 追踪：计划中引用的 {allMentioned.Count} 个文件与实际修改一致 ");
+                AddLog("INFO", "[EditAgent] " + LocalizationService.Instance.Format(
+                    "agent.log.editFileTrackingConsistent", allMentioned.Count));
             }
         }
 
@@ -1470,7 +1475,8 @@ namespace DeepSeek_v4_for_VisualStudio.Services.Agents
                         Success = true,
                         OperationType = EditOperationType.DeleteFile,
                     });
-                    NotifyFileChange(plan.PlanId, "delete", resolvedPath, "工具编辑 (delete_file)");
+                    NotifyFileChange(plan.PlanId, "delete", resolvedPath,
+                    LocalizationService.Instance.Format("agent.log.editToolEditNotify", "delete_file"));
 
                     if (!plan.ChangedFiles.Any(c => string.Equals(c.FilePath, resolvedPath, StringComparison.OrdinalIgnoreCase)))
                     {
@@ -1487,7 +1493,8 @@ namespace DeepSeek_v4_for_VisualStudio.Services.Agents
 
                 if (!fileExists && !isNewFile)
                 {
-                    AddLog("WARN", $"[EditAgent] 工具编辑目标文件不存在: {Path.GetFileName(resolvedPath)} (工具: {toolName})");
+                    AddLog("WARN", "[EditAgent] " + LocalizationService.Instance.Format(
+                    "agent.log.editToolEditTargetMissing", Path.GetFileName(resolvedPath), toolName));
                     appliedResults.Add(new EditApplyResult
                     {
                         FilePath = resolvedPath,
@@ -1507,7 +1514,8 @@ namespace DeepSeek_v4_for_VisualStudio.Services.Agents
                 }
 
                 // ── 记录编辑结果 ──
-                AddLog("INFO", $"[EditAgent] 工具编辑已应用: {Path.GetFileName(resolvedPath)} (工具: {toolName})");
+                AddLog("INFO", "[EditAgent] " + LocalizationService.Instance.Format(
+                    "agent.log.editToolEditApplied", Path.GetFileName(resolvedPath), toolName));
 
                 appliedResults.Add(new EditApplyResult
                 {
@@ -1519,7 +1527,7 @@ namespace DeepSeek_v4_for_VisualStudio.Services.Agents
                 // ── 变更通知 ──
                 string changeType = isNewFile ? "create" : "modify";
                 NotifyFileChange(plan.PlanId, changeType, resolvedPath,
-                    $"工具编辑 ({toolName})");
+                    LocalizationService.Instance.Format("agent.log.editToolEditNotify", toolName));
 
                 // ── 更新 plan.ChangedFiles ──
                 if (!plan.ChangedFiles.Any(c => string.Equals(c.FilePath, resolvedPath, StringComparison.OrdinalIgnoreCase)))
@@ -2929,11 +2937,11 @@ namespace DeepSeek_v4_for_VisualStudio.Services.Agents
                         stepSummary, sessionId, context.SolutionPath);
                 }
 
-                AddLog("INFO", $"[Memory] 步骤 {step.Index} 摘要已写入会话记忆: {fileName}");
+                AddLog("INFO", $"[Memory] {LocalizationService.Instance.Format("agent.log.memoryStepSummaryWritten", step.Index, fileName)}");
             }
             catch (Exception ex)
             {
-                AddLog("WARN", $"[Memory] 步骤摘要写入失败: {ex.Message}");
+                AddLog("WARN", $"[Memory] {LocalizationService.Instance.Format("agent.log.memoryStepSummaryFailed", ex.Message)}");
             }
         }
 
@@ -2953,7 +2961,7 @@ namespace DeepSeek_v4_for_VisualStudio.Services.Agents
                 await MemoryService.CreateAsync(MemoryScope.Session, fileName,
                     finalSummary, sessionId, context.SolutionPath);
 
-                AddLog("INFO", $"[Memory] 最终计划摘要已写入会话记忆: {fileName}");
+                AddLog("INFO", $"[Memory] {LocalizationService.Instance.Format("agent.log.memoryFinalSummaryWritten", fileName)}");
             }
             catch (Exception ex)
             {
@@ -2969,7 +2977,7 @@ namespace DeepSeek_v4_for_VisualStudio.Services.Agents
                 }
                 catch
                 {
-                    AddLog("WARN", $"[Memory] 最终计划摘要写入失败: {ex.Message}");
+                    AddLog("WARN", $"[Memory] {LocalizationService.Instance.Format("agent.log.memoryFinalSummaryFailed", ex.Message)}");
                 }
             }
         }
@@ -3024,11 +3032,11 @@ namespace DeepSeek_v4_for_VisualStudio.Services.Agents
                     catch { /* 静默忽略其他错误 */ }
                 }
 
-                AddLog("INFO", "[Memory] 已清理上一次计划的步骤摘要记忆文件");
+                AddLog("INFO", $"[Memory] {LocalizationService.Instance["agent.log.memoryStepSummariesCleared"]}");
             }
             catch (Exception ex)
             {
-                AddLog("WARN", $"[Memory] 清理计划记忆文件时出错: {ex.Message}");
+                AddLog("WARN", $"[Memory] {LocalizationService.Instance.Format("agent.log.memoryCleanupFailed", ex.Message)}");
             }
         }
 

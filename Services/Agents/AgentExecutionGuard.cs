@@ -75,21 +75,21 @@ namespace DeepSeek_v4_for_VisualStudio.Services.Agents
             {
                 return AgentExecutionDecision.Stop(
                     AgentExecutionStopReason.MaxDepth,
-                    $"已超过最大 Agent 递归深度 {_policy.MaxExecutionDepth}，已停止当前分支。");
+                    LocalizationService.Instance.Format("agent.guard.maxDepth", _policy.MaxExecutionDepth));
             }
 
             if (nextStep > _policy.MaxSteps)
             {
                 return AgentExecutionDecision.Stop(
                     AgentExecutionStopReason.MaxSteps,
-                    $"已达到最大工具循环步数 {_policy.MaxSteps}，已安全停止。");
+                    LocalizationService.Instance.Format("agent.guard.maxSteps", _policy.MaxSteps));
             }
 
             if (HasWallTimeLimit && _stopwatch.Elapsed >= _policy.MaxWallTime)
             {
                 return AgentExecutionDecision.Stop(
                     AgentExecutionStopReason.WallTime,
-                    $"已超过 Agent 墙钟时间上限 {FormatDuration(_policy.MaxWallTime)}，已安全停止。");
+                    LocalizationService.Instance.Format("agent.guard.wallTime", FormatDuration(_policy.MaxWallTime)));
             }
 
             return AgentExecutionDecision.Continue();
@@ -102,7 +102,7 @@ namespace DeepSeek_v4_for_VisualStudio.Services.Agents
             {
                 return AgentExecutionDecision.Stop(
                     AgentExecutionStopReason.TokenBudget,
-                    $"已超过 Agent Token 预算 {_policy.MaxTotalTokens:N0}，已安全停止。");
+                    LocalizationService.Instance.Format("agent.guard.tokenBudget", _policy.MaxTotalTokens.ToString("N0")));
             }
 
             return AgentExecutionDecision.Continue();
@@ -115,7 +115,7 @@ namespace DeepSeek_v4_for_VisualStudio.Services.Agents
             {
                 return AgentExecutionDecision.Stop(
                     AgentExecutionStopReason.ToolCallBudget,
-                    $"已超过 Agent 工具调用次数上限 {_policy.MaxToolCalls}，已安全停止。");
+                    LocalizationService.Instance.Format("agent.guard.toolCallBudget", _policy.MaxToolCalls));
             }
 
             return AgentExecutionDecision.Continue();
@@ -135,7 +135,7 @@ namespace DeepSeek_v4_for_VisualStudio.Services.Agents
             {
                 return AgentExecutionDecision.Stop(
                     AgentExecutionStopReason.NoProgress,
-                    $"检测到连续 {repetitions} 次无进展状态，已停止以避免无效循环。");
+                    LocalizationService.Instance.Format("agent.guard.noProgress", repetitions));
             }
 
             return AgentExecutionDecision.Continue();
@@ -156,10 +156,11 @@ namespace DeepSeek_v4_for_VisualStudio.Services.Agents
                 return null;
 
             _warningEmitted = true;
-            return $"Agent 执行预算已使用超过 80%：steps={nextStep}/{_policy.MaxSteps}, " +
-                $"tokens={_totalTokens:N0}/{_policy.MaxTotalTokens:N0}, " +
-                $"tools={_toolCallCount}/{_policy.MaxToolCalls}, " +
-                $"elapsed={FormatDuration(_stopwatch.Elapsed)}/{FormatWallTimeLimit()}";
+            return LocalizationService.Instance.Format("agent.guard.budgetWarning",
+                    nextStep, _policy.MaxSteps,
+                    _totalTokens.ToString("N0"), _policy.MaxTotalTokens.ToString("N0"),
+                    _toolCallCount, _policy.MaxToolCalls)
+                + $"elapsed={FormatDuration(_stopwatch.Elapsed)}/{FormatWallTimeLimit()}";
         }
 
         private static string ComputeFingerprint(IEnumerable<string> stateParts)

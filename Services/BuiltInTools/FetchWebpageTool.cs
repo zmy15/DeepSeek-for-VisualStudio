@@ -94,20 +94,21 @@ namespace DeepSeek_v4_for_VisualStudio.Services.BuiltInTools
                     return LocalizationService.Instance.Format("tool.fetchWebpage.noContent", url);
 
                 var sb = new StringBuilder();
-                sb.AppendLine($"=== 网页内容: {url} ===");
+                var L = LocalizationService.Instance;
+                sb.AppendLine(L.Format("tool.fetchWebpage.contentHeader", url));
                 sb.AppendLine();
                 for (int i = 0; i < allContents.Count; i++)
                 {
                     if (i > 0)
                     {
                         sb.AppendLine();
-                        sb.AppendLine("--- 相关链接内容 ---");
+                        sb.AppendLine(L["tool.fetchWebpage.relatedLinksHeader"]);
                         sb.AppendLine();
                     }
                     sb.AppendLine(allContents[i]);
                 }
                 sb.AppendLine();
-                sb.AppendLine("=== 网页内容结束 ===");
+                sb.AppendLine(L["tool.fetchWebpage.contentFooter"]);
 
                 string result = sb.ToString();
                 result = WebSearchService.AppendWebImagesBlock(result, imageUrls);

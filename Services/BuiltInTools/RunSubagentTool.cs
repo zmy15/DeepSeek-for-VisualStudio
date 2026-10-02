@@ -83,14 +83,14 @@ namespace DeepSeek_v4_for_VisualStudio.Services.BuiltInTools
             string description = GetStringArg(args, "description");
 
             if (string.IsNullOrWhiteSpace(agentName))
-                return "Error: runSubagent: 缺少 agentName 参数。请指定 \"Explore\"。";
+                return LocalizationService.Instance["tool.runSubagent.missingAgentName"];
 
             if (string.IsNullOrWhiteSpace(prompt))
-                return "Error: runSubagent: 缺少 prompt 参数。请提供委派给子 Agent 的任务描述。";
+                return LocalizationService.Instance["tool.runSubagent.missingPrompt"];
 
             // 目前仅支持 Explore 子 Agent
             if (!string.Equals(agentName, "Explore", StringComparison.OrdinalIgnoreCase))
-                return $"Error: runSubagent: 未知的子 Agent \"{agentName}\"。当前仅支持 \"Explore\"。";
+                return LocalizationService.Instance.Format("tool.runSubagent.unknownAgent", agentName);
 
             string traceId = Guid.NewGuid().ToString("N").Substring(0, 8);
             string logDesc = string.IsNullOrWhiteSpace(description) ? prompt.Truncate(60) : description;
@@ -114,7 +114,7 @@ namespace DeepSeek_v4_for_VisualStudio.Services.BuiltInTools
             catch (Exception ex)
             {
                 Logger.Error($"[RunSubagent:{traceId}] ExploreAgent 执行失败: {ex.Message}", ex);
-                return $"Error: ExploreAgent 执行异常: {ex.Message}";
+                return LocalizationService.Instance.Format("tool.runSubagent.executionFailed", ex.Message);
             }
         }
 
