@@ -1,4 +1,4 @@
-﻿# DeepSeek Visual Studio Prompt Inventory
+# DeepSeek Visual Studio Prompt Inventory
 
 本文件列出项目中发送给模型的 Prompt 文本。包含 `Resources/Locales/zh-CN.json` 与 `Resources/Locales/en.json` 中的中英文值，以及代码中直接构造的提示词。
 
@@ -3991,19 +3991,11 @@ File content:
 Extract key information:
 `````
 
-### `system.handoffContextPrompt`
+### `system.handoffContextPrompt`（已移除）
 
-**zh-CN**
-
-`````text
->  **Handoff 提示**: 你正在接手前一 Agent 的工作。项目文件可能已在之前的对话中被探索和读取，文件内容可从对话历史（上方消息）中的 read_file / list_dir 工具结果获取。**不要重复读取内容未变化的文件或行范围**；如果文件在上次读取后已被修改，或需要验证刚完成的修改，必须重新读取相关区域。**如果对话历史中已有构建成功记录，且此后没有文件或构建配置变更，不要重复构建；如果发生了变更，必须重新构建一次验证。**
-`````
-
-**en**
-
-`````text
->  **Handoff note**: You are taking over from a previous Agent. Project files may already have been explored and read in the prior conversation. File content is available from the read_file / list_dir tool results in the conversation history (messages above). **Do not repeat reads for files or line ranges that have not changed.** If a file changed after it was last read, or you need to verify a modification just made, re-read the relevant region. **If the history shows a successful build and no files or build configuration changed afterward, do NOT re-build. If anything changed, rebuild exactly once to verify.** Git push/commit is terminal once Exit Code 0 appears. Use `git status -sb` or `git rev-parse @ @{u}` for remote sync, then report success instead of repeating status/log/handoff.
-`````
+v1.1.14 精简 Handoff 载荷时移除。该提示词（"不要重复读取未变化文件 / 不要重复构建"）已随
+`AiPrompts.HandoffContextPrompt` 一起删除，因为移交前缀中已包含原始 `read_file` /
+`runSubagent` 工具结果，重复注入属于冗余。
 
 ### `system.handoffRoleBoundaryPrompt`
 
@@ -4738,12 +4730,22 @@ Instruction: <user instruction>
 
 #### Step Prompt Fixed Sections
 
-```text
-##  代码记忆（前面步骤的关键文件最新内容，可直接使用，无需重复 read_file）
->  未修改文件来自之前的 read_file 结果；已修改文件是编辑后的最新磁盘快照。
+步骤切换的 user 消息只包含：plan 标题前缀 + 当前步骤标题 + plan.md 对应章节。
+以下区块已移除（v1.1.14 精简，且这些信息由对话历史自然承接）：
 
+```text
+## 任务描述（Handoff 携带，必须严格按此执行）
+##  代码记忆（前面步骤的关键文件最新内容，可直接使用，无需重复 read_file）
 ## 前面步骤的执行结果（请基于这些结果继续，不要重复搜索已发现的文件）
+## 计划进度
+## 前面步骤的缓存文件内容（可直接使用，无需重复调用 read_file）
+## 统一执行规则
+## 重要提示
 ```
+
+注：「顺带完成后续步骤需声明『也完成了步骤X、Y』」规则已移至 Edit Agent 的常驻
+system 提示词（`EditAgent.BuildSystemPrompt`），以保留 `DetectAndAutoCompleteLaterSteps`
+的触发来源。
 
 #### Read-Only Execution Constraint
 

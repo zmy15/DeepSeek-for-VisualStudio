@@ -148,7 +148,10 @@ namespace DeepSeek_v4_for_VisualStudio.Services.Agents
                 + LocalizationService.Instance["agent.edit.mcpSystemPrompt"]
                 + LocalizationService.Instance["system.agent.editBuildTrustRule"]
                 + LocalizationService.Instance["system.agent.editPhaseToolOverride"]
-                + AiPrompts.AgentConclusionStopRule;
+                + AiPrompts.AgentConclusionStopRule
+                // 顺带完成后续步骤时的声明规则：原先写在每个步骤的 user 提示词末尾，
+                // 步骤提示精简后移至常驻 system 提示词，规则不丢失且每步不变、利于前缀缓存。
+                + "\n\n- 如果本步骤顺带完成了后续步骤，请在响应末尾声明：\"也完成了步骤X、Y\" 或 \"also completed step X, Y\"。";
         }
 
         #endregion
@@ -258,8 +261,7 @@ namespace DeepSeek_v4_for_VisualStudio.Services.Agents
             // ── 记录本轮计划开始时刻：供"前序步骤已代劳"判定区分本轮改动与上一轮残留 ──
             _planStartedUtc = DateTime.UtcNow;
 
-            // ── P0-6: 新计划开始，重置跨计划状态（防止前一个计划的 CodeMemory/AccumulatedContext 泄漏）──
-            context.CodeMemory = null;
+            // ── P0-6: 新计划开始，重置跨计划状态（防止前一个计划的累积上下文泄漏）──
             context.AccumulatedContext = null;
 
             // ── v1.1.11: 清理上一次计划的步骤摘要记忆文件，防止新旧摘要混在一起 ──
@@ -288,15 +290,6 @@ namespace DeepSeek_v4_for_VisualStudio.Services.Agents
                         context.FileReadCache[kvp.Key] = kvp.Value;
                     AddLog("INFO", LocalizationService.Instance.Format("agent.log.editCachedFiles", builtInCache.Count));
                 }
-            }
-
-            // ── P0-1: 预填充 CodeMemory，让步骤1也能受益于探索阶段已读取的文件 ──
-            if (string.IsNullOrEmpty(context.CodeMemory) && BuiltInTools != null)
-            {
-                var initialModifiedPaths = new HashSet<string>(
-                    plan.ChangedFiles.Select(c => NormalizePath(c.FilePath)),
-                    StringComparer.OrdinalIgnoreCase);
-                RefreshCodeMemory(context, initialModifiedPaths);
             }
 
             // ── 防重守卫：如果计划已完成，跳过重复执行 ──
@@ -376,9 +369,6 @@ namespace DeepSeek_v4_for_VisualStudio.Services.Agents
                                     context.AccumulatedContext.Length - maxAccumulatedChars);
                         }
                         AddLog("INFO", string.Format(LocalizationService.Instance["agent.log.contextAccumulated"], context.AccumulatedContext.Length));
-
-                        // ── 更新代码记忆：从文件读取缓存中提取关键文件内容 ──
-                        UpdateCodeMemory(context, plan);
 
                         // ── 将步骤摘要写入会话记忆（供 Ask Agent 最终汇总使用）──
                         await SaveStepSummaryToMemoryAsync(step, plan, context);
@@ -484,6 +474,17 @@ namespace DeepSeek_v4_for_VisualStudio.Services.Agents
             }
 
             // ── 所有步骤统一走工具循环，由模型自行选择工具。 ──
+            // 步骤推进属于同一 Agent 内部流转，不是移交：必须清掉可能残留的移交前缀
+            // （如上一步 build_solution 成功提前终止循环时保存的 ForwardedMessages），
+            // 否则 BuildContextAwareMessages 会误走 Handoff 复用分支，
+            // 插入身份边界提示 + 移交上下文块，把步骤提示伪装成第二次任务下发。
+            if (context.ForwardedMessages != null)
+            {
+                context.ForwardedMessages = null;
+                AddLog("INFO", "[EditAgent] 已清理上一步残留的移交前缀（步骤推进非移交）");
+            }
+            context.AllowForwardedMessageReuse = false;
+
             string stepPrompt = BuildStepPrompt(step, plan, context);
             await ExecuteStepWithToolsAsync(step, plan, context, stepPrompt, ct);
         }
@@ -1583,80 +1584,26 @@ namespace DeepSeek_v4_for_VisualStudio.Services.Agents
         {
             var sb = new StringBuilder();
 
-            // ── 缓存优化：稳定性高的内容放前面（token 级前缀缓存可命中更多）──
+            // ── 步骤推进语义（v1.1.14 精简）──
+            // 步骤切换发生在同一 Agent 内部，user 消息只承载"当前该做哪一步"：
+            //   1) plan 标题（同计划内恒定，最稳定，利于前缀缓存）
+            //   2) 当前步骤标题：当前步骤 (n/N): 标题
+            //   3) plan.md 中该步骤对应的章节（若有 plan.md）
+            // 任务描述、累积上下文、缓存文件内容等由对话历史（上一步骤的
+            // assistant/tool 结果）自然承接，不再逐步重发，避免每次步骤推进重复注入
+            // 数十 KB 的冗余上下文。
 
             // 第1层：Plan 标题（同计划内所有步骤完全相同，最稳定）
             sb.AppendLine(string.Format(AiPrompts.EditStepPromptPrefix, plan.Title));
             sb.AppendLine();
 
-            // ── Handoff 携带的完整任务描述：轻量计划仅有步骤标题，必须保留原始任务内容 ──
-            if (!string.IsNullOrWhiteSpace(plan.TaskDescription))
-            {
-                sb.AppendLine("## 任务描述（Handoff 携带，必须严格按此执行）");
-                sb.AppendLine("如果任务描述中给出了文件的完整目标内容（例如「完整内容如下，请照此创建」），必须原样创建，不得自行改写、优化或重新生成该文件内容。");
-                sb.AppendLine(plan.TaskDescription);
-                sb.AppendLine();
-            }
-
-            // 第2层：代码记忆（跨步骤持久化，包含未读文件与已修改文件的最新快照）
-            if (!string.IsNullOrEmpty(context.CodeMemory))
-            {
-                sb.AppendLine("##  代码记忆（前面步骤的关键文件最新内容，可直接使用，无需重复 read_file）");
-                sb.AppendLine(">  未修改文件来自之前的 read_file 结果；已修改文件是编辑后的最新磁盘快照。");
-                sb.AppendLine();
-                sb.AppendLine(context.CodeMemory);
-                sb.AppendLine();
-            }
-
-            // 第3层：累积上下文（每步追加，前缀稳定）
-            if (!string.IsNullOrEmpty(context.AccumulatedContext))
-            {
-                sb.AppendLine("## 前面步骤的执行结果（请基于这些结果继续，不要重复搜索已发现的文件）");
-                // RAG-MARK: no-truncate — 已在 ExecutePlanAsync 中做了 8000 字符截断
-                // RAG-SOURCE: accumulated-context 之前步骤的累积执行结果
-                sb.AppendLine(context.AccumulatedContext);
-                sb.AppendLine();
-            }
-
-            // 第4层：当前步骤信息（每步不同，变化最大）
-            sb.AppendLine(string.Format(LocalizationService.Instance["agent.step.currentStepPrompt"], step.Index, plan.Steps.Count, step.Title));
-            sb.AppendLine($"步骤详情: {step.Description}");
+            // 第2层：当前步骤标题（每步唯一变化的部分）
+            sb.AppendLine(string.Format(
+                LocalizationService.Instance["agent.step.currentStepPrompt"],
+                step.Index, plan.Steps.Count, step.Title));
             sb.AppendLine();
 
-            // ── 前序步骤已代劳提示（v1.1.13）──
-            // 背景：模型常在执行步骤 N 时顺手做完步骤 N+1 的改动，却不在回复里声明"步骤 N+1 已完成"，
-            // DetectAndAutoCompleteLaterSteps 因此不触发；步骤 N+1 单独执行时无事可做、不调用任何工具，
-            // 被判为"AI 空响应"而失败。
-            // 处理：用工作区客观事实（目标文件已在本轮被前序步骤修改）明确告知模型，避免它盲目重放
-            // 已生效的补丁；模型若判定确已完成，调用只读工具核实后一句话结束即可。
-            // 兜底：该步骤若最终一个工具调用都没有，由 ClassifyNoToolCallStep 依据同一客观事实
-            // 认定为"已由前序步骤完成"，而不是判失败。
-            if (IsStepCoveredByModifiedFiles(
-                    step, plan.ChangedFiles, _planStartedUtc, GetFileWriteTimeUtcSafe, out string alreadyModifiedFiles))
-            {
-                sb.AppendLine(LocalizationService.Instance.Format(
-                    "agent.step.alreadyModifiedHint", alreadyModifiedFiles));
-                sb.AppendLine();
-                AddLog("INFO", LocalizationService.Instance.Format(
-                    "agent.log.editStepClaimedSkipped", step.Index, step.Title, alreadyModifiedFiles));
-            }
-
-            // ── 计划进度快照：避免模型把历史中的“当前步骤”提示误认为新指令 ──
-            string progressSnapshot = BuildPlanProgressSnapshot(plan);
-            if (!string.IsNullOrEmpty(progressSnapshot))
-            {
-                sb.AppendLine(progressSnapshot);
-                sb.AppendLine();
-            }
-
-            sb.AppendLine("## 统一执行规则");
-            sb.AppendLine("- 直接根据当前步骤和任务描述调用所需工具，不要只说明计划或声称已经完成。");
-            sb.AppendLine("- 文件修改必须通过编辑工具完成；读取、搜索、终端、构建和 Git 操作使用对应工具。");
-            sb.AppendLine("- 需要构建或测试时调用 build_solution。构建成功后不要重复调用 get_errors 或再次构建；构建失败后结束本步骤，由系统决定是否移交 Build Agent。");
-            sb.AppendLine("- 启动 API、Web 服务或其他长驻进程时必须使用 run_in_terminal 的 detached 模式，避免阻塞。");
-            sb.AppendLine();
-
-            // ── 注入 plan.md 概述 + 当前步骤对应章节 ──
+            // 第3层：plan.md 中当前步骤对应的章节详情
             string? planFilePath = context.PlanFilePath ?? plan.PlanFilePath;
             if (!string.IsNullOrEmpty(planFilePath) && File.Exists(planFilePath))
             {
@@ -1665,20 +1612,11 @@ namespace DeepSeek_v4_for_VisualStudio.Services.Agents
                     string planMd = File.ReadAllText(planFilePath);
                     if (planMd.Length > 0)
                     {
-                        // 提取概述（详细步骤章节之前的内容，截断至 ~2000 字符）
-                        string overview = ExtractPlanMdOverview(planMd);
-                        if (!string.IsNullOrEmpty(overview))
-                        {
-                            sb.AppendLine("##  计划概述");
-                            sb.AppendLine(overview);
-                            sb.AppendLine();
-                        }
-
-                        // 提取当前步骤对应的章节
                         string stepSection = ExtractPlanMdStepSection(planMd, step);
                         if (!string.IsNullOrEmpty(stepSection))
                         {
-                            sb.AppendLine(string.Format(LocalizationService.Instance["agent.step.planMdDetail"], step.Index));
+                            sb.AppendLine(string.Format(
+                                LocalizationService.Instance["agent.step.planMdDetail"], step.Index));
                             sb.AppendLine(stepSection);
                             sb.AppendLine();
                         }
@@ -1690,102 +1628,10 @@ namespace DeepSeek_v4_for_VisualStudio.Services.Agents
                 }
             }
 
-            // ── 注入前面步骤缓存的最新文件内容（所有模式通用），避免重复 read_file 调用 ──
-            if (BuiltInTools != null)
-            {
-                var fileCache = BuiltInTools.GetFileReadCacheSnapshot();
-                if (fileCache.Count > 0)
-                {
-                    // 过滤出与当前步骤可能相关的文件（基于步骤标题/描述中的文件名关键词）
-                    var relevantFiles = FilterRelevantCachedFiles(fileCache, step);
-
-                    // ── P1-2: 收集 CodeMemory 中已包含的文件名，避免双重注入 ──
-                    var codeMemoryFileNames = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
-                    if (!string.IsNullOrEmpty(context.CodeMemory))
-                    {
-                        var cmMatches = System.Text.RegularExpressions.Regex.Matches(
-                            context.CodeMemory, @"###  `([^`]+)`");
-                        foreach (System.Text.RegularExpressions.Match m in cmMatches)
-                            codeMemoryFileNames.Add(m.Groups[1].Value);
-                    }
-
-                    var safeFiles = new Dictionary<string, string>(StringComparer.OrdinalIgnoreCase);
-                    foreach (var kvp in relevantFiles)
-                    {
-                        if (!codeMemoryFileNames.Contains(System.IO.Path.GetFileName(kvp.Key)))
-                            safeFiles[kvp.Key] = kvp.Value;
-                    }
-
-                    if (safeFiles.Count > 0)
-                    {
-                        sb.AppendLine("## 前面步骤的缓存文件内容（可直接使用，无需重复调用 read_file）");
-                        sb.AppendLine(">  以下文件内容来自跨步骤缓存，未修改文件保持原读取内容，已修改文件为编辑后的最新快照。");
-                        sb.AppendLine();
-
-                        const int maxFilesToInclude = 10;
-                        const int maxCharsPerFile = 2500; // 每个文件最多注入 2.5KB
-                        int included = 0;
-                        long totalChars = 0;
-                        const long maxTotalChars = 20000; // 总计最多 20KB
-
-                        foreach (var kvp in safeFiles)
-                        {
-                            if (included >= maxFilesToInclude || totalChars >= maxTotalChars)
-                                break;
-
-                            string filePath = kvp.Key;
-                            string content = kvp.Value;
-                            bool truncated = content.Length > maxCharsPerFile;
-                            if (truncated)
-                                content = content.Substring(0, maxCharsPerFile) + "\n... (内容已截断，如需完整内容请使用 read_file)";
-
-                            sb.AppendLine($"###  `{filePath}`");
-                            sb.AppendLine("```");
-                            sb.AppendLine(content);
-                            sb.AppendLine("```");
-                            sb.AppendLine();
-
-                            included++;
-                            totalChars += content.Length;
-                        }
-
-                        if (included < safeFiles.Count)
-                        {
-                            sb.AppendLine($">  还有 {safeFiles.Count - included} 个已缓存文件未显示（超出大小限制）。如需要，请使用 read_file 读取。");
-                            sb.AppendLine();
-                        }
-
-                        sb.AppendLine("**重要**: 上述文件内容已在前面步骤中通过 read_file 获取且未被修改。请直接使用这些内容进行分析和编辑，不要重复调用 read_file。");
-                        sb.AppendLine();
-                    }
-                }
-            }
-
-            // ── 提示 AI 利用已有计划上下文，避免不必要的全项目搜索 ──
-            sb.AppendLine("## 重要提示");
-            sb.AppendLine("- 用户消息中已包含计划概述和各步骤详情，请根据当前步骤标题和描述执行任务");
-            sb.AppendLine("- 请优先使用计划中已列出的文件路径，直接用 read_file 读取目标文件内容");
-            sb.AppendLine("- 仅在需要确认额外依赖关系时才使用 file_search/grep_search 搜索");
-            sb.AppendLine("- 避免全项目搜索已明确指定的文件");
-            sb.AppendLine();
-
-            if (!string.IsNullOrEmpty(context.SolutionPath))
-            {
-                sb.AppendLine($"解决方案路径: {context.SolutionPath}");
-                sb.AppendLine();
-            }
-
-            // ── 用户附加的文件上下文 ──
-            if (!string.IsNullOrEmpty(context.FileContext))
-            {
-                sb.AppendLine("## 用户上传的文件引用");
-                // 附件正文由 read_file 按需读取，避免在每次步骤请求中重复携带全文。
-                sb.AppendLine(context.FileContext);
-                sb.AppendLine();
-            }
-
-            sb.AppendLine();
-            sb.AppendLine("- 如果本步骤顺带完成了后续步骤，请在响应末尾声明：\"也完成了步骤X、Y\" 或 \"also completed step X, Y\"。");
+            // 第4层：复用对话历史的约束（每步恒定，置于尾部不影响前缀缓存）
+            // 代码记忆功能移除后，跨步骤的文件内容只能靠对话历史中的 read_file 结果承接，
+            // 显式提示模型优先复用，避免它重新读取未变化的文件。
+            sb.AppendLine(LocalizationService.Instance["agent.step.reuseHistoryHint"]);
 
             return sb.ToString();
         }
@@ -1898,96 +1744,6 @@ namespace DeepSeek_v4_for_VisualStudio.Services.Agents
             }
 
             return section;
-        }
-
-        /// <summary>
-        /// 从文件读取缓存中筛选与当前步骤可能相关的文件。
-        /// 匹配策略：文件名或路径片段出现在步骤标题/描述中，或者步骤关键词（如 WAL、B+树、Lock）匹配文件名。
-        /// </summary>
-        private static Dictionary<string, string> FilterRelevantCachedFiles(
-            Dictionary<string, string> fileCache, AgentStep step)
-        {
-            // 如果缓存文件数 ≤ 10，全部返回（无需过滤）
-            if (fileCache.Count <= 10)
-                return fileCache;
-
-            var relevant = new Dictionary<string, string>(StringComparer.OrdinalIgnoreCase);
-            string stepText = $"{step.Title} {step.Description}".ToLowerInvariant();
-
-            // 从步骤文本提取关键词（取长度>2的单词）
-            var keywords = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
-            foreach (var word in stepText.Split(new[] { ' ', '(', ')', '（', '）', '、', '，', '/', '\\', '_', '-', '.' },
-                StringSplitOptions.RemoveEmptyEntries))
-            {
-                if (word.Length > 2)
-                    keywords.Add(word);
-            }
-
-            foreach (var kvp in fileCache)
-            {
-                string fileName = System.IO.Path.GetFileName(kvp.Key).ToLowerInvariant();
-                string filePath = kvp.Key.ToLowerInvariant();
-
-                // 文件名直接匹配步骤文本
-                if (stepText.Contains(fileName) || fileName.Contains(stepText))
-                {
-                    relevant[kvp.Key] = kvp.Value;
-                    continue;
-                }
-
-                // 关键词匹配文件名或路径
-                bool keywordMatch = false;
-                foreach (var kw in keywords)
-                {
-                    if (fileName.Contains(kw) || filePath.Contains(kw))
-                    {
-                        keywordMatch = true;
-                        break;
-                    }
-                }
-                if (keywordMatch)
-                {
-                    relevant[kvp.Key] = kvp.Value;
-                    continue;
-                }
-            }
-
-            // 如果没匹配到任何文件，返回全部（让 AI 自己决定）
-            return relevant.Count > 0 ? relevant : fileCache;
-        }
-
-        /// <summary>
-        /// 更新代码记忆 — 使用 LRU + 头文件加权淘汰算法。
-        /// <summary>
-        /// 更新代码记忆 — 委托给 BaseAgent.RefreshCodeMemory。
-        /// 从文件读取缓存中提取未被修改的关键文件内容，供后续步骤直接使用。
-        /// </summary>
-        private void UpdateCodeMemory(AgentContext context, AgentTaskPlan plan)
-        {
-            if (BuiltInTools == null) return;
-
-            var modifiedPaths = new HashSet<string>(
-                plan.ChangedFiles.Select(c => NormalizePath(c.FilePath)),
-                StringComparer.OrdinalIgnoreCase);
-            var missingPaths = modifiedPaths
-                .Where(path => !File.Exists(path))
-                .ToHashSet(StringComparer.OrdinalIgnoreCase);
-
-            // 提取计划步骤关键词用于语义加分
-            var stepKeywords = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
-            foreach (var step in plan.Steps)
-            {
-                string text = $"{step.Title} {step.Description}".ToLowerInvariant();
-                foreach (var word in text.Split(new[] { ' ', '(', ')', '（', '）', '、', '，', '/', '\\', '_', '-', '.' },
-                    StringSplitOptions.RemoveEmptyEntries))
-                {
-                    if (word.Length > 2)
-                        stepKeywords.Add(word);
-                }
-            }
-
-            // 修改后的文件已刷新为最新内容；只有已删除的文件才需要从记忆中排除。
-            RefreshCodeMemory(context, missingPaths, stepKeywords);
         }
 
         #endregion

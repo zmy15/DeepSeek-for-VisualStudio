@@ -322,6 +322,8 @@ public class AskAgentTests
         var context = new AgentContext
         {
             ContextManager = contextManager,
+            // 真移交：允许复用移交前缀（走 Handoff 消息复用分支）
+            AllowForwardedMessageReuse = true,
             ForwardedMessages = new List<ChatApiMessage>
             {
                 new() { Role = "system", Content = "stable system" },
@@ -366,6 +368,8 @@ public class AskAgentTests
         var context = new AgentContext
         {
             ContextManager = contextManager,
+            // 真移交：允许复用移交前缀（走 Handoff 消息复用分支）
+            AllowForwardedMessageReuse = true,
             // 回归场景：快照末尾为 [上下文块(system), 用户提问(user)]。
             // 修复前该组合会被误判为"旧结构 [agent] + [user]"一并删除，导致用户提问丢失。
             ForwardedMessages = new List<ChatApiMessage>
