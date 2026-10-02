@@ -426,6 +426,7 @@
     "chat.html.codeSaveButton": "保存到文件",
     "chat.html.thinkingTitle": "思考过程",
     "chat.html.turnProcessSummary": "已执行 {0} 步 · 点击展开查看过程",
+    "chat.html.turnToolCallSummary": "已执行 {0} 次工具调用 · 点击展开查看过程",
     "chat.html.thinkingLoading": "思考中...",
     "chat.html.fileAttached": "已附加文件",
     "chat.html.imageAttached": "已附加图片",
