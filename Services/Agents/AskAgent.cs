@@ -275,10 +275,25 @@ namespace DeepSeek_v4_for_VisualStudio.Services.Agents
         /// 即使 ChangedFiles 为空（如仅执行了 git add/commit 等版本控制操作），
         /// 也应生成摘要告知用户执行结果，而非进入普通问答模式。
         /// </summary>
+        /// <remarks>
+        /// 「计划已结束」不等于「IsCompleted」：只要还有步骤失败或计划被取消，
+        /// <see cref="AgentTaskPlan.IsCompleted"/> 就是 false，此前会导致整个摘要处理
+        /// 被跳过、落到普通问答分支——而 Handoff 传来的 prompt 本就是「请生成最终总结」，
+        /// 于是最终总结既不经过摘要构建，也不再被当作本轮答复收尾。
+        /// 实测一轮 6 步计划中步骤 6 失败后即命中此路径，日志表现为打印
+        /// 「Ask Agent 开始回答」（普通路径）而非「开始生成变更总结」（摘要路径），
+        /// 且最终气泡 content 为空、总结整体丢失。
+        /// 因此改为「计划存在且已不再推进」即视为摘要 Handoff，让失败/取消也能出总结。
+        /// </remarks>
         private static bool IsSummaryHandoff(AgentContext context)
         {
-            return context.ActivePlan != null
-                && context.ActivePlan.IsCompleted;
+            var plan = context.ActivePlan;
+            if (plan == null)
+                return false;
+
+            // 正常完成，或虽未完成但已停止推进（存在失败步骤 / 已取消）→ 都需要出总结
+            return plan.IsCompleted || plan.IsCancelled
+                || plan.Steps.Any(s => s.Status == AgentStepStatus.Failed);
         }
 
         /// <summary>

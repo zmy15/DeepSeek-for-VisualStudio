@@ -624,6 +624,74 @@ public class AskAgentTests
 
     #endregion
 
+    #region IsSummaryHandoff — 计划结束时也应出总结
+
+    /// <summary>
+    /// 回归：IsSummaryHandoff 原先要求 plan.IsCompleted，但只要有步骤失败或被取消，
+    /// IsCompleted 就是 false，整个摘要处理会被跳过、落到普通问答分支；
+    /// 而 Handoff 传来的 prompt 本就是「请生成最终总结」。
+    /// 实测一轮 6 步计划中步骤 6 失败后命中该路径，最终气泡 content 为空、总结丢失。
+    /// </summary>
+    [Fact]
+    public void IsSummaryHandoff_PlanWithFailedStep_IsTreatedAsSummary()
+    {
+        var plan = new AgentTaskPlan { Title = "含失败步骤的计划" };
+        plan.Steps.Add(new AgentStep { Index = 1, Title = "第一步", Status = AgentStepStatus.Completed });
+        plan.Steps.Add(new AgentStep { Index = 2, Title = "第二步", Status = AgentStepStatus.Failed });
+
+        plan.IsCompleted.Should().BeFalse("有失败步骤时 IsCompleted 为 false，这正是原先漏判的原因");
+
+        var context = new AgentContext { ActivePlan = plan };
+
+        IsSummaryHandoffPublic(context).Should().BeTrue(
+            "计划已停止推进（含失败步骤），仍应生成变更总结");
+    }
+
+    [Fact]
+    public void IsSummaryHandoff_CompletedPlan_IsTreatedAsSummary()
+    {
+        // 注：IsCompleted 是可写属性（不是按步骤推导的），须显式置位
+        var plan = new AgentTaskPlan { Title = "全部完成的计划", IsCompleted = true };
+        plan.Steps.Add(new AgentStep { Index = 1, Title = "第一步", Status = AgentStepStatus.Completed });
+
+        var context = new AgentContext { ActivePlan = plan };
+
+        IsSummaryHandoffPublic(context).Should().BeTrue();
+    }
+
+    [Fact]
+    public void IsSummaryHandoff_CancelledPlan_IsTreatedAsSummary()
+    {
+        var plan = new AgentTaskPlan { Title = "已取消的计划", IsCancelled = true };
+        plan.Steps.Add(new AgentStep { Index = 1, Title = "第一步", Status = AgentStepStatus.Pending });
+
+        var context = new AgentContext { ActivePlan = plan };
+
+        IsSummaryHandoffPublic(context).Should().BeTrue("取消的计划同样需要给用户结论");
+    }
+
+    [Fact]
+    public void IsSummaryHandoff_NoPlan_IsNotSummary()
+    {
+        // 纯问答没有计划，必须保持普通问答路径，不受本次放宽影响
+        IsSummaryHandoffPublic(new AgentContext()).Should().BeFalse();
+    }
+
+    [Fact]
+    public void IsSummaryHandoff_PlanStillRunning_IsNotSummary()
+    {
+        // 仍在推进（有 Pending 步骤、无失败）不应提前被当成收尾总结
+        var plan = new AgentTaskPlan { Title = "进行中的计划" };
+        plan.Steps.Add(new AgentStep { Index = 1, Title = "第一步", Status = AgentStepStatus.Completed });
+        plan.Steps.Add(new AgentStep { Index = 2, Title = "第二步", Status = AgentStepStatus.Pending });
+
+        var context = new AgentContext { ActivePlan = plan };
+
+        IsSummaryHandoffPublic(context).Should().BeFalse("计划尚未结束，不应提前总结");
+    }
+
+    #endregion
+
     #region ParseCodeChangesFromResult (inherited from BaseAgent)
 
     [Fact]
@@ -775,6 +843,13 @@ const y = 2;
         var method = typeof(AskAgent).GetMethod("SummarizeForLog",
             System.Reflection.BindingFlags.NonPublic | System.Reflection.BindingFlags.Static);
         return (string)method!.Invoke(null, new object?[] { message })!;
+    }
+
+    private static bool IsSummaryHandoffPublic(AgentContext context)
+    {
+        var method = typeof(AskAgent).GetMethod("IsSummaryHandoff",
+            System.Reflection.BindingFlags.NonPublic | System.Reflection.BindingFlags.Static);
+        return (bool)method!.Invoke(null, new object[] { context })!;
     }
 
     private static string BuildSummaryMarkdownPublic(AgentTaskPlan plan, string? aiSummary)
