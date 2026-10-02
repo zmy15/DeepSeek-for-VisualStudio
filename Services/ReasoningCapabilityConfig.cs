@@ -245,8 +245,15 @@ namespace DeepSeek_v4_for_VisualStudio.Services
 
             return EffortValueMode switch
             {
-                // DeepSeek 官方枚举: high | max
-                "deepseek" => normalized is "max" or "xhigh" or "ultra" ? "max" : "high",
+                // DeepSeek 官方枚举: low | high | max
+                // 扩展档（xhigh/ultra）钳制到 max；minimal/medium 等更细的档位
+                // 向最近的合法档位收敛（low → low，medium → high）。
+                "deepseek" => normalized switch
+                {
+                    "max" or "xhigh" or "ultra" => "max",
+                    "low" or "minimal" => "low",
+                    _ => "high",
+                },
 
                 // OpenRouter 枚举: xhigh | high | medium | low | minimal（无 max）
                 "openrouter" => normalized switch

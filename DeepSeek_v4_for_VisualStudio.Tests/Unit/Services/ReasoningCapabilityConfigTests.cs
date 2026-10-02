@@ -159,6 +159,14 @@ public class ReasoningCapabilityConfigTests
     }
 
     [Fact]
+    public void MapEffort_DeepSeekMode_KeepsLowAsLow()
+    {
+        var config = ReasoningCapabilityConfig.DeepSeek;
+        config.MapEffort("low").Should().Be("low");
+        config.MapEffort("minimal").Should().Be("low");
+    }
+
+    [Fact]
     public void MapEffort_PassthroughMode_KeepsOriginalValue()
     {
         var config = ReasoningCapabilityConfig.Default;
