@@ -112,7 +112,14 @@ namespace DeepSeek_v4_for_VisualStudio.Services.Agents
                 return await ExecuteSummaryOnlyAsync(userMessage, context);
             }
 
-            AddLog("INFO", string.Format(LocalizationService.Instance["agent.log.askStarted"], userMessage));
+            // ── 提示词回显只进日志，不进 UI 时间线 ──
+            // askStarted 的占位符是整段用户消息/Handoff 提示词，最长可达数 KB。
+            // 它以 INFO 级别发出，会被时间线接住并渲染进过程折叠块，造成两个问题：
+            //   ① 界面泄漏大段内部提示词（含「自由生成面向用户的最终总结」等脚手架文案）；
+            //   ② 这行内容只存在于时间线、不属于模型回答，会把折叠块撑得很大。
+            // 因此改为直接写日志文件，不经过 AddLog（AddLog 会广播给 UI 订阅者）。
+            Logger.Info(string.Format(LocalizationService.Instance["agent.log.askStarted"],
+                SummarizeForLog(userMessage)));
 
             var result = new AgentResult
             {
@@ -204,7 +211,8 @@ namespace DeepSeek_v4_for_VisualStudio.Services.Agents
         private async Task<AgentResult> ExecuteSummaryOnlyAsync(string userMessage, AgentContext context)
         {
             var L = LocalizationService.Instance;
-            AddLog("INFO", string.Format(L["agent.log.askStarted"], userMessage));
+            // 同 ExecuteAsync：提示词回显只写日志文件，不广播给 UI 时间线。
+            Logger.Info(string.Format(L["agent.log.askStarted"], SummarizeForLog(userMessage)));
 
             var result = new AgentResult
             {
@@ -267,10 +275,50 @@ namespace DeepSeek_v4_for_VisualStudio.Services.Agents
         /// 即使 ChangedFiles 为空（如仅执行了 git add/commit 等版本控制操作），
         /// 也应生成摘要告知用户执行结果，而非进入普通问答模式。
         /// </summary>
+        /// <remarks>
+        /// 「计划已结束」不等于「IsCompleted」：只要还有步骤失败或计划被取消，
+        /// <see cref="AgentTaskPlan.IsCompleted"/> 就是 false，此前会导致整个摘要处理
+        /// 被跳过、落到普通问答分支——而 Handoff 传来的 prompt 本就是「请生成最终总结」，
+        /// 于是最终总结既不经过摘要构建，也不再被当作本轮答复收尾。
+        /// 实测一轮 6 步计划中步骤 6 失败后即命中此路径，日志表现为打印
+        /// 「Ask Agent 开始回答」（普通路径）而非「开始生成变更总结」（摘要路径），
+        /// 且最终气泡 content 为空、总结整体丢失。
+        /// 因此改为「计划存在且已不再推进」即视为摘要 Handoff，让失败/取消也能出总结。
+        /// </remarks>
         private static bool IsSummaryHandoff(AgentContext context)
         {
-            return context.ActivePlan != null
-                && context.ActivePlan.IsCompleted;
+            var plan = context.ActivePlan;
+            if (plan == null)
+                return false;
+
+            // 正常完成，或虽未完成但已停止推进（存在失败步骤 / 已取消）→ 都需要出总结
+            return plan.IsCompleted || plan.IsCancelled
+                || plan.Steps.Any(s => s.Status == AgentStepStatus.Failed);
+        }
+
+        /// <summary>
+        /// 把用于日志的提示词压缩成一行摘要。
+        /// 提示词常达数 KB（含步骤清单、复用历史提示、模板说明），
+        /// 原文写日志既刷屏又难以定位，故只保留首行与总长度。
+        /// </summary>
+        /// <param name="message">原始用户消息或 Handoff 提示词。</param>
+        private static string SummarizeForLog(string? message)
+        {
+            if (string.IsNullOrWhiteSpace(message))
+                return "(empty)";
+
+            string normalized = message.Replace("\r\n", "\n").Trim();
+            int newlineIdx = normalized.IndexOf('\n');
+            string firstLine = newlineIdx >= 0 ? normalized.Substring(0, newlineIdx).Trim() : normalized;
+
+            const int maxFirstLine = 120;
+            if (firstLine.Length > maxFirstLine)
+                firstLine = firstLine.Substring(0, maxFirstLine) + "…";
+
+            int totalLines = normalized.Split('\n').Length;
+            return totalLines > 1
+                ? $"{firstLine} …(共 {normalized.Length} 字符 / {totalLines} 行)"
+                : firstLine;
         }
 
         /// <summary>
@@ -422,7 +470,7 @@ namespace DeepSeek_v4_for_VisualStudio.Services.Agents
             }
             catch (Exception ex)
             {
-                AddLog("WARN", $"[Memory] 读取步骤摘要失败: {ex.Message}");
+                AddLog("WARN", $"[Memory] {LocalizationService.Instance.Format("agent.log.memoryReadStepSummaryFailed", ex.Message)}");
                 return string.Empty;
             }
         }
@@ -482,11 +530,12 @@ namespace DeepSeek_v4_for_VisualStudio.Services.Agents
                         : "(无)";
                     sb.AppendLine($"- {icon} **{step.Title}**: {summary}");
 
-                    // 当 ResultSummary 仅为机械统计时，补充 Description 展示实际修改内容
+                    // 当 ResultSummary 仅为机械统计时，补充 Description 展示实际修改内容。
+                    // 前缀从本地化键派生（而非硬编码字面量）：键值随语言变化，
+                    // 硬编码 "修改了 " 与当前中文键值 "修改 N 个文件…" 并不匹配，会导致该分支静默失效。
                     if (!string.IsNullOrWhiteSpace(step.Description)
                         && (string.IsNullOrWhiteSpace(step.ResultSummary)
-                            || step.ResultSummary.StartsWith("修改了 ")
-                            || step.ResultSummary.StartsWith("Modified ")))
+                            || IsMechanicalEditSummary(step.ResultSummary)))
                     {
                         string desc = step.Description;
                         sb.AppendLine($"  > {desc}");
@@ -571,27 +620,22 @@ namespace DeepSeek_v4_for_VisualStudio.Services.Agents
                     messages.RemoveAt(messages.Count - 1);
                 }
 
-                // 使用无工具调用的简单 API 调用。
-                // 走 toolChoice:"none" 的标准无工具路径，而不是"空白名单 + 完整工具集"：
-                // 后者仍会把 read_file 等定义暴露给模型，模型一旦调用就会被白名单拦截，
-                // 拦截警告会替代润色摘要成为最终内容；
-                // 且完整上下文现含工具调用记录，显式禁用工具可防止模型模仿历史发起工具调用。
-                // maxTokens 传 null（不发送 max_tokens 字段）→ 不限制输出长度。
-                // 此前硬编码 1024 会让携带完整 handoff 上下文（数千 KB、上百条消息）的
-                // 润色请求频繁以 finish_reason=length 被截断，总结只剩开头几行；
-                // 且截断发生在 thinking 之后时，reasoning 会挤占全部额度，正文仅剩数百字符。
-                string result = await CallAiWithMessagesAsync(
+                // ── 与 Plan/Ask 文本阶段一致的收尾策略：toolChoice:"auto" + 只读白名单 ──
+                //    auto 与主对话保持同一 tool_choice，避免该字段变化击穿 DeepSeek Prefix Cache。
+                //    完整上下文含工具调用记录，模型可能模仿历史发起工具调用；此处改走工具循环而非
+                //    单次调用，让误调用能在只读白名单内正常收尾（读文件/搜索），而不是静默返回空。
+                string result = await CallAiWithReadOnlyToolLoopAsync(
                     messages,
                     ct,
-                    maxTokens: null,
-                    toolChoice: "none");
+                    reminderAfterFirstToolRound:
+                        LocalizationService.Instance["agent.summaryPolishNoMoreToolsAfterToolRound"]);
 
                 result = StripToolCallMarkers(result);
                 return result?.Trim() ?? string.Empty;
             }
             catch (Exception ex)
             {
-                AddLog("WARN", $"[AskAgent] AI 润色失败，使用直接摘要: {ex.Message}");
+                AddLog("WARN", $"[AskAgent] {LocalizationService.Instance.Format("agent.log.askPolishFailed", ex.Message)}");
                 return string.Empty;
             }
         }
@@ -693,9 +737,9 @@ namespace DeepSeek_v4_for_VisualStudio.Services.Agents
                     foreach (var step in completedSteps)
                     {
                         sb.AppendLine($"-  **{step.Title}**: {step.ResultSummary}");
-                        // 当 ResultSummary 仅为机械统计时，补充 Description
+                        // 当 ResultSummary 仅为机械统计时，补充 Description（前缀由本地化键派生）
                         if (!string.IsNullOrWhiteSpace(step.Description)
-                            && (step.ResultSummary!.StartsWith("修改了 ") || step.ResultSummary.StartsWith("Modified ")))
+                            && IsMechanicalEditSummary(step.ResultSummary!))
                         {
                             string desc = step.Description;
                             sb.AppendLine($"  > {desc}");
@@ -784,6 +828,30 @@ namespace DeepSeek_v4_for_VisualStudio.Services.Agents
                 string.Empty, System.Text.RegularExpressions.RegexOptions.Singleline);
 
             return text.Trim();
+        }
+
+        /// <summary>
+        /// 判断步骤结果摘要是否为「机械统计」式文本（如「修改 N 个文件（格式: …）」），
+        /// 这类摘要不含具体改动内容，需要额外补充 Description。
+        /// 匹配前缀由本地化键 <c>agent.log.editFilesModified</c> 的占位符之前部分派生，
+        /// 避免硬编码字面量与键值漂移导致判断静默失效。
+        /// </summary>
+        private static bool IsMechanicalEditSummary(string? resultSummary)
+        {
+            if (string.IsNullOrWhiteSpace(resultSummary))
+                return false;
+
+            // 兼容历史英文/中文遗留前缀（旧版本写入的摘要可能仍以这些文本开头）
+            if (resultSummary.StartsWith("Modified ", StringComparison.Ordinal)
+                || resultSummary.StartsWith("修改了 ", StringComparison.Ordinal))
+                return true;
+
+            string template = LocalizationService.Instance["agent.log.editFilesModified"];
+            int placeholder = template.IndexOf('{');
+            string prefix = placeholder > 0 ? template.Substring(0, placeholder) : template;
+
+            return prefix.Length > 0
+                && resultSummary.StartsWith(prefix, StringComparison.Ordinal);
         }
 
         #endregion

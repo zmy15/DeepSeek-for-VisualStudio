@@ -134,6 +134,8 @@ public class ChatHtmlServiceTests
         // 回归：streamEnd 是本气泡内容的最终覆盖，必须以「收起态」渲染过程块。
         // 此前按展开渲染再依赖宿主随后下发收起指令，会与 innerHTML 覆盖竞态，
         // 实测出现「找不到节点」以及界面停留在展开态（用户要求默认不展开）。
+        // 摘要文案取工具调用次数，与时间线行数无关：
+        // 这里 3 行时间线，但只声明了 2 次工具调用，摘要应显示 2
         string json = ChatHtmlService.BuildStreamEndJson(
             1,
             "最终总结",
@@ -141,7 +143,8 @@ public class ChatHtmlServiceTests
             extraFooterHtml: null,
             timelineContent: "移交 Edit\n创建文件 leetcode.cpp\n构建解决方案",
             turnId: "4e9831ea",
-            isProcessMessage: true);
+            isProcessMessage: true,
+            toolCallCount: 2);
 
         // 取出 html 字段后检查 details 开标签不含 open
         json.Should().Contain("turn-process");
@@ -152,6 +155,55 @@ public class ChatHtmlServiceTests
         openTag.Should().NotContain("open", "过程块默认应为收起态");
         openTag.Should().Contain("data-turn-id");
         json.Should().Contain("最终总结");
+        // 摘要应使用工具调用口径（2），而非时间线非空行数（3）
+        json.Should().Contain("2", "摘要应展示工具调用次数 2");
+        json.Should().NotContain("3 步", "不得再按时间线行数统计步骤");
+    }
+
+    [Fact]
+    public void BuildStreamEndJson_SummaryCountsToolCalls_NotTimelineLines()
+    {
+        // 回归：此前摘要按时间线非空行数统计，把步骤预告、工具返回和模型中间文本
+        // 一并计入，得到的数字与「工具调用」并非同一口径。现改为使用 ToolCallCount。
+        string manyLines = string.Join("\n", new[]
+        {
+            "移交 Edit",
+            "步骤 1: 读取文件",
+            "🔧 read_file (xxx)",
+            "读取完成 120 行",
+            "🔧 apply_patch (xxx)",
+            "补丁已应用",
+        });
+
+        string json = ChatHtmlService.BuildStreamEndJson(
+            1,
+            "总结",
+            string.Empty,
+            timelineContent: manyLines,
+            turnId: "aabbccdd",
+            isProcessMessage: true,
+            toolCallCount: 2);
+
+        // 6 个非空行，但只有 2 次工具调用
+        json.Should().Contain("2", "摘要必须反映真实工具调用次数");
+        json.Should().NotContain("6", "不得再统计时间线行数");
+    }
+
+    [Fact]
+    public void BuildStreamEndJson_ZeroToolCalls_RendersZeroCount()
+    {
+        // 边界：过程块存在（有中间文本）但一次工具都没调用时，应如实显示 0。
+        string json = ChatHtmlService.BuildStreamEndJson(
+            1,
+            "总结",
+            string.Empty,
+            timelineContent: "只是中间文本，没有工具调用",
+            turnId: "00112233",
+            isProcessMessage: true,
+            toolCallCount: 0);
+
+        json.Should().Contain("turn-process");
+        json.Should().Contain("0", "未调用工具时应显示 0 次");
     }
 
     [Fact]
@@ -580,6 +632,115 @@ public class ChatHtmlServiceTests
 
         js.Should().Be("var p=document.getElementById(\"terminal-approval-abc\");if(p)p.remove();");
     }
+
+    #region 用户消息 @ / 蓝色渲染
+
+    [Fact]
+    public void BuildUserMessageHtml_AgentToken_WrapsInBlueMentionSpan()
+    {
+        string html = ChatHtmlService.BuildUserMessageHtml("@ask");
+
+        html.Should().Contain("class=\"mention mention-agent\"");
+        html.Should().Contain(">@ask</span>");
+        html.Should().NotContain("mention-skill");
+    }
+
+    [Fact]
+    public void BuildUserMessageHtml_SkillToken_WrapsInBlueMentionSpan()
+    {
+        string html = ChatHtmlService.BuildUserMessageHtml("看下 /review 这个改动");
+
+        html.Should().Contain("class=\"mention mention-skill\"");
+        html.Should().Contain(">/review</span>");
+        html.Should().NotContain("mention-agent");
+    }
+
+    [Fact]
+    public void BuildUserMessageHtml_LeadingAgentPrefix_RendersBadgeInsteadOfMention()
+    {
+        // 行首 "@agent 内容" 会被抽成路由徽章，正文不再含 @ 前缀，因此不应再被着色
+        string html = ChatHtmlService.BuildUserMessageHtml("@ask 帮我看看");
+
+        html.Should().Contain("agent-route-badge");
+        html.Should().NotContain("mention-agent");
+    }
+
+    [Fact]
+    public void BuildUserMessageHtml_EscapesHtml_AndStillWrapsEscapedToken()
+    {
+        string html = ChatHtmlService.BuildUserMessageHtml("<script> @x </script>");
+
+        // 原始标签必须被转义，不能以可执行形式进入 DOM
+        html.Should().NotContain("<script>");
+        html.Should().Contain("&lt;script&gt;");
+
+        // token 内容走同一条转义路径，且仍被包在 span 内
+        html.Should().Contain("class=\"mention mention-agent\"");
+        html.Should().Contain(">@x</span>");
+    }
+
+    [Fact]
+    public void BuildUserMessageHtml_FencedCodeBlock_DoesNotHighlight()
+    {
+        string html = ChatHtmlService.BuildUserMessageHtml("```\n@ask\n```");
+
+        html.Should().NotContain("mention-agent");
+        html.Should().Contain("@ask");
+    }
+
+    [Fact]
+    public void BuildUserMessageHtml_WithoutTokens_KeepsLegacyEscaping()
+    {
+        string html = ChatHtmlService.BuildUserMessageHtml("第一行\n第二行 <b>x</b> & y");
+
+        // 回归：无 token 时输出必须与改动前逐字符一致（转义 + \n 换成 <br>）
+        html.Should().Contain("第一行<br>第二行 &lt;b&gt;x&lt;/b&gt; &amp; y");
+        html.Should().NotContain("mention");
+    }
+
+    [Fact]
+    public void BuildAssistantMessageHtml_WithMentionText_DoesNotHighlight()
+    {
+        var message = new ChatMessage
+        {
+            Role = "assistant",
+            Content = "已按 @ask 路由处理 /review 请求",
+        };
+
+        string html = ChatHtmlService.BuildAssistantMessageHtml(message, 1);
+
+        // 着色只作用于用户消息，助手回复（含代码块）不受影响
+        html.Should().NotContain("mention-agent");
+        html.Should().NotContain("mention-skill");
+    }
+
+    [Fact]
+    public void BuildRestoreMessageJs_WithMentionText_KeepsHighlightSpans()
+    {
+        string js = ChatHtmlService.BuildRestoreMessageJs(3, "看下 @ask 与 /review");
+
+        // 正文 HTML 由宿主预生成，恢复后仍保留 @ / 着色 span
+        js.Should().Contain("mention mention-agent");
+        js.Should().Contain("mention mention-skill");
+
+        // 旧的「JS 端转义 + 换行替换」重建逻辑必须已移除，
+        // 否则取消编辑时会用不含 span 的纯文本覆盖宿主生成的 HTML
+        js.Should().NotContain("var text=");
+        js.Should().Contain("msgBody.innerHTML=");
+    }
+
+    [Fact]
+    public void BuildRestoreMessageJs_WithHtmlText_KeepsEscaping()
+    {
+        string js = ChatHtmlService.BuildRestoreMessageJs(3, "<b>hi</b> & <i>x</i>");
+
+        // 回归：恢复路径同样必须走 HTML 转义，不能让原始标签进入 innerHTML
+        js.Should().NotContain("<b>hi</b>");
+        js.Should().Contain("&lt;b&gt;");
+        js.Should().Contain("&amp;");
+    }
+
+    #endregion
 
     private static int CountOccurrences(string haystack, string needle)
     {

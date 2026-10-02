@@ -144,6 +144,9 @@ namespace DeepSeek_v4_for_VisualStudio.View
                     InputPlaceholder.Foreground = mutedText;
                 ApplyBorderBrush(FindParentBorder(InputTextBox), inputBg, panelBorder);
 
+                // 输入区底色会随主题变化，高亮层的蓝色与覆盖底色需要同步重算
+                RefreshInputHighlightTheme();
+
                 // ── 审批控制栏 ──
                 ApplyBorderBrush(FindParentBorder(ApprovalModeComboBox), panelBg, panelBorder);
                 if (ApprovalAreaBorder != null)

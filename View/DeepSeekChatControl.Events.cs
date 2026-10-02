@@ -896,47 +896,36 @@ namespace DeepSeek_v4_for_VisualStudio.View
         {
             try
             {
-                var text = InputTextBox.Text;
-
                 // ── 占位提示文字显隐 ──
                 UpdatePlaceholderVisibility();
 
-                // ── @ 路由前缀检测（优先） ──
-                if (!string.IsNullOrEmpty(text) && text.StartsWith("@"))
+                // ── @ / token 蓝色高亮同步（内容变化即重算，内部按内容去重） ──
+                UpdateInputHighlight();
+
+                // 判定依据是「光标所在的当前 token」而非整段文本。
+                // 发送侧支持 "@agent /skill 参数" 组合输入，若沿用整段行首锚定，
+                // 则 "@ask " 的尾随空格会让 / 菜单永久无法打开。
+                var currentToken = GetCurrentToken(out _, out _);
+
+                // ── @ 路由 token 检测 ──
+                if (currentToken.StartsWith("@", StringComparison.Ordinal))
                 {
-                    // 关闭 Skill 弹出框（互斥）
+                    // 关闭 Skill 弹出框（同一时刻只服务光标所在的一个 token）
                     if (SkillSuggestionPopup.IsOpen)
                         SkillSuggestionPopup.IsOpen = false;
 
-                    // @ 后包含空格 → 用户正在输入参数，关闭弹出框
-                    if (text.Contains(' '))
-                    {
-                        if (AgentSuggestionPopup.IsOpen)
-                            AgentSuggestionPopup.IsOpen = false;
-                        return;
-                    }
-
                     // 提取 @ 后的文本用于过滤
-                    var agentFilterText = text.Length > 1 ? text.Substring(1).ToLowerInvariant() : string.Empty;
+                    var agentFilterText = currentToken.Length > 1 ? currentToken.Substring(1).ToLowerInvariant() : string.Empty;
                     UpdateAgentSuggestions(agentFilterText);
                     return;
                 }
 
-                // 关闭 Agent 弹出框（非 @ 开头）
+                // 关闭 Agent 弹出框（当前 token 不是 @ 路由）
                 if (AgentSuggestionPopup.IsOpen)
                     AgentSuggestionPopup.IsOpen = false;
 
-                // ── / 斜杠命令检测 ──
-                // 不以 / 开头 → 关闭弹出框
-                if (string.IsNullOrEmpty(text) || !text.StartsWith("/"))
-                {
-                    if (SkillSuggestionPopup.IsOpen)
-                        SkillSuggestionPopup.IsOpen = false;
-                    return;
-                }
-
-                // 命令已包含空格 → 用户正在输入参数，关闭弹出框
-                if (text.Contains(' '))
+                // ── / 斜杠命令 token 检测 ──
+                if (!currentToken.StartsWith("/", StringComparison.Ordinal))
                 {
                     if (SkillSuggestionPopup.IsOpen)
                         SkillSuggestionPopup.IsOpen = false;
@@ -944,13 +933,64 @@ namespace DeepSeek_v4_for_VisualStudio.View
                 }
 
                 // 提取 / 后的文本用于过滤
-                var filterText = text.Length > 1 ? text.Substring(1).ToLowerInvariant() : string.Empty;
+                var filterText = currentToken.Length > 1 ? currentToken.Substring(1).ToLowerInvariant() : string.Empty;
                 UpdateSkillSuggestions(filterText);
             }
             catch (Exception ex)
             {
                 Logger.Warn($"[Skill] 文本变更处理失败: {ex.Message}");
             }
+        }
+
+        /// <summary>
+        /// 获取输入框中光标所在的当前 token（以空白字符为分隔）。
+        /// 用光标回溯而非整段锚定，是因为发送侧支持 "@agent /skill 参数" 组合输入，
+        /// 需要让 @ 与 / 各自针对光标所在片段独立触发补全。
+        /// </summary>
+        /// <param name="tokenStart">输出参数：当前 token 在文本中的起始索引（含）。</param>
+        /// <param name="tokenEnd">输出参数：当前 token 的结束索引（不含），即光标位置。</param>
+        /// <returns>光标所在的当前 token 文本；文本为空或光标越界时返回空字符串。</returns>
+        private string GetCurrentToken(out int tokenStart, out int tokenEnd)
+        {
+            var text = InputTextBox.Text ?? string.Empty;
+
+            // 光标越界时收敛到文本末尾，避免 Substring 抛出越界异常
+            var caret = InputTextBox.CaretIndex;
+            if (caret < 0)
+                caret = 0;
+            if (caret > text.Length)
+                caret = text.Length;
+
+            // 从光标向前回溯到最近的空白字符，确定当前 token 的起点
+            tokenStart = caret;
+            while (tokenStart > 0 && !char.IsWhiteSpace(text[tokenStart - 1]))
+                tokenStart--;
+
+            tokenEnd = caret;
+            return text.Substring(tokenStart, caret - tokenStart);
+        }
+
+        /// <summary>
+        /// 替换输入框中光标所在的当前 token，并保留 token 之后的原有文本。
+        /// 供 @Agent 与 /Skill 两条补全路径复用，确保插入行为（尾随空格、光标位置、
+        /// 后续文本保留）完全一致，避免两条路径各自实现导致语义分叉。
+        /// </summary>
+        /// <param name="replacement">替换文本；调用方需自行包含便于继续输入的尾随空格。</param>
+        private void ReplaceCurrentToken(string replacement)
+        {
+            var text = InputTextBox.Text ?? string.Empty;
+
+            // 先取当前 token 范围再改写文本：赋值 Text 会触发 TextChanged，之后光标位置不再可靠
+            GetCurrentToken(out var tokenStart, out var tokenEnd);
+
+            // 保留光标之后的原有文本，避免覆盖 "@ask /review" 这类组合输入的后半段
+            var tail = tokenEnd < text.Length ? text.Substring(tokenEnd) : string.Empty;
+
+            InputTextBox.Text = text.Substring(0, tokenStart) + replacement + tail;
+
+            // 光标落在替换文本之后、原有尾段之前，便于用户继续输入
+            InputTextBox.CaretIndex = tokenStart + replacement.Length;
+            InputTextBox.Focus();
         }
 
         /// <summary>
@@ -1032,14 +1072,12 @@ namespace DeepSeek_v4_for_VisualStudio.View
 
                 var allItems = metaCommands.Concat(skillItems).ToList();
 
-                // 按过滤文本筛选
+                // 按过滤文本筛选。filterText 是光标前的单个 token，不再可能含空格，
+                // 因此无需再拆分"命令 + 参数"。
                 if (!string.IsNullOrEmpty(filterText))
                 {
-                    var parts = filterText.Split(new[] { ' ' }, 2, StringSplitOptions.RemoveEmptyEntries);
-                    var commandPart = parts.Length > 0 ? parts[0] : filterText;
-
                     allItems = allItems
-                        .Where(item => item.Name.StartsWith(commandPart, StringComparison.OrdinalIgnoreCase)
+                        .Where(item => item.Name.StartsWith(filterText, StringComparison.OrdinalIgnoreCase)
                                        || item.Description.IndexOf(filterText, StringComparison.OrdinalIgnoreCase) >= 0)
                         .ToList();
                 }
@@ -1105,26 +1143,9 @@ namespace DeepSeek_v4_for_VisualStudio.View
                 else
                     Logger.Info($"[Skill] 用户从弹出框选择技能: /{skillName} | 描述: {item.Description} | 来源: {item.Source}");
 
-                // 保留 / 后的其他参数（如果用户在 /skill-name 后输入了额外文本）
-                var currentText = InputTextBox.Text;
-                var spaceIndex = currentText.IndexOf(' ');
-                var extraArgs = spaceIndex > 0 ? currentText.Substring(spaceIndex) : string.Empty;
-
-                if (item.IsMeta)
-                {
-                    // 元命令直接执行
-                    InputTextBox.Text = $"/{skillName}{extraArgs}";
-                }
-                else
-                {
-                    // 技能命令：格式为 /skill-name [description hint]
-                    var hint = item.SkillDefinition?.ArgumentHint;
-                    InputTextBox.Text = $"/{skillName}{extraArgs}";
-                }
-
-                // 将光标移到末尾
-                InputTextBox.CaretIndex = InputTextBox.Text.Length;
-                InputTextBox.Focus();
+                // 统一插入 "/skill-name "（含尾随空格）：与 @Agent 补全行为对齐，
+                // 用户选完即可直接输入参数；ArgumentHint 仅作界面展示，不写入输入框以免污染命令。
+                ReplaceCurrentToken($"/{skillName} ");
             }
 
             SkillSuggestionPopup.IsOpen = false;
@@ -1291,10 +1312,9 @@ namespace DeepSeek_v4_for_VisualStudio.View
 
                 Logger.Info($"[Agent] 用户从弹出框选择 Agent: @{agentName} ({item.Description})");
 
-                // 设置输入框为 @agent-name 后加空格，方便用户继续输入
-                InputTextBox.Text = $"@{agentName} ";
-                InputTextBox.CaretIndex = InputTextBox.Text.Length;
-                InputTextBox.Focus();
+                // 只替换光标所在的 token，不再整段覆盖：发送侧支持 "@agent /skill 参数" 组合输入，
+                // 整段覆盖会丢弃用户已输入的 /skill 等内容。尾随空格保留，便于继续输入。
+                ReplaceCurrentToken($"@{agentName} ");
             }
 
             AgentSuggestionPopup.IsOpen = false;

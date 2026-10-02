@@ -411,12 +411,13 @@ public class EditAgentTests
     }
 
     [Fact]
-    public void BuildStepPrompt_UsesUnifiedInstructionsWithoutPhaseClassification()
+    public void BuildStepPrompt_ContainsOnlyCurrentStepAndPlanSection()
     {
         var agent = new EditAgent(_apiService);
         var plan = new AgentTaskPlan
         {
             Title = "Implement feature",
+            TaskDescription = "## 背景\n这是一段很长的移交任务描述，步骤推进时不应逐条重发。",
             Steps =
             {
                 new AgentStep
@@ -436,11 +437,200 @@ public class EditAgentTests
             plan.Steps[0], plan, new AgentContext()
         })!;
 
-        prompt.Should().Contain("## 统一执行规则");
-        prompt.Should().Contain("文件修改必须通过编辑工具完成");
-        prompt.Should().Contain("需要构建或测试时调用 build_solution");
+        // 只保留：plan 标题前缀 + 当前步骤标题 + plan.md 章节 + 复用历史约束
+        prompt.Should().Contain("创建 test.txt 文件");
+        prompt.Should().Contain("1/1");
+
+        // 代码记忆移除后，跨步骤文件内容只能靠对话历史承接，必须显式提示复用
+        prompt.Should().Contain("优先复用对话历史中已读取的文件内容");
+
+        // 精简后不再逐步骤重发的冗余块（代码记忆功能已移除）
+        prompt.Should().NotContain("## 任务描述（Handoff 携带，必须严格按此执行）");
+        prompt.Should().NotContain("这是一段很长的移交任务描述");
+        prompt.Should().NotContain("代码记忆");
+        prompt.Should().NotContain("## 前面步骤的缓存文件内容");
+        prompt.Should().NotContain("## 前面步骤的执行结果");
+        prompt.Should().NotContain("## 计划进度");
+        prompt.Should().NotContain("## 统一执行规则");
+        prompt.Should().NotContain("## 重要提示");
         prompt.Should().NotContain("## 代码修改步骤");
-        prompt.Should().NotContain("这是一个分析/验证步骤");
+    }
+
+    [Fact]
+    public void SystemPrompt_DeclaresSubsequentStepCompletionRule()
+    {
+        // 步骤提示精简后，"顺带完成后续步骤需声明" 规则移至常驻 system 提示词，
+        // 否则 DetectAndAutoCompleteLaterSteps 失去触发来源。
+        var agent = new EditAgent(_apiService);
+
+        agent.Definition.SystemPrompt.Should().Contain("也完成了步骤X、Y");
+        agent.Definition.SystemPrompt.Should().Contain("also completed step X, Y");
+    }
+
+    #endregion
+
+    #region Build Permission — 步骤级构建许可
+
+    /// <summary>中间步骤 + 文本未要求构建 → 不允许构建。</summary>
+    [Fact]
+    public void IsBuildAllowedForStep_MiddleStepWithoutBuildIntent_IsBlocked()
+    {
+        var plan = BuildPlan(
+            (1, "修改 Settings 页", "调整属性定义"),
+            (2, "更新本地化键", "补充字符串"),
+            (3, "同步测试并构建", "更新测试"));   // 最后一步带构建意图
+
+        bool allowed = EditAgent.IsBuildAllowedForStep(plan.Steps[0], plan, out string? reason);
+
+        allowed.Should().BeFalse();
+        reason.Should().BeNull();
+    }
+
+    /// <summary>步骤标题明确要求构建 → 允许，即使不是最后一步。</summary>
+    /// <remarks>
+    /// 判据只看 Title。此前的用例把构建词放在 Description（如 "步骤 2" / "同步测试并构建"），
+    /// 那是改版前的契约；现由
+    /// <see cref="IsBuildAllowedForStep_BuildWordOnlyInDescription_IsBlocked"/> 反向覆盖。
+    /// </remarks>
+    [Theory]
+    [InlineData("同步测试并构建", "执行构建")]
+    [InlineData("构建验证", "运行一次编译")]
+    [InlineData("Build and verify", "compile the solution")]
+    [InlineData("Rebuild project", "run rebuild")]
+    public void IsBuildAllowedForStep_StepTextRequiresBuild_IsAllowed(string title, string description)
+    {
+        var plan = BuildPlan(
+            (1, title, description),
+            (2, "收尾步骤", "无构建要求"));
+
+        bool allowed = EditAgent.IsBuildAllowedForStep(plan.Steps[0], plan, out string? reason);
+
+        allowed.Should().BeTrue();
+        reason.Should().Be(LocalizationService.Instance["agent.step.buildAllowedReasonExplicit"]);
+    }
+
+    /// <summary>最后一步即使未明说构建 → 允许（收敛验证点）。</summary>
+    [Fact]
+    public void IsBuildAllowedForStep_LastStepWithoutBuildIntent_IsAllowed()
+    {
+        var plan = BuildPlan(
+            (1, "修改代码", "调整实现"),
+            (2, "收尾清理", "整理注释"));
+
+        bool allowed = EditAgent.IsBuildAllowedForStep(plan.Steps[1], plan, out string? reason);
+
+        allowed.Should().BeTrue();
+        reason.Should().Be(LocalizationService.Instance["agent.step.buildAllowedReasonLastStep"]);
+    }
+
+    /// <summary>
+    /// 回归：构建意图只看 Title，描述里的约束性说法不得放行。
+    /// 实测一轮 6 步计划中「抽取纯函数计数器 + 单元测试」被放行构建——
+    /// 标题无关键词，但描述含构建词，而中文按子串匹配、无否定语气识别，
+    /// 「确保可编译」这类约束被误当成构建意图，导致白名单未裁剪 build_solution。
+    /// </summary>
+    [Theory]
+    [InlineData("抽取纯函数计数器 + 单元测试", "确保新文件可编译，避免编译错误")]
+    [InlineData("重构解析器", "改动后代码应能正常编译")]
+    [InlineData("补充单元测试", "本次不构建，仅新增测试用例")]
+    [InlineData("更新文档", "说明如何编译本仓库")]
+    public void IsBuildAllowedForStep_BuildWordOnlyInDescription_IsBlocked(string title, string description)
+    {
+        var plan = BuildPlan(
+            (1, title, description),
+            (2, "下一步", "继续"));
+
+        bool allowed = EditAgent.IsBuildAllowedForStep(plan.Steps[0], plan, out string? reason);
+
+        allowed.Should().BeFalse(
+            "描述里的构建词是约束性说法，不代表本步骤要求执行构建");
+        reason.Should().BeNull();
+    }
+
+    /// <summary>标题明确要求构建 → 仍放行，即使描述未提构建。</summary>
+    [Theory]
+    [InlineData("单元测试补充与构建验证")]
+    [InlineData("构建解决方案")]
+    [InlineData("编译并修复错误")]
+    [InlineData("Build the solution")]
+    public void IsBuildAllowedForStep_BuildWordInTitle_IsAllowed(string title)
+    {
+        var plan = BuildPlan(
+            (1, title, "无描述"),
+            (2, "下一步", "继续"));
+
+        bool allowed = EditAgent.IsBuildAllowedForStep(plan.Steps[0], plan, out string? reason);
+
+        allowed.Should().BeTrue("标题写明的构建意图应被尊重");
+        reason.Should().Be(LocalizationService.Instance["agent.step.buildAllowedReasonExplicit"]);
+    }
+
+    /// <summary>英文关键词按词边界匹配，避免子串误命中（如 "build" 不应命中 "rebuilding" 之外的无关词）。</summary>
+    [Theory]
+    [InlineData("latest changes applied", false)]      // "test" 不在其中，且不应命中 "latest"
+    [InlineData("the builder pattern", false)]         // "builder" 不是 "build" 的独立词
+    [InlineData("building blocks", false)]             // "building" 同样不应命中
+    [InlineData("build", true)]
+    [InlineData("please Build it", true)]
+    [InlineData("compile", true)]
+    [InlineData("rebuild", true)]
+    public void ContainsBuildIntent_EnglishKeywords_RespectWordBoundaries(string text, bool expected)
+    {
+        EditAgent.ContainsBuildIntent(text).Should().Be(expected);
+    }
+
+    /// <summary>中文关键词按子串匹配。</summary>
+    [Theory]
+    [InlineData("构建解决方案", true)]
+    [InlineData("重新编译", true)]
+    [InlineData("构建验证", true)]
+    [InlineData("修改属性", false)]
+    [InlineData("更新文档", false)]
+    public void ContainsBuildIntent_ChineseKeywords_SubstringMatch(string text, bool expected)
+    {
+        EditAgent.ContainsBuildIntent(text).Should().Be(expected);
+    }
+
+    /// <summary>步骤提示词随构建许可给出对应说明。</summary>
+    [Fact]
+    public void BuildStepPrompt_ReflectsBuildPermission()
+    {
+        var agent = new EditAgent(_apiService);
+
+        // 中间步骤（无构建意图）→ 提示不允许构建
+        var blockedPlan = BuildPlan(
+            (1, "修改 Settings 页", "调整属性定义"),
+            (2, "收尾清理", "整理注释"));
+        var blocked = InvokeBuildStepPrompt(agent, blockedPlan.Steps[0], blockedPlan);
+        blocked.Should().Contain("不允许");
+        blocked.Should().Contain("build_solution");
+
+        // 最后一步 → 提示允许构建
+        var allowed = InvokeBuildStepPrompt(agent, blockedPlan.Steps[1], blockedPlan);
+        allowed.Should().Contain("允许调用 build_solution");
+    }
+
+    private static string InvokeBuildStepPrompt(EditAgent agent, AgentStep step, AgentTaskPlan plan)
+    {
+        var method = typeof(EditAgent).GetMethod(
+            "BuildStepPrompt",
+            System.Reflection.BindingFlags.NonPublic | System.Reflection.BindingFlags.Instance);
+        return (string)method!.Invoke(agent, new object[] { step, plan, new AgentContext() })!;
+    }
+
+    private static AgentTaskPlan BuildPlan(params (int Index, string Title, string Description)[] steps)
+    {
+        var plan = new AgentTaskPlan { Title = "测试计划" };
+        foreach (var (index, title, description) in steps)
+        {
+            plan.Steps.Add(new AgentStep
+            {
+                Index = index,
+                Title = title,
+                Description = description,
+            });
+        }
+        return plan;
     }
 
     #endregion
@@ -989,6 +1179,73 @@ public class EditAgentTests
         string result, bool coveredByPrevious, EditAgent.StepNoToolCallOutcome expected)
     {
         EditAgent.ClassifyNoToolCallStep(result, coveredByPrevious).Should().Be(expected);
+    }
+
+    /// <summary>
+    /// 回归：以文字交付为目的的收尾步骤（如「回归风险清单与手动验证」）不产生文件修改，
+    /// 回复又长又有结构，原先被长度闸门冤判为 TextOnlyFailure 导致整轮失败。
+    /// 含结构化交付物（标题/列表/表格）且声明完成时长回复应判为已完成。
+    /// </summary>
+    [Fact]
+    public void ClassifyNoToolCallStep_LongStructuredDeliverable_IsConfirmedNoChange()
+    {
+        // 还原截图里步骤 6 的实际输出形态：说明已完成 + 风险清单 + 表格
+        string step6 = string.Join("\n", new[]
+        {
+            "本步骤已完成。代码修改已由前序步骤落盘，此处不再改动文件。",
+            "",
+            "## 回归风险清单",
+            "",
+            "- MentionTokenizer 边界：空输入与全空白输入需重点验证",
+            "- XAML 高亮层：滚动同步在超长文档下可能滞后",
+            "- WebView2 消息高亮：需确认 Regenerate 后再次高亮不重复",
+            "",
+            "## 手动验证步骤",
+            "",
+            "1. 打开聊天窗口，发送包含 @文件 的消息，确认蓝色高亮出现",
+            "2. 滚动编辑器，确认高亮层与文本同步刷新",
+            "3. 触发 Regenerate，确认高亮不叠加",
+        });
+
+        EditAgent.ClassifyNoToolCallStep(step6, coveredByPreviousSteps: false)
+            .Should().Be(EditAgent.StepNoToolCallOutcome.ConfirmedNoChange,
+                "结构化交付物应以完成收尾，而非判失败");
+    }
+
+    /// <summary>
+    /// 反向保护：长篇「辩解式」叙述即使很长也不算交付物，长度闸门对借口仍然有效。
+    /// 这是 IsNoChangesResponse 长度限制的原始目的，不得被上面的放行破坏。
+    /// 注：文本必须真的超过 200 字符才会走到结构判定分支，否则测的是短回复路径。
+    /// </summary>
+    [Theory]
+    [InlineData("由于前序步骤已经把两处修复全部落盘，且构建已通过，因此不再重复读取或构建，仅说明本轮情况即可，无需再次执行任何操作。")]
+    [InlineData("已经完成。前面几步已经把所有需要改的地方都改完了，所以这里没有必要再调用任何工具去读取或修改文件，直接说明一下当前的状态就可以了，不需要再做别的事情。")]
+    public void ClassifyNoToolCallStep_LongUnstructuredExcuse_StillFails(string excuse)
+    {
+        // 补足长度确保跨过 200 字符闸门，进入结构判定：这才是要保护的分支
+        string padded = excuse + new string('说', 150);
+        padded.Length.Should().BeGreaterThan(200, "用例必须长于长度闸门，否则测不到结构判定");
+
+        EditAgent.ClassifyNoToolCallStep(padded, coveredByPreviousSteps: false)
+            .Should().Be(EditAgent.StepNoToolCallOutcome.TextOnlyFailure,
+                "无结构的冗长辩解不构成交付物");
+    }
+
+    /// <summary>
+    /// 反向保护：单行列表噪声不足以判定为交付物（需至少两条结构性线索）。
+    /// </summary>
+    [Fact]
+    public void ClassifyNoToolCallStep_SingleStructuralLine_StillFails()
+    {
+        string text = "已完成。本步骤无需修改任何文件，因此没有再调用工具，具体原因如上所述，"
+            + "前序步骤已经覆盖了全部改动点，这里只是做一次简短的收尾说明，确保流程闭环即可。"
+            + new string('补', 150) + "\n- 无";
+
+        text.Length.Should().BeGreaterThan(200, "用例必须长于长度闸门，否则测不到结构判定");
+
+        EditAgent.ClassifyNoToolCallStep(text, coveredByPreviousSteps: false)
+            .Should().Be(EditAgent.StepNoToolCallOutcome.TextOnlyFailure,
+                "仅一条列表项不足以构成结构化交付物");
     }
 
     #endregion

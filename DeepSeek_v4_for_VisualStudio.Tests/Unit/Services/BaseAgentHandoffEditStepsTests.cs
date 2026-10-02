@@ -196,6 +196,36 @@ public class BaseAgentHandoffEditStepsTests
         context.IsPlanningMode.Should().BeTrue();
     }
 
+    /// <summary>
+    /// Handoff 载荷只含：移交要求 + 复用历史约束。不再注入 plan.md 概述、
+    /// 探索结果、代码记忆、Git 状态等重复块（这些在移交前缀里已有原件）。
+    /// </summary>
+    [Fact]
+    public async Task ExecuteHandoffAsync_Payload_ContainsHandoffPromptAndReuseHintOnly()
+    {
+        var apiService = new DeepSeekApiService("test-api-key");
+        var agent = new EditStepsTestAgent(apiService);
+        var factory = new AgentFactory(apiService);
+        var target = new NoOpEditAgent(apiService);
+        InjectPrivateField(factory, "_editAgent", target);
+
+        var handoff = BuildHandoff(AgentType.Edit, "步骤一");
+        var context = new AgentContext();
+
+        await agent.ExecuteHandoffAsync(handoff, context, null, factory);
+
+        // 载荷 = 移交要求 + 复用历史约束
+        target.LastUserMessage.Should().Contain(handoff.Prompt);
+        target.LastUserMessage.Should().Contain(
+            LocalizationService.Instance["agent.step.reuseHistoryHint"]);
+
+        // 已移除的重复注入块
+        target.LastUserMessage.Should().NotContain("##  计划概述");
+        target.LastUserMessage.Should().NotContain("##  前一 Agent 的探索结果");
+        target.LastUserMessage.Should().NotContain("##  代码记忆");
+        target.LastUserMessage.Should().NotContain("handoff.gitState.header");
+    }
+
     /// <summary>非 Edit 目标（Ask）+ EditSteps 非空：不构造轻量计划，context.ActivePlan 保持 null。</summary>
     [Fact]
     public async Task ExecuteHandoffAsync_NonEditTarget_DoesNotInjectPlan()
@@ -315,8 +345,14 @@ public class BaseAgentHandoffEditStepsTests
         {
         }
 
+        /// <summary>记录 ExecuteHandoffAsync 实际传入的 handoff 载荷，供断言检查。</summary>
+        public string LastUserMessage { get; private set; } = string.Empty;
+
         public override Task<AgentResult> ExecuteAsync(string userMessage, AgentContext context)
-            => Task.FromResult(new AgentResult { Success = true, Content = userMessage });
+        {
+            LastUserMessage = userMessage;
+            return Task.FromResult(new AgentResult { Success = true, Content = userMessage });
+        }
     }
 
     #endregion

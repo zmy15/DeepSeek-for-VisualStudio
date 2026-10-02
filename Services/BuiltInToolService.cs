@@ -373,7 +373,7 @@ namespace DeepSeek_v4_for_VisualStudio.Services
 
         /// <summary>
         /// 写入或更新文件读取缓存。
-        /// Agent 应用编辑后用它刷新最新文件内容，供下一步的 CodeMemory 使用。
+        /// Agent 应用编辑后用它刷新最新文件内容，保证缓存与磁盘一致。
         /// </summary>
         public void UpdateFileReadCache(IEnumerable<KeyValuePair<string, string>> fileContents)
         {

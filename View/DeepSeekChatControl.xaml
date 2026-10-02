@@ -1,4 +1,4 @@
-﻿<UserControl x:Class="DeepSeek_v4_for_VisualStudio.View.DeepSeekChatControl"
+<UserControl x:Class="DeepSeek_v4_for_VisualStudio.View.DeepSeekChatControl"
              xmlns="http://schemas.microsoft.com/winfx/2006/xaml/presentation"
              xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
              xmlns:mc="http://schemas.openxmlformats.org/markup-compatibility/2006"
@@ -372,10 +372,13 @@
         </Popup>
 
         <!-- ═══ WebView2 聊天显示区 (Chromium) ═══ -->
-        <!-- WebView2 is created programmatically in InitializeChatWebView() to avoid
-             XamlParseException caused by assembly version conflicts with ReSharper.
-             See GitHub issue #18. -->
-        <!-- ClipToBounds=True 修复 GitHub issue #31: WebView2 HWND 穿透覆盖其他 VS 面板 -->
+        <!-- WebView2CompositionControl (visual/composition hosting, no child HWND) is created
+             programmatically in InitializeChatWebView() to avoid XamlParseException caused
+             by assembly version conflicts with ReSharper. See GitHub issue #18. -->
+        <!-- 视觉托管控件把渲染合成进 WPF 视觉树、参与正常 z-order：
+             修复 GitHub issue #31（窗口式 WebView2 的子 HWND 空域问题——
+             聊天内容始终覆盖 VS 自动隐藏弹窗等其他 VS 面板）。
+             ClipToBounds 保留，用于正确的区域裁剪。 -->
         <ContentControl Grid.Row="1"
                         x:Name="ChatWebViewHost"
                         Margin="0"
@@ -580,6 +583,29 @@
                          TextChanged="InputTextBox_TextChanged"
                          GotFocus="InputTextBox_GotFocus"
                          LostFocus="InputTextBox_LostFocus" />
+
+                <!-- 输入框高亮层：只渲染 @ / token，不参与命中测试、不抢焦点，与被覆盖的 TextBox 逐像素对齐 -->
+                <TextBlock Grid.Row="0"
+                           x:Name="InputHighlightLayer"
+                           Panel.ZIndex="1"
+                           IsHitTestVisible="False"
+                           Focusable="False"
+                           Visibility="Collapsed"
+                           Foreground="Transparent"
+                           FontFamily="{Binding FontFamily, ElementName=InputTextBox}"
+                           FontSize="{Binding FontSize, ElementName=InputTextBox}"
+                           FontWeight="{Binding FontWeight, ElementName=InputTextBox}"
+                           FontStretch="{Binding FontStretch, ElementName=InputTextBox}"
+                           TextWrapping="Wrap"
+                           TextTrimming="None"
+                           Padding="10,8,8,4"
+                           HorizontalAlignment="Stretch"
+                           VerticalAlignment="Top">
+                    <TextBlock.RenderTransform>
+                        <!-- 多行滚动同步：Y 由代码设置为 -VerticalOffset -->
+                        <TranslateTransform x:Name="InputHighlightOffset" />
+                    </TextBlock.RenderTransform>
+                </TextBlock>
 
                 <!-- 输入框占位提示文字（无内容且无焦点时显示） -->
                 <TextBlock Grid.Row="0"

@@ -322,6 +322,8 @@ public class AskAgentTests
         var context = new AgentContext
         {
             ContextManager = contextManager,
+            // 真移交：允许复用移交前缀（走 Handoff 消息复用分支）
+            AllowForwardedMessageReuse = true,
             ForwardedMessages = new List<ChatApiMessage>
             {
                 new() { Role = "system", Content = "stable system" },
@@ -346,15 +348,17 @@ public class AskAgentTests
             agent,
             new object[] { "Edit agent prompt", "handoff user", int.MaxValue, false })!;
 
-        context.ToolHistoryInsertIndex.Should().Be(6);
+        // Handoff 分支不再注入易变块，故尾部结构紧凑：[边界提示][user][Agent 提示词]
+        context.ToolHistoryInsertIndex.Should().Be(5);
         messages[3].Role.Should().Be("system");
         messages[3].Content.Should().NotBeNullOrWhiteSpace();
-        messages[4].Role.Should().Be("system");
-        messages[4].Content.Should().Contain("[IDE Context]");
-        messages[5].Role.Should().Be("user");
-        messages[5].Content.Should().Be("handoff user");
-        messages[6].Role.Should().Be("system");
-        messages[6].Content.Should().Be("Edit agent prompt");
+        messages[4].Role.Should().Be("user");
+        messages[4].Content.Should().Be("handoff user");
+        messages[5].Role.Should().Be("system");
+        messages[5].Content.Should().Be("Edit agent prompt");
+
+        // 易变上下文块（IDE Context）不得在 Handoff 分支重复注入
+        messages.Should().NotContain(m => m.Content != null && m.Content.Contains("[IDE Context]"));
     }
 
     [Fact]
@@ -366,6 +370,8 @@ public class AskAgentTests
         var context = new AgentContext
         {
             ContextManager = contextManager,
+            // 真移交：允许复用移交前缀（走 Handoff 消息复用分支）
+            AllowForwardedMessageReuse = true,
             // 回归场景：快照末尾为 [上下文块(system), 用户提问(user)]。
             // 修复前该组合会被误判为"旧结构 [agent] + [user]"一并删除，导致用户提问丢失。
             ForwardedMessages = new List<ChatApiMessage>
@@ -404,15 +410,139 @@ public class AskAgentTests
         messages[3].Role.Should().Be("system");
         messages[3].Content.Should().NotBeNullOrWhiteSpace();
 
-        // volatile 重注入、新任务 user 与 Edit 提示词位于末尾
-        messages[4].Role.Should().Be("system");
-        messages[4].Content.Should().Contain("[IDE Context]");
-        messages[5].Role.Should().Be("user");
-        messages[5].Content.Should().Be("handoff user");
-        messages[6].Role.Should().Be("system");
-        messages[6].Content.Should().Be("Edit agent prompt");
+        // Handoff 分支不再重复注入 volatile 块，改为紧接 [新任务 user][Edit 提示词]
+        messages[4].Role.Should().Be("user");
+        messages[4].Content.Should().Be("handoff user");
+        messages[5].Role.Should().Be("system");
+        messages[5].Content.Should().Be("Edit agent prompt");
 
-        context.ToolHistoryInsertIndex.Should().Be(6);
+        // 易变上下文块只应保留快照中那一份（[1]），不得在此处再次注入
+        messages.Count(m => m.Content != null && m.Content.Contains("[IDE Context]"))
+            .Should().Be(0, "Handoff 分支不得重复注入 IDE Context");
+
+        context.ToolHistoryInsertIndex.Should().Be(5);
+    }
+
+    /// <summary>
+    /// 回归：@agent 显式路由等不经 AskAgent 的路径，其 BuildContextAwareMessages 调用
+    /// 不传 persistVolatileToHistory（默认 false）。修复前易变上下文块只临时进入本次请求，
+    /// 不落 _entries，重启后 IDE Context 丢失。现在内部默认尝试固化，修复该缺口。
+    /// </summary>
+    [Fact]
+    public void BuildContextAwareMessages_NonHandoff_PersistsVolatileToEntriesByDefault()
+    {
+        var contextManager = new ConversationContextManager();
+        contextManager.SetIdeContext("[IDE Context] Active File: Test.cs");
+        contextManager.AddUserMessage("@Edit 修复这个 bug");
+
+        var context = new AgentContext
+        {
+            ContextManager = contextManager,
+        };
+        var agent = new AskAgent(_apiService)
+        {
+            Context = context,
+        };
+
+        var method = typeof(BaseAgent).GetMethod(
+            "BuildContextAwareMessages",
+            System.Reflection.BindingFlags.Instance | System.Reflection.BindingFlags.NonPublic,
+            binder: null,
+            new[] { typeof(string), typeof(string), typeof(int), typeof(bool) },
+            modifiers: null);
+        method.Should().NotBeNull();
+
+        // 默认重载：persistVolatileToHistory 隐式为 false（模拟 @agent / 子 Agent 调用）
+        method!.Invoke(agent, new object[] { "Edit agent prompt", "@Edit 修复这个 bug", int.MaxValue, false });
+
+        // 易变块应已固化进 _entries → 可随会话持久化
+        contextManager.GetFullContext()
+            .Should().Contain(m => m.Role == "system" && m.Content!.Contains("[IDE Context]"),
+                "非 Handoff 且未显式要求固化时，也应变易变块写入 _entries");
+    }
+
+    /// <summary>
+    /// 回归：同一轮内连续多次构建（主对话 → @agent 切换 → Handoff）不得产生多份 IDE Context。
+    /// </summary>
+    [Fact]
+    public void BuildContextAwareMessages_RepeatedCallsInSameTurn_PersistOnlyOneSnapshot()
+    {
+        var contextManager = new ConversationContextManager();
+        contextManager.SetIdeContext("[IDE Context] Active File: Test.cs");
+        contextManager.AddUserMessage("修复这个 bug");
+
+        var context = new AgentContext { ContextManager = contextManager };
+        var agent = new AskAgent(_apiService) { Context = context };
+
+        var method = typeof(BaseAgent).GetMethod(
+            "BuildContextAwareMessages",
+            System.Reflection.BindingFlags.Instance | System.Reflection.BindingFlags.NonPublic,
+            binder: null,
+            new[] { typeof(string), typeof(string), typeof(int), typeof(bool) },
+            modifiers: null);
+        method.Should().NotBeNull();
+
+        for (int i = 0; i < 3; i++)
+            method!.Invoke(agent, new object[] { "prompt", "user", int.MaxValue, false });
+
+        contextManager.GetFullContext()
+            .Count(m => m.Content != null && m.Content.Contains("[IDE Context]"))
+            .Should().Be(1, "同一轮内多次构建应受幂等保护，只保留一份 IDE Context");
+    }
+
+    /// <summary>
+    /// 回归：身份边界提示必须固化进 _entries（可持久化），而不只是存在于「发射即焚」的
+    /// 本次请求消息列表里。修复前 BuildContextAwareMessages 只在局部 result 中添加边界提示，
+    /// 从不回写 ContextManager，导致 GetFullContext()/ApiHistory 都导不出它；重启或切换会话后，
+    /// 历史中仍留有来源 Agent 身份声明却没有边界提示中和，模型可能沿用旧身份。
+    /// </summary>
+    [Fact]
+    public void BuildContextAwareMessages_HandoffPrefix_PersistsBoundaryPromptToContextManager()
+    {
+        var contextManager = new ConversationContextManager();
+
+        var context = new AgentContext
+        {
+            ContextManager = contextManager,
+            AllowForwardedMessageReuse = true,
+            ForwardedMessages = new List<ChatApiMessage>
+            {
+                new() { Role = "system", Content = "stable system" },
+                new() { Role = "assistant", Content = "explore" },
+                new() { Role = "tool", Content = "result" },
+            },
+        };
+        var agent = new AskAgent(_apiService)
+        {
+            Context = context,
+        };
+
+        var method = typeof(BaseAgent).GetMethod(
+            "BuildContextAwareMessages",
+            System.Reflection.BindingFlags.Instance | System.Reflection.BindingFlags.NonPublic,
+            binder: null,
+            new[] { typeof(string), typeof(string), typeof(int), typeof(bool) },
+            modifiers: null);
+        method.Should().NotBeNull();
+
+        var messages = (List<ChatApiMessage>)method!.Invoke(
+            agent,
+            new object[] { "Edit agent prompt", "handoff user", int.MaxValue, false })!;
+
+        string boundaryPrompt = messages[3].Content!;
+
+        // 持久化路径：GetFullContext() 从 _entries 导出，模拟 ApiHistory 落盘
+        var persisted = contextManager.GetFullContext();
+        persisted.Should().ContainSingle(
+            m => m.Role == "system" && m.Content == boundaryPrompt,
+            "身份边界提示必须进入 _entries，才能随会话持久化并在重启后生效");
+
+        // 往返验证：序列化再恢复后边界提示仍在（模拟重启 / 会话切换）
+        var restored = new ConversationContextManager();
+        restored.RestoreFullContext(persisted);
+        restored.GetFullContext().Should().ContainSingle(
+            m => m.Role == "system" && m.Content == boundaryPrompt,
+            "重启恢复后身份边界提示必须依然存在");
     }
 
     [Fact]
@@ -490,6 +620,74 @@ public class AskAgentTests
         var result = BuildContextualPromptPublic("我的问题是这个", context);
 
         result.Should().Contain("我的问题是这个");
+    }
+
+    #endregion
+
+    #region IsSummaryHandoff — 计划结束时也应出总结
+
+    /// <summary>
+    /// 回归：IsSummaryHandoff 原先要求 plan.IsCompleted，但只要有步骤失败或被取消，
+    /// IsCompleted 就是 false，整个摘要处理会被跳过、落到普通问答分支；
+    /// 而 Handoff 传来的 prompt 本就是「请生成最终总结」。
+    /// 实测一轮 6 步计划中步骤 6 失败后命中该路径，最终气泡 content 为空、总结丢失。
+    /// </summary>
+    [Fact]
+    public void IsSummaryHandoff_PlanWithFailedStep_IsTreatedAsSummary()
+    {
+        var plan = new AgentTaskPlan { Title = "含失败步骤的计划" };
+        plan.Steps.Add(new AgentStep { Index = 1, Title = "第一步", Status = AgentStepStatus.Completed });
+        plan.Steps.Add(new AgentStep { Index = 2, Title = "第二步", Status = AgentStepStatus.Failed });
+
+        plan.IsCompleted.Should().BeFalse("有失败步骤时 IsCompleted 为 false，这正是原先漏判的原因");
+
+        var context = new AgentContext { ActivePlan = plan };
+
+        IsSummaryHandoffPublic(context).Should().BeTrue(
+            "计划已停止推进（含失败步骤），仍应生成变更总结");
+    }
+
+    [Fact]
+    public void IsSummaryHandoff_CompletedPlan_IsTreatedAsSummary()
+    {
+        // 注：IsCompleted 是可写属性（不是按步骤推导的），须显式置位
+        var plan = new AgentTaskPlan { Title = "全部完成的计划", IsCompleted = true };
+        plan.Steps.Add(new AgentStep { Index = 1, Title = "第一步", Status = AgentStepStatus.Completed });
+
+        var context = new AgentContext { ActivePlan = plan };
+
+        IsSummaryHandoffPublic(context).Should().BeTrue();
+    }
+
+    [Fact]
+    public void IsSummaryHandoff_CancelledPlan_IsTreatedAsSummary()
+    {
+        var plan = new AgentTaskPlan { Title = "已取消的计划", IsCancelled = true };
+        plan.Steps.Add(new AgentStep { Index = 1, Title = "第一步", Status = AgentStepStatus.Pending });
+
+        var context = new AgentContext { ActivePlan = plan };
+
+        IsSummaryHandoffPublic(context).Should().BeTrue("取消的计划同样需要给用户结论");
+    }
+
+    [Fact]
+    public void IsSummaryHandoff_NoPlan_IsNotSummary()
+    {
+        // 纯问答没有计划，必须保持普通问答路径，不受本次放宽影响
+        IsSummaryHandoffPublic(new AgentContext()).Should().BeFalse();
+    }
+
+    [Fact]
+    public void IsSummaryHandoff_PlanStillRunning_IsNotSummary()
+    {
+        // 仍在推进（有 Pending 步骤、无失败）不应提前被当成收尾总结
+        var plan = new AgentTaskPlan { Title = "进行中的计划" };
+        plan.Steps.Add(new AgentStep { Index = 1, Title = "第一步", Status = AgentStepStatus.Completed });
+        plan.Steps.Add(new AgentStep { Index = 2, Title = "第二步", Status = AgentStepStatus.Pending });
+
+        var context = new AgentContext { ActivePlan = plan };
+
+        IsSummaryHandoffPublic(context).Should().BeFalse("计划尚未结束，不应提前总结");
     }
 
     #endregion
@@ -640,6 +838,20 @@ const y = 2;
 
     // ──────────── Reflection helpers for testing private methods ────────────
 
+    private static string SummarizeForLogPublic(string? message)
+    {
+        var method = typeof(AskAgent).GetMethod("SummarizeForLog",
+            System.Reflection.BindingFlags.NonPublic | System.Reflection.BindingFlags.Static);
+        return (string)method!.Invoke(null, new object?[] { message })!;
+    }
+
+    private static bool IsSummaryHandoffPublic(AgentContext context)
+    {
+        var method = typeof(AskAgent).GetMethod("IsSummaryHandoff",
+            System.Reflection.BindingFlags.NonPublic | System.Reflection.BindingFlags.Static);
+        return (bool)method!.Invoke(null, new object[] { context })!;
+    }
+
     private static string BuildSummaryMarkdownPublic(AgentTaskPlan plan, string? aiSummary)
     {
         var method = typeof(AskAgent).GetMethod("BuildSummaryMarkdown",
@@ -666,5 +878,64 @@ const y = 2;
         var method = typeof(AskAgent).GetMethod("StripToolCallMarkers",
             System.Reflection.BindingFlags.NonPublic | System.Reflection.BindingFlags.Static);
         return (string)method!.Invoke(null, new object[] { text })!;
+    }
+
+    // ──────────── 提示词回显压缩（不进 UI 时间线） ────────────
+
+    /// <summary>
+    /// 回归：askStarted 的占位符是整段提示词，最长数 KB。
+    /// 它以 INFO 级别广播给 UI 后会被渲染进过程折叠块，泄漏内部脚手架文案
+    /// （如「自由生成面向用户的最终总结」）并撑大折叠块。
+    /// 现改为只写日志文件，且日志内容压缩为首行 + 长度统计。
+    /// </summary>
+    [Fact]
+    public void SummarizeForLog_MultiLinePrompt_KeepsFirstLineAndStats()
+    {
+        string prompt = string.Join("\n", new[]
+        {
+            "代码修改已完成。请自由生成面向用户的最终总结：不要求固定结构。",
+            "",
+            "**任务**: 输入框与聊天记录中 @ / 蓝色渲染实现计划",
+            "## 步骤执行情况",
+            "- ✅ 步骤 1: 抽取纯函数分词器 + 单元测试 — 修改 2 个文件",
+        });
+
+        string result = SummarizeForLogPublic(prompt);
+
+        result.Should().StartWith("代码修改已完成。");
+        result.Should().Contain("字符");
+        result.Should().Contain("行");
+        // 关键：只保留首行，后续脚手架内容（任务标题、步骤清单）不得带入
+        result.Should().NotContain("步骤执行情况");
+        result.Should().NotContain("步骤 1: 抽取纯函数分词器");
+        result.Should().NotContain("**任务**");
+        // 首行本身被保留（它是提示词的入口句），但整段不得原样透出
+        result.Length.Should().BeLessThan(prompt.Length);
+    }
+
+    [Fact]
+    public void SummarizeForLog_SingleLineShortMessage_ReturnsAsIs()
+    {
+        SummarizeForLogPublic("把@和/都加上蓝色渲染").Should().Be("把@和/都加上蓝色渲染");
+    }
+
+    [Fact]
+    public void SummarizeForLog_VeryLongFirstLine_IsTruncated()
+    {
+        string longLine = new string('长', 500);
+
+        string result = SummarizeForLogPublic(longLine);
+
+        result.Length.Should().BeLessThan(200, "首行过长必须截断，避免日志刷屏");
+        result.Should().Contain("…");
+    }
+
+    [Theory]
+    [InlineData("")]
+    [InlineData("   ")]
+    [InlineData(null)]
+    public void SummarizeForLog_EmptyInput_ReturnsPlaceholder(string? input)
+    {
+        SummarizeForLogPublic(input).Should().Be("(empty)");
     }
 }

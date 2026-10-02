@@ -49,23 +49,26 @@ namespace DeepSeek_v4_for_VisualStudio.View
 
             public string Model { get; }
             public EntrySource Source { get; }
-            private readonly string _customSuffix;
 
-            private ModelListItem(string model, EntrySource source, string customSuffix)
+            private ModelListItem(string model, EntrySource source)
             {
                 Model = model;
                 Source = source;
-                _customSuffix = customSuffix;
             }
 
-            public static ModelListItem Official(string model) => new(model, EntrySource.Official, string.Empty);
+            public static ModelListItem Official(string model) => new(model, EntrySource.Official);
 
-            public static ModelListItem Custom(string model)
-                => new(model, EntrySource.Custom, LocalizationService.Instance["chat.model.customSuffix"]);
+            public static ModelListItem Custom(string model) => new(model, EntrySource.Custom);
 
-            /// <summary>下拉框显示文本：官方条目显示原始模型名，自定义条目追加后缀。</summary>
+            /// <summary>
+            /// 下拉框显示文本：官方条目显示原始模型名，自定义条目追加后缀。
+            /// 后缀实时读取本地化资源（而非构造时缓存），避免语言切换后残留旧语言；
+            /// 注意 DisplayMemberPath 不会自动重新求值，切换语言仍需重建 ItemsSource。
+            /// </summary>
             public string Display
-                => Source == EntrySource.Custom ? Model + _customSuffix : Model;
+                => Source == EntrySource.Custom
+                    ? Model + LocalizationService.Instance["chat.model.customSuffix"]
+                    : Model;
         }
 
         /// <summary>
@@ -353,7 +356,8 @@ namespace DeepSeek_v4_for_VisualStudio.View
         private System.Windows.Threading.DispatcherTimer? _conversationElapsedTimer;
 
         // ── Token 估算校准 ──
-        private long _lastCalibratedPromptTokens; // 上次校准时的 prompt_tokens，避免重复校准
+        // 注：同一次 usage 的去重标记已收敛到 ConversationContextManager 内部
+        //     （_lastCalibratedPromptTokens），此处不再单独维护，避免两处标记各自为政。
 
         // ── 增量渲染状态（对标 Turbo ucChat） ──
         private bool _browserInitialized;
@@ -368,8 +372,16 @@ namespace DeepSeek_v4_for_VisualStudio.View
         /// WebView2 控件（程序化创建，替代 XAML 中的 wv2:WebView2）。
         /// 不在 XAML 中声明以避免 ReSharper 等第三方扩展预加载不同版本的
         /// Microsoft.Web.WebView2.Wpf.dll 导致 XamlParseException (GitHub issue #18)。
+        /// <para>
+        /// 使用视觉托管（Composition）的 <see cref="Microsoft.Web.WebView2.Wpf.WebView2CompositionControl"/>，
+        /// 而非窗口式（Windowed）的 <c>WebView2</c>：窗口式控件在 HwndHost 内创建 Chromium 子 HWND，
+        /// 受 Win32「空域(airspace)」限制，子 HWND 永远绘制在 WPF 合成内容之上——
+        /// 当 VS 自动隐藏的工具窗口（如右侧「Git 更改」弹窗）滑出时，聊天页面的渲染内容
+        /// 会覆盖在弹窗之上 (GitHub issue #31)。组合控件把浏览器画面合成进 WPF 视觉树，
+        /// 参与 VS Shell 的正常 z-order，弹窗可以正确地覆盖聊天窗口。
+        /// </para>
         /// </summary>
-        internal Microsoft.Web.WebView2.Wpf.WebView2 ChatWebView = null!;
+        internal Microsoft.Web.WebView2.Wpf.WebView2CompositionControl ChatWebView = null!;
         /// <summary>抑制 CoreWebView2InitializationCompleted 中的 UpdateBrowser（由 LoadAndShowAsync 显式接管）</summary>
         private bool _suppressWebViewUpdate;
         private int _lastRenderedMessagesLength;
@@ -480,6 +492,13 @@ namespace DeepSeek_v4_for_VisualStudio.View
         private readonly StringBuilder _agentTimelineContent = new();
 
         /// <summary>
+        /// 本轮实际发生的工具调用次数，与 <see cref="_agentTimelineContent"/> 同生命周期：
+        /// 轮次开始时归零，每收到一条 <c>Level == "TOOL"</c> 的日志累加一次。
+        /// 过程折叠块的摘要文案取自该值，而非时间线的行数。
+        /// </summary>
+        private int _agentTurnToolCallCount;
+
+        /// <summary>
         /// 当前 Agent 任务的轮次标识：一轮任务开始时分配，该轮内所有过程消息与
         /// 最终总结共享此值，供前端把过程输出聚合为可折叠分组。Ask 模式下为 null。
         /// </summary>
@@ -527,6 +546,13 @@ namespace DeepSeek_v4_for_VisualStudio.View
                     UpdateInputPlaceholder();
                     UpdateAllTooltips();
                     UpdateUiLabels();
+                    // 联网搜索开关的 ToolTip 由状态决定（开/关两套文案），
+                    // 必须在此刷新，否则语言切换后仍停留在旧语言的 ToolTip。
+                    UpdateWebSearchToggleAppearance();
+                    RefreshSearchEngineItems();
+                    // 模型下拉项的「（自定义端点）」后缀在条目构造时固化，
+                    // 必须重建条目才能跟随语言切换。
+                    RefreshModelFromSettings();
                     RefreshAppendQueuePanel();
                     RefreshBalanceDisplay();
                 });
@@ -536,9 +562,10 @@ namespace DeepSeek_v4_for_VisualStudio.View
             ModelComboBox.ItemsSource = BuildModelListItems();
             ModelComboBox.SelectedIndex = 0;
 
-            EffortComboBox.ItemsSource = new[] { "high", "max" };
+            EffortComboBox.ItemsSource = new[] { "low", "high", "max" };
             // 推理强度初始值稍后在 StartControl 中从设置恢复（此时 _options 尚未赋值）
-            EffortComboBox.SelectedIndex = 0;
+            // 默认档位是 high，在 ItemsSource 中排第 2 位。
+            EffortComboBox.SelectedIndex = 1;
 
             // 初始化审批模式下拉框
             InitializeApprovalModeComboBox();
@@ -546,12 +573,7 @@ namespace DeepSeek_v4_for_VisualStudio.View
             ThinkingCheckBox.IsChecked = true;
 
             // 联网搜索: 默认关闭
-            var L = LocalizationService.Instance;
-            WebSearchEngineComboBox.ItemsSource = new[] {
- " " + L["websearch.searchEngine.baidu"],
- " " + L["websearch.searchEngine.bing"],
- " " + L["websearch.searchEngine.duckduckgo"]
-            };
+            RefreshSearchEngineItems();
             WebSearchEngineComboBox.SelectedIndex = 0; // 默认百度
 
             _webSearchEngine = "Off";
@@ -599,8 +621,11 @@ namespace DeepSeek_v4_for_VisualStudio.View
         /// - XAML 中的 xmlns:wv2 声明会在 BAML 加载时强制 CLR 解析 WebView2 类型。
         /// - 若 ReSharper 已加载不同版本的同名程序集，CLR 可能返回 ReSharper 的版本，
         ///   导致 BAML 类型不匹配 → XamlParseException。
-        /// - 程序化 new WebView2() 避免了 BAML 类型的编译时绑定差异，
+        /// - 程序化 new WebView2CompositionControl() 避免了 BAML 类型的编译时绑定差异，
         ///   即使 ReSharper 版本被加载，其构造函数也足够兼容以创建控件实例。
+        /// - 选用视觉托管（Composition）控件而非窗口式 WebView2：窗口式控件的
+        ///   Chromium 子 HWND 受 Win32 空域限制，始终覆盖 VS 自动隐藏弹窗等 WPF 内容
+        ///   (GitHub issue #31)；组合控件参与 WPF z-order，弹窗可正常置顶。
         /// </summary>
         private void InitializeChatWebView()
         {
@@ -630,7 +655,9 @@ namespace DeepSeek_v4_for_VisualStudio.View
                 }
 
                 // ── 2. 创建 WebView2 控件并放入占位符 ──
-                ChatWebView = new Microsoft.Web.WebView2.Wpf.WebView2();
+                // 视觉托管（Composition）：浏览器画面合成进 WPF 视觉树，无子 HWND，
+                // 修复 VS 自动隐藏弹窗（如「Git 更改」）被聊天内容覆盖的问题 (issue #31)。
+                ChatWebView = new Microsoft.Web.WebView2.Wpf.WebView2CompositionControl();
                 ChatWebViewHost.Content = ChatWebView;
 
                 // ── 3. 订阅初始化完成事件（原在构造函数中直接订阅 ChatWebView）──
@@ -640,7 +667,7 @@ namespace DeepSeek_v4_for_VisualStudio.View
                 ChatWebView.PreviewKeyDown += ChatWebView_PreviewKeyDown;
                 ChatWebView.KeyDown += ChatWebView_PreviewKeyDown;
 
-                Logger.Info("[ChatWebView] WebView2 control created and placed in ChatWebViewHost");
+                Logger.Info("[ChatWebView] WebView2CompositionControl (visual hosting) created and placed in ChatWebViewHost");
             }
             catch (Exception ex)
             {
@@ -1339,7 +1366,9 @@ namespace DeepSeek_v4_for_VisualStudio.View
 
         /// <summary>
         /// 若 API 返回了新的 usage 数据，使用实际 prompt_tokens 校准上下文估算器。
-        /// 只在 prompt_tokens 发生变化时校准一次，避免重复校准。
+        /// 同一次 usage 的去重由 ContextManager.CalibrateFromApiUsage 统一负责——
+        /// 本方法无法感知 BaseAgent 工具循环内的上报，若在此重复判断反而会造成
+        /// 两处标记各自为政（此前正是该原因导致同一 usage 被 EMA 叠加两次）。
         /// </summary>
         private void CalibrateContextIfNeeded()
         {
@@ -1347,10 +1376,8 @@ namespace DeepSeek_v4_for_VisualStudio.View
             if (usage == null) return;
 
             long currentPromptTokens = usage.PromptTokens;
-            if (currentPromptTokens <= 0 || currentPromptTokens == _lastCalibratedPromptTokens)
-                return;
+            if (currentPromptTokens <= 0) return;
 
-            _lastCalibratedPromptTokens = currentPromptTokens;
             _contextManager.CalibrateFromApiUsage(currentPromptTokens);
         }
 
@@ -1549,6 +1576,36 @@ namespace DeepSeek_v4_for_VisualStudio.View
         }
 
         /// <summary>
+        /// 重建搜索引擎下拉项（跟随 i18n 语言设置）。
+        /// 项文本在中英文下不同（如 Baidu / 百度搜索），语言切换时必须重建，
+        /// 否则下拉框停留在旧语言。重建后恢复原选中项，避免切换语言导致引擎被重置。
+        /// </summary>
+        private void RefreshSearchEngineItems()
+        {
+            try
+            {
+                if (WebSearchEngineComboBox == null) return;
+
+                var L = LocalizationService.Instance;
+                int previousIndex = WebSearchEngineComboBox.SelectedIndex;
+
+                WebSearchEngineComboBox.ItemsSource = new[] {
+                    " " + L["websearch.searchEngine.baidu"],
+                    " " + L["websearch.searchEngine.bing"],
+                    " " + L["websearch.searchEngine.duckduckgo"]
+                };
+
+                // 首次构建时 SelectedIndex 为 -1，交由调用方决定默认值
+                if (previousIndex >= 0 && previousIndex < WebSearchEngineComboBox.Items.Count)
+                    WebSearchEngineComboBox.SelectedIndex = previousIndex;
+            }
+            catch (Exception ex)
+            {
+                Logger.Warn($"[i18n] 重建搜索引擎下拉项失败: {ex.Message}");
+            }
+        }
+
+        /// <summary>
         /// 更新所有按钮的 ToolTip 和文本（跟随 i18n 语言设置）。
         /// </summary>
         private void UpdateAllTooltips()
@@ -1739,7 +1796,28 @@ namespace DeepSeek_v4_for_VisualStudio.View
         /// </summary>
         private void RefreshModelFromSettings()
         {
-            if (ModelComboBox == null || _options == null) return;
+            if (ModelComboBox == null) return;
+
+            // _options 尚未注入（如构造函数阶段）时，仍重建条目以刷新语言相关的后缀，
+            // 并按模型名保留原选中项，避免语言切换后回落到第一项。
+            if (_options == null)
+            {
+                var previous = ModelComboBox.SelectedItem as ModelListItem;
+                ModelComboBox.ItemsSource = BuildModelListItems();
+                if (previous != null)
+                {
+                    foreach (var item in ModelComboBox.Items.OfType<ModelListItem>())
+                    {
+                        if (item.Source == previous.Source &&
+                            string.Equals(item.Model, previous.Model, StringComparison.OrdinalIgnoreCase))
+                        {
+                            ModelComboBox.SelectedItem = item;
+                            break;
+                        }
+                    }
+                }
+                return;
+            }
 
             ModelComboBox.ItemsSource = BuildModelListItems();
 
@@ -1778,7 +1856,8 @@ namespace DeepSeek_v4_for_VisualStudio.View
         {
             if (EffortComboBox == null || _options == null) return;
             string savedEffort = _options.ReasoningEffort ?? "high";
-            EffortComboBox.SelectedItem = savedEffort == "max" ? "max" : "high";
+            // 只允许下拉框中真实存在的档位，避免设置里残留的非法值让选中项为空。
+            EffortComboBox.SelectedItem = savedEffort is "low" or "high" or "max" ? savedEffort : "high";
         }
 
         /// <summary>

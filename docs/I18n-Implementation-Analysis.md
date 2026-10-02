@@ -67,7 +67,6 @@ LocalizationService.Instance[key] / Format(key, args…)
 agent.build.handoffAskPrompt
 agent.log.buildReconciledStepResult
 agent.log.buildReconciledSteps
-agent.log.codeMemoryUpdated
 agent.log.editAutoSplit
 agent.log.editExplicitRouteSkipHandoff
 agent.log.patchApplied
