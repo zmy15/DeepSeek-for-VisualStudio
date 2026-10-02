@@ -1181,6 +1181,73 @@ public class EditAgentTests
         EditAgent.ClassifyNoToolCallStep(result, coveredByPrevious).Should().Be(expected);
     }
 
+    /// <summary>
+    /// 回归：以文字交付为目的的收尾步骤（如「回归风险清单与手动验证」）不产生文件修改，
+    /// 回复又长又有结构，原先被长度闸门冤判为 TextOnlyFailure 导致整轮失败。
+    /// 含结构化交付物（标题/列表/表格）且声明完成时长回复应判为已完成。
+    /// </summary>
+    [Fact]
+    public void ClassifyNoToolCallStep_LongStructuredDeliverable_IsConfirmedNoChange()
+    {
+        // 还原截图里步骤 6 的实际输出形态：说明已完成 + 风险清单 + 表格
+        string step6 = string.Join("\n", new[]
+        {
+            "本步骤已完成。代码修改已由前序步骤落盘，此处不再改动文件。",
+            "",
+            "## 回归风险清单",
+            "",
+            "- MentionTokenizer 边界：空输入与全空白输入需重点验证",
+            "- XAML 高亮层：滚动同步在超长文档下可能滞后",
+            "- WebView2 消息高亮：需确认 Regenerate 后再次高亮不重复",
+            "",
+            "## 手动验证步骤",
+            "",
+            "1. 打开聊天窗口，发送包含 @文件 的消息，确认蓝色高亮出现",
+            "2. 滚动编辑器，确认高亮层与文本同步刷新",
+            "3. 触发 Regenerate，确认高亮不叠加",
+        });
+
+        EditAgent.ClassifyNoToolCallStep(step6, coveredByPreviousSteps: false)
+            .Should().Be(EditAgent.StepNoToolCallOutcome.ConfirmedNoChange,
+                "结构化交付物应以完成收尾，而非判失败");
+    }
+
+    /// <summary>
+    /// 反向保护：长篇「辩解式」叙述即使很长也不算交付物，长度闸门对借口仍然有效。
+    /// 这是 IsNoChangesResponse 长度限制的原始目的，不得被上面的放行破坏。
+    /// 注：文本必须真的超过 200 字符才会走到结构判定分支，否则测的是短回复路径。
+    /// </summary>
+    [Theory]
+    [InlineData("由于前序步骤已经把两处修复全部落盘，且构建已通过，因此不再重复读取或构建，仅说明本轮情况即可，无需再次执行任何操作。")]
+    [InlineData("已经完成。前面几步已经把所有需要改的地方都改完了，所以这里没有必要再调用任何工具去读取或修改文件，直接说明一下当前的状态就可以了，不需要再做别的事情。")]
+    public void ClassifyNoToolCallStep_LongUnstructuredExcuse_StillFails(string excuse)
+    {
+        // 补足长度确保跨过 200 字符闸门，进入结构判定：这才是要保护的分支
+        string padded = excuse + new string('说', 150);
+        padded.Length.Should().BeGreaterThan(200, "用例必须长于长度闸门，否则测不到结构判定");
+
+        EditAgent.ClassifyNoToolCallStep(padded, coveredByPreviousSteps: false)
+            .Should().Be(EditAgent.StepNoToolCallOutcome.TextOnlyFailure,
+                "无结构的冗长辩解不构成交付物");
+    }
+
+    /// <summary>
+    /// 反向保护：单行列表噪声不足以判定为交付物（需至少两条结构性线索）。
+    /// </summary>
+    [Fact]
+    public void ClassifyNoToolCallStep_SingleStructuralLine_StillFails()
+    {
+        string text = "已完成。本步骤无需修改任何文件，因此没有再调用工具，具体原因如上所述，"
+            + "前序步骤已经覆盖了全部改动点，这里只是做一次简短的收尾说明，确保流程闭环即可。"
+            + new string('补', 150) + "\n- 无";
+
+        text.Length.Should().BeGreaterThan(200, "用例必须长于长度闸门，否则测不到结构判定");
+
+        EditAgent.ClassifyNoToolCallStep(text, coveredByPreviousSteps: false)
+            .Should().Be(EditAgent.StepNoToolCallOutcome.TextOnlyFailure,
+                "仅一条列表项不足以构成结构化交付物");
+    }
+
     #endregion
 
     // ──────────── Reflection helpers for testing private methods ────────────
