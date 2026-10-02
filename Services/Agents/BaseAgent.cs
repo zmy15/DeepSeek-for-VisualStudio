@@ -24,7 +24,7 @@ namespace DeepSeek_v4_for_VisualStudio.Services.Agents
     public abstract class BaseAgent : IDisposable
     {
         /// <summary>Ask Agent 直接探索工具的最大累计调用次数。</summary>
-        internal const int AskDirectExplorationCallLimit = 3;
+        internal const int AskDirectExplorationCallLimit = 5;
 
         protected readonly DeepSeekApiService _apiService;
         protected readonly List<AgentLogEntry> _logs = new();
@@ -1636,7 +1636,7 @@ namespace DeepSeek_v4_for_VisualStudio.Services.Agents
                         }
                     }
 
-                    // ── Ask Agent 直接探索预算：超过 3 次后不再自己读/搜，强制委派 Explore。──
+                    // ── Ask Agent 直接探索预算：超过 AskDirectExplorationCallLimit 次后不再自己读/搜，强制委派 Explore。──
                     HashSet<int>? blockedDirectExplorationIndices = null;
                     bool canDelegateAskExploration = Definition.Type == AgentType.Ask
                         && ExploreAgent != null
@@ -1755,7 +1755,9 @@ namespace DeepSeek_v4_for_VisualStudio.Services.Agents
                         if (blockedDirectExplorationIndices?.Contains(idx) == true)
                         {
                             return Task.FromResult(LocalizationService.Instance.Format(
-                                "tool.ask.explorationLimitReached", AskDirectExplorationCallLimit));
+                                "tool.ask.explorationLimitReached",
+                                askDirectExplorationCallCount,
+                                AskDirectExplorationCallLimit));
                         }
 
                         // ── 白名单拦截：不在白名单中的工具不执行，返回拒绝消息 ──
