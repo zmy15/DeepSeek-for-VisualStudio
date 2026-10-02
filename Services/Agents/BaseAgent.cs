@@ -417,7 +417,8 @@ namespace DeepSeek_v4_for_VisualStudio.Services.Agents
         /// <summary>
         /// 当前 Agent 最近一次可观测活动，用于子代理看门狗超时时报告卡住阶段。
         /// </summary>
-        internal string CurrentActivity { get; private set; } = "尚未开始";
+        internal string CurrentActivity { get; private set; } =
+            LocalizationService.Instance["agent.currentActivity.notStarted"];
 
         protected BaseAgent(DeepSeekApiService apiService, AgentType agentType)
         {
@@ -1208,7 +1209,7 @@ namespace DeepSeek_v4_for_VisualStudio.Services.Agents
 
                 // ── P0 Telemetry：本轮 LLM 请求计时开始（TTFT/耗时基准）──
                 metrics?.BeginTurn(round);
-                CurrentActivity = $"等待模型响应（第 {round} 轮）";
+                CurrentActivity = LocalizationService.Instance.Format("agent.currentActivity.waitingModel", round);
 
                 // ── 同步当前轮次到文件读取缓存，用于轮数过期策略 ──
                 if (BuiltInTools != null)
@@ -1320,11 +1321,11 @@ namespace DeepSeek_v4_for_VisualStudio.Services.Agents
                             });
 
                             string tailContent = savedPartialContent.Length > 300
-                                ? "…(截断)…" + savedPartialContent.Substring(savedPartialContent.Length - 300)
+                                ? LocalizationService.Instance["agent.resume.truncatedMarker"] + savedPartialContent.Substring(savedPartialContent.Length - 300)
                                 : savedPartialContent;
                             string resumeInstruction = reasoningLoopRetryPending
                                 ? BuildReasoningLoopRetryPrompt(originalUserQuestion)
-                                : $"[系统指令] 你之前的回复因网络中断被截断。以下是已发送的末尾内容：\n```\n{tailContent}\n```\n请从截断处**精确**继续，不要重复任何已发送的内容，不要道歉或解释中断。直接继续未完成的句子或代码块。";
+                                : LocalizationService.Instance.Format("agent.resume.truncated", tailContent);
                             resumeMessages.Add(new ChatApiMessage
                             {
                                 Role = "user",
@@ -1408,7 +1409,7 @@ namespace DeepSeek_v4_for_VisualStudio.Services.Agents
                         // 用户取消导致的流释放，不重试
                         Logger.Info($"[Agent:{Definition.Name}] 流式调用被取消令牌中断");
                         if (contentBuilder.Length == 0)
-                            contentBuilder.Append("\n\n>  操作已被取消。");
+                            contentBuilder.Append(LocalizationService.Instance["agent.cancelledNotice"]);
                         streamSuccess = true; // 不视为失败，正常退出
                     }
                     catch (ObjectDisposedException) when (!ct.IsCancellationRequested && streamAttempt < maxStreamAttempts - 1)
@@ -1430,7 +1431,7 @@ namespace DeepSeek_v4_for_VisualStudio.Services.Agents
                         // 用户取消导致的 IO 异常，不重试
                         Logger.Info($"[Agent:{Definition.Name}] 流式调用被取消令牌中断 (IO)");
                         if (contentBuilder.Length == 0)
-                            contentBuilder.Append("\n\n>  操作已被取消。");
+                            contentBuilder.Append(LocalizationService.Instance["agent.cancelledNotice"]);
                         streamSuccess = true;
                     }
                     catch (IOException) when (!ct.IsCancellationRequested && streamAttempt < maxStreamAttempts - 1)
@@ -1469,7 +1470,7 @@ namespace DeepSeek_v4_for_VisualStudio.Services.Agents
                         toolCallAccumulator.Clear();
                         if (contentBuilder.Length > 0)
                             contentBuilder.AppendLine();
-                        contentBuilder.Append("> 检测到思考过程持续重复，已自动停止本轮生成。请重新提问或缩小任务范围。");
+                        contentBuilder.Append(LocalizationService.Instance["agent.thinkingLoopStopped"]);
                         streamSuccess = true;
                         metrics?.MarkTerminated("reasoning_loop");
                     }
@@ -1478,7 +1479,7 @@ namespace DeepSeek_v4_for_VisualStudio.Services.Agents
                         // 用户取消，不重试
                         Logger.Info($"[Agent:{Definition.Name}] 流式调用被取消");
                         if (contentBuilder.Length == 0)
-                            contentBuilder.Append("\n\n>  操作已被取消。");
+                            contentBuilder.Append(LocalizationService.Instance["agent.cancelledNotice"]);
                         streamSuccess = true;
                     }
                 }
@@ -1492,7 +1493,7 @@ namespace DeepSeek_v4_for_VisualStudio.Services.Agents
                         string partial = contentBuilder.Length > 0 ? contentBuilder.ToString() : savedPartialContent;
                         contentBuilder.Clear();
                         contentBuilder.Append(partial);
-                        contentBuilder.Append($"\n\n>  网络连接在 {maxStreamAttempts} 次重试后仍未恢复。请点击重试按钮从中断处继续。");
+                        contentBuilder.Append(LocalizationService.Instance.Format("agent.streamRetryExhausted", maxStreamAttempts));
                     }
                     else
                     {
@@ -1676,7 +1677,7 @@ namespace DeepSeek_v4_for_VisualStudio.Services.Agents
                 if (toolCalls.Count > 0)
                 {
                     Logger.Info($"[Agent:{Definition.Name}] 检测到 {toolCalls.Count} 个工具调用: {string.Join(", ", toolCalls.Select(t => t.Function.Name))}");
-                    CurrentActivity = $"执行工具（第 {round} 轮）: " +
+                    CurrentActivity = LocalizationService.Instance.Format("agent.currentActivity.executingTool", round) +
                         string.Join(", ", toolCalls.Select(t => t.Function.Name));
 
                     // ── 去重：检测同一批次中完全相同的工具调用（同函数名+同参数），避免重复执行 ──
@@ -1834,8 +1835,7 @@ namespace DeepSeek_v4_for_VisualStudio.Services.Agents
                         if (suppressedAskQuestionIndices?.Contains(idx) == true)
                         {
                             return Task.FromResult(
-                                "Error: 本阶段已经收到用户回答，禁止再次调用 VisualStudio_askQuestions。" +
-                                "请立即基于用户回答继续，不要重复提问；需求对齐阶段必须只回复 DONE。");
+                                LocalizationService.Instance["agent.ask.answerAlreadyReceived"]);
                         }
 
                         if (blockedDirectExplorationIndices?.Contains(idx) == true)
@@ -1851,23 +1851,20 @@ namespace DeepSeek_v4_for_VisualStudio.Services.Agents
                         {
                             string allowedList = effectiveWhitelist != null
                                 ? string.Join(", ", effectiveWhitelist)
-                                : "无";
+                                : LocalizationService.Instance["agent.none"];
+                            var L = LocalizationService.Instance;
                             return Task.FromResult(
-                                $"Error: 工具 '{tc.Function.Name}' 在当前 Agent/阶段不可用。\n" +
-                                $"原因：该工具不在当前白名单中。\n" +
-                                $"当前可用工具: {allowedList}\n" +
-                                "这是确定性配置错误，不要重复调用该工具。\n" +
-                                "请改用当前可用工具继续；如果任务无法在当前 Agent 完成，" +
-                                (effectiveWhitelist.Contains("request_handoff", StringComparer.OrdinalIgnoreCase)
-                                    ? "请立即调用 request_handoff 移交给合适的 Agent。"
-                                    : "请直接说明无法完成的原因。") +
-                                "\n再次发生白名单外工具调用将终止本轮工具循环。");
+                                L.Format("agent.toolNotAvailable", tc.Function.Name, allowedList)
+                                + (effectiveWhitelist!.Contains("request_handoff", StringComparer.OrdinalIgnoreCase)
+                                    ? L["agent.toolNotAvailableHandoff"]
+                                    : L["agent.toolNotAvailableExplain"])
+                                + L["agent.toolNotAvailableTerminate"]);
                         }
                         var timeout = GetToolTimeout(NormalizeToolName(tc.Function.Name));
                         return ExecuteToolWithTelemetryAsync(metrics, round, tc, workspaceRoot, ct, timeout);
                     }).ToList();
                     var dedupedResults = await Task.WhenAll(toolTasks).ConfigureAwait(false);
-                    CurrentActivity = $"工具已完成（第 {round} 轮），准备下一轮";
+                    CurrentActivity = LocalizationService.Instance.Format("agent.currentActivity.toolDone", round);
 
                     if (canDelegateAskExploration
                         && dedupedIndices
@@ -2031,8 +2028,9 @@ namespace DeepSeek_v4_for_VisualStudio.Services.Agents
                         metrics?.MarkTerminated("whitelist_rejection");
 
                         var terminatedBuilder = new StringBuilder().Append(contentBuilder);
-                        terminatedBuilder.Append($"\n\n>  连续 {rejectedToolRounds} 轮调用白名单外工具: {distinctRejectedTools}。");
-                        terminatedBuilder.Append("\n> 已终止工具循环。请检查阶段工具配置后重新发起任务。");
+                        terminatedBuilder.Append(LocalizationService.Instance.Format(
+                            "agent.noToolCallsTerminated", rejectedToolRounds, distinctRejectedTools));
+                        terminatedBuilder.Append(LocalizationService.Instance["agent.noToolCallsTerminatedHint"]);
                         contentBuilder.Clear();
                         contentBuilder.Append(terminatedBuilder.ToString());
                         break;
@@ -2056,7 +2054,8 @@ namespace DeepSeek_v4_for_VisualStudio.Services.Agents
                                 ?? new List<ChatApiMessage>(messages);
                             Context.ForwardedMessages = PrepareHandoffCacheMessages(sentMessages);
                         }
-                        contentBuilder.Append("\n\n>  任务已移交给 " + PendingHandoffRequest.TargetAgent + " Agent...");
+                        contentBuilder.Append(LocalizationService.Instance.Format(
+                    "agent.handoffNotice", PendingHandoffRequest.TargetAgent));
                         break;
                     }
 
@@ -2123,11 +2122,11 @@ namespace DeepSeek_v4_for_VisualStudio.Services.Agents
 
                                 if (toolCallHistory.Count > 0)
                                 {
-                                    terminatedBuilder.Append("\n\n---\n###  此前 AI 执行的操作\n");
+                                    terminatedBuilder.Append(LocalizationService.Instance["agent.priorOperationsHeader"]);
                                     int startRound = toolCallHistory[0].Round;
                                     foreach (var (r, summary) in toolCallHistory)
                                     {
-                                        string prefix = r == round ? "" : $"第{r - startRound + 1}轮";
+                                        string prefix = r == round ? "" : LocalizationService.Instance.Format("agent.roundLabel", r - startRound + 1);
                                         terminatedBuilder.AppendLine($"- {prefix} {summary}");
                                     }
                                 }
@@ -2136,10 +2135,12 @@ namespace DeepSeek_v4_for_VisualStudio.Services.Agents
                                 {
                                     string result = toolResults[i];
                                     if (!string.IsNullOrWhiteSpace(result))
-                                        terminatedBuilder.Append($"\n\n###  最后一次 `{toolCalls[i].Function.Name}` 结果\n\n{result}");
+                                        terminatedBuilder.Append(LocalizationService.Instance.Format(
+                            "agent.lastToolResultHeader", toolCalls[i].Function.Name, result));
                                 }
 
-                                terminatedBuilder.Append($"\n\n>  检测到 `{toolName}` 重复调用 {repeatCount} 次且每次返回相同结果，已自动终止循环。请根据以上工具结果修复问题后重新请求。");
+                                terminatedBuilder.Append(LocalizationService.Instance.Format(
+                            "agent.repeatedResultTerminated", toolName, repeatCount));
                                 contentBuilder.Clear();
                                 contentBuilder.Append(terminatedBuilder.ToString());
                                 break;
@@ -2206,11 +2207,11 @@ namespace DeepSeek_v4_for_VisualStudio.Services.Agents
                             // 2. 历史工具调用总结
                             if (toolCallHistory.Count > 0)
                             {
-                                terminatedBuilder.Append("\n\n---\n###  此前 AI 执行的操作\n");
+                                terminatedBuilder.Append(LocalizationService.Instance["agent.priorOperationsHeader"]);
                                 int startRound = toolCallHistory[0].Round;
                                 foreach (var (r, summary) in toolCallHistory)
                                 {
-                                    string prefix = r == round ? "" : $"第{r - startRound + 1}轮";
+                                    string prefix = r == round ? "" : LocalizationService.Instance.Format("agent.roundLabel", r - startRound + 1);
                                     terminatedBuilder.AppendLine($"- {prefix} {summary}");
                                 }
                             }
@@ -2221,11 +2222,13 @@ namespace DeepSeek_v4_for_VisualStudio.Services.Agents
                                 string result = toolResults[i];
                                 if (!string.IsNullOrWhiteSpace(result))
                                 {
-                                    terminatedBuilder.Append($"\n\n###  最后一次 `{toolCalls[i].Function.Name}` 结果\n\n{result}");
+                                    terminatedBuilder.Append(LocalizationService.Instance.Format(
+                            "agent.lastToolResultHeader", toolCalls[i].Function.Name, result));
                                 }
                             }
 
-                            terminatedBuilder.Append($"\n\n>  连续 {consecutiveErrorRounds} 轮工具调用均失败，已自动终止。");
+                            terminatedBuilder.Append(LocalizationService.Instance.Format(
+                        "agent.consecutiveErrorsTerminated", consecutiveErrorRounds));
                             contentBuilder.Clear();
                             contentBuilder.Append(terminatedBuilder.ToString());
                         }
@@ -2247,13 +2250,14 @@ namespace DeepSeek_v4_for_VisualStudio.Services.Agents
 
         internal static string BuildReasoningLoopRetryPrompt(string? originalUserQuestion)
         {
-            const string instruction =
-                "[系统指令] 检测到你刚才的思考在原地打转。不要重复已经分析过的内容。只总结已经确认的事实、当前最重要的下一步，然后直接继续完成用户任务。";
+            string instruction =
+                LocalizationService.Instance["agent.reasoningLoopInstruction"];
 
             if (string.IsNullOrWhiteSpace(originalUserQuestion))
                 return instruction;
 
-            return $"{instruction}\n\n原始用户提问：\n{originalUserQuestion}";
+            return LocalizationService.Instance.Format(
+                "agent.reasoningLoopWithQuestion", instruction, originalUserQuestion);
         }
 
         /// <summary>
@@ -2340,7 +2344,7 @@ namespace DeepSeek_v4_for_VisualStudio.Services.Agents
                 catch (Exception ex)
                 {
                     Logger.Error($"[Agent:{Definition.Name}] 工具 {tc.Function.Name} 执行异常: {ex.Message}", ex);
-                    return $"Error: 工具执行异常: {ex.Message}";
+                    return LocalizationService.Instance.Format("agent.toolExecutionFailed", ex.Message);
                 }
             }
 
@@ -2361,19 +2365,21 @@ namespace DeepSeek_v4_for_VisualStudio.Services.Agents
                     // 超时 — 取消工具执行
                     timeoutCts.Cancel();
                     Logger.Warn($"[Agent:{Definition.Name}] Timeout: 工具 {tc.Function.Name} 执行超时 ({timeout.TotalSeconds:F0}s)，已终止");
-                    return $"Timeout: 工具 {tc.Function.Name} 执行超时（{timeout.TotalSeconds:F0}s），已跳过。";
+                    return LocalizationService.Instance.Format(
+                        "agent.toolTimeoutSkipped", tc.Function.Name, timeout.TotalSeconds.ToString("F0"));
                 }
             }
             catch (OperationCanceledException) when (!ct.IsCancellationRequested)
             {
                 // 仅由 timeoutCts 触发（非外部 ct）
                 Logger.Warn($"[Agent:{Definition.Name}] Timeout: 工具 {tc.Function.Name} 执行超时 ({timeout.TotalSeconds:F0}s)，已终止");
-                return $"Timeout: 工具 {tc.Function.Name} 执行超时（{timeout.TotalSeconds:F0}s），已跳过。";
+                return LocalizationService.Instance.Format(
+                        "agent.toolTimeoutSkipped", tc.Function.Name, timeout.TotalSeconds.ToString("F0"));
             }
             catch (Exception ex)
             {
                 Logger.Error($"[Agent:{Definition.Name}] 工具 {tc.Function.Name} 执行异常: {ex.Message}", ex);
-                return $"Error: 工具执行异常: {ex.Message}";
+                return LocalizationService.Instance.Format("agent.toolExecutionFailed", ex.Message);
             }
         }
 
@@ -2494,13 +2500,13 @@ namespace DeepSeek_v4_for_VisualStudio.Services.Agents
                                 if (completed != executionTask)
                                 {
                                     subagentCts.Cancel();
-                                    string timeoutMessage =
-                                        $"子 Agent 看门狗超时（{watchdogTimeout.TotalMinutes:F0} 分钟），" +
-                                        $"已取消。最后活动: {exploreAgent.CurrentActivity}";
+                                    string timeoutMessage = LocalizationService.Instance.Format(
+                                        "agent.subagentWatchdogTimeout",
+                                        watchdogTimeout.TotalMinutes.ToString("F0"), exploreAgent.CurrentActivity);
                                     Logger.Warn($"[Subagent:{traceId}] {timeoutMessage}; task={ctx.Description.Truncate(120)}");
                                     AddLog("WARN", $"[{Definition.Type}][{traceId}] {timeoutMessage}");
                                     _ = ObserveSubagentCompletionAsync(executionTask, traceId);
-                                    return $"Timeout: {timeoutMessage}。请缩小探索范围后重试。";
+                                    return LocalizationService.Instance.Format("agent.subagentWatchdogRetry", timeoutMessage);
                                 }
                             }
 
@@ -2524,7 +2530,9 @@ namespace DeepSeek_v4_for_VisualStudio.Services.Agents
                                 // ── 通过 AddLog 触发 LogEntryAdded 事件，使 UI 实时更新执行进度 ──
                                 //     修复：之前仅用 _logs.Add() 导入日志，不触发事件，
                                 //     导致 @agent 路由时 UI 思考面板不显示 ExploreAgent 执行流程。
-                                AddLog("INFO", $"[Explore] 探索完成: {exploreResult.Logs.Count} 条日志, {exploreResult.Content?.Length ?? 0} 字符结果");
+                                AddLog("INFO", "[Explore] " + LocalizationService.Instance.Format(
+                                    "agent.log.exploreDoneWithLogs",
+                                    exploreResult.Logs.Count, exploreResult.Content?.Length ?? 0));
                                 Logger.Info($"[{Definition.Name}][Explore] ExploreAgent 完成: {exploreResult.Logs.Count} 条日志, {exploreResult.Content?.Length ?? 0} 字符结果");
                             }
                         }
@@ -2555,17 +2563,19 @@ namespace DeepSeek_v4_for_VisualStudio.Services.Agents
                         }
 
                         return exploreResult.Success
-                            ? "(ExploreAgent 完成但无内容)"
-                            : $"Error: ExploreAgent 失败: {exploreResult.ErrorMessage ?? "未知错误"}";
+                            ? LocalizationService.Instance["agent.exploreNoContent"]
+                            : LocalizationService.Instance.Format("agent.exploreFailed",
+                                exploreResult.ErrorMessage ?? LocalizationService.Instance["agent.unknownError"]);
                     }
                     catch (OperationCanceledException) when (!ct.IsCancellationRequested && subagentCts.IsCancellationRequested)
                     {
-                        string timeoutMessage =
-                            $"子 Agent 看门狗超时（{watchdogTimeout.TotalMinutes:F0} 分钟），" +
-                            $"已取消。最后活动: {activeExploreAgent?.CurrentActivity ?? "启动前"}";
+                        string timeoutMessage = LocalizationService.Instance.Format(
+                            "agent.subagentWatchdogTimeout",
+                            watchdogTimeout.TotalMinutes.ToString("F0"),
+                            activeExploreAgent?.CurrentActivity ?? LocalizationService.Instance["agent.subagentNotStarted"]);
                         Logger.Warn($"[Subagent:{traceId}] {timeoutMessage}; task={ctx.Description.Truncate(120)}");
                         AddLog("WARN", $"[{Definition.Type}][{traceId}] {timeoutMessage}");
-                        return $"Timeout: {timeoutMessage}。请缩小探索范围后重试。";
+                        return LocalizationService.Instance.Format("agent.subagentWatchdogRetry", timeoutMessage);
                     }
                     catch (OperationCanceledException)
                     {
@@ -2575,7 +2585,7 @@ namespace DeepSeek_v4_for_VisualStudio.Services.Agents
                     catch (Exception ex)
                     {
                         Logger.Error($"[Subagent:{traceId}] runSubagent 异常: {ex.Message}", ex);
-                        return $"Error: runSubagent 执行异常: {ex.Message}";
+                        return LocalizationService.Instance.Format("agent.runSubagentException", ex.Message);
                     }
                 };
             }
@@ -2663,16 +2673,17 @@ namespace DeepSeek_v4_for_VisualStudio.Services.Agents
 
                 if (requiresApproval && !string.IsNullOrWhiteSpace(operation))
                 {
+                    var L = LocalizationService.Instance;
                     string gitOpDesc = operation switch
                     {
-                        "add" => "暂存文件",
-                        "commit" => "提交更改",
-                        "branch" => "分支操作",
-                        "checkout" => "切换分支",
-                        "pull" => "拉取远程更改",
-                        "push" => "推送到远程",
-                        "stash" => "暂存工作区",
-                        "reset" => "回退更改",
+                        "add" => L["agent.approval.gitOp.add"],
+                        "commit" => L["agent.approval.gitOp.commit"],
+                        "branch" => L["agent.approval.gitOp.branch"],
+                        "checkout" => L["agent.approval.gitOp.checkout"],
+                        "pull" => L["agent.approval.gitOp.pull"],
+                        "push" => L["agent.approval.gitOp.push"],
+                        "stash" => L["agent.approval.gitOp.stash"],
+                        "reset" => L["agent.approval.gitOp.reset"],
                         _ => $"git {operation}"
                     };
 
@@ -2681,12 +2692,12 @@ namespace DeepSeek_v4_for_VisualStudio.Services.Agents
                             ? $"git {operation}"
                             : $"git {operation} {approvalReason}";
                     string approvalTitle = flagsRequireApproval
-                        ? $"确认 git {operation} 额外参数"
+                        ? L.Format("agent.approval.confirmGitFlags", operation)
                         : operation == "push"
-                            ? $"确认 git push 操作"
-                            : $"确认 git {operation} 危险操作: {gitOpDesc}";
+                            ? L["agent.approval.confirmGitPush"]
+                            : L.Format("agent.approval.confirmGitDanger", operation, gitOpDesc);
                     string approvalDetail = string.IsNullOrEmpty(purpose)
-                        ? $"AI 请求执行 git {operation} 操作"
+                        ? L.Format("agent.approval.gitRequest", operation)
                         : purpose;
                     if (!string.IsNullOrEmpty(approvalReason))
                     {
@@ -2707,10 +2718,10 @@ namespace DeepSeek_v4_for_VisualStudio.Services.Agents
 
                     if (!approved)
                     {
-                        AddLog("WARN", $"用户拒绝了 git {operation} 操作");
-                        return $"用户跳过了 git 操作: git {operation}";
+                        AddLog("WARN", LocalizationService.Instance.Format("agent.log.gitOperationDenied", operation));
+                        return LocalizationService.Instance.Format("agent.approval.skipGitOperation", operation);
                     }
-                    AddLog("INFO", $"用户批准了 git {operation} 操作");
+                    AddLog("INFO", LocalizationService.Instance.Format("agent.log.gitOperationApproved", operation));
                 }
             }
 
@@ -2743,7 +2754,7 @@ namespace DeepSeek_v4_for_VisualStudio.Services.Agents
                     && RunInTerminalTool.DetectFileEditingCommand(command))
                 {
                     // 只读 Agent：直接拒绝会修改文件的终端命令，不进入审批流程
-                    AddLog("WARN", $"[BLOCKED] 只读 Agent 的文件修改命令被拦截: {command}");
+                    AddLog("WARN", LocalizationService.Instance.Format("agent.log.readOnlyCommandBlocked", command));
                     return RunInTerminalTool.FormatFileEditBlocked(command);
                 }
 
@@ -2751,7 +2762,7 @@ namespace DeepSeek_v4_for_VisualStudio.Services.Agents
                 {
                     bool approved = await RequestTerminalApprovalAsync(command, explanation, purpose, ct);
                     if (!approved)
-                        return $"用户跳过了终端命令: {command}";
+                        return LocalizationService.Instance.Format("agent.approval.skipTerminalCommand", command);
                 }
             }
 
@@ -2778,7 +2789,8 @@ namespace DeepSeek_v4_for_VisualStudio.Services.Agents
                     var paths = new List<string> { filePath };
                     bool approved = await RequestFileDeleteConfirmationAsync(paths, explanation, purpose, ct);
                     if (!approved)
-                        return $"用户取消了文件删除: {System.IO.Path.GetFileName(filePath)}";
+                        return LocalizationService.Instance.Format(
+                    "agent.approval.cancelFileDeletion", System.IO.Path.GetFileName(filePath));
                 }
             }
 
@@ -2813,17 +2825,18 @@ namespace DeepSeek_v4_for_VisualStudio.Services.Agents
                     string fileName = System.IO.Path.GetFileName(targetPath!.TrimEnd('/', '\\'));
                     string displayName = string.IsNullOrEmpty(fileName) ? targetPath : fileName;
 
+                    var L = LocalizationService.Instance;
                     bool approved = await RequestPermissionAsync(
-                        $"确认{operation}项目外路径: {displayName}",
-                        $"AI 正在尝试{operation}当前项目之外的路径：\n\n`{targetPath}`\n\n 该路径不在当前工作区 `{workspaceRoot}` 内。",
+                        L.Format("agent.approval.confirmOutOfWorkspace", operation, displayName),
+                        L.Format("agent.approval.outOfWorkspaceDetail", operation, targetPath, workspaceRoot),
                         "file_access_outside_workspace",
                         "",
-                        $"AI 请求{operation}项目外部路径 `{targetPath}` 以完成任务",
+                        L.Format("agent.approval.outOfWorkspacePurpose", operation, targetPath),
                         ct);
                     if (!approved)
                     {
                         AddLog("WARN", LocalizationService.Instance.Format("agent.log.permissionDenied", targetPath));
-                        return $"[BLOCKED] 用户拒绝了项目外路径{operation}: {targetPath}\n\n"
+                        return L.Format("agent.approval.outOfWorkspaceDenied", operation, targetPath)
                             + string.Format(AiPrompts.OutOfWorkspaceWarning, targetPath, workspaceRoot);
                     }
                     AddLog("INFO", LocalizationService.Instance.Format("agent.log.permissionGranted", targetPath));
@@ -2837,26 +2850,27 @@ namespace DeepSeek_v4_for_VisualStudio.Services.Agents
                 if (!string.IsNullOrWhiteSpace(targetPath) && IsProjectFile(targetPath))
                 {
                     string fileName = System.IO.Path.GetFileName(targetPath);
+                    var Lp = LocalizationService.Instance;
                     string operation = toolName switch
                     {
-                        "replace_string_in_file" => "修改",
-                        "multi_replace_string_in_file" => "批量修改",
-                        "create_file" => "创建",
-                        "apply_patch" => "应用补丁到",
-                        _ => "操作"
+                        "replace_string_in_file" => Lp["agent.op.modify"],
+                        "multi_replace_string_in_file" => Lp["agent.op.batchModify"],
+                        "create_file" => Lp["agent.op.create"],
+                        "apply_patch" => Lp["agent.op.applyPatch"],
+                        _ => Lp["agent.op.generic"]
                     };
                     // 根据工具类型自动推断操作目的
                     string filePurpose = toolName switch
                     {
-                        "create_file" => $"创建新的项目文件 `{fileName}` 以扩展项目功能",
-                        "replace_string_in_file" => $"修改 `{fileName}` 中的项目配置以适配代码变更",
-                        "multi_replace_string_in_file" => $"对 `{fileName}` 进行多处配置调整以适配代码变更",
-                        "apply_patch" => $"向 `{fileName}` 应用代码补丁以完成修改",
-                        _ => $"对项目文件 `{fileName}` 进行必要的配置变更"
+                        "create_file" => Lp.Format("agent.purpose.createFile", fileName),
+                        "replace_string_in_file" => Lp.Format("agent.purpose.replaceString", fileName),
+                        "multi_replace_string_in_file" => Lp.Format("agent.purpose.multiReplace", fileName),
+                        "apply_patch" => Lp.Format("agent.purpose.applyPatch", fileName),
+                        _ => Lp.Format("agent.purpose.generic", fileName)
                     };
                     bool approved = await RequestPermissionAsync(
-                        $"确认{operation}项目文件: {fileName}",
-                        $"即将{operation}项目配置文件 `{fileName}`\n\n路径: {targetPath}\n\n 修改项目文件可能影响构建配置和项目结构。",
+                        Lp.Format("agent.approval.confirmProjectFile", operation, fileName),
+                        Lp.Format("agent.approval.projectFileDetail", operation, fileName, targetPath),
                         "file_write",
                         "",
                         filePurpose,
@@ -2864,7 +2878,7 @@ namespace DeepSeek_v4_for_VisualStudio.Services.Agents
                     if (!approved)
                     {
                         AddLog("WARN", LocalizationService.Instance.Format("agent.log.projectModDenied", fileName));
-                        return $"用户取消了项目文件{operation}: {fileName}";
+                        return Lp.Format("agent.approval.projectFileCancelled", operation, fileName);
                     }
                     AddLog("INFO", LocalizationService.Instance.Format("agent.log.projectModGranted", fileName));
                 }
@@ -2883,7 +2897,7 @@ namespace DeepSeek_v4_for_VisualStudio.Services.Agents
                     }
                     catch (Exception ex)
                     {
-                        return $"Error: MCP 工具调用失败 ({toolName}): {ex.Message}";
+                        return LocalizationService.Instance.Format("agent.mcpToolFailed", toolName, ex.Message);
                     }
                 }
             }
@@ -2896,7 +2910,7 @@ namespace DeepSeek_v4_for_VisualStudio.Services.Agents
                     return result;
             }
 
-            return $"Error: 未知工具: {toolName}";
+            return LocalizationService.Instance.Format("agent.unknownTool", toolName);
         }
 
         #endregion
@@ -2975,7 +2989,7 @@ namespace DeepSeek_v4_for_VisualStudio.Services.Agents
                     // 截断保护
                     if (sb.Length > maxBytes)
                     {
-                        sb.AppendLine("\n>  探索结果已截断（总量超限），完整内容见对话历史。");
+                        sb.AppendLine(LocalizationService.Instance["agent.exploreResultTruncated"]);
                         break;
                     }
                 }
@@ -3013,7 +3027,8 @@ namespace DeepSeek_v4_for_VisualStudio.Services.Agents
                 _ => L["agent.handoff.defaultLabel"]
             };
 
-            string prompt = $"[移交自 {request.SourceAgent}] {request.Reason}\n\n{request.TaskDescription}";
+            string prompt = LocalizationService.Instance.Format(
+                "agent.handoffFrom", request.SourceAgent, request.Reason, request.TaskDescription);
 
             return new AgentHandoff
             {
@@ -3580,19 +3595,20 @@ namespace DeepSeek_v4_for_VisualStudio.Services.Agents
         /// </summary>
         private static string GetToolOperationName(string toolName)
         {
+            var L = LocalizationService.Instance;
             return toolName switch
             {
-                "read_file" => "读取",
-                "list_dir" => "列出目录",
-                "create_file" => "创建文件",
-                "delete_file" => "删除文件",
-                "replace_string_in_file" => "修改",
-                "multi_replace_string_in_file" => "批量修改",
-                "create_directory" => "创建目录",
-                "file_search" => "搜索文件",
-                "grep_search" => "搜索内容",
-                "apply_patch" => "应用补丁到",
-                _ => "访问"
+                "read_file" => L["agent.op.read"],
+                "list_dir" => L["agent.op.listDir"],
+                "create_file" => L["agent.op.createFile"],
+                "delete_file" => L["agent.op.deleteFile"],
+                "replace_string_in_file" => L["agent.op.modify"],
+                "multi_replace_string_in_file" => L["agent.op.batchModify"],
+                "create_directory" => L["agent.op.createDirectory"],
+                "file_search" => L["agent.op.searchFiles"],
+                "grep_search" => L["agent.op.searchContent"],
+                "apply_patch" => L["agent.op.applyPatch"],
+                _ => L["agent.op.access"]
             };
         }
 
@@ -4704,7 +4720,7 @@ namespace DeepSeek_v4_for_VisualStudio.Services.Agents
 
             var request = new AgentPermissionRequest
             {
-                Title = "运行命令?",
+                Title = LocalizationService.Instance["agent.approval.runCommandTitle"],
                 Command = command,
                 ActionType = "terminal_command",
                 Purpose = purpose,
@@ -4729,7 +4745,8 @@ namespace DeepSeek_v4_for_VisualStudio.Services.Agents
                 // 清理
                 _pendingPermissions.TryRemove(request.RequestId, out _);
                 AddLog("INFO", string.Format(LocalizationService.Instance["agent.log.terminalApprovalResult"],
-                    approved ? " 允许" : " 跳过", command));
+                    approved ? LocalizationService.Instance["agent.approval.allowed"]
+                        : LocalizationService.Instance["agent.approval.skipped"], command));
                 return approved;
             }
             finally
@@ -4835,7 +4852,7 @@ namespace DeepSeek_v4_for_VisualStudio.Services.Agents
             }
             catch (Exception ex)
             {
-                return $"Error: VisualStudio_askQuestions 失败: {ex.Message}";
+                return LocalizationService.Instance.Format("agent.approval.askQuestionsFailed", ex.Message);
             }
         }
 
@@ -4876,8 +4893,8 @@ namespace DeepSeek_v4_for_VisualStudio.Services.Agents
 
             var fileNames = filePaths.Select(p => System.IO.Path.GetFileName(p)).ToList();
             string title = filePaths.Count == 1
-                ? $"删除文件: {fileNames[0]}"
-                : $"删除 {filePaths.Count} 个文件";
+                ? LocalizationService.Instance.Format("agent.approval.deleteFileSingle", fileNames[0])
+                : LocalizationService.Instance.Format("agent.approval.deleteFilesMultiple", filePaths.Count);
             string command = !string.IsNullOrEmpty(reason) ? reason : string.Join("\n", filePaths);
 
             var request = new AgentPermissionRequest

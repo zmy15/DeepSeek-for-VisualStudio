@@ -419,7 +419,8 @@ namespace DeepSeek_v4_for_VisualStudio.Services.Agents
 
                     if (System.IO.Directory.Exists(workspaceDir))
                     {
-                        AddLog("INFO", $"[Discover] DTE 未发现文件，回退到目录扫描: {workspaceDir}");
+                        AddLog("INFO", "[Discover] " + LocalizationService.Instance.Format(
+                    "agent.log.discoverDteFallback", workspaceDir));
 
                         var excludeDirs = SharedConstants.ExcludedDirectories;
 
@@ -451,16 +452,19 @@ namespace DeepSeek_v4_for_VisualStudio.Services.Agents
                             }
                             catch (Exception ex)
                             {
-                                AddLog("WARN", $"[Discover] 目录扫描回退失败: {ex.Message}");
+                                AddLog("WARN", "[Discover] " + LocalizationService.Instance.Format(
+                                    "agent.log.discoverDirScanFailed", ex.Message));
                             }
                         });
 
-                        AddLog("INFO", $"[Discover] 目录扫描回退完成: {discoveredFiles.Count} 个文件");
+                        AddLog("INFO", "[Discover] " + LocalizationService.Instance.Format(
+                            "agent.log.discoverDirScanDone", discoveredFiles.Count));
                     }
                 }
                 catch (Exception ex)
                 {
-                    AddLog("WARN", $"[Discover] 目录扫描回退异常: {ex.Message}");
+                    AddLog("WARN", "[Discover] " + LocalizationService.Instance.Format(
+                        "agent.log.discoverDirScanError", ex.Message));
                 }
             }
 
@@ -589,13 +593,15 @@ namespace DeepSeek_v4_for_VisualStudio.Services.Agents
                     }
 
                     if (keywords.Count > 0)
-                        AddLog("INFO", $"[Discover] AI 生成 {keywords.Count} 个关键词: [{string.Join(", ", keywords.Take(10))}]"
+                        AddLog("INFO", "[Discover] " + LocalizationService.Instance.Format(
+                    "agent.log.discoverKeywordsGenerated", keywords.Count, string.Join(", ", keywords.Take(10)))
                             + (keywords.Count > 10 ? $" ... 等 {keywords.Count} 个" : ""));
                 }
             }
             catch (Exception ex)
             {
-                AddLog("WARN", $"[Discover] AI 关键词生成失败 ({ex.Message})，回退到规则提取");
+                AddLog("WARN", "[Discover] " + LocalizationService.Instance.Format(
+                        "agent.log.discoverKeywordGenFailed", ex.Message));
             }
 
             return keywords;
@@ -634,7 +640,8 @@ namespace DeepSeek_v4_for_VisualStudio.Services.Agents
 
             try
             {
-                AddLog("INFO", $"[Discover] 智能文件发现开始: \"{userQuery}\"");
+                AddLog("INFO", "[Discover] " + LocalizationService.Instance.Format(
+                    "agent.log.discoverSmartStart", userQuery));
 
                 // ── 阶段 0: 提取搜索关键词（AI 优先，规则兜底）──
                 var keywords = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
@@ -653,19 +660,20 @@ namespace DeepSeek_v4_for_VisualStudio.Services.Agents
 
                 if (keywords.Count == 0)
                 {
-                    AddLog("INFO", "[Discover] 未提取到有效关键词，回退到全量发现");
+                    AddLog("INFO", "[Discover] " + LocalizationService.Instance["agent.log.discoverNoKeywords"]);
                     return await DiscoverSolutionFilesAsync(solutionPath);
                 }
 
-                AddLog("INFO", $"[Discover] 合并关键词: {keywords.Count} 个 "
-                    + $"(AI: {aiKeywords.Count}, 规则: {ruleKeywords.Count}) "
-                    + $"[{string.Join(", ", keywords.Take(8))}]");
+                AddLog("INFO", "[Discover] " + LocalizationService.Instance.Format(
+                    "agent.log.discoverKeywordsMerged", keywords.Count,
+                    aiKeywords.Count, ruleKeywords.Count,
+                    string.Join(", ", keywords.Take(8))));
 
                 // ── 阶段 1: 收集候选文件 ──
                 var candidateFiles = await DiscoverSolutionFilesAsync(solutionPath, maxFiles: 200);
                 if (candidateFiles.Count == 0)
                 {
-                    AddLog("INFO", "[Discover] 未找到候选文件");
+                    AddLog("INFO", "[Discover] " + LocalizationService.Instance["agent.log.discoverNoCandidates"]);
                     return relevantFiles;
                 }
 
@@ -692,12 +700,14 @@ namespace DeepSeek_v4_for_VisualStudio.Services.Agents
                     .Select(f => f.FilePath)
                     .ToList();
 
-                AddLog("INFO", $"[Discover] 智能文件发现完成: {relevantFiles.Count} 个相关文件 "
-                    + $"(候选: {candidateFiles.Count}, 评分>0: {scoredFiles.Count})");
+                AddLog("INFO", "[Discover] " + LocalizationService.Instance.Format(
+                    "agent.log.discoverSmartDone", relevantFiles.Count,
+                    candidateFiles.Count, scoredFiles.Count));
             }
             catch (Exception ex)
             {
-                AddLog("ERROR", $"[Discover] 智能文件发现失败: {ex.Message}");
+                AddLog("ERROR", "[Discover] " + LocalizationService.Instance.Format(
+                    "agent.log.discoverSmartFailed", ex.Message));
                 // 回退到全量发现
                 relevantFiles = await DiscoverSolutionFilesAsync(solutionPath);
             }

@@ -1192,7 +1192,7 @@ namespace DeepSeek_v4_for_VisualStudio.Services.BuiltInTools
             string stderr = stderrTask.Result;
 
             var sb = new StringBuilder();
-            sb.AppendLine($"git 输出 (退出码: {exitCode}):");
+            sb.AppendLine(LocalizationService.Instance.Format("tool.git.outputHeader", exitCode));
             if (!string.IsNullOrWhiteSpace(stdout))
                 sb.AppendLine(stdout.TrimEnd());
             if (!string.IsNullOrWhiteSpace(stderr))

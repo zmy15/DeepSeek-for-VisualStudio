@@ -49,23 +49,26 @@ namespace DeepSeek_v4_for_VisualStudio.View
 
             public string Model { get; }
             public EntrySource Source { get; }
-            private readonly string _customSuffix;
 
-            private ModelListItem(string model, EntrySource source, string customSuffix)
+            private ModelListItem(string model, EntrySource source)
             {
                 Model = model;
                 Source = source;
-                _customSuffix = customSuffix;
             }
 
-            public static ModelListItem Official(string model) => new(model, EntrySource.Official, string.Empty);
+            public static ModelListItem Official(string model) => new(model, EntrySource.Official);
 
-            public static ModelListItem Custom(string model)
-                => new(model, EntrySource.Custom, LocalizationService.Instance["chat.model.customSuffix"]);
+            public static ModelListItem Custom(string model) => new(model, EntrySource.Custom);
 
-            /// <summary>下拉框显示文本：官方条目显示原始模型名，自定义条目追加后缀。</summary>
+            /// <summary>
+            /// 下拉框显示文本：官方条目显示原始模型名，自定义条目追加后缀。
+            /// 后缀实时读取本地化资源（而非构造时缓存），避免语言切换后残留旧语言；
+            /// 注意 DisplayMemberPath 不会自动重新求值，切换语言仍需重建 ItemsSource。
+            /// </summary>
             public string Display
-                => Source == EntrySource.Custom ? Model + _customSuffix : Model;
+                => Source == EntrySource.Custom
+                    ? Model + LocalizationService.Instance["chat.model.customSuffix"]
+                    : Model;
         }
 
         /// <summary>
@@ -543,6 +546,13 @@ namespace DeepSeek_v4_for_VisualStudio.View
                     UpdateInputPlaceholder();
                     UpdateAllTooltips();
                     UpdateUiLabels();
+                    // 联网搜索开关的 ToolTip 由状态决定（开/关两套文案），
+                    // 必须在此刷新，否则语言切换后仍停留在旧语言的 ToolTip。
+                    UpdateWebSearchToggleAppearance();
+                    RefreshSearchEngineItems();
+                    // 模型下拉项的「（自定义端点）」后缀在条目构造时固化，
+                    // 必须重建条目才能跟随语言切换。
+                    RefreshModelFromSettings();
                     RefreshAppendQueuePanel();
                     RefreshBalanceDisplay();
                 });
@@ -563,12 +573,7 @@ namespace DeepSeek_v4_for_VisualStudio.View
             ThinkingCheckBox.IsChecked = true;
 
             // 联网搜索: 默认关闭
-            var L = LocalizationService.Instance;
-            WebSearchEngineComboBox.ItemsSource = new[] {
- " " + L["websearch.searchEngine.baidu"],
- " " + L["websearch.searchEngine.bing"],
- " " + L["websearch.searchEngine.duckduckgo"]
-            };
+            RefreshSearchEngineItems();
             WebSearchEngineComboBox.SelectedIndex = 0; // 默认百度
 
             _webSearchEngine = "Off";
@@ -1571,6 +1576,36 @@ namespace DeepSeek_v4_for_VisualStudio.View
         }
 
         /// <summary>
+        /// 重建搜索引擎下拉项（跟随 i18n 语言设置）。
+        /// 项文本在中英文下不同（如 Baidu / 百度搜索），语言切换时必须重建，
+        /// 否则下拉框停留在旧语言。重建后恢复原选中项，避免切换语言导致引擎被重置。
+        /// </summary>
+        private void RefreshSearchEngineItems()
+        {
+            try
+            {
+                if (WebSearchEngineComboBox == null) return;
+
+                var L = LocalizationService.Instance;
+                int previousIndex = WebSearchEngineComboBox.SelectedIndex;
+
+                WebSearchEngineComboBox.ItemsSource = new[] {
+                    " " + L["websearch.searchEngine.baidu"],
+                    " " + L["websearch.searchEngine.bing"],
+                    " " + L["websearch.searchEngine.duckduckgo"]
+                };
+
+                // 首次构建时 SelectedIndex 为 -1，交由调用方决定默认值
+                if (previousIndex >= 0 && previousIndex < WebSearchEngineComboBox.Items.Count)
+                    WebSearchEngineComboBox.SelectedIndex = previousIndex;
+            }
+            catch (Exception ex)
+            {
+                Logger.Warn($"[i18n] 重建搜索引擎下拉项失败: {ex.Message}");
+            }
+        }
+
+        /// <summary>
         /// 更新所有按钮的 ToolTip 和文本（跟随 i18n 语言设置）。
         /// </summary>
         private void UpdateAllTooltips()
@@ -1761,7 +1796,28 @@ namespace DeepSeek_v4_for_VisualStudio.View
         /// </summary>
         private void RefreshModelFromSettings()
         {
-            if (ModelComboBox == null || _options == null) return;
+            if (ModelComboBox == null) return;
+
+            // _options 尚未注入（如构造函数阶段）时，仍重建条目以刷新语言相关的后缀，
+            // 并按模型名保留原选中项，避免语言切换后回落到第一项。
+            if (_options == null)
+            {
+                var previous = ModelComboBox.SelectedItem as ModelListItem;
+                ModelComboBox.ItemsSource = BuildModelListItems();
+                if (previous != null)
+                {
+                    foreach (var item in ModelComboBox.Items.OfType<ModelListItem>())
+                    {
+                        if (item.Source == previous.Source &&
+                            string.Equals(item.Model, previous.Model, StringComparison.OrdinalIgnoreCase))
+                        {
+                            ModelComboBox.SelectedItem = item;
+                            break;
+                        }
+                    }
+                }
+                return;
+            }
 
             ModelComboBox.ItemsSource = BuildModelListItems();
 

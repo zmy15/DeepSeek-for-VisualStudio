@@ -108,8 +108,7 @@ namespace DeepSeek_v4_for_VisualStudio.Services.BuiltInTools
                 // ── 构建失败时附加一次性读取提示，避免 AI 逐轮试探 ──
                 if (result.Contains("Error: ") || result.Contains("Build FAILED") || result.Contains("error CS") || result.Contains("error C"))
                 {
-                    result += "\n\n>  **构建失败提示**: 请在单次调用中同时读取**所有**报错文件及行号范围。"
-                        + "不要逐个文件试探。使用并行 read_file 调用（一次发送多个 read_file 请求）可大幅减少轮次。";
+                    result += LocalizationService.Instance["tool.buildSolution.failureHint"];
                 }
 
                 return result;

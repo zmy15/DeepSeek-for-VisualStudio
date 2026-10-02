@@ -350,12 +350,15 @@ namespace DeepSeek_v4_for_VisualStudio.Services.BuiltInTools
             }
             else
             {
-                sb.AppendLine("| # | 符号全名 | 显示名 | 项目 | 文件 | 行 |");
-                sb.AppendLine("|---|----------|--------|------|------|----|");
+                var L = LocalizationService.Instance;
+                sb.AppendLine(L["tool.symbolSearch.tableHeader"]);
+                sb.AppendLine(L["tool.symbolSearch.tableSeparator"]);
                 for (int i = 0; i < results.Count; i++)
                 {
                     var r = results[i];
-                    sb.AppendLine($"| {i + 1} | `{EscapePipe(r.FullName)}` | `{EscapePipe(r.DisplayName)}` | `{EscapePipe(r.ProjectName)}` | `{EscapePipe(r.FileName)}` | {r.LineNumber} |");
+                    sb.AppendLine(L.Format("tool.symbolSearch.tableRow",
+                        i + 1, EscapePipe(r.FullName), EscapePipe(r.DisplayName),
+                        EscapePipe(r.ProjectName), EscapePipe(r.FileName), r.LineNumber));
                 }
             }
 
