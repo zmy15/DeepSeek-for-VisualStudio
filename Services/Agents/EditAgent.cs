@@ -1617,10 +1617,19 @@ namespace DeepSeek_v4_for_VisualStudio.Services.Agents
         /// <summary>
         /// 判断某步骤是否允许调用 build_solution。
         /// 规则（按用户约定）：仅当
-        ///   ① 当前步骤标题/描述明确要求构建（关键词命中），或
+        ///   ① 当前步骤<strong>标题</strong>明确要求构建（关键词命中），或
         ///   ② 当前步骤是计划的最后一步
         /// 时允许构建；其余步骤禁用，避免每个中间步骤都触发一次昂贵的解决方案构建。
         /// </summary>
+        /// <remarks>
+        /// 只匹配 <see cref="AgentStep.Title"/>，不再拼接 <see cref="AgentStep.Description"/>。
+        /// 描述里常出现「确保可编译」「避免编译错误」这类<em>约束性说法</em>，语义上并不要求
+        /// 本步骤执行构建；而中文关键词按子串匹配、无词边界与否定语气识别，一旦纳入描述
+        /// 就会把这类步骤误判为构建意图，令白名单不裁剪 build_solution。
+        /// 标题是计划作者对本步骤动作的凝练表达，作为「是否构建」的判据更可预测。
+        /// 注：代价是标题未写构建、描述却明确要求构建时不再放行；此类步骤仍可依赖
+        /// ②「最后一步」兜底，或由计划作者把构建意图写进标题。
+        /// </remarks>
         /// <param name="step">当前步骤</param>
         /// <param name="plan">所属计划（用于判定是否为最后一步）</param>
         /// <param name="reason">命中的允许原因（用于提示词文案），不允许时为 null</param>
@@ -1630,10 +1639,8 @@ namespace DeepSeek_v4_for_VisualStudio.Services.Agents
             if (step == null || plan == null)
                 return false;
 
-            string text = $"{step.Title} {step.Description}";
-
-            // ① 步骤文本明确要求构建
-            if (ContainsBuildIntent(text))
+            // ① 步骤标题明确要求构建
+            if (ContainsBuildIntent(step.Title))
             {
                 reason = LocalizationService.Instance["agent.step.buildAllowedReasonExplicit"];
                 return true;
