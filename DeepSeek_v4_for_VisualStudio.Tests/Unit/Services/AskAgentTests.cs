@@ -348,15 +348,17 @@ public class AskAgentTests
             agent,
             new object[] { "Edit agent prompt", "handoff user", int.MaxValue, false })!;
 
-        context.ToolHistoryInsertIndex.Should().Be(6);
+        // Handoff 分支不再注入易变块，故尾部结构紧凑：[边界提示][user][Agent 提示词]
+        context.ToolHistoryInsertIndex.Should().Be(5);
         messages[3].Role.Should().Be("system");
         messages[3].Content.Should().NotBeNullOrWhiteSpace();
-        messages[4].Role.Should().Be("system");
-        messages[4].Content.Should().Contain("[IDE Context]");
-        messages[5].Role.Should().Be("user");
-        messages[5].Content.Should().Be("handoff user");
-        messages[6].Role.Should().Be("system");
-        messages[6].Content.Should().Be("Edit agent prompt");
+        messages[4].Role.Should().Be("user");
+        messages[4].Content.Should().Be("handoff user");
+        messages[5].Role.Should().Be("system");
+        messages[5].Content.Should().Be("Edit agent prompt");
+
+        // 易变上下文块（IDE Context）不得在 Handoff 分支重复注入
+        messages.Should().NotContain(m => m.Content != null && m.Content.Contains("[IDE Context]"));
     }
 
     [Fact]
@@ -408,15 +410,139 @@ public class AskAgentTests
         messages[3].Role.Should().Be("system");
         messages[3].Content.Should().NotBeNullOrWhiteSpace();
 
-        // volatile 重注入、新任务 user 与 Edit 提示词位于末尾
-        messages[4].Role.Should().Be("system");
-        messages[4].Content.Should().Contain("[IDE Context]");
-        messages[5].Role.Should().Be("user");
-        messages[5].Content.Should().Be("handoff user");
-        messages[6].Role.Should().Be("system");
-        messages[6].Content.Should().Be("Edit agent prompt");
+        // Handoff 分支不再重复注入 volatile 块，改为紧接 [新任务 user][Edit 提示词]
+        messages[4].Role.Should().Be("user");
+        messages[4].Content.Should().Be("handoff user");
+        messages[5].Role.Should().Be("system");
+        messages[5].Content.Should().Be("Edit agent prompt");
 
-        context.ToolHistoryInsertIndex.Should().Be(6);
+        // 易变上下文块只应保留快照中那一份（[1]），不得在此处再次注入
+        messages.Count(m => m.Content != null && m.Content.Contains("[IDE Context]"))
+            .Should().Be(0, "Handoff 分支不得重复注入 IDE Context");
+
+        context.ToolHistoryInsertIndex.Should().Be(5);
+    }
+
+    /// <summary>
+    /// 回归：@agent 显式路由等不经 AskAgent 的路径，其 BuildContextAwareMessages 调用
+    /// 不传 persistVolatileToHistory（默认 false）。修复前易变上下文块只临时进入本次请求，
+    /// 不落 _entries，重启后 IDE Context 丢失。现在内部默认尝试固化，修复该缺口。
+    /// </summary>
+    [Fact]
+    public void BuildContextAwareMessages_NonHandoff_PersistsVolatileToEntriesByDefault()
+    {
+        var contextManager = new ConversationContextManager();
+        contextManager.SetIdeContext("[IDE Context] Active File: Test.cs");
+        contextManager.AddUserMessage("@Edit 修复这个 bug");
+
+        var context = new AgentContext
+        {
+            ContextManager = contextManager,
+        };
+        var agent = new AskAgent(_apiService)
+        {
+            Context = context,
+        };
+
+        var method = typeof(BaseAgent).GetMethod(
+            "BuildContextAwareMessages",
+            System.Reflection.BindingFlags.Instance | System.Reflection.BindingFlags.NonPublic,
+            binder: null,
+            new[] { typeof(string), typeof(string), typeof(int), typeof(bool) },
+            modifiers: null);
+        method.Should().NotBeNull();
+
+        // 默认重载：persistVolatileToHistory 隐式为 false（模拟 @agent / 子 Agent 调用）
+        method!.Invoke(agent, new object[] { "Edit agent prompt", "@Edit 修复这个 bug", int.MaxValue, false });
+
+        // 易变块应已固化进 _entries → 可随会话持久化
+        contextManager.GetFullContext()
+            .Should().Contain(m => m.Role == "system" && m.Content!.Contains("[IDE Context]"),
+                "非 Handoff 且未显式要求固化时，也应变易变块写入 _entries");
+    }
+
+    /// <summary>
+    /// 回归：同一轮内连续多次构建（主对话 → @agent 切换 → Handoff）不得产生多份 IDE Context。
+    /// </summary>
+    [Fact]
+    public void BuildContextAwareMessages_RepeatedCallsInSameTurn_PersistOnlyOneSnapshot()
+    {
+        var contextManager = new ConversationContextManager();
+        contextManager.SetIdeContext("[IDE Context] Active File: Test.cs");
+        contextManager.AddUserMessage("修复这个 bug");
+
+        var context = new AgentContext { ContextManager = contextManager };
+        var agent = new AskAgent(_apiService) { Context = context };
+
+        var method = typeof(BaseAgent).GetMethod(
+            "BuildContextAwareMessages",
+            System.Reflection.BindingFlags.Instance | System.Reflection.BindingFlags.NonPublic,
+            binder: null,
+            new[] { typeof(string), typeof(string), typeof(int), typeof(bool) },
+            modifiers: null);
+        method.Should().NotBeNull();
+
+        for (int i = 0; i < 3; i++)
+            method!.Invoke(agent, new object[] { "prompt", "user", int.MaxValue, false });
+
+        contextManager.GetFullContext()
+            .Count(m => m.Content != null && m.Content.Contains("[IDE Context]"))
+            .Should().Be(1, "同一轮内多次构建应受幂等保护，只保留一份 IDE Context");
+    }
+
+    /// <summary>
+    /// 回归：身份边界提示必须固化进 _entries（可持久化），而不只是存在于「发射即焚」的
+    /// 本次请求消息列表里。修复前 BuildContextAwareMessages 只在局部 result 中添加边界提示，
+    /// 从不回写 ContextManager，导致 GetFullContext()/ApiHistory 都导不出它；重启或切换会话后，
+    /// 历史中仍留有来源 Agent 身份声明却没有边界提示中和，模型可能沿用旧身份。
+    /// </summary>
+    [Fact]
+    public void BuildContextAwareMessages_HandoffPrefix_PersistsBoundaryPromptToContextManager()
+    {
+        var contextManager = new ConversationContextManager();
+
+        var context = new AgentContext
+        {
+            ContextManager = contextManager,
+            AllowForwardedMessageReuse = true,
+            ForwardedMessages = new List<ChatApiMessage>
+            {
+                new() { Role = "system", Content = "stable system" },
+                new() { Role = "assistant", Content = "explore" },
+                new() { Role = "tool", Content = "result" },
+            },
+        };
+        var agent = new AskAgent(_apiService)
+        {
+            Context = context,
+        };
+
+        var method = typeof(BaseAgent).GetMethod(
+            "BuildContextAwareMessages",
+            System.Reflection.BindingFlags.Instance | System.Reflection.BindingFlags.NonPublic,
+            binder: null,
+            new[] { typeof(string), typeof(string), typeof(int), typeof(bool) },
+            modifiers: null);
+        method.Should().NotBeNull();
+
+        var messages = (List<ChatApiMessage>)method!.Invoke(
+            agent,
+            new object[] { "Edit agent prompt", "handoff user", int.MaxValue, false })!;
+
+        string boundaryPrompt = messages[3].Content!;
+
+        // 持久化路径：GetFullContext() 从 _entries 导出，模拟 ApiHistory 落盘
+        var persisted = contextManager.GetFullContext();
+        persisted.Should().ContainSingle(
+            m => m.Role == "system" && m.Content == boundaryPrompt,
+            "身份边界提示必须进入 _entries，才能随会话持久化并在重启后生效");
+
+        // 往返验证：序列化再恢复后边界提示仍在（模拟重启 / 会话切换）
+        var restored = new ConversationContextManager();
+        restored.RestoreFullContext(persisted);
+        restored.GetFullContext().Should().ContainSingle(
+            m => m.Role == "system" && m.Content == boundaryPrompt,
+            "重启恢复后身份边界提示必须依然存在");
     }
 
     [Fact]

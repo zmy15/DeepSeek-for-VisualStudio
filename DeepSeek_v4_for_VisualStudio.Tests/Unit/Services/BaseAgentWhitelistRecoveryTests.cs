@@ -164,7 +164,16 @@ public class BaseAgentWhitelistRecoveryTests
             // 超预算那次的文件从未被读取过，说明它确实没执行。
             blockedBody.Should().NotContain("content of " + files[limit]);
 
-            // 拦截提示要求委派 Explore，模型据此调用 runSubagent。
+            // 提示只发一次：它会留在对话历史里，但"新增"应恰好发生在一轮请求中。
+            // 注意 Explore 子代理复用同一 handler，它自己的请求不含该提示，
+            // 会让计数回落；因此只跟踪"至今见过的最多次数"是否被突破过。
+            var bodies = handler.RequestBodies
+                .Select(System.Text.RegularExpressions.Regex.Unescape).ToList();
+            CountNoticeAdditions(bodies, expectedLimitMessage).Should()
+                .Be(1, "该提示在单次 Ask 工具循环内只应新增一次"
+                    + " | counts=" + string.Join(",", bodies.Select(b => CountOccurrences(b, expectedLimitMessage))));
+
+            // 提示要求委派 Explore，模型据此调用 runSubagent。
             blockedBody.Should().Contain("runSubagent");
 
             // 委派成功：子代理结果进入历史，主循环正常收尾。
@@ -177,6 +186,103 @@ public class BaseAgentWhitelistRecoveryTests
         {
             try { Directory.Delete(root, true); } catch { /* 清理失败不影响断言 */ }
         }
+    }
+
+    /// <summary>
+    /// 预算只是提醒而非硬上限：第 limit+1 次被拦并提示一次后，
+    /// 后续直接探索调用应重新放行（不再拦截、不再重复提示）。
+    /// </summary>
+    [Fact]
+    public async Task AskAgent_DirectExplorationBudget_AllowsCallsAfterSingleNotice()
+    {
+        const int limit = BaseAgent.AskDirectExplorationCallLimit;
+        // 前 limit 次放行 + 1 次被拦 + 之后 2 次重新放行。
+        int totalReads = limit + 3;
+
+        string root = Path.Combine(Path.GetTempPath(), "ask-exploration-notice-" + Guid.NewGuid().ToString("N"));
+        Directory.CreateDirectory(root);
+        string[] files = Enumerable.Range(0, totalReads)
+            .Select(i => "file" + i + ".txt")
+            .ToArray();
+        foreach (string file in files)
+            File.WriteAllText(Path.Combine(root, file),
+                "content of " + file + "\n" + new string('y', 40 + file.Length));
+
+        try
+        {
+            var handler = new SequenceHttpMessageHandler(
+                files.Select((f, i) => ToolCallSse("read_file",
+                        "{\"filePath\":\"" + Path.Combine(root, f).Replace("\\", "\\\\") + "\"}",
+                        "call_r" + i))
+                    .Concat(new[] { ContentSse("done exploring") })
+                    .ToArray());
+            var agent = CreateAgent(handler);
+            agent.ExploreAgent = new ExploreAgent(new DeepSeekApiService(
+                new HttpClient(new SequenceHttpMessageHandler(Array.Empty<string>()))));
+
+            var result = await agent.RunLoopAsync(
+                new List<ChatApiMessage> { new() { Role = "user", Content = "调查多个文件" } },
+                new List<string> { "read_file", "runSubagent" },
+                CancellationToken.None,
+                root);
+
+            string expectedNotice = string.Format(
+                LocalizationService.Instance["tool.ask.explorationLimitReached"], limit, limit);
+            var bodies = handler.RequestBodies
+                .Select(System.Text.RegularExpressions.Regex.Unescape).ToList();
+
+            // 提示只新增一次（之后残留在历史中属于正常）。
+            CountNoticeAdditions(bodies, expectedNotice).Should()
+                .Be(1, "该提示在单次 Ask 工具循环内只应新增一次");
+
+            // 第 limit+1 个文件确实没被读取。
+            bodies[limit + 1].Should().NotContain("content of " + files[limit]);
+
+            // 提示之后的两次直探重新放行，内容出现在历史里。
+            string last = bodies[bodies.Count - 1];
+            last.Should().Contain("content of " + files[limit + 1]);
+            last.Should().Contain("content of " + files[limit + 2]);
+
+            result.Should().Contain("done exploring");
+        }
+        finally
+        {
+            try { Directory.Delete(root, true); } catch { /* 清理失败不影响断言 */ }
+        }
+    }
+
+    /// <summary>
+    /// 统计"提示新增"发生的轮次数。
+    /// 提示一旦插入就会留在对话历史中，之后每轮请求都会包含它；
+    /// 而 Explore 子代理复用同一 handler，它自己的请求不含该提示，
+    /// 会让出现次数回落，故按"历史峰值被突破"的次数计，而非逐轮比较。
+    /// </summary>
+    private static int CountNoticeAdditions(IEnumerable<string> bodies, string notice)
+    {
+        int peak = 0, additions = 0;
+        foreach (string body in bodies)
+        {
+            int now = CountOccurrences(body, notice);
+            if (now > peak)
+            {
+                peak = now;
+                additions++;
+            }
+        }
+        return additions;
+    }
+
+    /// <summary>统计子串出现次数（提示会残留在历史里，用于判断"新增"轮次）。</summary>
+    private static int CountOccurrences(string text, string needle)
+    {
+        if (string.IsNullOrEmpty(needle)) return 0;
+        int count = 0, i = 0;
+        while ((i = text.IndexOf(needle, i, StringComparison.Ordinal)) >= 0)
+        {
+            count++;
+            i += needle.Length;
+        }
+        return count;
     }
 
     private static RecoveryTestAgent CreateAgent(SequenceHttpMessageHandler handler)

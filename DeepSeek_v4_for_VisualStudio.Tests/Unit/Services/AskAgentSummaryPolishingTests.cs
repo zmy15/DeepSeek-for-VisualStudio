@@ -81,9 +81,14 @@ public class AskAgentSummaryPolishingTests
         result.Content.Should().Contain("已完成功能 X");
         result.Content.Should().NotContain("白名单外工具调用");
 
-        // 润色请求必须显式禁用工具调用，而不是只靠客户端空白名单拦截。
-        handler.RequestBodies.Should().ContainSingle()
-            .Which.Should().Contain("\"tool_choice\":\"none\"");
+        // 润色请求走只读工具循环：tool_choice 恒为 "auto"（与主对话一致，命中 Prefix Cache），
+        // 模型误调用 read_file 后会执行并把结果写回，再输出总结——因此会有多轮请求。
+        handler.RequestBodies.Should().NotBeEmpty();
+        handler.RequestBodies.Should().OnlyContain(b => b.Contains("\"tool_choice\":\"auto\""));
+
+        // 误调用的 read_file 属于只读白名单，会被正常执行（而非被拦截后污染摘要）。
+        handler.RequestBodies.Should().Contain(b => b.Contains("\"name\":\"read_file\"")
+            && b.Contains("\"role\":\"tool\""));
     }
 
     [Fact]

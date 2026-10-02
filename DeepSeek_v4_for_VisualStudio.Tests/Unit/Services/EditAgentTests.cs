@@ -486,9 +486,14 @@ public class EditAgentTests
         reason.Should().BeNull();
     }
 
-    /// <summary>步骤文本明确要求构建 → 允许，即使不是最后一步。</summary>
+    /// <summary>步骤标题明确要求构建 → 允许，即使不是最后一步。</summary>
+    /// <remarks>
+    /// 判据只看 Title。此前的用例把构建词放在 Description（如 "步骤 2" / "同步测试并构建"），
+    /// 那是改版前的契约；现由
+    /// <see cref="IsBuildAllowedForStep_BuildWordOnlyInDescription_IsBlocked"/> 反向覆盖。
+    /// </remarks>
     [Theory]
-    [InlineData("步骤 2", "同步测试并构建")]
+    [InlineData("同步测试并构建", "执行构建")]
     [InlineData("构建验证", "运行一次编译")]
     [InlineData("Build and verify", "compile the solution")]
     [InlineData("Rebuild project", "run rebuild")]
@@ -516,6 +521,48 @@ public class EditAgentTests
 
         allowed.Should().BeTrue();
         reason.Should().Be(LocalizationService.Instance["agent.step.buildAllowedReasonLastStep"]);
+    }
+
+    /// <summary>
+    /// 回归：构建意图只看 Title，描述里的约束性说法不得放行。
+    /// 实测一轮 6 步计划中「抽取纯函数计数器 + 单元测试」被放行构建——
+    /// 标题无关键词，但描述含构建词，而中文按子串匹配、无否定语气识别，
+    /// 「确保可编译」这类约束被误当成构建意图，导致白名单未裁剪 build_solution。
+    /// </summary>
+    [Theory]
+    [InlineData("抽取纯函数计数器 + 单元测试", "确保新文件可编译，避免编译错误")]
+    [InlineData("重构解析器", "改动后代码应能正常编译")]
+    [InlineData("补充单元测试", "本次不构建，仅新增测试用例")]
+    [InlineData("更新文档", "说明如何编译本仓库")]
+    public void IsBuildAllowedForStep_BuildWordOnlyInDescription_IsBlocked(string title, string description)
+    {
+        var plan = BuildPlan(
+            (1, title, description),
+            (2, "下一步", "继续"));
+
+        bool allowed = EditAgent.IsBuildAllowedForStep(plan.Steps[0], plan, out string? reason);
+
+        allowed.Should().BeFalse(
+            "描述里的构建词是约束性说法，不代表本步骤要求执行构建");
+        reason.Should().BeNull();
+    }
+
+    /// <summary>标题明确要求构建 → 仍放行，即使描述未提构建。</summary>
+    [Theory]
+    [InlineData("单元测试补充与构建验证")]
+    [InlineData("构建解决方案")]
+    [InlineData("编译并修复错误")]
+    [InlineData("Build the solution")]
+    public void IsBuildAllowedForStep_BuildWordInTitle_IsAllowed(string title)
+    {
+        var plan = BuildPlan(
+            (1, title, "无描述"),
+            (2, "下一步", "继续"));
+
+        bool allowed = EditAgent.IsBuildAllowedForStep(plan.Steps[0], plan, out string? reason);
+
+        allowed.Should().BeTrue("标题写明的构建意图应被尊重");
+        reason.Should().Be(LocalizationService.Instance["agent.step.buildAllowedReasonExplicit"]);
     }
 
     /// <summary>英文关键词按词边界匹配，避免子串误命中（如 "build" 不应命中 "rebuilding" 之外的无关词）。</summary>

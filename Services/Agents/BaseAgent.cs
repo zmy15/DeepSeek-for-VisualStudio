@@ -49,12 +49,33 @@ namespace DeepSeek_v4_for_VisualStudio.Services.Agents
         /// <summary>
         /// 文本生成阶段的只读工具白名单。Plan 与 Ask 的总结阶段共用。
         /// 提示词会要求模型不要主动调用工具，但误调用时仍可通过这些只读工具正常收尾。
+        /// 含 runSubagent：这些阶段本身可能需要委派 Explore 补充探索。
         /// </summary>
         protected static List<string> CreateReadOnlyTextPhaseToolWhitelist()
         {
             return new List<string>
             {
                 "runSubagent",
+                "read_file",
+                "grep_search",
+                "file_search",
+                "symbol_search",
+                "get_file_symbols",
+                "list_dir",
+                "memory",
+            };
+        }
+
+        /// <summary>
+        /// 终态收尾阶段的只读白名单（记忆判断、总结润色等子任务专用）。
+        /// 相对 <see cref="CreateReadOnlyTextPhaseToolWhitelist"/> 去掉了 runSubagent：
+        /// 这些是一次性的判定/润色子任务，不需要二次委派子代理再探索一遍代码库，
+        /// 否则误调用时可能触发一次完整的 Explore（额外耗时与 token 开销）。
+        /// </summary>
+        protected static List<string> CreateReadOnlyFinalTaskToolWhitelist()
+        {
+            return new List<string>
+            {
                 "read_file",
                 "grep_search",
                 "file_search",
@@ -542,6 +563,37 @@ namespace DeepSeek_v4_for_VisualStudio.Services.Agents
         }
 
         /// <summary>
+        /// 文本收尾阶段的公共入口：以 toolChoice:"auto" + 只读白名单走完整工具循环。
+        ///
+        /// 与 CallAiWithMessagesAsync 的区别：后者是单次调用，模型误发起工具调用时不会执行、
+        /// 只会拿到空的 content（静默失败）。本方法复用 Plan/Ask 文本阶段的成熟策略——
+        /// 保持 tool_choice 与主对话一致以命中 Prefix Cache，同时让误调用能在只读白名单内
+        /// 正常收尾（读文件/搜索），并通过 reminderAfterFirstToolRound 提示模型停止调用。
+        /// </summary>
+        /// <param name="messages">预构建的完整消息列表</param>
+        /// <param name="ct">取消令牌</param>
+        /// <param name="reminderAfterFirstToolRound">首次工具调用后追加的"禁止继续调用工具"提示</param>
+        /// <param name="responseFormat">响应格式（例如 json_object）</param>
+        /// <param name="temperature">采样温度</param>
+        public async Task<string> CallAiWithReadOnlyToolLoopAsync(
+            List<ChatApiMessage> messages,
+            CancellationToken ct,
+            string? reminderAfterFirstToolRound = null,
+            string? responseFormat = null,
+            double? temperature = null)
+        {
+            return await CallAiWithToolLoopAsync(
+                messages,
+                Context != null ? GetWorkspaceRoot(Context) : null,
+                ct,
+                toolWhitelist: CreateReadOnlyFinalTaskToolWhitelist(),
+                toolChoiceOverride: "auto",
+                responseFormat: responseFormat,
+                temperature: temperature,
+                noToolsReminderAfterFirstToolRound: reminderAfterFirstToolRound);
+        }
+
+        /// <summary>
         /// 安全获取完整工具集（Agent 未初始化时返回 null 降级）。
         /// </summary>
         private List<ToolDefinition>? TryGetFullToolSet()
@@ -753,9 +805,21 @@ namespace DeepSeek_v4_for_VisualStudio.Services.Agents
 
                 result.Add(new ChatApiMessage { Role = "system", Content = AiPrompts.HandoffRoleBoundaryPrompt });
 
-                string? handoffVolatileBlock = Context?.ContextManager?.BuildVolatileContextBlock();
-                if (!string.IsNullOrWhiteSpace(handoffVolatileBlock))
-                    result.Add(new ChatApiMessage { Role = "system", Content = handoffVolatileBlock });
+                // ── 身份边界提示固化进 _entries（持久化）──
+                //   上述 result 是「发射即焚」的局部列表：只参与本次 API 请求，不回写
+                //   ContextManager，故 GetFullContext()/ApiHistory 都导不出它。重启或切换会话后，
+                //   _entries 里仍保留着带来源 Agent 身份的历史（如「你是一个 Edit Agent」的任务
+                //   提示与工具调用记录），却没有对应的边界提示来中和，模型可能沿用旧身份。
+                //   这里同步写一份到 _entries，使边界提示随会话持久化，重启后仍然生效。
+                Context?.ContextManager?.AddCustomMessage("system", AiPrompts.HandoffRoleBoundaryPrompt);
+
+                // ── 不再在 Handoff 分支注入易变上下文块（IDE Context / 工作区快照）──
+                //   易变块只应在「用户发起一次提问」时注入一次：主对话路径由
+                //   AskAgent.ExecuteAsync → BuildContextAwareMessages(persistVolatileToHistory:true)
+                //   → PersistCurrentVolatileSnapshot() 完成该轮固化，Handoff 只是同一轮内的
+                //   Agent 交接，再次注入会产生同一轮内重复的 IDE 快照（曾出现同一请求内
+                //   两份逐字符相同的 361 字符块），既浪费 token 又稀释身份边界提示。
+                //   目标 Agent 需要实时 IDE 态时可经历史中已固化的快照获取。
 
                 result.Add(CreateCurrentUserMessage(userPrompt));
 
@@ -772,11 +836,27 @@ namespace DeepSeek_v4_for_VisualStudio.Services.Agents
             var messages = new List<ChatApiMessage>();
             var ctxManager = Context?.ContextManager;
             bool volatilePersisted = false;
+
+            // ── 易变上下文块固化（IDE Context / 工作区快照）──
+            //   调用方显式要求（persistVolatileToHistory=true，AskAgent 主流程）时必须固化；
+            //   即便未显式要求，也尝试固化一次——@agent 显式路由等场景不经 AskAgent，
+            //   若此处不固化，易变块只会临时进入本次请求而不落 _entries，重启后即丢失。
+            //   PersistCurrentVolatileSnapshot 自带同轮幂等保护（重复调用返回 false），
+            //   故对所有调用方默认尝试是安全的：同一轮内始终只有一份快照。
+            //   注意必须在选取历史之前完成，快照需插在本轮 user 之前。
+            if (ctxManager != null && maxRecentTurns > 0)
+            {
+                volatilePersisted = ctxManager.PersistCurrentVolatileSnapshot();
+
+                if (persistVolatileToHistory && !volatilePersisted)
+                {
+                    // 调用方要求固化但未成功（如无易变内容可固化），保持原语义记录日志便于排查
+                    Logger.Debug("[Agent] 易变上下文固化未生效（无可固化内容或同轮已固化）");
+                }
+            }
+
             if (ctxManager != null && !ctxManager.IsEmpty && maxRecentTurns > 0)
             {
-                if (persistVolatileToHistory)
-                    volatilePersisted = ctxManager.PersistCurrentVolatileSnapshot();
-
                 var recentMessages = ctxManager.BuildApiMessagesRecentTurns(maxRecentTurns);
                 if (recentMessages.Count > 0)
                 {
@@ -1042,6 +1122,8 @@ namespace DeepSeek_v4_for_VisualStudio.Services.Agents
             int consecutiveErrorRounds = 0;
             int askQuestionsCallCount = 0;
             int askDirectExplorationCallCount = 0;
+            // 本次工具循环内"考虑探索深度"提示只发一次，避免反复刷屏。
+            bool askDirectExplorationNoticeSent = false;
             bool noToolsReminderAppended = false;
             int maxRepeatedSameCall = Settings.DeepSeekOptionsPage.Instance?.MaxRepeatedSameCall ?? 5;
             if (maxRepeatedSameCall < 1) maxRepeatedSameCall = 5;
@@ -1636,35 +1718,39 @@ namespace DeepSeek_v4_for_VisualStudio.Services.Agents
                         }
                     }
 
-                    // ── Ask Agent 直接探索预算：超过 AskDirectExplorationCallLimit 次后不再自己读/搜，强制委派 Explore。──
+                    // ── Ask Agent 直接探索预算：前 AskDirectExplorationCallLimit 次正常执行；
+                    //    第 limit+1 次不执行并回一条"考虑探索深度/改用 runSubagent"的提示，
+                    //    该提示每次工具循环只发一次，之后不再拦截（预算只是提醒，不是硬上限）。──
                     HashSet<int>? blockedDirectExplorationIndices = null;
                     bool canDelegateAskExploration = Definition.Type == AgentType.Ask
                         && ExploreAgent != null
                         && effectiveWhitelist?.Contains("runSubagent", StringComparer.OrdinalIgnoreCase) == true;
                     if (canDelegateAskExploration)
                     {
-                        int remaining = Math.Max(0, AskDirectExplorationCallLimit - askDirectExplorationCallCount);
                         foreach (int idx in dedupedIndices)
                         {
                             if (!IsDirectExplorationTool(toolCalls[idx].Function.Name))
                                 continue;
 
-                            if (remaining > 0)
+                            if (askDirectExplorationCallCount < AskDirectExplorationCallLimit)
                             {
-                                remaining--;
+                                // 预算内的调用正常执行并计数。
                                 askDirectExplorationCallCount++;
                             }
-                            else
+                            else if (!askDirectExplorationNoticeSent)
                             {
+                                // 首次超出预算：本次不执行，回一条"考虑探索深度"的提示。
+                                askDirectExplorationNoticeSent = true;
                                 (blockedDirectExplorationIndices ??= new HashSet<int>()).Add(idx);
                             }
+                            // 否则：提示已发过，直接放行（不再拦截）。预算只是提醒，不是硬性上限。
                         }
 
                         if (blockedDirectExplorationIndices?.Count > 0)
                         {
                             Logger.Warn(
-                                $"[Agent:{Definition.Name}] 已拦截超过预算的直接探索调用 " +
-                                $"({askDirectExplorationCallCount}/{AskDirectExplorationCallLimit})，要求委派 Explore");
+                                $"[Agent:{Definition.Name}] 直接探索已达 {askDirectExplorationCallCount} 次，"
+                                + "已提示考虑探索深度并要求改用 runSubagent；本次调用未执行");
                         }
                     }
 

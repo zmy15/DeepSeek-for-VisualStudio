@@ -571,20 +571,15 @@ namespace DeepSeek_v4_for_VisualStudio.Services.Agents
                     messages.RemoveAt(messages.Count - 1);
                 }
 
-                // 使用无工具调用的简单 API 调用。
-                // 走 toolChoice:"none" 的标准无工具路径，而不是"空白名单 + 完整工具集"：
-                // 后者仍会把 read_file 等定义暴露给模型，模型一旦调用就会被白名单拦截，
-                // 拦截警告会替代润色摘要成为最终内容；
-                // 且完整上下文现含工具调用记录，显式禁用工具可防止模型模仿历史发起工具调用。
-                // maxTokens 传 null（不发送 max_tokens 字段）→ 不限制输出长度。
-                // 此前硬编码 1024 会让携带完整 handoff 上下文（数千 KB、上百条消息）的
-                // 润色请求频繁以 finish_reason=length 被截断，总结只剩开头几行；
-                // 且截断发生在 thinking 之后时，reasoning 会挤占全部额度，正文仅剩数百字符。
-                string result = await CallAiWithMessagesAsync(
+                // ── 与 Plan/Ask 文本阶段一致的收尾策略：toolChoice:"auto" + 只读白名单 ──
+                //    auto 与主对话保持同一 tool_choice，避免该字段变化击穿 DeepSeek Prefix Cache。
+                //    完整上下文含工具调用记录，模型可能模仿历史发起工具调用；此处改走工具循环而非
+                //    单次调用，让误调用能在只读白名单内正常收尾（读文件/搜索），而不是静默返回空。
+                string result = await CallAiWithReadOnlyToolLoopAsync(
                     messages,
                     ct,
-                    maxTokens: null,
-                    toolChoice: "none");
+                    reminderAfterFirstToolRound:
+                        LocalizationService.Instance["agent.summaryPolishNoMoreToolsAfterToolRound"]);
 
                 result = StripToolCallMarkers(result);
                 return result?.Trim() ?? string.Empty;
