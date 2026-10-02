@@ -75,14 +75,31 @@ namespace DeepSeek_v4_for_VisualStudio.View
 
             var coverBrush = GetHighlightCoverBrush();
 
+            // 当前选区范围：与选区重叠的 token 不能铺不透明覆盖背景，
+            // 否则会遮住底层 TextBox 的选区高亮，导致选区在 token 处出现断裂/异常色块
+            int selectionStart = InputTextBox.SelectionStart;
+            int selectionEnd = selectionStart + InputTextBox.SelectionLength;
+            bool hasSelection = InputTextBox.SelectionLength > 0;
+
             foreach (var token in tokens)
             {
-                // 覆盖刷铺在 Run 背景上，遮住底层 TextBox 的灰色字形，避免蓝色与灰色重影
+                int tokenEnd = token.Start + token.Length;
+                bool inSelection = hasSelection
+                    && token.Start < selectionEnd
+                    && selectionStart < tokenEnd;
+
                 var run = new Run(text.Substring(token.Start, token.Length))
                 {
                     Foreground = GetMentionForeground(token.Kind),
-                    Background = coverBrush,
                 };
+
+                // 覆盖刷铺在 Run 背景上，遮住底层 TextBox 的灰色字形，避免蓝色与灰色重影；
+                // 但选区内的 token 需透出选区底色，故跳过覆盖背景
+                if (!inSelection)
+                {
+                    run.Background = coverBrush;
+                }
+
                 InputHighlightLayer.Inlines.Add(run);
             }
 

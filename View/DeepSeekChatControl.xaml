@@ -600,9 +600,7 @@
                            TextTrimming="None"
                            Padding="10,8,8,4"
                            HorizontalAlignment="Stretch"
-                           VerticalAlignment="Top"
-                           SnapsToDevicePixels="True"
-                           UseLayoutRounding="True">
+                           VerticalAlignment="Top">
                     <TextBlock.RenderTransform>
                         <!-- 多行滚动同步：Y 由代码设置为 -VerticalOffset -->
                         <TranslateTransform x:Name="InputHighlightOffset" />
