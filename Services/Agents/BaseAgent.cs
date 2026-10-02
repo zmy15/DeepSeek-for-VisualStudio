@@ -49,12 +49,33 @@ namespace DeepSeek_v4_for_VisualStudio.Services.Agents
         /// <summary>
         /// 文本生成阶段的只读工具白名单。Plan 与 Ask 的总结阶段共用。
         /// 提示词会要求模型不要主动调用工具，但误调用时仍可通过这些只读工具正常收尾。
+        /// 含 runSubagent：这些阶段本身可能需要委派 Explore 补充探索。
         /// </summary>
         protected static List<string> CreateReadOnlyTextPhaseToolWhitelist()
         {
             return new List<string>
             {
                 "runSubagent",
+                "read_file",
+                "grep_search",
+                "file_search",
+                "symbol_search",
+                "get_file_symbols",
+                "list_dir",
+                "memory",
+            };
+        }
+
+        /// <summary>
+        /// 终态收尾阶段的只读白名单（记忆判断、总结润色等子任务专用）。
+        /// 相对 <see cref="CreateReadOnlyTextPhaseToolWhitelist"/> 去掉了 runSubagent：
+        /// 这些是一次性的判定/润色子任务，不需要二次委派子代理再探索一遍代码库，
+        /// 否则误调用时可能触发一次完整的 Explore（额外耗时与 token 开销）。
+        /// </summary>
+        protected static List<string> CreateReadOnlyFinalTaskToolWhitelist()
+        {
+            return new List<string>
+            {
                 "read_file",
                 "grep_search",
                 "file_search",
@@ -539,6 +560,37 @@ namespace DeepSeek_v4_for_VisualStudio.Services.Agents
             }
             LogCacheHitRate();
             return sb.ToString().Trim();
+        }
+
+        /// <summary>
+        /// 文本收尾阶段的公共入口：以 toolChoice:"auto" + 只读白名单走完整工具循环。
+        ///
+        /// 与 CallAiWithMessagesAsync 的区别：后者是单次调用，模型误发起工具调用时不会执行、
+        /// 只会拿到空的 content（静默失败）。本方法复用 Plan/Ask 文本阶段的成熟策略——
+        /// 保持 tool_choice 与主对话一致以命中 Prefix Cache，同时让误调用能在只读白名单内
+        /// 正常收尾（读文件/搜索），并通过 reminderAfterFirstToolRound 提示模型停止调用。
+        /// </summary>
+        /// <param name="messages">预构建的完整消息列表</param>
+        /// <param name="ct">取消令牌</param>
+        /// <param name="reminderAfterFirstToolRound">首次工具调用后追加的"禁止继续调用工具"提示</param>
+        /// <param name="responseFormat">响应格式（例如 json_object）</param>
+        /// <param name="temperature">采样温度</param>
+        public async Task<string> CallAiWithReadOnlyToolLoopAsync(
+            List<ChatApiMessage> messages,
+            CancellationToken ct,
+            string? reminderAfterFirstToolRound = null,
+            string? responseFormat = null,
+            double? temperature = null)
+        {
+            return await CallAiWithToolLoopAsync(
+                messages,
+                Context != null ? GetWorkspaceRoot(Context) : null,
+                ct,
+                toolWhitelist: CreateReadOnlyFinalTaskToolWhitelist(),
+                toolChoiceOverride: "auto",
+                responseFormat: responseFormat,
+                temperature: temperature,
+                noToolsReminderAfterFirstToolRound: reminderAfterFirstToolRound);
         }
 
         /// <summary>
