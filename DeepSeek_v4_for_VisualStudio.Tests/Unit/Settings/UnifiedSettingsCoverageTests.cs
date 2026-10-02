@@ -18,12 +18,9 @@ public class UnifiedSettingsCoverageTests
         "deepseekCustomApiKeyGuide",
         "deepseekApiKeyGuide",
         "deepseekTestConnectionGuide",
-        "deepseekCustomModelPickerGuide",
         "deepseekAbout",
         "deepseekApiBaseUrlGuide",
-        "deepseekCustomModelNameGuide",
-        "deepseekModelMaxTokenLimitsGuide",
-        "deepseekVisionModelsGuide",
+        "deepseekModelCatalogGuide",
     };
 
     private static readonly (string OptionProperty, string SettingId)[] ExpectedCoverage =
@@ -77,7 +74,7 @@ public class UnifiedSettingsCoverageTests
         var declaredIds = GetDeclaredSettingIds();
         var boundMonikers = GetBoundMonikers();
 
-        declaredIds.Should().HaveCount(50);
+        declaredIds.Should().HaveCount(47);
         foreach (var guideSettingId in GuideSettingIds)
             declaredIds.Should().Contain(guideSettingId);
 
