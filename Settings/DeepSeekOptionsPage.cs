@@ -559,9 +559,7 @@ namespace DeepSeek_v4_for_VisualStudio.Settings
         /// 自定义端点可用的模型列表；支持换行、英文分号/逗号和中文分号/逗号分隔。
         /// </summary>
         [LocalizedCategory("settings.category.model")]
-        [LocalizedDisplayName("settings.customModelName.displayName")]
-        [LocalizedDescription("settings.customModelName.description")]
-        [Editor(typeof(System.ComponentModel.Design.MultilineStringEditor), typeof(UITypeEditor))]
+        [Browsable(false)] // 已并入统一「模型设置」表格（ModelCatalog），不再单独展示。
         [DesignerSerializationVisibility(DesignerSerializationVisibility.Visible)] // Fix for WFO1000
         public string CustomModelName { get; set; } = string.Empty;
 
@@ -570,9 +568,7 @@ namespace DeepSeek_v4_for_VisualStudio.Settings
         /// 未配置的模型默认 1M，自定义端点模型也使用同一配置。
         /// </summary>
         [LocalizedCategory("settings.category.model")]
-        [LocalizedDisplayName("settings.modelMaxTokenLimits.displayName")]
-        [LocalizedDescription("settings.modelMaxTokenLimits.description")]
-        [Editor(typeof(ModelMaxTokenEditor), typeof(UITypeEditor))]
+        [Browsable(false)] // 已并入统一「模型设置」表格（ModelCatalog），不再单独展示。
         [DesignerSerializationVisibility(DesignerSerializationVisibility.Visible)] // Fix for WFO1000
         public string ModelMaxTokenLimits { get; set; } = string.Empty;
 
@@ -581,11 +577,27 @@ namespace DeepSeek_v4_for_VisualStudio.Settings
         /// 官方接口模型与自定义端点模型共用同一份名单。
         /// </summary>
         [LocalizedCategory("settings.category.model")]
-        [LocalizedDisplayName("settings.visionModels.displayName")]
-        [LocalizedDescription("settings.visionModels.description")]
-        [Editor(typeof(VisionModelPickerEditor), typeof(UITypeEditor))]
+        [Browsable(false)] // 已并入统一「模型设置」表格（ModelCatalog），不再单独展示。
         [DesignerSerializationVisibility(DesignerSerializationVisibility.Visible)] // Fix for WFO1000
         public string CustomVisionModels { get; set; } = string.Empty;
+
+        /// <summary>
+        /// 统一「模型设置」入口：在一个表格中同时维护自定义模型列表、每个模型的
+        /// 最大上下文 Token 与视觉（多模态）勾选。点击属性网格的 … 打开 <see cref="ModelCatalogDialog"/>。
+        /// 该属性本身不持久化值——后端仍写入 <see cref="CustomModelName"/>、
+        /// <see cref="ModelMaxTokenLimits"/> 与 <see cref="CustomVisionModels"/> 三个字符串。
+        /// </summary>
+        [LocalizedCategory("settings.category.model")]
+        [LocalizedDisplayName("settings.modelCatalog.displayName")]
+        [LocalizedDescription("settings.modelCatalog.description")]
+        [Editor(typeof(ModelCatalogEditor), typeof(UITypeEditor))]
+        [DesignerSerializationVisibility(DesignerSerializationVisibility.Hidden)]
+        public string ModelCatalog
+        {
+            // 表格编辑器自行读写三个底层字符串，这里只作为不持久化的入口（与 CustomModelPicker 同模式）。
+            get => string.Empty;
+            set { /* 值由 ModelCatalogEditor 写入底层三个属性。 */ }
+        }
 
         /// <summary>自定义模型列表中的当前激活模型；聊天窗口选择自定义条目时更新。</summary>
         [Browsable(false)]
@@ -594,9 +606,7 @@ namespace DeepSeek_v4_for_VisualStudio.Settings
 
         /// <summary>属性网格中的“从自定义端点添加模型”入口；不持久化自身值。</summary>
         [LocalizedCategory("settings.category.model")]
-        [LocalizedDisplayName("settings.customModelPicker.displayName")]
-        [LocalizedDescription("settings.customModelPicker.description")]
-        [Editor(typeof(ModelPickerEditor), typeof(UITypeEditor))]
+        [Browsable(false)] // 已并入统一「模型设置」表格（ModelCatalog）的“+ 添加模型”按钮。
         [DesignerSerializationVisibility(DesignerSerializationVisibility.Hidden)]
         public string CustomModelPicker
         {
