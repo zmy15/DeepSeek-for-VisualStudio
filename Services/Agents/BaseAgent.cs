@@ -1042,6 +1042,8 @@ namespace DeepSeek_v4_for_VisualStudio.Services.Agents
             int consecutiveErrorRounds = 0;
             int askQuestionsCallCount = 0;
             int askDirectExplorationCallCount = 0;
+            // 本次工具循环内"考虑探索深度"提示只发一次，避免反复刷屏。
+            bool askDirectExplorationNoticeSent = false;
             bool noToolsReminderAppended = false;
             int maxRepeatedSameCall = Settings.DeepSeekOptionsPage.Instance?.MaxRepeatedSameCall ?? 5;
             if (maxRepeatedSameCall < 1) maxRepeatedSameCall = 5;
@@ -1636,35 +1638,39 @@ namespace DeepSeek_v4_for_VisualStudio.Services.Agents
                         }
                     }
 
-                    // ── Ask Agent 直接探索预算：超过 AskDirectExplorationCallLimit 次后不再自己读/搜，强制委派 Explore。──
+                    // ── Ask Agent 直接探索预算：前 AskDirectExplorationCallLimit 次正常执行；
+                    //    第 limit+1 次不执行并回一条"考虑探索深度/改用 runSubagent"的提示，
+                    //    该提示每次工具循环只发一次，之后不再拦截（预算只是提醒，不是硬上限）。──
                     HashSet<int>? blockedDirectExplorationIndices = null;
                     bool canDelegateAskExploration = Definition.Type == AgentType.Ask
                         && ExploreAgent != null
                         && effectiveWhitelist?.Contains("runSubagent", StringComparer.OrdinalIgnoreCase) == true;
                     if (canDelegateAskExploration)
                     {
-                        int remaining = Math.Max(0, AskDirectExplorationCallLimit - askDirectExplorationCallCount);
                         foreach (int idx in dedupedIndices)
                         {
                             if (!IsDirectExplorationTool(toolCalls[idx].Function.Name))
                                 continue;
 
-                            if (remaining > 0)
+                            if (askDirectExplorationCallCount < AskDirectExplorationCallLimit)
                             {
-                                remaining--;
+                                // 预算内的调用正常执行并计数。
                                 askDirectExplorationCallCount++;
                             }
-                            else
+                            else if (!askDirectExplorationNoticeSent)
                             {
+                                // 首次超出预算：本次不执行，回一条"考虑探索深度"的提示。
+                                askDirectExplorationNoticeSent = true;
                                 (blockedDirectExplorationIndices ??= new HashSet<int>()).Add(idx);
                             }
+                            // 否则：提示已发过，直接放行（不再拦截）。预算只是提醒，不是硬性上限。
                         }
 
                         if (blockedDirectExplorationIndices?.Count > 0)
                         {
                             Logger.Warn(
-                                $"[Agent:{Definition.Name}] 已拦截超过预算的直接探索调用 " +
-                                $"({askDirectExplorationCallCount}/{AskDirectExplorationCallLimit})，要求委派 Explore");
+                                $"[Agent:{Definition.Name}] 直接探索已达 {askDirectExplorationCallCount} 次，"
+                                + "已提示考虑探索深度并要求改用 runSubagent；本次调用未执行");
                         }
                     }
 
