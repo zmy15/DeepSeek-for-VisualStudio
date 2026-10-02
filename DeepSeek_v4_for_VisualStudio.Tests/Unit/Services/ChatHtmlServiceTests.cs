@@ -633,6 +633,115 @@ public class ChatHtmlServiceTests
         js.Should().Be("var p=document.getElementById(\"terminal-approval-abc\");if(p)p.remove();");
     }
 
+    #region 用户消息 @ / 蓝色渲染
+
+    [Fact]
+    public void BuildUserMessageHtml_AgentToken_WrapsInBlueMentionSpan()
+    {
+        string html = ChatHtmlService.BuildUserMessageHtml("@ask");
+
+        html.Should().Contain("class=\"mention mention-agent\"");
+        html.Should().Contain(">@ask</span>");
+        html.Should().NotContain("mention-skill");
+    }
+
+    [Fact]
+    public void BuildUserMessageHtml_SkillToken_WrapsInBlueMentionSpan()
+    {
+        string html = ChatHtmlService.BuildUserMessageHtml("看下 /review 这个改动");
+
+        html.Should().Contain("class=\"mention mention-skill\"");
+        html.Should().Contain(">/review</span>");
+        html.Should().NotContain("mention-agent");
+    }
+
+    [Fact]
+    public void BuildUserMessageHtml_LeadingAgentPrefix_RendersBadgeInsteadOfMention()
+    {
+        // 行首 "@agent 内容" 会被抽成路由徽章，正文不再含 @ 前缀，因此不应再被着色
+        string html = ChatHtmlService.BuildUserMessageHtml("@ask 帮我看看");
+
+        html.Should().Contain("agent-route-badge");
+        html.Should().NotContain("mention-agent");
+    }
+
+    [Fact]
+    public void BuildUserMessageHtml_EscapesHtml_AndStillWrapsEscapedToken()
+    {
+        string html = ChatHtmlService.BuildUserMessageHtml("<script> @x </script>");
+
+        // 原始标签必须被转义，不能以可执行形式进入 DOM
+        html.Should().NotContain("<script>");
+        html.Should().Contain("&lt;script&gt;");
+
+        // token 内容走同一条转义路径，且仍被包在 span 内
+        html.Should().Contain("class=\"mention mention-agent\"");
+        html.Should().Contain(">@x</span>");
+    }
+
+    [Fact]
+    public void BuildUserMessageHtml_FencedCodeBlock_DoesNotHighlight()
+    {
+        string html = ChatHtmlService.BuildUserMessageHtml("```\n@ask\n```");
+
+        html.Should().NotContain("mention-agent");
+        html.Should().Contain("@ask");
+    }
+
+    [Fact]
+    public void BuildUserMessageHtml_WithoutTokens_KeepsLegacyEscaping()
+    {
+        string html = ChatHtmlService.BuildUserMessageHtml("第一行\n第二行 <b>x</b> & y");
+
+        // 回归：无 token 时输出必须与改动前逐字符一致（转义 + \n 换成 <br>）
+        html.Should().Contain("第一行<br>第二行 &lt;b&gt;x&lt;/b&gt; &amp; y");
+        html.Should().NotContain("mention");
+    }
+
+    [Fact]
+    public void BuildAssistantMessageHtml_WithMentionText_DoesNotHighlight()
+    {
+        var message = new ChatMessage
+        {
+            Role = "assistant",
+            Content = "已按 @ask 路由处理 /review 请求",
+        };
+
+        string html = ChatHtmlService.BuildAssistantMessageHtml(message, 1);
+
+        // 着色只作用于用户消息，助手回复（含代码块）不受影响
+        html.Should().NotContain("mention-agent");
+        html.Should().NotContain("mention-skill");
+    }
+
+    [Fact]
+    public void BuildRestoreMessageJs_WithMentionText_KeepsHighlightSpans()
+    {
+        string js = ChatHtmlService.BuildRestoreMessageJs(3, "看下 @ask 与 /review");
+
+        // 正文 HTML 由宿主预生成，恢复后仍保留 @ / 着色 span
+        js.Should().Contain("mention mention-agent");
+        js.Should().Contain("mention mention-skill");
+
+        // 旧的「JS 端转义 + 换行替换」重建逻辑必须已移除，
+        // 否则取消编辑时会用不含 span 的纯文本覆盖宿主生成的 HTML
+        js.Should().NotContain("var text=");
+        js.Should().Contain("msgBody.innerHTML=");
+    }
+
+    [Fact]
+    public void BuildRestoreMessageJs_WithHtmlText_KeepsEscaping()
+    {
+        string js = ChatHtmlService.BuildRestoreMessageJs(3, "<b>hi</b> & <i>x</i>");
+
+        // 回归：恢复路径同样必须走 HTML 转义，不能让原始标签进入 innerHTML
+        js.Should().NotContain("<b>hi</b>");
+        js.Should().Contain("&lt;b&gt;");
+        js.Should().Contain("&amp;");
+    }
+
+    #endregion
+
     private static int CountOccurrences(string haystack, string needle)
     {
         int count = 0;
