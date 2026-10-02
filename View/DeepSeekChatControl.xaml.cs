@@ -353,7 +353,8 @@ namespace DeepSeek_v4_for_VisualStudio.View
         private System.Windows.Threading.DispatcherTimer? _conversationElapsedTimer;
 
         // ── Token 估算校准 ──
-        private long _lastCalibratedPromptTokens; // 上次校准时的 prompt_tokens，避免重复校准
+        // 注：同一次 usage 的去重标记已收敛到 ConversationContextManager 内部
+        //     （_lastCalibratedPromptTokens），此处不再单独维护，避免两处标记各自为政。
 
         // ── 增量渲染状态（对标 Turbo ucChat） ──
         private bool _browserInitialized;
@@ -1353,7 +1354,9 @@ namespace DeepSeek_v4_for_VisualStudio.View
 
         /// <summary>
         /// 若 API 返回了新的 usage 数据，使用实际 prompt_tokens 校准上下文估算器。
-        /// 只在 prompt_tokens 发生变化时校准一次，避免重复校准。
+        /// 同一次 usage 的去重由 ContextManager.CalibrateFromApiUsage 统一负责——
+        /// 本方法无法感知 BaseAgent 工具循环内的上报，若在此重复判断反而会造成
+        /// 两处标记各自为政（此前正是该原因导致同一 usage 被 EMA 叠加两次）。
         /// </summary>
         private void CalibrateContextIfNeeded()
         {
@@ -1361,10 +1364,8 @@ namespace DeepSeek_v4_for_VisualStudio.View
             if (usage == null) return;
 
             long currentPromptTokens = usage.PromptTokens;
-            if (currentPromptTokens <= 0 || currentPromptTokens == _lastCalibratedPromptTokens)
-                return;
+            if (currentPromptTokens <= 0) return;
 
-            _lastCalibratedPromptTokens = currentPromptTokens;
             _contextManager.CalibrateFromApiUsage(currentPromptTokens);
         }
 
