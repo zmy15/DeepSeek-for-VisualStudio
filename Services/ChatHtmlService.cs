@@ -623,7 +623,11 @@ namespace DeepSeek_v4_for_VisualStudio.Services
         /// </summary>
         public static string BuildRestoreMessageJs(int messageIndex, string originalContent)
         {
-            string escapedContent = EscapeJsString(originalContent);
+            // 正文由 C# 侧预生成：与用户消息首次渲染复用同一条着色路径，
+            // 否则「取消编辑」重建 innerHTML 后 @ / token 的蓝色 span 会丢失。
+            // 转义顺序必须是先生成含 <span> 的 HTML、再做 JS 字符串转义，
+            // 绝不能把 <span> 本身丢进 HTML 转义流程。
+            string escapedBodyHtml = EscapeJsString(BuildUserMessageHtmlWithMentions(originalContent));
 
             return $@"
 (function(){{
@@ -640,10 +644,8 @@ namespace DeepSeek_v4_for_VisualStudio.Services
     var editArea=msgBubble.querySelector('.inline-edit-area');
     if(editArea)editArea.remove();
 
-    // 恢复原始正文
-    var text={escapedContent};
-    var html=text.replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;').replace(/\n/g,'<br>');
-    msgBody.innerHTML=html;
+    // 恢复原始正文（HTML 已由宿主预生成，内含 @ / 着色 span）
+    msgBody.innerHTML={escapedBodyHtml};
 
     // 恢复编辑按钮
     editBtn.style.display='';
@@ -690,8 +692,9 @@ namespace DeepSeek_v4_for_VisualStudio.Services
                 }
             }
 
-            string escaped = System.Net.WebUtility.HtmlEncode(cleanContent.Trim());
-            string body = escaped.Replace("\n", "<br>");
+            // 用户消息正文需要给 @ / token 着色：先按未转义文本分词，再逐段转义拼接，
+            // 既保证转义结果不被破坏，也不会引入 XSS
+            string body = BuildUserMessageHtmlWithMentions(cleanContent.Trim());
 
             // ── 气泡 + 头像水平对齐（无标签）
             sb.Append("<div class='msg-wrapper user'>");
@@ -704,6 +707,49 @@ namespace DeepSeek_v4_for_VisualStudio.Services
             sb.Append("</div>");
             sb.Append("<div class='msg-avatar user'>U</div>");
             sb.Append("</div>");
+        }
+
+        /// <summary>
+        /// 把用户消息原文转义为 HTML，并把 @ / 提及 token 包裹为蓝色 span。
+        /// 先对未转义文本分词（保证索引正确），再按区间切分、逐段转义，
+        /// 因此不会破坏转义结果、不会产生嵌套标签、不引入 XSS。
+        /// </summary>
+        /// <param name="rawText">用户消息原始文本（未转义）。</param>
+        /// <returns>可直接嵌入气泡容器的安全 HTML 片段。</returns>
+        private static string BuildUserMessageHtmlWithMentions(string rawText)
+        {
+            if (string.IsNullOrEmpty(rawText))
+                return string.Empty;
+
+            var tokens = MentionTokenizer.FindTokens(rawText);
+
+            // 无命中时直接复用既有转义（含 \n → <br>），保证输出与旧实现逐字符一致
+            if (tokens.Count == 0)
+                return EscapeHtmlWithBreaks(rawText);
+
+            var sb = new StringBuilder(rawText.Length + tokens.Count * 48);
+
+            var cursor = 0;
+            foreach (var token in tokens)
+            {
+                // 普通段：原样转义，不加包裹
+                if (token.Start > cursor)
+                    sb.Append(EscapeHtmlWithBreaks(rawText.Substring(cursor, token.Start - cursor)));
+
+                // 提及段：类名区分 Agent 与 Skill，具体配色由主题 CSS 提供
+                var kindClass = token.Kind == MentionTokenKind.Agent ? "mention-agent" : "mention-skill";
+                sb.Append("<span class=\"mention ").Append(kindClass).Append("\">");
+                sb.Append(EscapeHtmlWithBreaks(rawText.Substring(token.Start, token.Length)));
+                sb.Append("</span>");
+
+                cursor = token.End;
+            }
+
+            // 末尾剩余的普通文本
+            if (cursor < rawText.Length)
+                sb.Append(EscapeHtmlWithBreaks(rawText.Substring(cursor)));
+
+            return sb.ToString();
         }
 
         /// <summary>
