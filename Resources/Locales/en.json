@@ -915,6 +915,8 @@
  "agent.plan.discoveryNoExploreNeeded": "## Sufficient Context — No Exploration Needed\n\nThe following information is already available for planning. Reply DONE to proceed to alignment:\n- The user\u0027s original request is listed above\n- If file attachments are included, relevant code is already available\n- If conversation history contains prior exploration results, they can be reused\n\n If you determine existing information is sufficient for planning, **do NOT call any tools** — reply DONE directly.",
  "agent.summaryOnlySystemPrompt": "You are in the terminal summary phase. Do not call any tools and do not output DSML, XML, pseudo-tool calls, or tool-call syntax; if an accidental call occurs, the system will return its result and continue. Based on the existing context, directly produce the complete final summary and do not hand off the task.",
  "agent.summaryOnlyNoMoreToolsAfterToolRound": "The tool result has been returned. Do not call any more tools and do not output DSML, XML, pseudo-tool calls, or tool-call syntax; output the final summary directly.",
+ "agent.summaryPolishNoMoreToolsAfterToolRound": "The tool result has been returned. Do not call any more tools and do not output DSML, XML, pseudo-tool calls, or tool-call syntax; output the final summary directly based on the complete context.",
+ "agent.memoryAutoRecordNoMoreToolsAfterToolRound": "The tool result has been returned. Do not call any more tools and do not output DSML, XML, pseudo-tool calls, or tool-call syntax; output the judgment result as JSON directly.",
  "agent.plan.fileContextHeader": "## Uploaded file references",
     "agent.plan.truncatedSuffix": "... (truncated)",
     "plan.md.userTask": "## User\u0027s Original Requirement",

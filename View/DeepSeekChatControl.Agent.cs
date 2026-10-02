@@ -1671,9 +1671,13 @@ namespace DeepSeek_v4_for_VisualStudio.View
                     AiPrompts.MemoryAutoRecordUserPrompt,
                     AiPrompts.MemoryAutoRecordSystemPrompt);
 
-                // toolChoice:"none"：完整上下文含工具调用记录，防止模型模仿发起工具调用
-                var rawResponse = await _activeAgent.CallAiWithMessagesAsync(
-                    messages, CancellationToken.None, responseFormat: "json_object", temperature: 0.0, toolChoice: "none");
+                // toolChoice:"auto" + 只读白名单：与主对话保持同一 tool_choice，避免因该字段变化
+                // 击穿 DeepSeek Prefix Cache。完整上下文含工具调用记录，模型可能模仿历史发起工具
+                // 调用；此处走只读工具循环而非单次调用，误调用可在白名单内正常收尾，而非静默返回空。
+                var rawResponse = await _activeAgent.CallAiWithReadOnlyToolLoopAsync(
+                    messages, CancellationToken.None,
+                    reminderAfterFirstToolRound: LocalizationService.Instance["agent.memoryAutoRecordNoMoreToolsAfterToolRound"],
+                    responseFormat: "json_object", temperature: 0.0);
 
                 if (string.IsNullOrWhiteSpace(rawResponse))
                 {
