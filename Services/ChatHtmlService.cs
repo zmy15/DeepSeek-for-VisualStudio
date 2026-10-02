@@ -267,7 +267,8 @@ namespace DeepSeek_v4_for_VisualStudio.Services
         public static string BuildStreamEndJson(int messageIndex, string fullContent,
             string reasoningContent, string? extraFooterHtml = null,
             string? timelineContent = null,
-            string? turnId = null, bool isProcessMessage = false)
+            string? turnId = null, bool isProcessMessage = false,
+            int toolCallCount = 0)
         {
             string displayContent = BuildAssistantDisplayContent(timelineContent, fullContent);
 
@@ -288,7 +289,7 @@ namespace DeepSeek_v4_for_VisualStudio.Services
                 // 这样既消除了「innerHTML 覆盖 vs 收起指令」的竞态（此前会出现
                 // 找不到节点、或用户看到展开态一闪），也避免了程序化收起触发的
                 // toggle 事件被误记为用户操作。最终总结始终留在折叠块之外。
-                bodyHtml = RenderTurnProcessPanelHtml(processHtml, processTimeline, turnId, collapsed: true) + finalHtml;
+                bodyHtml = RenderTurnProcessPanelHtml(processHtml, toolCallCount, turnId, collapsed: true) + finalHtml;
             }
             else
             {
@@ -893,7 +894,7 @@ namespace DeepSeek_v4_for_VisualStudio.Services
                 bool turnCollapsed = msg.IsTurnProcessCollapsed
                     || (!msg.IsStreaming && !string.IsNullOrWhiteSpace(msg.Content));
 
-                bodyHtml = RenderTurnProcessPanelHtml(processHtml, timelineContent, msg.TurnId, turnCollapsed) + finalHtml;
+                bodyHtml = RenderTurnProcessPanelHtml(processHtml, msg.ToolCallCount, msg.TurnId, turnCollapsed) + finalHtml;
             }
             else
             {
@@ -967,19 +968,16 @@ namespace DeepSeek_v4_for_VisualStudio.Services
         /// 折叠态由浏览器原生维护，无需额外脚本；data-turn-id 供宿主按轮次定位元素。
         /// </summary>
         /// <param name="processHtml">已完成 Markdown 渲染的过程内容 HTML（工具调用、中间文本、工具返回）。</param>
-        /// <param name="timelineContent">过程原文，用于统计步骤数生成摘要文案。</param>
+        /// <param name="toolCallCount">本轮实际发生的工具调用次数，用于生成摘要文案。</param>
         /// <param name="turnId">所属轮次标识；为空时不输出 data-turn-id 属性。</param>
         /// <param name="collapsed">是否以折叠态渲染（已结束的轮次默认收起，仅保留摘要行）。</param>
         /// <returns>折叠块 HTML 片段。</returns>
-        private static string RenderTurnProcessPanelHtml(string processHtml, string timelineContent, string? turnId, bool collapsed)
+        private static string RenderTurnProcessPanelHtml(string processHtml, int toolCallCount, string? turnId, bool collapsed)
         {
-            // 摘要计数：时间线中每个非空行代表一次过程事件（工具调用 / 进度 / 中间文本），
-            // 避免依赖具体工具调用标记文本，兼容中英界面
-            int stepCount = timelineContent
-                .Split('\n')
-                .Count(line => !string.IsNullOrWhiteSpace(line));
-
-            string summaryText = L.Format("chat.html.turnProcessSummary", stepCount);
+            // 摘要计数：使用 Agent 侧按 Level == "TOOL" 累加的真实工具调用次数。
+            // 此前按时间线非空行数统计，会把步骤预告、工具返回和模型中间文本一并计入，
+            // 得到的数字与「工具调用」并非同一口径，且随界面语言与日志格式漂移。
+            string summaryText = L.Format("chat.html.turnToolCallSummary", toolCallCount);
             string turnIdAttr = string.IsNullOrEmpty(turnId)
                 ? string.Empty
                 : " data-turn-id='" + EscapeHtmlAttribute(turnId) + "'";

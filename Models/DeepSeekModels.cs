@@ -589,6 +589,15 @@ namespace DeepSeek_v4_for_VisualStudio.Models
         }
 
         /// <summary>
+        /// 本轮实际发生的工具调用次数，供过程折叠块的摘要文案展示。
+        /// 由 Agent 侧按 <c>Level == "TOOL"</c> 的日志条目累加，与
+        /// <see cref="TimelineContent"/> 的行数无关：时间线还包含步骤预告、
+        /// 工具返回与中间文本，按行统计会把它们一起算进去。
+        /// </summary>
+        [DataMember]
+        public int ToolCallCount { get; set; }
+
+        /// <summary>
         /// 思考模式下的推理过程内容，以单行滚动形式展示。
         /// 非思考模式下此属性为空。
         /// </summary>

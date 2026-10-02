@@ -334,6 +334,7 @@ namespace DeepSeek_v4_for_VisualStudio.View
                 string? timelineContent = null;
                 string? turnId = null;
                 bool isProcessMessage = false;
+                int toolCallCount = 0;
                 lock (_lock)
                 {
                     if (messageIndex >= 0 && messageIndex < _messages.Count)
@@ -342,6 +343,7 @@ namespace DeepSeek_v4_for_VisualStudio.View
                         timelineContent = finalizedMsg.TimelineContent;
                         turnId = finalizedMsg.TurnId;
                         isProcessMessage = finalizedMsg.IsProcessMessage;
+                        toolCallCount = finalizedMsg.ToolCallCount;
                     }
                 }
                 string json = ChatHtmlService.BuildStreamEndJson(
@@ -351,7 +353,8 @@ namespace DeepSeek_v4_for_VisualStudio.View
                     extraFooterHtml,
                     timelineContent,
                     turnId,
-                    isProcessMessage);
+                    isProcessMessage,
+                    toolCallCount);
                 ChatWebView.CoreWebView2.PostWebMessageAsString(json);
             }
             catch (Exception ex)

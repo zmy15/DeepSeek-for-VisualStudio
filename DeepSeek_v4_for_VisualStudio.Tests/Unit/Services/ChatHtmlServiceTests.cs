@@ -134,6 +134,8 @@ public class ChatHtmlServiceTests
         // 回归：streamEnd 是本气泡内容的最终覆盖，必须以「收起态」渲染过程块。
         // 此前按展开渲染再依赖宿主随后下发收起指令，会与 innerHTML 覆盖竞态，
         // 实测出现「找不到节点」以及界面停留在展开态（用户要求默认不展开）。
+        // 摘要文案取工具调用次数，与时间线行数无关：
+        // 这里 3 行时间线，但只声明了 2 次工具调用，摘要应显示 2
         string json = ChatHtmlService.BuildStreamEndJson(
             1,
             "最终总结",
@@ -141,7 +143,8 @@ public class ChatHtmlServiceTests
             extraFooterHtml: null,
             timelineContent: "移交 Edit\n创建文件 leetcode.cpp\n构建解决方案",
             turnId: "4e9831ea",
-            isProcessMessage: true);
+            isProcessMessage: true,
+            toolCallCount: 2);
 
         // 取出 html 字段后检查 details 开标签不含 open
         json.Should().Contain("turn-process");
@@ -152,6 +155,55 @@ public class ChatHtmlServiceTests
         openTag.Should().NotContain("open", "过程块默认应为收起态");
         openTag.Should().Contain("data-turn-id");
         json.Should().Contain("最终总结");
+        // 摘要应使用工具调用口径（2），而非时间线非空行数（3）
+        json.Should().Contain("2", "摘要应展示工具调用次数 2");
+        json.Should().NotContain("3 步", "不得再按时间线行数统计步骤");
+    }
+
+    [Fact]
+    public void BuildStreamEndJson_SummaryCountsToolCalls_NotTimelineLines()
+    {
+        // 回归：此前摘要按时间线非空行数统计，把步骤预告、工具返回和模型中间文本
+        // 一并计入，得到的数字与「工具调用」并非同一口径。现改为使用 ToolCallCount。
+        string manyLines = string.Join("\n", new[]
+        {
+            "移交 Edit",
+            "步骤 1: 读取文件",
+            "🔧 read_file (xxx)",
+            "读取完成 120 行",
+            "🔧 apply_patch (xxx)",
+            "补丁已应用",
+        });
+
+        string json = ChatHtmlService.BuildStreamEndJson(
+            1,
+            "总结",
+            string.Empty,
+            timelineContent: manyLines,
+            turnId: "aabbccdd",
+            isProcessMessage: true,
+            toolCallCount: 2);
+
+        // 6 个非空行，但只有 2 次工具调用
+        json.Should().Contain("2", "摘要必须反映真实工具调用次数");
+        json.Should().NotContain("6", "不得再统计时间线行数");
+    }
+
+    [Fact]
+    public void BuildStreamEndJson_ZeroToolCalls_RendersZeroCount()
+    {
+        // 边界：过程块存在（有中间文本）但一次工具都没调用时，应如实显示 0。
+        string json = ChatHtmlService.BuildStreamEndJson(
+            1,
+            "总结",
+            string.Empty,
+            timelineContent: "只是中间文本，没有工具调用",
+            turnId: "00112233",
+            isProcessMessage: true,
+            toolCallCount: 0);
+
+        json.Should().Contain("turn-process");
+        json.Should().Contain("0", "未调用工具时应显示 0 次");
     }
 
     [Fact]

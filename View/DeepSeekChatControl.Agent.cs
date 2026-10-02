@@ -45,6 +45,8 @@ namespace DeepSeek_v4_for_VisualStudio.View
             // 该标记跟随轮次而非消息，因此 Handoff 链上任意一棒（含末尾的 Ask 总结）
             // 都能正确判断「这一轮到底有没有过程可折叠」。
             _currentAgentTurnProducedProcess = false;
+            // 工具调用计数与轮次同生命周期，避免 Handoff 链上把上一棒的调用数带进新一轮
+            _agentTurnToolCallCount = 0;
             return _currentAgentTurnId;
         }
 
@@ -710,6 +712,7 @@ namespace DeepSeek_v4_for_VisualStudio.View
                     _agentTimelineContent.Clear();
                     _streamingContent.Clear();
                     _streamingReasoning.Clear();
+                    _agentTurnToolCallCount = 0;
                 }
                 _agentStreamingMsgIndex = -1;
                 _lastReportedStepIndex = 0;
@@ -762,6 +765,7 @@ namespace DeepSeek_v4_for_VisualStudio.View
                 await ThreadHelper.JoinableTaskFactory.SwitchToMainThreadAsync();
                 _agentTimelineContent.Clear();
                 _streamingContent.Clear();
+                _agentTurnToolCallCount = 0;
 
                 // ── 检查是否已有 retry fork 占位，有则复用，避免产生多余气泡 ──
                 bool reusedPlaceholder = false;
@@ -1449,6 +1453,7 @@ namespace DeepSeek_v4_for_VisualStudio.View
                     var msg = _messages[msgIndex];
                     msg.Content = content;
                     msg.TimelineContent = timelineContent;
+                    msg.ToolCallCount = _agentTurnToolCallCount;
                     msg.ReasoningContent = reasoning;
                     msg.IsStreaming = false;
                     msg.IsRendered = true;
@@ -1671,9 +1676,13 @@ namespace DeepSeek_v4_for_VisualStudio.View
                     AiPrompts.MemoryAutoRecordUserPrompt,
                     AiPrompts.MemoryAutoRecordSystemPrompt);
 
-                // toolChoice:"none"：完整上下文含工具调用记录，防止模型模仿发起工具调用
-                var rawResponse = await _activeAgent.CallAiWithMessagesAsync(
-                    messages, CancellationToken.None, responseFormat: "json_object", temperature: 0.0, toolChoice: "none");
+                // toolChoice:"auto" + 只读白名单：与主对话保持同一 tool_choice，避免因该字段变化
+                // 击穿 DeepSeek Prefix Cache。完整上下文含工具调用记录，模型可能模仿历史发起工具
+                // 调用；此处走只读工具循环而非单次调用，误调用可在白名单内正常收尾，而非静默返回空。
+                var rawResponse = await _activeAgent.CallAiWithReadOnlyToolLoopAsync(
+                    messages, CancellationToken.None,
+                    reminderAfterFirstToolRound: LocalizationService.Instance["agent.memoryAutoRecordNoMoreToolsAfterToolRound"],
+                    responseFormat: "json_object", temperature: 0.0);
 
                 if (string.IsNullOrWhiteSpace(rawResponse))
                 {
@@ -1933,6 +1942,7 @@ namespace DeepSeek_v4_for_VisualStudio.View
                 _agentTimelineContent.Clear();
                 _streamingContent.Clear();
                 _streamingReasoning.Clear();
+                _agentTurnToolCallCount = 0;
             }
 
             PostStreamEnd(previousIndex, previousContent, previousReasoning);
@@ -2379,7 +2389,18 @@ namespace DeepSeek_v4_for_VisualStudio.View
             if (!string.IsNullOrEmpty(thinkingLine))
             {
                 if (entry.Level == "TOOL")
+                {
                     FlushStreamingContentToTimeline();
+                    // ── 工具调用计数：摘要文案的唯一口径 ──
+                    // 只在 TOOL 级别累加，与时间线行数解耦；失败/超时的工具调用同样计入，
+                    // 因为它们确实发生了一次调用（与「已执行 N 次」的语义一致）。
+                    lock (_lock)
+                    {
+                        _agentTurnToolCallCount++;
+                        if (_agentStreamingMsgIndex >= 0 && _agentStreamingMsgIndex < _messages.Count)
+                            _messages[_agentStreamingMsgIndex].ToolCallCount = _agentTurnToolCallCount;
+                    }
+                }
                 AppendAgentThinking(thinkingLine);
             }
         }

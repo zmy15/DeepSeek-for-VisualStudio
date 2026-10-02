@@ -86,6 +86,14 @@ namespace DeepSeek_v4_for_VisualStudio.Services
         /// <summary>Token 估算校准系数（基于 API 实际 usage 的指数移动平均，1.0 = 无校准）</summary>
         private double _calibrationFactor = 1.0;
 
+        /// <summary>
+        /// 上一次已参与校准的 API prompt_tokens。
+        /// 同一份 usage 会被两条链路各上报一次（BaseAgent 工具循环内按轮上报、
+        /// UI 层 RefreshConsumptionDisplay 收尾上报），若不做去重，同一 ratio 会被
+        /// EMA 连续叠加两次（α=0.15），导致估算因子被过快拉向单次观测值并在并发下抖动。
+        /// </summary>
+        private long _lastCalibratedPromptTokens;
+
         /// <summary>校准样本权重（EMA α 值，0.15 约等于最近 ~7 次调用的加权）</summary>
         private const double CalibrationAlpha = 0.15;
 
@@ -1958,11 +1966,21 @@ namespace DeepSeek_v4_for_VisualStudio.Services
         /// 使用 API 返回的实际 prompt_tokens 校准本地字符级估算。
         /// 使用指数移动平均 (EMA) 平滑校准系数，避免单次波动。
         /// 应在每次 Chat API 调用完成后调用。
+        ///
+        /// 幂等保护：同一份 usage 常被两条链路各上报一次（BaseAgent 工具循环内按轮
+        /// 上报、UI 层 RefreshConsumptionDisplay 收尾上报），二者共享 _apiService.LastUsage。
+        /// 若不去重，同一 ratio 会被 EMA 连乘两次，估算因子被过度拉向单次观测值。
+        /// 故此处以 prompt_tokens 作为「同一次 API 调用」的标识，重复值直接忽略。
+        /// 说明：不同调用的 prompt_tokens 相同属于极小概率（上下文逐轮增长），
+        /// 即使偶发碰撞也只是少校准一次，远优于重复叠加。
         /// </summary>
         /// <param name="actualPromptTokens">API usage 中的实际 prompt_tokens</param>
         public void CalibrateFromApiUsage(long actualPromptTokens)
         {
             if (actualPromptTokens <= 0 || _estimatedTokens <= 0) return;
+
+            // ── 同一份 usage 去重（多链路重复上报）──
+            if (actualPromptTokens == _lastCalibratedPromptTokens) return;
 
             // 计算本次调用的实际/估算比率
             double ratio = (double)actualPromptTokens / _estimatedTokens;
@@ -1970,12 +1988,25 @@ namespace DeepSeek_v4_for_VisualStudio.Services
             // 合理性检查：比率在 0.2 ~ 10 之间才参与校准（过滤异常值）
             if (ratio < 0.2 || ratio > 10.0) return;
 
+            // 记录已校准的 usage 标识；放在合理性检查之后，确保被过滤的异常值
+            // 不会占用该标识而误挡掉后续同值的合法校准
+            _lastCalibratedPromptTokens = actualPromptTokens;
+
             // 指数移动平均：newFactor = oldFactor * (1 - α) + ratio * α
             _calibrationFactor = _calibrationFactor * (1 - CalibrationAlpha) + ratio * CalibrationAlpha;
 
             Logger.Info($"[ContextCalibration] API prompt_tokens={actualPromptTokens}, " +
                         $"rawEstimate={_estimatedTokens}, ratio={ratio:F3}, " +
                         $"newFactor={_calibrationFactor:F3}");
+        }
+
+        /// <summary>
+        /// 重置校准去重标记。会话切换/清空上下文后调用，避免新会话的首个
+        /// usage 与上一会话末次值相同而被误判为重复上报。
+        /// </summary>
+        internal void ResetCalibrationDedup()
+        {
+            _lastCalibratedPromptTokens = 0;
         }
 
         #endregion
@@ -2100,6 +2131,8 @@ namespace DeepSeek_v4_for_VisualStudio.Services
             _nextEntryId = 0;
             _lastCompressedEntryId = 0;
             _conversationResetNoticePending = false;
+            // 新会话的校准去重标记需复位，否则首个 usage 若与上一会话末次值相同会被误判重复
+            _lastCalibratedPromptTokens = 0;
         }
 
         /// <summary>
