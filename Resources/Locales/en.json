@@ -1752,7 +1752,7 @@
     "tool.requestHandoff.param.chainBack": "Whether to chain back to the current Agent after the target Agent completes (default false, meaning end directly after completion)",
  "tool.requestHandoff.missingTargetAgent": "Error: request_handoff: Missing targetAgent parameter. Available: Edit, Ask, Plan, Build, Explore",
  "tool.requestHandoff.missingTaskDescription": "Error: request_handoff: Missing taskDescription parameter. Please describe the task for the target Agent.",
- "tool.ask.explorationLimitReached": "Error: Ask Agent has used {0} direct exploration calls (limit {1}). Stop calling read_file, grep_search, file_search, list_dir, or symbol_search; the next step must use runSubagent to delegate to Explore.",
+ "tool.ask.explorationLimitReached": "Note: direct exploration has reached {0} calls (limit {1}); please consider how much exploration depth you need. If you still need more exploration, use runSubagent to delegate to the Explore sub-agent (this call was not executed).",
  "tool.requestHandoff.handoffRequested": "HANDOFF_REQUESTED  {0}: {1}\n\nThe target Agent will receive the following task and execute it in a new context. Current Agent session ends.",
  "tool.requestHandoff.handoffTo": "**Handoff  {0}** — {1}",
  "tool.requestHandoff.completed": "Handoff requested",

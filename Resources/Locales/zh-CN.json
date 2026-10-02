@@ -1751,7 +1751,7 @@
     "tool.requestHandoff.param.chainBack": "目标 Agent 完成后是否链回当前 Agent（默认 false，即完成后直接结束）",
  "tool.requestHandoff.missingTargetAgent": "Error: request_handoff: 缺少 targetAgent 参数。可选值: Edit, Ask, Plan, Build, Explore",
  "tool.requestHandoff.missingTaskDescription": "Error: request_handoff: 缺少 taskDescription 参数。请描述目标 Agent 需要执行的任务。",
- "tool.ask.explorationLimitReached": "Error: Ask Agent 已完成 {0} 次直接探索（上限 {1} 次）。停止继续调用 read_file、grep_search、file_search、list_dir、symbol_search；下一步必须调用 runSubagent 委派 Explore。",
+ "tool.ask.explorationLimitReached": "提示：本次直接探索已达 {0} 次（上限 {1} 次），请考虑所需的探索深度。如果仍需要更多探索，请使用 runSubagent 委派 Explore 子代理（本次调用未执行）。",
  "tool.requestHandoff.handoffRequested": "HANDOFF_REQUESTED  {0}: {1}\n\n目标 Agent 将接收以下任务并在新的上下文中执行。当前 Agent 会话结束。",
  "tool.requestHandoff.handoffTo": "**移交  {0}** — {1}",
  "tool.requestHandoff.completed": "已请求移交",
