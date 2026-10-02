@@ -469,6 +469,125 @@ public class EditAgentTests
 
     #endregion
 
+    #region Build Permission — 步骤级构建许可
+
+    /// <summary>中间步骤 + 文本未要求构建 → 不允许构建。</summary>
+    [Fact]
+    public void IsBuildAllowedForStep_MiddleStepWithoutBuildIntent_IsBlocked()
+    {
+        var plan = BuildPlan(
+            (1, "修改 Settings 页", "调整属性定义"),
+            (2, "更新本地化键", "补充字符串"),
+            (3, "同步测试并构建", "更新测试"));   // 最后一步带构建意图
+
+        bool allowed = EditAgent.IsBuildAllowedForStep(plan.Steps[0], plan, out string? reason);
+
+        allowed.Should().BeFalse();
+        reason.Should().BeNull();
+    }
+
+    /// <summary>步骤文本明确要求构建 → 允许，即使不是最后一步。</summary>
+    [Theory]
+    [InlineData("步骤 2", "同步测试并构建")]
+    [InlineData("构建验证", "运行一次编译")]
+    [InlineData("Build and verify", "compile the solution")]
+    [InlineData("Rebuild project", "run rebuild")]
+    public void IsBuildAllowedForStep_StepTextRequiresBuild_IsAllowed(string title, string description)
+    {
+        var plan = BuildPlan(
+            (1, title, description),
+            (2, "收尾步骤", "无构建要求"));
+
+        bool allowed = EditAgent.IsBuildAllowedForStep(plan.Steps[0], plan, out string? reason);
+
+        allowed.Should().BeTrue();
+        reason.Should().Be(LocalizationService.Instance["agent.step.buildAllowedReasonExplicit"]);
+    }
+
+    /// <summary>最后一步即使未明说构建 → 允许（收敛验证点）。</summary>
+    [Fact]
+    public void IsBuildAllowedForStep_LastStepWithoutBuildIntent_IsAllowed()
+    {
+        var plan = BuildPlan(
+            (1, "修改代码", "调整实现"),
+            (2, "收尾清理", "整理注释"));
+
+        bool allowed = EditAgent.IsBuildAllowedForStep(plan.Steps[1], plan, out string? reason);
+
+        allowed.Should().BeTrue();
+        reason.Should().Be(LocalizationService.Instance["agent.step.buildAllowedReasonLastStep"]);
+    }
+
+    /// <summary>英文关键词按词边界匹配，避免子串误命中（如 "build" 不应命中 "rebuilding" 之外的无关词）。</summary>
+    [Theory]
+    [InlineData("latest changes applied", false)]      // "test" 不在其中，且不应命中 "latest"
+    [InlineData("the builder pattern", false)]         // "builder" 不是 "build" 的独立词
+    [InlineData("building blocks", false)]             // "building" 同样不应命中
+    [InlineData("build", true)]
+    [InlineData("please Build it", true)]
+    [InlineData("compile", true)]
+    [InlineData("rebuild", true)]
+    public void ContainsBuildIntent_EnglishKeywords_RespectWordBoundaries(string text, bool expected)
+    {
+        EditAgent.ContainsBuildIntent(text).Should().Be(expected);
+    }
+
+    /// <summary>中文关键词按子串匹配。</summary>
+    [Theory]
+    [InlineData("构建解决方案", true)]
+    [InlineData("重新编译", true)]
+    [InlineData("构建验证", true)]
+    [InlineData("修改属性", false)]
+    [InlineData("更新文档", false)]
+    public void ContainsBuildIntent_ChineseKeywords_SubstringMatch(string text, bool expected)
+    {
+        EditAgent.ContainsBuildIntent(text).Should().Be(expected);
+    }
+
+    /// <summary>步骤提示词随构建许可给出对应说明。</summary>
+    [Fact]
+    public void BuildStepPrompt_ReflectsBuildPermission()
+    {
+        var agent = new EditAgent(_apiService);
+
+        // 中间步骤（无构建意图）→ 提示不允许构建
+        var blockedPlan = BuildPlan(
+            (1, "修改 Settings 页", "调整属性定义"),
+            (2, "收尾清理", "整理注释"));
+        var blocked = InvokeBuildStepPrompt(agent, blockedPlan.Steps[0], blockedPlan);
+        blocked.Should().Contain("不允许");
+        blocked.Should().Contain("build_solution");
+
+        // 最后一步 → 提示允许构建
+        var allowed = InvokeBuildStepPrompt(agent, blockedPlan.Steps[1], blockedPlan);
+        allowed.Should().Contain("允许调用 build_solution");
+    }
+
+    private static string InvokeBuildStepPrompt(EditAgent agent, AgentStep step, AgentTaskPlan plan)
+    {
+        var method = typeof(EditAgent).GetMethod(
+            "BuildStepPrompt",
+            System.Reflection.BindingFlags.NonPublic | System.Reflection.BindingFlags.Instance);
+        return (string)method!.Invoke(agent, new object[] { step, plan, new AgentContext() })!;
+    }
+
+    private static AgentTaskPlan BuildPlan(params (int Index, string Title, string Description)[] steps)
+    {
+        var plan = new AgentTaskPlan { Title = "测试计划" };
+        foreach (var (index, title, description) in steps)
+        {
+            plan.Steps.Add(new AgentStep
+            {
+                Index = index,
+                Title = title,
+                Description = description,
+            });
+        }
+        return plan;
+    }
+
+    #endregion
+
     #region ExploreAgent Property
 
     [Fact]

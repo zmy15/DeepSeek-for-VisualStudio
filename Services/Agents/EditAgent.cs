@@ -527,6 +527,23 @@ namespace DeepSeek_v4_for_VisualStudio.Services.Agents
             var thinkingBuilder = new StringBuilder();
             var stepToolWhitelist = new List<string>(StepTools);
 
+            // ── 步骤级构建许可：非"要求构建"的中间步骤禁用 build_solution ──
+            // 只裁剪客户端拦截白名单，tools JSON 仍发送完整集（保持 Prefix Cache 稳定）。
+            // 模型若仍调用 build_solution，会收到白名单拒绝消息并据此调整。
+            if (!IsBuildAllowedForStep(step, plan, out string? buildAllowedReason))
+            {
+                stepToolWhitelist.RemoveAll(t =>
+                    string.Equals(t, "build_solution", StringComparison.OrdinalIgnoreCase));
+                AddLog("INFO", string.Format(
+                    LocalizationService.Instance["agent.log.editStepBuildBlocked"], step.Index));
+            }
+            else
+            {
+                AddLog("INFO", string.Format(
+                    LocalizationService.Instance["agent.log.editStepBuildAllowed"],
+                    step.Index, buildAllowedReason));
+            }
+
             AddLog("INFO", LocalizationService.Instance["agent.log.callingAiToolLoop"]);
             result = await CallAiWithToolLoopAsync(
                 messages,
@@ -1579,6 +1596,94 @@ namespace DeepSeek_v4_for_VisualStudio.Services.Agents
             return sb.ToString();
         }
 
+        #region Build Permission — 步骤级构建许可
+
+        /// <summary>
+        /// 步骤文本中表示"本步骤需要构建/编译/验证"的关键词。
+        /// 命中任一关键词即认为该步骤明确要求构建，允许调用 build_solution。
+        /// 匹配不区分大小写；中文关键词按子串匹配，英文按词边界匹配以避免
+        /// 例如 "test" 命中 "latest" 这类误判。
+        /// </summary>
+        private static readonly string[] BuildIntentKeywordsZh = new[]
+        {
+            "构建", "编译", "生成解决方案", "验证构建", "构建验证", "重新构建",
+        };
+
+        private static readonly string[] BuildIntentKeywordsEn = new[]
+        {
+            "build", "compile", "rebuild", "msbuild", "dotnet build",
+        };
+
+        /// <summary>
+        /// 判断某步骤是否允许调用 build_solution。
+        /// 规则（按用户约定）：仅当
+        ///   ① 当前步骤标题/描述明确要求构建（关键词命中），或
+        ///   ② 当前步骤是计划的最后一步
+        /// 时允许构建；其余步骤禁用，避免每个中间步骤都触发一次昂贵的解决方案构建。
+        /// </summary>
+        /// <param name="step">当前步骤</param>
+        /// <param name="plan">所属计划（用于判定是否为最后一步）</param>
+        /// <param name="reason">命中的允许原因（用于提示词文案），不允许时为 null</param>
+        internal static bool IsBuildAllowedForStep(AgentStep step, AgentTaskPlan plan, out string? reason)
+        {
+            reason = null;
+            if (step == null || plan == null)
+                return false;
+
+            string text = $"{step.Title} {step.Description}";
+
+            // ① 步骤文本明确要求构建
+            if (ContainsBuildIntent(text))
+            {
+                reason = LocalizationService.Instance["agent.step.buildAllowedReasonExplicit"];
+                return true;
+            }
+
+            // ② 最后一步：收敛验证点，允许构建
+            //    注：net472 不支持 System.Index（[^1]），使用传统索引。
+            int lastIndex = plan.Steps.Count > 0
+                ? plan.Steps[plan.Steps.Count - 1].Index
+                : step.Index;
+            if (step.Index >= lastIndex)
+            {
+                reason = LocalizationService.Instance["agent.step.buildAllowedReasonLastStep"];
+                return true;
+            }
+
+            return false;
+        }
+
+        /// <summary>
+        /// 步骤文本是否表达了构建意图。中文关键词子串匹配；英文关键词要求词边界，
+        /// 避免 "build" 之外的子串误命中（如 "rebuild" 需单独列出）。
+        /// </summary>
+        internal static bool ContainsBuildIntent(string? text)
+        {
+            if (string.IsNullOrWhiteSpace(text))
+                return false;
+
+            foreach (string kw in BuildIntentKeywordsZh)
+            {
+                if (text.Contains(kw, StringComparison.Ordinal))
+                    return true;
+            }
+
+            foreach (string kw in BuildIntentKeywordsEn)
+            {
+                if (System.Text.RegularExpressions.Regex.IsMatch(
+                        text,
+                        $@"(?<![A-Za-z]){System.Text.RegularExpressions.Regex.Escape(kw)}(?![A-Za-z])",
+                        System.Text.RegularExpressions.RegexOptions.IgnoreCase))
+                {
+                    return true;
+                }
+            }
+
+            return false;
+        }
+
+        #endregion
+
         private string BuildStepPrompt(AgentStep step, AgentTaskPlan plan,
             AgentContext context)
         {
@@ -1632,6 +1737,18 @@ namespace DeepSeek_v4_for_VisualStudio.Services.Agents
             // 代码记忆功能移除后，跨步骤的文件内容只能靠对话历史中的 read_file 结果承接，
             // 显式提示模型优先复用，避免它重新读取未变化的文件。
             sb.AppendLine(LocalizationService.Instance["agent.step.reuseHistoryHint"]);
+            sb.AppendLine();
+
+            // 第5层：构建许可说明（仅当本步骤允许构建时给出；不允许时由工具白名单拦截）
+            if (IsBuildAllowedForStep(step, plan, out string? buildReason))
+            {
+                sb.AppendLine(string.Format(
+                    LocalizationService.Instance["agent.step.buildAllowedHint"], buildReason));
+            }
+            else
+            {
+                sb.AppendLine(LocalizationService.Instance["agent.step.buildBlockedHint"]);
+            }
 
             return sb.ToString();
         }
