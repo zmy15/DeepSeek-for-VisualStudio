@@ -21,7 +21,7 @@ DeepSeek for Visual Studio 将 AI 聊天、代码编辑、解决方案工具、�
 
 它通过 WebView2 提供原生级聊天体验，并结合五个协作 Agent、可复用 Skills、MCP 工具服务器、Ghost Text 补全和持久化项目记忆。
 
-> 如果这个项目对你有帮助，欢迎点个 Star，帮助更多开发者发现它。
+> ⭐如果这个项目对你有帮助，欢迎点个 Star，帮助更多开发者发现它。
 
 ## 界面截图
 
@@ -150,10 +150,10 @@ git clone https://github.com/zmy15/DeepSeek-for-VisualStudio.git
 
 1. **先创建 Issue**：任何改动都要先在 [Issues](https://github.com/zmy15/DeepSeek-for-VisualStudio/issues/new/choose) 建一个 Issue，说明背景、期望行为和大致的实现思路，等维护者确认方向后再开始编码。PR 描述中必须用 `Fixes #123` 或 `Closes #123` 关联对应 Issue；没有对应 Issue 的 PR 会被要求先补 Issue。
 2. **先同步再提交**：基于最新的 `dev` 变基或合并，避免出现冲突和无意义的合并提交。
-2. **编译通过**：在 Release 配置下编译整个解决方案，确保没有新增警告或错误。
-3. **跑通测试**：执行 `dotnet test DeepSeek_v4_for_VisualStudio.Tests\DeepSeek_v4_for_VisualStudio.Tests.csproj --configuration Release`，新增逻辑请补充对应测试，不要降低现有覆盖率。
-4. **遵守 i18n 约束**：面向用户的文案必须走本地化资源，不要在 `Services/` 和 `View/` 中新增硬编码中文字符串。提交前运行 `powershell -File tools\check-cjk-strings.ps1`（加 `-Enforce` 时出现 `[NEW]` 文件会直接失败）。
-5. **保持改动聚焦**：一个 PR 只解决一件事，不要混入无关的格式化、重命名或依赖升级。
+3. **编译通过**：在 Release 配置下编译整个解决方案，确保没有新增警告或错误。
+4. **跑通测试**：执行 `dotnet test DeepSeek_v4_for_VisualStudio.Tests\DeepSeek_v4_for_VisualStudio.Tests.csproj --configuration Release`，新增逻辑请补充对应测试，不要降低现有覆盖率。
+5. **遵守 i18n 约束**：面向用户的文案必须走本地化资源，不要在 `Services/` 和 `View/` 中新增硬编码中文字符串。
+6. **保持改动聚焦**：一个 PR 只解决一件事，不要混入无关的格式化、重命名或依赖升级。
 
 ### PR 内容要求
 

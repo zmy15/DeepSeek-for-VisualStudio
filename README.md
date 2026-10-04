@@ -1,6 +1,5 @@
 <div align="center">
 
-> **Beta Stage** — Back up your project before use.
 
 # DeepSeek for Visual Studio
 
@@ -9,7 +8,6 @@
 [![License](https://img.shields.io/badge/license-MIT-blue)](https://github.com/zmy15/DeepSeek-for-VisualStudio/blob/master/LICENSE)
 [![Visual Studio](https://img.shields.io/badge/Visual%20Studio-2022%20%7C%202026-purple)]()
 [![.NET](https://img.shields.io/badge/.NET%20Framework-4.7.2-blueviolet)]()
-[![DeepSeek](https://img.shields.io/badge/-DeepSeek-green)]()
 [![Platform](https://img.shields.io/badge/platform-Windows%20x64%20%2F%20ARM64-lightgrey)]()
 [![Version](https://img.shields.io/badge/version-1.2.6-blue)]()
 [![GitHub Stars](https://img.shields.io/github/stars/zmy15/DeepSeek-for-VisualStudio?style=social)](https://github.com/zmy15/DeepSeek-for-VisualStudio)
@@ -24,7 +22,7 @@ DeepSeek for Visual Studio brings AI chat, code editing, solution-aware tools, t
 
 The extension combines a native-grade WebView2 chat experience with five cooperating agents, reusable Skills, MCP tool servers, Ghost Text completion, and persistent project memory.
 
-> If this project helps you, please consider giving it a Star — it helps more developers discover it.
+> ⭐If this project helps you, please consider giving it a Star — it helps more developers discover it.
 
 ## Screenshots
 
@@ -80,7 +78,6 @@ The extension combines a native-grade WebView2 chat experience with five coopera
 |---|---|
 | Visual Studio | **2022 (17.14+)** or **2026** |
 | Operating system | Windows 10/11 |
-| Runtime | .NET Framework 4.7.2 |
 | Architectures | x64; ARM64 for the No-Local-OCR package |
 
 ## Installation
@@ -110,8 +107,8 @@ Recommended starting settings:
 | Setting | Value |
 |---|---|
 | Model | Choose from the list returned by `/models` |
-| Deep Reasoning | Enabled, effort `max` |
-| Token budget | `900000` |
+| Deep Reasoning | Enabled, effort `high` |
+| Token budget | `90%` |
 | Vision models | Mark multimodal models in the Vision Models picker |
 
 | Shortcut | Action |
@@ -133,18 +130,44 @@ Recommended starting settings:
 
 Use `@ask`, `@plan`, `@edit`, or `@build` to select an agent explicitly, or let Handoff route the task automatically. Skills are loaded from project-level directories, user-level directories, and built-in skills.
 
-## Roadmap / TODO
+## TODO
 
 | Item | Description | Priority |
 |---|---|---|
-| **RAG code retrieval** | Local vector storage, file indexing, BM25/vector hybrid search, and solution symbol indexing. | High |
 | **Code knowledge graph** | AST-based relationships and semantic navigation across classes and methods. | Medium |
-| **Test generation skill** | Generate xUnit tests from the built-in TDD workflow. | High |
-| **GitHub integration** | PR descriptions, review assistance, and issue assignment. | Medium |
 | **More built-in skills** | Debug analyzer, SQL optimizer, API design, and other workflows. | Medium |
-| **Local model support** | Ollama and LM Studio offline inference. | Low |
 | **Session export** | Export conversations as Markdown, PDF, or HTML. | Low |
-| **More UI languages** | Japanese, Korean, and additional locales. | Low |
+| **More UI languages** | Japanese, Korean, and additional locales. | Medium |
+
+## Contributing
+
+### Branches and workflow
+
+- The default branch is `master`; day-to-day development happens on `dev`, so please do not push to `master` directly.
+- Branch off the latest `dev` using a `feature/xxx`, `fix/xxx`, or `docs/xxx` name, then open a Pull Request against `dev`.
+- `dev` is merged into `master` by the maintainers at release time only.
+
+### Before opening a Pull Request
+
+1. **Open an Issue first**: every change should start with an [Issue](https://github.com/zmy15/DeepSeek-for-VisualStudio/issues/new/choose) describing the background, expected behavior, and rough implementation approach. Wait for the maintainers to confirm the direction before you start coding. The PR description must link the Issue with `Fixes #123` or `Closes #123`; PRs without a corresponding Issue will be asked to file one first.
+2. **Sync before you submit**: rebase or merge onto the latest `dev` to avoid conflicts and meaningless merge commits.
+3. **Build cleanly**: build the whole solution in the Release configuration and make sure you add no new warnings or errors.
+4. **Pass the tests**: run `dotnet test DeepSeek_v4_for_VisualStudio.Tests\DeepSeek_v4_for_VisualStudio.Tests.csproj --configuration Release`. Add tests for new logic and do not lower existing coverage.
+5. **Respect the i18n constraint**: user-facing text must go through localization resources; do not add hardcoded Chinese string literals in `Services/` or `View/`.
+6. **Keep the change focused**: one PR solves one problem — do not mix in unrelated formatting, renames, or dependency upgrades.
+
+### What a PR should contain
+
+- **Title**: follow Conventional Commits, e.g. `feat(chat): support session export` or `fix(edit): fix out-of-range patch matching`.
+- **Description**: explain the background and motivation, the concrete changes, the blast radius (whether settings, shortcuts, `SKILL.md`, or MCP behavior are affected), and how you verified it.
+- **Linked Issue**: reference the Issue with `Fixes #123` or `Closes #123`.
+- **UI changes**: attach a screenshot or screen recording so reviewers can confirm the visual result.
+- **Compatibility notes**: call out anything involving localization, the official DeepSeek API, compatible endpoints, or other platforms.
+- **Do not commit**: API keys, tokens, internal paths, proprietary code, or build output such as `bin/`, `obj/`, and `TestResults/`.
+
+### CI and review
+
+Pull Requests automatically trigger the **Build & Test** workflow (build, unit tests with an uploaded coverage report, and the hardcoded-CJK string check), and all checks must pass before merging. Address review feedback with follow-up commits rather than force-pushing over existing discussion.
 
 ## Support
 
