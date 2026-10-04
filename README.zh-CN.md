@@ -1,7 +1,5 @@
 <div align="center">
 
-> **测试阶段** — 使用前请备份项目。
-
 # DeepSeek for Visual Studio
 
 **面向 Visual Studio 2022 和 2026 的 AI 编程助手**
@@ -9,7 +7,6 @@
 [![License](https://img.shields.io/badge/license-MIT-blue)](https://github.com/zmy15/DeepSeek-for-VisualStudio/blob/master/LICENSE)
 [![Visual Studio](https://img.shields.io/badge/Visual%20Studio-2022%20%7C%202026-purple)]()
 [![.NET](https://img.shields.io/badge/.NET%20Framework-4.7.2-blueviolet)]()
-[![DeepSeek](https://img.shields.io/badge/-DeepSeek-green)]()
 [![Platform](https://img.shields.io/badge/platform-Windows%20x64%20%2F%20ARM64-lightgrey)]()
 [![Version](https://img.shields.io/badge/version-1.2.6-blue)]()
 [![GitHub Stars](https://img.shields.io/github/stars/zmy15/DeepSeek-for-VisualStudio?style=social)](https://github.com/zmy15/DeepSeek-for-VisualStudio)
@@ -80,7 +77,6 @@ DeepSeek for Visual Studio 将 AI 聊天、代码编辑、解决方案工具、�
 |---|---|
 | Visual Studio | **2022（17.14+）** 或 **2026** |
 | 操作系统 | Windows 10/11 |
-| 运行时 | .NET Framework 4.7.2 |
 | 架构 | x64；No-Local-OCR 版支持 ARM64 |
 
 ## 安装
@@ -110,8 +106,8 @@ git clone https://github.com/zmy15/DeepSeek-for-VisualStudio.git
 | 设置 | 值 |
 |---|---|
 | 模型 | 从 `/models` 返回的模型列表中选择 |
-| Deep Reasoning | 开启，Effort 为 `max` |
-| Token 预算 | `900000` |
+| Deep Reasoning | 开启，Effort 为 `high` |
+| Token 预算 | `90%` |
 | 视觉模型 | 需要理解图片或 PDF 时，在多模态模型列表中勾选对应模型 |
 
 | 快捷键 | 作用 |
@@ -133,18 +129,44 @@ git clone https://github.com/zmy15/DeepSeek-for-VisualStudio.git
 
 可以使用 `@ask`、`@plan`、`@edit`、`@build` 显式选择 Agent，也可以让 Handoff 自动路由。Skills 会从项目级目录、用户级目录和内置目录加载。
 
-## TODO / 路线图
+## TODO
 
 | 计划 | 说明 | 优先级 |
 |---|---|---|
-| **RAG 代码检索** | 本地向量存储、文件索引、BM25/向量混合搜索和解决方案符号索引。 | 高 |
 | **代码知识图谱** | 基于 AST 的类和方法关系图，提供语义级导航。 | 中 |
-| **测试生成 Skill** | 基于内置 TDD 工作流生成 xUnit 测试。 | 高 |
-| **GitHub 集成** | PR 描述生成、Review 辅助和 Issue 分派。 | 中 |
 | **更多内置 Skills** | Debug 分析、SQL 优化、API 设计等工作流。 | 中 |
-| **本地模型支持** | Ollama 和 LM Studio 离线推理。 | 低 |
 | **会话导出** | 导出为 Markdown、PDF 或 HTML。 | 低 |
-| **更多界面语言** | 日语、韩语等语言支持。 | 低 |
+| **更多界面语言** | 日语、韩语等语言支持。 | 中 |
+
+## 参与贡献
+
+### 分支与流程
+
+- 默认分支是 `master`，日常开发在 `dev` 分支进行，请不要直接向 `master` 推送。
+- 从最新的 `dev` 切出特性分支，命名建议为 `feature/xxx`、`fix/xxx`、`docs/xxx`，完成后向 `dev` 发起 Pull Request。
+- 只有发布时才由维护者把 `dev` 合并到 `master`。
+
+### 提交 Pull Request 前
+
+1. **先创建 Issue**：任何改动都要先在 [Issues](https://github.com/zmy15/DeepSeek-for-VisualStudio/issues/new/choose) 建一个 Issue，说明背景、期望行为和大致的实现思路，等维护者确认方向后再开始编码。PR 描述中必须用 `Fixes #123` 或 `Closes #123` 关联对应 Issue；没有对应 Issue 的 PR 会被要求先补 Issue。
+2. **先同步再提交**：基于最新的 `dev` 变基或合并，避免出现冲突和无意义的合并提交。
+2. **编译通过**：在 Release 配置下编译整个解决方案，确保没有新增警告或错误。
+3. **跑通测试**：执行 `dotnet test DeepSeek_v4_for_VisualStudio.Tests\DeepSeek_v4_for_VisualStudio.Tests.csproj --configuration Release`，新增逻辑请补充对应测试，不要降低现有覆盖率。
+4. **遵守 i18n 约束**：面向用户的文案必须走本地化资源，不要在 `Services/` 和 `View/` 中新增硬编码中文字符串。提交前运行 `powershell -File tools\check-cjk-strings.ps1`（加 `-Enforce` 时出现 `[NEW]` 文件会直接失败）。
+5. **保持改动聚焦**：一个 PR 只解决一件事，不要混入无关的格式化、重命名或依赖升级。
+
+### PR 内容要求
+
+- **标题**：遵循 Conventional Commits，例如 `feat(chat): 支持会话导出`、`fix(edit): 修复补丁匹配越界`。
+- **描述**：说明背景与动机、具体改动、影响范围（是否影响设置项、快捷键、`SKILL.md` 或 MCP 行为），以及验证方式。
+- **关联 Issue**：使用 `Fixes #123` 或 `Closes #123` 关联相关 Issue。
+- **界面改动**：请附上截图或录屏，便于评审确认视觉效果。
+- **兼容性说明**：涉及本地化、DeepSeek 官方 API、兼容端点或其他平台时应单独说明。
+- **不要提交**：API Key、令牌、内部路径、公司代码以及 `bin/`、`obj/`、`TestResults/` 等构建产物。
+
+### CI 与评审
+
+PR 会自动触发 **Build & Test** 工作流（编译、单元测试并上传覆盖率报告、CJK 硬编码字符串检查），必须全部通过才能合并。评审意见请通过追加提交处理，避免在评审过程中强制推送覆盖已有讨论。
 
 ## 支持
 
@@ -169,4 +191,4 @@ git clone https://github.com/zmy15/DeepSeek-for-VisualStudio.git
 
 ## 开源协议
 
-[MIT](https://github.com/zmy15/DeepSeek-for-VisualStudio/blob/master/LICENSE) © 2026 zmy15
+[MIT](https://github.com/zmy15/DeepSeek-for-VisualStudio/blob/master/LICENSE)
