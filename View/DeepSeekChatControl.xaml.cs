@@ -594,6 +594,16 @@ namespace DeepSeek_v4_for_VisualStudio.View
             // XamlParseException: Set connectionId threw an exception (issue #18)。
             InitializeChatWebView();
 
+            // ── 订阅视觉树生命周期事件 ──
+            // WebView2 控件被卸出视觉树后会释放底层 CoreWebView2（HRESULT 0x8007139F），
+            // 这些日志用于定位卸载发生的时刻与上下文。
+            // 仅在构造函数订阅一次（ChatWebView 实例级订阅在 InitializeChatWebView 内完成）。
+            Loaded += ChatWebControl_Loaded;
+            Unloaded += ChatWebControl_Unloaded;
+            ChatWebViewHost.Loaded += ChatWebViewHost_Loaded;
+            ChatWebViewHost.Unloaded += ChatWebViewHost_Unloaded;
+            ChatWebViewHost.IsVisibleChanged += ChatWebViewHost_IsVisibleChanged;
+
             // ── 粘贴命令绑定：作为后备路径，支持剪贴板图片直接粘贴为附件 ──
             // 主路径在 PreviewKeyDown 中通过隧道事件拦截 Ctrl+V，确保优先于 TextBox 内部处理。
             CommandBindings.Add(new CommandBinding(ApplicationCommands.Paste,
@@ -658,6 +668,18 @@ namespace DeepSeek_v4_for_VisualStudio.View
                 // 视觉托管（Composition）：浏览器画面合成进 WPF 视觉树，无子 HWND，
                 // 修复 VS 自动隐藏弹窗（如「Git 更改」）被聊天内容覆盖的问题 (issue #31)。
                 ChatWebView = new Microsoft.Web.WebView2.Wpf.WebView2CompositionControl();
+
+                // ── 关键规避：禁止把 0 尺寸传给 WebView2CompositionControl ──
+                // 该控件在 SizeChanged 中调用 GraphicsItemD3DImage.UpdateSize →
+                // framePool.Recreate(width, height)。任一边为 0 时该调用失败并抛
+                // ArgumentException(0x80070057 / E_INVALIDARG)。工具窗口 unpin / 自动隐藏 /
+                // 收起时 VS 会把宿主行高压到 0，正好触发；异常在 WPF 渲染回调
+                // (MediaContext.RenderMessageHandler) 中抛出，不在任何 try/catch 范围内，
+                // 表现为「未经处理的异常」崩溃，托管代码无法捕获（上游 issue #5485）。
+                // 除 XAML 中宿主的 MinWidth/MinHeight 外，这里在控件自身再兜一层下限。
+                ChatWebView.MinWidth = 1;
+                ChatWebView.MinHeight = 1;
+
                 ChatWebViewHost.Content = ChatWebView;
 
                 // ── 3. 订阅初始化完成事件（原在构造函数中直接订阅 ChatWebView）──
@@ -667,11 +689,22 @@ namespace DeepSeek_v4_for_VisualStudio.View
                 ChatWebView.PreviewKeyDown += ChatWebView_PreviewKeyDown;
                 ChatWebView.KeyDown += ChatWebView_PreviewKeyDown;
 
+                // ── 5. 订阅控件自身的视觉树生命周期 ──
+                // 控件被卸出视觉树时 WebView2 会释放底层 CoreWebView2（HRESULT 0x8007139F），
+                // 这里是定位「谁卸载了控件」的关键日志点。
+                // 订阅放在此处而非构造函数：ChatWebView 每次重建都会新建实例，旧实例由
+                // DetachChatWebViewEvents 解绑，避免同一实例重复订阅。
+                ChatWebView.Loaded += ChatWebView_Loaded;
+                ChatWebView.Unloaded += ChatWebView_Unloaded;
+                ChatWebView.IsVisibleChanged += ChatWebView_IsVisibleChanged;
+
                 Logger.Info("[ChatWebView] WebView2CompositionControl (visual hosting) created and placed in ChatWebViewHost");
+                Logger.Info($"[WebViewLifecycle] webview.created | view={ChatWebView.GetHashCode()} | Host.Content={ChatWebViewHost.Content?.GetHashCode()}");
             }
             catch (Exception ex)
             {
                 Logger.Error($"[ChatWebView] Failed to create WebView2 control: {ex.GetType().Name}: {ex.Message}", ex);
+                Logger.Error($"[WebViewLifecycle] webview.createFailed | hostContent={(ChatWebViewHost.Content == null ? "null(已摘除)" : "存在")}");
                 StatusLabel.Text = $"WebView2 initialization failed: {ex.Message}";
                 // 不抛出异常，允许工具窗口打开但不含 WebView2（用户将看到错误提示）
             }
@@ -1490,6 +1523,22 @@ namespace DeepSeek_v4_for_VisualStudio.View
             _apiService?.Dispose();
             _webSearchService?.Dispose();
             _mcpManager?.Dispose();
+
+            // ── WebView2：阻断后续渲染并解绑事件 ──
+            // _loadAndShowTask / _webViewInitializationTask 没有 CancellationToken，无法取消，
+            // 改由 _disposed 守卫（TryGetLiveCoreWebView 与 UpdateBrowser 入口）拦截其后续渲染。
+            // 此处不主动 Dispose 控件：VS 恢复布局时可能复用同一控件，重建统一交给 UpdateBrowser 处理。
+            // 记录释放时的挂载状态：用于判断「控件是否在 Dispose 之前就已脱离宿主」。
+            try
+            {
+                Logger.Info($"[WebViewLifecycle] dispose | view={ChatWebView?.GetHashCode() ?? 0} | hostContent={(ChatWebViewHost.Content == null ? "null(已摘除)" : "存在")} | controlLoaded={IsLoaded}");
+            }
+            catch (Exception ex)
+            {
+                Logger.Debug($"[WebViewLifecycle] dispose 状态记录失败: {ex.GetType().Name}");
+            }
+            _suppressWebViewUpdate = true;
+            DetachChatWebViewEvents(ChatWebView);
 
             if (_agentFactory != null)
             {
