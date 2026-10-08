@@ -594,6 +594,16 @@ namespace DeepSeek_v4_for_VisualStudio.View
             // XamlParseException: Set connectionId threw an exception (issue #18)。
             InitializeChatWebView();
 
+            // ── 订阅视觉树生命周期事件 ──
+            // WebView2 控件被卸出视觉树后会释放底层 CoreWebView2（HRESULT 0x8007139F），
+            // 这些日志用于定位卸载发生的时刻与上下文。
+            // 仅在构造函数订阅一次（ChatWebView 实例级订阅在 InitializeChatWebView 内完成）。
+            Loaded += ChatWebControl_Loaded;
+            Unloaded += ChatWebControl_Unloaded;
+            ChatWebViewHost.Loaded += ChatWebViewHost_Loaded;
+            ChatWebViewHost.Unloaded += ChatWebViewHost_Unloaded;
+            ChatWebViewHost.IsVisibleChanged += ChatWebViewHost_IsVisibleChanged;
+
             // ── 粘贴命令绑定：作为后备路径，支持剪贴板图片直接粘贴为附件 ──
             // 主路径在 PreviewKeyDown 中通过隧道事件拦截 Ctrl+V，确保优先于 TextBox 内部处理。
             CommandBindings.Add(new CommandBinding(ApplicationCommands.Paste,
@@ -667,11 +677,22 @@ namespace DeepSeek_v4_for_VisualStudio.View
                 ChatWebView.PreviewKeyDown += ChatWebView_PreviewKeyDown;
                 ChatWebView.KeyDown += ChatWebView_PreviewKeyDown;
 
+                // ── 5. 订阅控件自身的视觉树生命周期 ──
+                // 控件被卸出视觉树时 WebView2 会释放底层 CoreWebView2（HRESULT 0x8007139F），
+                // 这里是定位「谁卸载了控件」的关键日志点。
+                // 订阅放在此处而非构造函数：ChatWebView 每次重建都会新建实例，旧实例由
+                // DetachChatWebViewEvents 解绑，避免同一实例重复订阅。
+                ChatWebView.Loaded += ChatWebView_Loaded;
+                ChatWebView.Unloaded += ChatWebView_Unloaded;
+                ChatWebView.IsVisibleChanged += ChatWebView_IsVisibleChanged;
+
                 Logger.Info("[ChatWebView] WebView2CompositionControl (visual hosting) created and placed in ChatWebViewHost");
+                Logger.Info($"[WebViewLifecycle] webview.created | view={ChatWebView.GetHashCode()} | Host.Content={ChatWebViewHost.Content?.GetHashCode()}");
             }
             catch (Exception ex)
             {
                 Logger.Error($"[ChatWebView] Failed to create WebView2 control: {ex.GetType().Name}: {ex.Message}", ex);
+                Logger.Error($"[WebViewLifecycle] webview.createFailed | hostContent={(ChatWebViewHost.Content == null ? "null(已摘除)" : "存在")}");
                 StatusLabel.Text = $"WebView2 initialization failed: {ex.Message}";
                 // 不抛出异常，允许工具窗口打开但不含 WebView2（用户将看到错误提示）
             }
@@ -1490,6 +1511,22 @@ namespace DeepSeek_v4_for_VisualStudio.View
             _apiService?.Dispose();
             _webSearchService?.Dispose();
             _mcpManager?.Dispose();
+
+            // ── WebView2：阻断后续渲染并解绑事件 ──
+            // _loadAndShowTask / _webViewInitializationTask 没有 CancellationToken，无法取消，
+            // 改由 _disposed 守卫（TryGetLiveCoreWebView 与 UpdateBrowser 入口）拦截其后续渲染。
+            // 此处不主动 Dispose 控件：VS 恢复布局时可能复用同一控件，重建统一交给 UpdateBrowser 处理。
+            // 记录释放时的挂载状态：用于判断「控件是否在 Dispose 之前就已脱离宿主」。
+            try
+            {
+                Logger.Info($"[WebViewLifecycle] dispose | view={ChatWebView?.GetHashCode() ?? 0} | hostContent={(ChatWebViewHost.Content == null ? "null(已摘除)" : "存在")} | controlLoaded={IsLoaded}");
+            }
+            catch (Exception ex)
+            {
+                Logger.Debug($"[WebViewLifecycle] dispose 状态记录失败: {ex.GetType().Name}");
+            }
+            _suppressWebViewUpdate = true;
+            DetachChatWebViewEvents(ChatWebView);
 
             if (_agentFactory != null)
             {

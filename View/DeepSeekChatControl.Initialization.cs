@@ -856,8 +856,19 @@ namespace DeepSeek_v4_for_VisualStudio.View
         }
 
         // ── .sln 事件处理 ──
-        private void OnAfterOpenSolution(object sender, OpenSolutionEventArgs e) => OnSolutionOpened();
-        private void OnAfterCloseSolution(object sender, EventArgs e) => OnSolutionClosed();
+        // 记录事件到达时刻，便于与 webview.unloaded / control.unloaded 日志对照，
+        // 判断「控件被卸载」是否由解决方案切换引起。
+        private void OnAfterOpenSolution(object sender, OpenSolutionEventArgs e)
+        {
+            Logger.Info("[WebViewLifecycle] solutionEvent.afterOpenSolution");
+            OnSolutionOpened();
+        }
+
+        private void OnAfterCloseSolution(object sender, EventArgs e)
+        {
+            Logger.Info("[WebViewLifecycle] solutionEvent.afterCloseSolution");
+            OnSolutionClosed();
+        }
 
         // ── Open Folder / CMake 事件处理 ──
         private void OnAfterOpenFolder(object sender, FolderEventArgs e)
@@ -1190,7 +1201,10 @@ namespace DeepSeek_v4_for_VisualStudio.View
         /// </summary>
         private async Task<bool> InitializeWebViewAsync()
         {
-            if (ChatWebView?.CoreWebView2 != null)
+            // 控件仍存活且 CoreWebView2 就绪：无需重复初始化。
+            // 注意：不能用 ChatWebView?.CoreWebView2 != null 判断——控件被视觉树卸载后
+            // 该访问会抛异常或返回已失效实例，导致重建被误跳过。
+            if (TryGetLiveCoreWebView(out _))
             {
                 Logger.Info("[Render] CoreWebView2 已初始化，跳过重复初始化");
                 return true;
@@ -1216,7 +1230,8 @@ namespace DeepSeek_v4_for_VisualStudio.View
 
         private async Task<bool> InitializeWebViewCoreAsync()
         {
-            if (ChatWebView?.CoreWebView2 != null)
+            // 控件已存活且环境就绪则直接复用；失效控件由 TryGetLiveCoreWebView 拦截
+            if (TryGetLiveCoreWebView(out _))
             {
                 return true;
             }
@@ -1252,12 +1267,13 @@ namespace DeepSeek_v4_for_VisualStudio.View
                 _webView2Environment ??= environment;
                 await ChatWebView.EnsureCoreWebView2Async(_webView2Environment);
                 Logger.Info("[Render] CoreWebView2 环境初始化成功");
-                return ChatWebView.CoreWebView2 != null;
+                // 用存活探测判定结果：控件若在此期间失效，直接访问 CoreWebView2 会抛异常
+                return TryGetLiveCoreWebView(out _);
             }
             catch (Exception ex)
             {
                 Logger.Error($"[Render] WebView2 初始化失败: {ex.GetType().Name}: {ex.Message}");
-                if (ChatWebView?.CoreWebView2 != null)
+                if (TryGetLiveCoreWebView(out _))
                 {
                     Logger.Info("[Render] CoreWebView2 已在初始化过程中完成，按成功处理");
                     return true;
