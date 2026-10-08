@@ -378,10 +378,21 @@
         <!-- 视觉托管控件把渲染合成进 WPF 视觉树、参与正常 z-order：
              修复 GitHub issue #31（窗口式 WebView2 的子 HWND 空域问题——
              聊天内容始终覆盖 VS 自动隐藏弹窗等其他 VS 面板）。
-             ClipToBounds 保留，用于正确的区域裁剪。 -->
+             ClipToBounds 保留，用于正确的区域裁剪。
+
+             MinWidth/MinHeight=1 是本项目的关键规避措施，不要删除：
+             WebView2CompositionControl 在 SizeChanged 中调用 GraphicsItemD3DImage.UpdateSize，
+             进而 framePool.Recreate(width, height)。当尺寸有一边为 0 时该调用会失败并抛
+             ArgumentException(0x80070057 / E_INVALIDARG)。工具窗口 unpin / 自动隐藏 / 收起时
+             VS 会把本行高度压到 0，正好触发——且异常是在 WPF 渲染回调
+             (MediaContext.RenderMessageHandler) 中抛出的，不在任何 try/catch 范围内，
+             因此表现为「未经处理的异常」崩溃，无法通过托管代码捕获。
+             给宿主保留 1 像素下限可避免把 0 传给库（上游 issue #5485）。 -->
         <ContentControl Grid.Row="1"
                         x:Name="ChatWebViewHost"
                         Margin="0"
+                        MinWidth="1"
+                        MinHeight="1"
                         ClipToBounds="True" />
 
         <!-- ═══ Diff 预览全局控制栏 ═══ -->

@@ -668,6 +668,18 @@ namespace DeepSeek_v4_for_VisualStudio.View
                 // 视觉托管（Composition）：浏览器画面合成进 WPF 视觉树，无子 HWND，
                 // 修复 VS 自动隐藏弹窗（如「Git 更改」）被聊天内容覆盖的问题 (issue #31)。
                 ChatWebView = new Microsoft.Web.WebView2.Wpf.WebView2CompositionControl();
+
+                // ── 关键规避：禁止把 0 尺寸传给 WebView2CompositionControl ──
+                // 该控件在 SizeChanged 中调用 GraphicsItemD3DImage.UpdateSize →
+                // framePool.Recreate(width, height)。任一边为 0 时该调用失败并抛
+                // ArgumentException(0x80070057 / E_INVALIDARG)。工具窗口 unpin / 自动隐藏 /
+                // 收起时 VS 会把宿主行高压到 0，正好触发；异常在 WPF 渲染回调
+                // (MediaContext.RenderMessageHandler) 中抛出，不在任何 try/catch 范围内，
+                // 表现为「未经处理的异常」崩溃，托管代码无法捕获（上游 issue #5485）。
+                // 除 XAML 中宿主的 MinWidth/MinHeight 外，这里在控件自身再兜一层下限。
+                ChatWebView.MinWidth = 1;
+                ChatWebView.MinHeight = 1;
+
                 ChatWebViewHost.Content = ChatWebView;
 
                 // ── 3. 订阅初始化完成事件（原在构造函数中直接订阅 ChatWebView）──
