@@ -234,6 +234,29 @@ namespace DeepSeek_v4_for_VisualStudio.View
             if (TryGetLiveCoreWebView(out _))
                 return true;
 
+            // ── 初始化进行中：绝不能在此时重建 ──
+            // 启动路径正在对当前控件执行 EnsureCoreWebView2Async。此刻 CoreWebView2 尚为 null，
+            // 上面的存活探测必然失败，但这并不代表控件已失效。
+            // 若此时重建，会 Dispose 掉正在初始化的控件并把 _webViewInitializationTask 置空，
+            // 导致库内部 InitializeController 抛 NullReferenceException(0x80004003)。
+            // 等待其完成，再由调用方重新判断状态。
+            var initializationTask = _webViewInitializationTask;
+            if (initializationTask != null && !initializationTask.IsCompleted)
+            {
+                Logger.Info("[WebViewLifecycle] rebuild.deferred | 初始化正在进行，跳过本次重建");
+                try
+                {
+                    await initializationTask;
+                }
+                catch (Exception ex)
+                {
+                    Logger.Debug($"[Render] 等待进行中的初始化完成时忽略异常: {ex.GetType().Name}");
+                }
+
+                // 初始化可能已让控件恢复可用
+                return TryGetLiveCoreWebView(out _);
+            }
+
             // ── 合并并发重建请求 ──
             // 流式更新、主题变更、切换解决方案可能同时发现控件失效；
             // 若各自重建会创建多个控件实例并重复挂载，这里统一复用同一任务。

@@ -1265,7 +1265,28 @@ namespace DeepSeek_v4_for_VisualStudio.View
             try
             {
                 _webView2Environment ??= environment;
-                await ChatWebView.EnsureCoreWebView2Async(_webView2Environment);
+
+                // ── 捕获局部引用，避免 await 期间字段被换掉导致「撕裂读」──
+                // 上面的 environment 创建是真正的异步让出点；期间重建路径可能已把
+                // ChatWebView 字段换成一个新控件（甚至释放了旧控件）。
+                // 若此处直接读字段，可能把 EnsureCoreWebView2Async 打到一个已释放的实例上，
+                // 在其内部 InitializeController 抛 NullReferenceException(0x80004003)。
+                var target = ChatWebView;
+                if (target == null)
+                {
+                    Logger.Warn("[Render] 初始化时控件字段为 null，放弃本次初始化");
+                    return false;
+                }
+
+                await target.EnsureCoreWebView2Async(_webView2Environment);
+
+                // await 之后重新校验：控件若已被替换，则本次初始化结果对当前控件无效
+                if (!ReferenceEquals(target, ChatWebView))
+                {
+                    Logger.Warn("[Render] 初始化期间控件实例已被替换，丢弃本次初始化结果");
+                    return TryGetLiveCoreWebView(out _);
+                }
+
                 Logger.Info("[Render] CoreWebView2 环境初始化成功");
                 // 用存活探测判定结果：控件若在此期间失效，直接访问 CoreWebView2 会抛异常
                 return TryGetLiveCoreWebView(out _);
