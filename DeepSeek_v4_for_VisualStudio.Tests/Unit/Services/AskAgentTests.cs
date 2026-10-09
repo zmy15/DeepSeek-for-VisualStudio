@@ -353,7 +353,8 @@ public class AskAgentTests
         messages[3].Role.Should().Be("system");
         messages[3].Content.Should().NotBeNullOrWhiteSpace();
         messages[4].Role.Should().Be("user");
-        messages[4].Content.Should().Be("handoff user");
+        // 移交提示带「当前任务目标」标记
+        messages[4].Content.Should().Be("[当前任务目标] handoff user");
         messages[5].Role.Should().Be("system");
         messages[5].Content.Should().Be("Edit agent prompt");
 
@@ -378,7 +379,8 @@ public class AskAgentTests
             {
                 new() { Role = "system", Content = "stable system" },
                 new() { Role = "system", Content = "volatile 上下文块" },
-                new() { Role = "user", Content = "原始用户提问" },
+                // 快照来自真实管线：用户文本落库时已带「本轮用户需求」前缀
+                new() { Role = "user", Content = "[本轮用户需求] 原始用户提问" },
             },
         };
         var agent = new AskAgent(_apiService)
@@ -404,7 +406,8 @@ public class AskAgentTests
         messages[1].Role.Should().Be("system");
         messages[1].Content.Should().Be("volatile 上下文块");
         messages[2].Role.Should().Be("user");
-        messages[2].Content.Should().Be("原始用户提问");
+        // 源轮次的用户需求标记在移交后必须保留
+        messages[2].Content.Should().Be("[本轮用户需求] 原始用户提问");
 
         // 身份边界提示紧随用户提问之后（[3]），而非直接跟在主 system 之后
         messages[3].Role.Should().Be("system");
@@ -412,7 +415,8 @@ public class AskAgentTests
 
         // Handoff 分支不再重复注入 volatile 块，改为紧接 [新任务 user][Edit 提示词]
         messages[4].Role.Should().Be("user");
-        messages[4].Content.Should().Be("handoff user");
+        // 移交提示带「当前任务目标」标记
+        messages[4].Content.Should().Be("[当前任务目标] handoff user");
         messages[5].Role.Should().Be("system");
         messages[5].Content.Should().Be("Edit agent prompt");
 

@@ -296,6 +296,12 @@ namespace DeepSeek_v4_for_VisualStudio.Services.Agents
             }
 
             // 第4层：用户消息（每问必变，放最后）
+            // ── 打「当前任务目标」标记 ──
+            //   BuildAgent 走 BuildContextAwareMessages(..., deduplicateCurrentUser: false)，
+            //   该消息是**新追加**的 user，不经过 Handoff 分支的
+            //   ApplyCurrentUserQuestionPrefix，也不入 _entries。缺该标记时，
+            //   切换 Agent 后的长上下文里模型容易把中间内容误当成本轮目标。
+            sb.Append(LocalizationService.Instance["system.agent.handoffTaskGoalPrefix"]);
             sb.AppendLine(userMessage);
 
             return sb.ToString();

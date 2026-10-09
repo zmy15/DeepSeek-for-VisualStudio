@@ -1766,6 +1766,13 @@ namespace DeepSeek_v4_for_VisualStudio.Services.Agents
             // 数十 KB 的冗余上下文。
 
             // 第1层：Plan 标题（同计划内所有步骤完全相同，最稳定）
+            // ── 该 user 消息即「当前任务目标」──
+            //   EditAgent 走 BuildContextAwareMessages(..., deduplicateCurrentUser: false)，
+            //   步骤提示是**新追加**的 user，不会经过 Handoff 分支的
+            //   ApplyCurrentUserQuestionPrefix，也不会经过 AddUserMessage（步骤提示不入 _entries）。
+            //   因此必须在此处显式打标：上下文最长、身份刚切换，历史里堆着源 Agent 的
+            //   user 轮次与工具记录，没有该标记时模型容易把中间内容误当成本轮目标。
+            sb.Append(LocalizationService.Instance["system.agent.handoffTaskGoalPrefix"]);
             sb.AppendLine(string.Format(AiPrompts.EditStepPromptPrefix, plan.Title));
             sb.AppendLine();
 

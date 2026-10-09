@@ -831,6 +831,17 @@ namespace DeepSeek_v4_for_VisualStudio.Services.Agents
                 if (!string.IsNullOrWhiteSpace(systemPrompt))
                     result.Add(new ChatApiMessage { Role = "system", Content = systemPrompt });
                 AppendExplicitRouteInstruction(result);
+
+                // ── 标记移交后的当前任务目标 ──
+                //   Handoff 分支在下方的前缀逻辑之前就 return 了，目标 Agent 收到的
+                //   user（「你是一个 Edit Agent，正在执行任务…」）没有任何「这是当前目标」
+                //   的显式标记。而这恰恰是最需要该标记的场景：上下文最长、身份刚切换，
+                //   历史里还堆着源 Agent 的 user 轮次与工具记录，模型容易把中间内容或
+                //   上一轮需求误当成本轮目标而跑偏。
+                //   源轮次那条 user 的 [本轮用户需求] 前缀已由 AddUserMessage 落进 _entries，
+                //   随移交快照自然带出，无需在此处补写（此前补写会逐次叠加，且命中
+                //   "倒数第二条 user" 的脆弱定位）。
+                ApplyCurrentUserQuestionPrefix(result, "system.agent.handoffTaskGoalPrefix");
                 return result;
             }
 
@@ -924,10 +935,22 @@ namespace DeepSeek_v4_for_VisualStudio.Services.Agents
         /// 不修改持久化上下文；已有前缀时不重复添加。
         /// </summary>
         internal static void ApplyCurrentUserQuestionPrefix(List<ChatApiMessage> messages)
+            => ApplyCurrentUserQuestionPrefix(messages, "system.agent.currentUserQuestionPrefix");
+
+        /// <summary>
+        /// 给最后一条 user 消息加显式前缀，前缀文案由本地化键决定。
+        /// 主对话路径用 <c>system.agent.currentUserQuestionPrefix</c>（本轮用户需求）；
+        /// Handoff 目标 Agent 用 <c>system.agent.handoffTaskGoalPrefix</c>（当前任务目标）。
+        /// </summary>
+        /// <param name="messages">本次请求的消息列表（就地修改）。</param>
+        /// <param name="localizationKey">前缀文案的本地化键。</param>
+        internal static void ApplyCurrentUserQuestionPrefix(List<ChatApiMessage> messages, string localizationKey)
         {
             if (messages == null || messages.Count == 0) return;
 
-            string prefix = LocalizationService.Instance["system.agent.currentUserQuestionPrefix"];
+            // 已落库的前缀不再重复处理：_entries 中的 user 在 AddUserMessage 时
+            // 已写入前缀，这里用 StartsWith 兜底避免二次叠加。
+            string prefix = LocalizationService.Instance[localizationKey];
             if (string.IsNullOrWhiteSpace(prefix)) return;
 
             // 从末尾向前找最后一条 user 消息（跳过尾部 system/工具历史）
@@ -1667,9 +1690,16 @@ namespace DeepSeek_v4_for_VisualStudio.Services.Agents
 
                     if (hasInterimAssistant)
                     {
+                        // ── 仅回收本次请求的局部消息，绝不回滚持久化历史 ──
+                        //   局部 messages 中的这条 assistant 必须移除：调用方会把最终正文
+                        //   作为本次请求的返回值再渲染一次，留着会与工具循环尾部重复。
+                        //   但 ContextManager 里的同一条必须保留 —— 它就是「上一轮 AI 的最终输出」，
+                        //   下一次用户提问时由 BuildApiMessagesRecentTurns 重放。
+                        //   此前这里连 _entries 一起回滚（RemoveLastAssistantMessage），
+                        //   导致下一轮请求只剩 tool_calls / tool 结果、没有 assistant 答复，
+                        //   模型因此看不到自己上一轮回答过什么，表现为「上轮结论丢失」。
                         toolInsertPos--;
                         messages.RemoveAt(toolInsertPos);
-                        Context?.ContextManager?.RemoveLastAssistantMessage();
                     }
                     break;
                 }

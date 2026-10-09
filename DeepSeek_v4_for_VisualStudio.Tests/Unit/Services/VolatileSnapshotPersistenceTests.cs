@@ -91,10 +91,12 @@ public class VolatileSnapshotPersistenceTests
         full.Should().Contain(m => m.Content != null && m.Content.Contains("[IDE Context] New"));
 
         // 旧快照必须留在原位（Q1 之前），新快照位于 Q2 之前，保证前缀缓存不被击穿
+        // 用户文本带「本轮用户需求」前缀（落库时写入），按前缀后的内容定位
+        string prefix = LocalizationService.Instance["system.agent.currentUserQuestionPrefix"];
         int oldIdx = full.FindIndex(m => m.Content != null && m.Content.Contains("[IDE Context] Old"));
-        int q1Idx = full.FindIndex(m => m.Role == "user" && m.Content == "Q1");
+        int q1Idx = full.FindIndex(m => m.Role == "user" && m.Content == prefix + "Q1");
         int newIdx = full.FindIndex(m => m.Content != null && m.Content.Contains("[IDE Context] New"));
-        int q2Idx = full.FindIndex(m => m.Role == "user" && m.Content == "Q2");
+        int q2Idx = full.FindIndex(m => m.Role == "user" && m.Content == prefix + "Q2");
 
         oldIdx.Should().BeLessThan(q1Idx);
         newIdx.Should().BeGreaterThan(q1Idx);

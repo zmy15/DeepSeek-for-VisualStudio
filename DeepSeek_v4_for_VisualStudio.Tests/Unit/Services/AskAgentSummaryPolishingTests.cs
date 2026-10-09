@@ -118,7 +118,8 @@ public class AskAgentSummaryPolishingTests
             ForwardedMessages = new List<ChatApiMessage>
             {
                 new() { Role = "system", Content = "SharedImmutablePrefix" },
-                new() { Role = "user", Content = "把 A.cs 改成异步实现" },
+                // 快照来自真实管线：用户文本落库时已带「本轮用户需求」前缀
+                new() { Role = "user", Content = "[本轮用户需求] 把 A.cs 改成异步实现" },
                 new() { Role = "assistant", Content = "已修改 A.cs。" },
                 new() { Role = "system", Content = "来源 Agent 末尾身份提示词" },
             },
@@ -151,9 +152,10 @@ public class AskAgentSummaryPolishingTests
         using var doc = JsonDocument.Parse(body);
         var messages = doc.RootElement.GetProperty("messages").EnumerateArray().ToList();
 
-        // 完整转发前缀保留（含历史轮次），末位来源身份提示词由基类移除
+        // 完整转发前缀保留（含历史轮次），末位来源身份提示词由基类移除。
+        // 源轮次的用户需求标记随移交保留（前缀必须还在）。
         messages.Should().Contain(m => m.GetProperty("role").GetString() == "user"
-            && m.GetProperty("content").GetString() == "把 A.cs 改成异步实现");
+            && m.GetProperty("content").GetString() == "[本轮用户需求] 把 A.cs 改成异步实现");
         messages.Should().Contain(m => m.GetProperty("role").GetString() == "assistant"
             && m.GetProperty("content").GetString() == "已修改 A.cs。");
         messages.Should().NotContain(m => m.GetProperty("content").GetString() == "来源 Agent 末尾身份提示词");

@@ -70,4 +70,26 @@ public class BuildAgentTests
         prompt.Should().Contain("已截断");
         prompt.Length.Should().BeLessThan(5000);
     }
+
+    /// <summary>
+    /// 构建任务是「当前任务目标」：该 user 由 BuildContextAwareMessages 追加
+    /// （deduplicateCurrentUser: false），不经过 Handoff 分支的前缀逻辑，
+    /// 必须由 BuildEnhancedUserMessage 自身打标。
+    /// </summary>
+    [Fact]
+    public void BuildEnhancedUserMessage_CarriesCurrentTaskGoalPrefix()
+    {
+        var agent = new BuildAgent(new DeepSeekApiService("test-api-key"));
+        var method = typeof(BuildAgent).GetMethod(
+            "BuildEnhancedUserMessage",
+            System.Reflection.BindingFlags.NonPublic | System.Reflection.BindingFlags.Instance);
+
+        string result = (string)method!.Invoke(agent, new object[] { "修复编译错误", new AgentContext() })!;
+
+        string prefix = global::DeepSeek_v4_for_VisualStudio.Services.LocalizationService.Instance[
+            "system.agent.handoffTaskGoalPrefix"];
+        result.Should().Contain(prefix + "修复编译错误");
+        // 前缀只应出现一次，不得叠加
+        result.Split(new[] { prefix }, StringSplitOptions.None).Length.Should().Be(2);
+    }
 }

@@ -134,6 +134,23 @@ public class ExploreAgentTests
         result.Should().Contain("探索任务");
     }
 
+    /// <summary>
+    /// 探索任务是「当前任务目标」：该 user 由 BuildContextAwareMessages 追加，
+    /// 不经过 Handoff 分支的前缀逻辑，必须由 prompt 自身打标。
+    /// </summary>
+    [Fact]
+    public void BuildExplorePrompt_CarriesCurrentTaskGoalPrefix()
+    {
+        var context = new AgentContext();
+
+        var result = BuildExplorePromptPublic("找到认证相关的代码", context);
+
+        string prefix = LocalizationService.Instance["system.agent.handoffTaskGoalPrefix"];
+        result.Should().Contain(prefix + "找到认证相关的代码");
+        // 前缀只应出现一次，不得叠加
+        result.Split(new[] { prefix }, StringSplitOptions.None).Length.Should().Be(2);
+    }
+
     [Fact]
     public void BuildExplorePrompt_WithSolutionPath_IncludesWorkspaceInfo()
     {
