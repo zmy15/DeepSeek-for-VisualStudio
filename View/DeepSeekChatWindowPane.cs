@@ -78,6 +78,10 @@ namespace DeepSeek_v4_for_VisualStudio.View
                 {
                     DiagnosticLog.Write($"[DeepSeek Pane] OnCreate: Content type is {Content?.GetType().FullName ?? "null"} (expected DeepSeekChatControl)");
                 }
+
+                // 工具窗口窗格创建完成：与 webview.unloaded / control.unloaded 日志对照，
+                // 可判断控件被卸出视觉树是否由工具窗口生命周期引起。
+                Logger.Info("[WebViewLifecycle] pane.onCreated");
             }
             catch (Exception ex)
             {
@@ -94,6 +98,8 @@ namespace DeepSeek_v4_for_VisualStudio.View
         /// </summary>
         protected override void Dispose(bool disposing)
         {
+            // 工具窗口关闭或 VS 重建布局都会走到这里，是「控件被卸出视觉树」的强候选原因
+            Logger.Info($"[WebViewLifecycle] pane.dispose | disposing={disposing} | content={Content?.GetType().Name ?? "null"}");
             if (disposing && Content is IDisposable disposable)
             {
                 disposable.Dispose();
