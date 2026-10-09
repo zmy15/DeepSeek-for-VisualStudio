@@ -61,7 +61,7 @@ public class BaseAgentTests
 
         BaseAgent.ApplyCurrentUserQuestionPrefix(messages);
 
-        messages[3].Content.Should().StartWith("[当前用户提问]");
+        messages[3].Content.Should().StartWith("[本轮用户需求]");
         messages[3].Content.Should().EndWith("当前问题");
         messages[1].Content.Should().Be("旧问题");
     }
@@ -71,12 +71,12 @@ public class BaseAgentTests
     {
         var messages = new List<ChatApiMessage>
         {
-            new() { Role = "user", Content = "[当前用户提问] 已标记" },
+            new() { Role = "user", Content = "[本轮用户需求] 已标记" },
         };
 
         BaseAgent.ApplyCurrentUserQuestionPrefix(messages);
 
-        messages[0].Content.Should().Be("[当前用户提问] 已标记");
+        messages[0].Content.Should().Be("[本轮用户需求] 已标记");
     }
 
     [Fact]
@@ -94,8 +94,68 @@ public class BaseAgentTests
 
         BaseAgent.ApplyCurrentUserQuestionPrefix(messages);
 
-        parts[0].Text.Should().StartWith("[当前用户提问]");
+        parts[0].Text.Should().StartWith("[本轮用户需求]");
         parts[0].Text.Should().EndWith("看图回答问题");
+    }
+
+    /// <summary>
+    /// 只调用「当前任务目标」标记时，仅命中最后一条 user，
+    /// 源 Agent 的历史 user 轮次不被该次调用改动。
+    /// </summary>
+    [Fact]
+    public void ApplyCurrentUserQuestionPrefix_HandoffKey_MarksOnlyHandoffUser()
+    {
+        var messages = new List<ChatApiMessage>
+        {
+            new() { Role = "user", Content = "加到TODO里" },
+            new() { Role = "assistant", Content = "移交 Edit Agent" },
+            new() { Role = "system", Content = "身份边界提示" },
+            new() { Role = "user", Content = "你是一个 Edit Agent，正在执行任务：「执行代码变更」。" },
+            new() { Role = "system", Content = "Edit 模式提示词" },
+        };
+
+        BaseAgent.ApplyCurrentUserQuestionPrefix(messages, "system.agent.handoffTaskGoalPrefix");
+
+        messages[3].Content.Should().StartWith("[当前任务目标]");
+        messages[3].Content.Should().Contain("你是一个 Edit Agent");
+        // 该次调用只命中最后一条 user；源轮次的前缀由 AddUserMessage 落库时写入
+        messages[0].Content.Should().Be("加到TODO里");
+    }
+
+    [Fact]
+    public void ApplyCurrentUserQuestionPrefix_HandoffKey_DoesNotDoublePrefix()
+    {
+        var messages = new List<ChatApiMessage>
+        {
+            new() { Role = "user", Content = "[当前任务目标] 已标记" },
+        };
+
+        BaseAgent.ApplyCurrentUserQuestionPrefix(messages, "system.agent.handoffTaskGoalPrefix");
+
+        messages[0].Content.Should().Be("[当前任务目标] 已标记");
+    }
+
+    /// <summary>
+    /// Handoff 请求：交接提示带「当前任务目标」；源轮次的前缀来自 _entries
+    /// （落库时写入），此处验证请求侧不会把它再改一次。
+    /// </summary>
+    [Fact]
+    public void ApplyCurrentUserQuestionPrefix_Handoff_SourceTurnPrefixUntouched()
+    {
+        var messages = new List<ChatApiMessage>
+        {
+            new() { Role = "user", Content = "[本轮用户需求] 加到TODO里" },
+            new() { Role = "assistant", Content = "移交 Edit Agent" },
+            new() { Role = "system", Content = "身份边界提示" },
+            new() { Role = "user", Content = "你是一个 Edit Agent，正在执行任务：「执行代码变更」。" },
+            new() { Role = "system", Content = "Edit 模式提示词" },
+        };
+
+        BaseAgent.ApplyCurrentUserQuestionPrefix(messages, "system.agent.handoffTaskGoalPrefix");
+
+        messages[3].Content.Should().StartWith("[当前任务目标]");
+        // 源轮次已由落库写入前缀，请求侧不再改动，也不得叠加
+        messages[0].Content.Should().Be("[本轮用户需求] 加到TODO里");
     }
 
     [Theory]

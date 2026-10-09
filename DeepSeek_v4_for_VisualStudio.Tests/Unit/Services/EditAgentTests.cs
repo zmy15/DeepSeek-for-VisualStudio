@@ -591,6 +591,25 @@ public class EditAgentTests
         EditAgent.ContainsBuildIntent(text).Should().Be(expected);
     }
 
+    /// <summary>
+    /// EditAgent 的步骤提示是「当前任务目标」：它通过 BuildContextAwareMessages 追加为新 user，
+    /// 既不走 Handoff 分支也不入 _entries，必须由 BuildStepPrompt 自己打标，
+    /// 否则切换 Agent 后该 user 没有任何「这是当前目标」的标记。
+    /// </summary>
+    [Fact]
+    public void BuildStepPrompt_CarriesCurrentTaskGoalPrefix()
+    {
+        var agent = new EditAgent(_apiService);
+        var plan = BuildPlan((1, "修改 Settings 页", "调整属性定义"));
+
+        string prompt = InvokeBuildStepPrompt(agent, plan.Steps[0], plan);
+
+        string prefix = LocalizationService.Instance["system.agent.handoffTaskGoalPrefix"];
+        prompt.Should().StartWith(prefix);
+        // 前缀后紧跟原有的步骤提示首行（Edit step prompt prefix）
+        prompt.Should().Contain(string.Format(AiPrompts.EditStepPromptPrefix, plan.Title));
+    }
+
     /// <summary>步骤提示词随构建许可给出对应说明。</summary>
     [Fact]
     public void BuildStepPrompt_ReflectsBuildPermission()

@@ -17,6 +17,14 @@ public class ConversationContextManagerExtendedTests
         _manager = new ConversationContextManager();
     }
 
+    /// <summary>
+    /// 用户消息落库时会写入「本轮用户需求」前缀（持久化事实，
+    /// 让移交/后续请求无需在每条路径上重复补写）。
+    /// 断言期望文本时统一经此换算，避免逐处硬编码前缀。
+    /// </summary>
+    private static string Prefixed(string userText)
+        => LocalizationService.Instance["system.agent.currentUserQuestionPrefix"] + userText;
+
     #region SetSkillContext
 
     [Fact]
@@ -102,18 +110,21 @@ public class ConversationContextManagerExtendedTests
 
         _manager.AddUserMessage(prompt, visual);
 
+        // 落库时写入「本轮用户需求」前缀（持久化事实，随移交/后续请求自然带出）
+        string expected = LocalizationService.Instance["system.agent.currentUserQuestionPrefix"] + prompt;
+
         var userMessage = _manager.BuildApiMessages().Single(m => m.Role == "user");
-        userMessage.Content.Should().Be(prompt);
+        userMessage.Content.Should().Be(expected);
         userMessage.MultimodalContent.Should().HaveCount(2);
         userMessage.MultimodalContent![0].Type.Should().Be("text");
-        userMessage.MultimodalContent[0].Text.Should().Be(prompt);
+        userMessage.MultimodalContent[0].Text.Should().Be(expected);
         userMessage.MultimodalContent[1].Type.Should().Be("image_url");
         userMessage.MultimodalContent[1].ImageUrl!.Url.Should().Be("data:image/png;base64,AAAA");
 
         using var document = JsonDocument.Parse(JsonSerializer.Serialize(userMessage));
         var contentParts = document.RootElement.GetProperty("content");
         contentParts.GetArrayLength().Should().Be(2);
-        contentParts[0].GetProperty("text").GetString().Should().Be(prompt);
+        contentParts[0].GetProperty("text").GetString().Should().Be(expected);
         contentParts[1].GetProperty("type").GetString().Should().Be("image_url");
     }
 
@@ -376,9 +387,9 @@ public class ConversationContextManagerExtendedTests
 
         capturedMessages.Should().NotBeNull();
         capturedMessages.Should().Contain(m => m.Role == "system");
-        capturedMessages.Should().Contain(m => m.Content == "Q1");
+        capturedMessages.Should().Contain(m => m.Content == Prefixed("Q1"));
         capturedMessages.Should().Contain(m => m.Content == "A1");
-        capturedMessages.Should().NotContain(m => m.Content == "Q2");
+        capturedMessages.Should().NotContain(m => m.Content == Prefixed("Q2"));
         capturedMessages!.Last().Role.Should().Be("system");
         capturedMessages.Last().Content.Should().Contain("请将上方");
 
@@ -413,7 +424,7 @@ public class ConversationContextManagerExtendedTests
         staticPrefixMessageCount.Should().Be(1);
         removedMessageCount.Should().Be(2);
         dynamicBlock.Should().Contain("tool-loop-summary");
-        capturedMessages.Should().Contain(m => m.Content == "Q1");
+        capturedMessages.Should().Contain(m => m.Content == Prefixed("Q1"));
         capturedMessages.Should().Contain(m => m.Content == "A1");
         capturedMessages.Should().NotContain(m => m.Content == "T1");
     }
@@ -597,7 +608,7 @@ public class ConversationContextManagerExtendedTests
             m.Role == "system"
             && m.Content != null
             && m.Content.Contains("persistent-system", StringComparison.Ordinal));
-        messages.Should().NotContain(m => m.Content == "old-user");
+        messages.Should().NotContain(m => m.Content == Prefixed("old-user"));
         messages.Should().NotContain(m => m.Content == "old-assistant");
         messages.Should().NotContain(m =>
             m.Content != null && m.Content.Contains("old-summary", StringComparison.Ordinal));
@@ -709,8 +720,8 @@ public class ConversationContextManagerExtendedTests
 
         var messages = _manager.BuildApiMessagesRecentTurns(maxTurns: 5);
 
-        messages.Should().Contain(m => m.Content == "Q1");
-        messages.Should().Contain(m => m.Content == "Q2");
+        messages.Should().Contain(m => m.Content == Prefixed("Q1"));
+        messages.Should().Contain(m => m.Content == Prefixed("Q2"));
     }
 
     [Fact]
@@ -726,10 +737,10 @@ public class ConversationContextManagerExtendedTests
         var messages = _manager.BuildApiMessagesRecentTurns(maxTurns: 2);
 
         // Q1 应该在 maxTurns 之外
-        messages.Should().NotContain(m => m.Content == "Q1");
+        messages.Should().NotContain(m => m.Content == Prefixed("Q1"));
         // Q2 和 Q3 应保留
-        messages.Should().Contain(m => m.Content == "Q2");
-        messages.Should().Contain(m => m.Content == "Q3");
+        messages.Should().Contain(m => m.Content == Prefixed("Q2"));
+        messages.Should().Contain(m => m.Content == Prefixed("Q3"));
     }
 
     [Fact]
@@ -778,8 +789,8 @@ public class ConversationContextManagerExtendedTests
 
         _manager.MessageCount.Should().Be(2);
         var messages = _manager.BuildApiMessages();
-        messages.Should().Contain(m => m.Content == "Q1");
-        messages.Should().NotContain(m => m.Content == "Q2");
+        messages.Should().Contain(m => m.Content == Prefixed("Q1"));
+        messages.Should().NotContain(m => m.Content == Prefixed("Q2"));
     }
 
     [Fact]
@@ -1138,16 +1149,16 @@ public class ConversationContextManagerExtendedTests
 
         var messages = _manager.BuildApiMessages();
 
-        messages.Should().Contain(m => m.Role == "user" && m.Content == "Q1");
+        messages.Should().Contain(m => m.Role == "user" && m.Content == Prefixed("Q1"));
         messages.Should().Contain(m => m.Role == "system" && m.Content!.Contains("[IDE Context] Old"));
         messages.Should().Contain(m => m.Role == "assistant" && m.Content == "A1");
-        messages.Should().Contain(m => m.Role == "user" && m.Content == "Q2");
+        messages.Should().Contain(m => m.Role == "user" && m.Content == Prefixed("Q2"));
         messages.Should().Contain(m => m.Role == "system" && m.Content!.Contains("[IDE Context] New"));
 
         int oldIndex = messages.FindIndex(m => m.Role == "system" && m.Content!.Contains("[IDE Context] Old"));
-        int q1Index = messages.FindIndex(m => m.Role == "user" && m.Content == "Q1");
+        int q1Index = messages.FindIndex(m => m.Role == "user" && m.Content == Prefixed("Q1"));
         int newIndex = messages.FindIndex(m => m.Role == "system" && m.Content!.Contains("[IDE Context] New"));
-        int q2Index = messages.FindIndex(m => m.Role == "user" && m.Content == "Q2");
+        int q2Index = messages.FindIndex(m => m.Role == "user" && m.Content == Prefixed("Q2"));
 
         oldIndex.Should().BeLessThan(q1Index);
         newIndex.Should().BeLessThan(q2Index);

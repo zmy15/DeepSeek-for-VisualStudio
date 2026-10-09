@@ -326,7 +326,11 @@ namespace DeepSeek_v4_for_VisualStudio.Services.Agents
             }
 
             // 第4层：探索任务（每问必变，放最后）
+            // ── 打「当前任务目标」标记 ──
+            //   与 Build/Edit 同理：该消息由 BuildContextAwareMessages 追加为新 user
+            //   （deduplicateCurrentUser: false），不经过 Handoff 分支的前缀逻辑。
             sb.AppendLine("## 探索任务");
+            sb.Append(LocalizationService.Instance["system.agent.handoffTaskGoalPrefix"]);
             sb.AppendLine(userMessage);
             sb.AppendLine();
 

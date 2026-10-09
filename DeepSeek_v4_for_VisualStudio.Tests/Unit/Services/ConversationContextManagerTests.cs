@@ -70,7 +70,9 @@ public class ConversationContextManagerTests
         // 共享不可变前缀仍须追加在 fixedPrompt 之后；文件读取规则已下沉到 read_file 工具描述。
         messages[0].Content.Should().Contain("PowerShell 语法");
         messages[1].Role.Should().Be("user");
-        messages[1].Content.Should().Be("Hi");
+        // 用户文本落库时带「本轮用户需求」前缀（持久化事实）
+        messages[1].Content.Should().Be(
+            LocalizationService.Instance["system.agent.currentUserQuestionPrefix"] + "Hi");
     }
 
     [Fact]
@@ -201,5 +203,38 @@ public class ConversationContextManagerTests
 
         volatileBlock.Should().NotBeNull();
         volatileBlock!.Should().Contain("Search results");
+    }
+
+    /// <summary>
+    /// 回归：用户消息落库即带「本轮用户需求」前缀，中途切换 Agent（Handoff）
+    /// 后前缀仍必须存在于请求中——此前前缀只在请求时临时加到副本上，
+    /// Handoff 分支不经过该逻辑，导致历史 user 丢失标记。
+    /// </summary>
+    [Fact]
+    public void AddUserMessage_PersistsRequirementPrefix_SurvivesHandoff()
+    {
+        string prefix = LocalizationService.Instance["system.agent.currentUserQuestionPrefix"];
+
+        _manager.AddUserMessage("加到TODO里");
+        _manager.AddAssistantMessage("移交 Edit Agent");
+        _manager.AddToolResult("call_1", "request_handoff", "HANDOFF_REQUESTED");
+
+        // 移交后目标 Agent 重建请求：源轮次的 user 仍带前缀
+        var messages = _manager.BuildApiMessages();
+        messages.Should().Contain(m => m.Role == "user" && m.Content == prefix + "加到TODO里");
+    }
+
+    /// <summary>
+    /// 重复落库不得叠加前缀（会话恢复 / 重放同一文本时）。
+    /// </summary>
+    [Fact]
+    public void AddUserMessage_SameTextTwice_DoesNotStackPrefix()
+    {
+        string prefix = LocalizationService.Instance["system.agent.currentUserQuestionPrefix"];
+
+        _manager.AddUserMessage(prefix + "重复文本");
+
+        _manager.GetFullContext()
+            .Should().Contain(m => m.Content == prefix + "重复文本");
     }
 }

@@ -619,6 +619,21 @@ namespace DeepSeek_v4_for_VisualStudio.Services
         public string? GetFixedSystemPrompt() => _fixedSystemPrompt;
 
         /// <summary>
+        /// 给用户输入加上「本轮用户需求」前缀（幂等）。
+        /// 前缀文案取自本地化键，未配置时原样返回。
+        /// </summary>
+        private static string ApplyUserRequirementPrefix(string content)
+        {
+            string prefix = LocalizationService.Instance["system.agent.currentUserQuestionPrefix"];
+            if (string.IsNullOrWhiteSpace(prefix))
+                return content;
+
+            return content.StartsWith(prefix, StringComparison.Ordinal)
+                ? content
+                : prefix + content;
+        }
+
+        /// <summary>
         /// 添加用户消息。
         /// 当 Token 超出预算时触发压缩而非直接删除。
         /// </summary>
@@ -638,6 +653,16 @@ namespace DeepSeek_v4_for_VisualStudio.Services
             // ── 安全净化：防止工具注入标记进入上下文 ──
             if (hasText)
                 content = StringExtensions.SanitizeUserInput(content);
+
+            // ── 落库时写入「本轮用户需求」前缀 ──
+            //   前缀此前只在发出请求时临时加到消息副本上，_entries 里始终是裸文本。
+            //   一旦同一轮内发生 Agent 移交（Handoff 走独立分支、不经过前缀逻辑），
+            //   目标 Agent 就会看到一条没有任何「这是用户需求」标记的历史 user，
+            //   与上一请求不一致，模型容易把中间内容或旧需求误当成本轮目标。
+            //   改为落库时写入：前缀成为持久化事实，任何后续请求（含移交）自动继承，
+            //   无需在每条路径上重复补写。幂等保护避免重复保存时二次叠加。
+            if (hasText)
+                content = ApplyUserRequirementPrefix(content);
 
             var normalizedMultimodalContent = CloneContentParts(multimodalContent);
             if (hasText
@@ -706,6 +731,19 @@ namespace DeepSeek_v4_for_VisualStudio.Services
                     // 场景 B：前条有 tool_calls，本条是纯文本 → 合并文本到前条（保留 tool_calls 结构）
                     if (!currHasTc)
                     {
+                        // ── 幂等保护：完全相同的正文不重复追加 ──
+                        //   工具循环终止时已把最终答复写入 _entries，UI 收尾
+                        //   （SyncAgentResponseToTreeAndContextAsync）会再写一次同样的正文。
+                        //   若不拦截，同一段回答会被拼接成 "正文\n\n---\n\n正文"，
+                        //   既浪费 token 又让下一轮看到重复内容。
+                        if (!string.IsNullOrWhiteSpace(content)
+                            && string.Equals(last.Content, content, StringComparison.Ordinal))
+                        {
+                            if (!string.IsNullOrWhiteSpace(reasoningContent))
+                                last.ReasoningContent = reasoningContent;
+                            return;
+                        }
+
                         // 合并文本内容到前条 assistant
                         if (!string.IsNullOrWhiteSpace(content))
                         {
