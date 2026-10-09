@@ -8,7 +8,7 @@
 [![Visual Studio](https://img.shields.io/badge/Visual%20Studio-2022%20%7C%202026-purple)]()
 [![.NET](https://img.shields.io/badge/.NET%20Framework-4.7.2-blueviolet)]()
 [![Platform](https://img.shields.io/badge/platform-Windows%20x64%20%2F%20ARM64-lightgrey)]()
-[![Version](https://img.shields.io/badge/version-1.2.6-blue)]()
+[![Version](https://img.shields.io/badge/version-1.2.7-blue)]()
 [![GitHub Stars](https://img.shields.io/github/stars/zmy15/DeepSeek-for-VisualStudio?style=social)](https://github.com/zmy15/DeepSeek-for-VisualStudio)
 
 [English](https://github.com/zmy15/DeepSeek-for-VisualStudio/blob/master/README.md)
