@@ -236,7 +236,7 @@
     "settings.apiDebugDump.displayName": "开发者：转储完整 API 报文",
     "settings.apiDebugDump.description": "仅供开发者使用。开启后把每次 API 调用的完整请求体与完整响应流写入 %LocalAppData%\\DeepSeekVS\\api-dump\\，一次调用对应一对请求 / 响应文件，用于离线分析缓存命中、工具调用与消息清洗结果。转储包含完整 prompt 与代码，单次可达数 MB，非排查问题请保持关闭；超过 7 天的转储会自动清理。",
     "settings.ocrEngine.displayName": "OCR 引擎",
-    "settings.ocrEngine.description": "选择图像 OCR 引擎:\n  • Windows Built-in — 系统内置，无需配置，准确率一般\n  • PaddleOCR-Sharp — 本地离线识别，中文准确率更高\n  • 通过 MCP 协议使用远程 OCR 服务",
+    "settings.ocrEngine.description": "选择图像 OCR 引擎:\n  • Windows Built-in — 系统内置，无需配置，准确率一般\n  • 通过 MCP 协议使用远程 OCR 服务",
     "settings.autocompleteEnabled.displayName": "启用代码补全",
     "settings.autocompleteEnabled.description": "在编辑器中启用内联代码补全（幽灵文本）。启用后，DeepSeek 将在你输入时提供代码补全建议。按 Tab 接受，按 Escape 取消。",
     "settings.autocompleteDelay.displayName": "补全延迟 (毫秒)",
