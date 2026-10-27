@@ -5,7 +5,7 @@
 > hunk-by-hunk reviewable diff editing.
 
 [![License: MIT](https://img.shields.io/badge/License-MIT-blue.svg)](LICENSE)
-[![VSIX](https://img.shields.io/badge/VSIX-1.3.0-success.svg)](source.extension.vsixmanifest)
+[![VSIX](https://img.shields.io/badge/VSIX-1.3.1-success.svg)](source.extension.vsixmanifest)
 [![Visual Studio](https://img.shields.io/badge/Visual%20Studio-2022%20%7C%202026-5C2D91.svg)](https://visualstudio.microsoft.com/)
 [![.NET Framework](https://img.shields.io/badge/.NET%20Framework-4.7.2-512BD4.svg)](https://dotnet.microsoft.com/)
 [![Stars](https://img.shields.io/github/stars/zmy15/DeepSeek-for-VisualStudio?style=flat&logo=github&label=Stars)](https://github.com/zmy15/DeepSeek-for-VisualStudio/stargazers)
