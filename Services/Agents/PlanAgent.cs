@@ -1371,27 +1371,8 @@ namespace DeepSeek_v4_for_VisualStudio.Services.Agents
         /// <returns>保存的文件绝对路径</returns>
         private static async Task<string> SavePlanMarkdownAsync(string markdown, AgentContext context)
         {
-            // 基础目录：%LocalAppData%\DeepSeekVS\plans
-            string baseDir = Path.Combine(
-                Environment.GetFolderPath(Environment.SpecialFolder.LocalApplicationData),
-                "DeepSeekVS", "plans");
-
-            // 根据解决方案路径计算子目录哈希（与 ChatPersistenceService 保持一致）
-            string subDir;
-            if (!string.IsNullOrEmpty(context.SolutionPath))
-            {
-                using (var sha256 = SHA256.Create())
-                {
-                    var hashBytes = sha256.ComputeHash(Encoding.UTF8.GetBytes(context.SolutionPath));
-                    var hash = BitConverter.ToString(hashBytes).Replace("-", "").Substring(0, 16);
-                    subDir = Path.Combine(baseDir, $"proj_{hash}");
-                }
-            }
-            else
-            {
-                subDir = Path.Combine(baseDir, "_unsaved");
-            }
-
+            // 基础目录/子目录规则统一由 StoragePaths 提供（与会话、输入历史保持同一套指纹）。
+            string subDir = StoragePaths.PlanDirectory(context.SolutionPath);
             Directory.CreateDirectory(subDir);
 
             // 文件名：固定为 plan.md（每次覆盖，同一方案可重复使用）

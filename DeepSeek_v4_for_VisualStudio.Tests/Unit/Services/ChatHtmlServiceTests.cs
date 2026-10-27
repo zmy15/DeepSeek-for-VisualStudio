@@ -420,7 +420,6 @@ public class ChatHtmlServiceTests
             streamingContent: null,
             reasoningContent: null,
             isComplete: false,
-            statusText: null,
             reasoningDelta: "思考增量",
             contentDelta: null);
 

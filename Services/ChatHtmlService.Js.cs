@@ -451,7 +451,7 @@ window.__appendMessageHtml=function(html){
     } else {
         container.appendChild(fragment);
     }
-    // 流式追加期间跳过语法高亮（节省性能），由 BuildFinalRenderJs 在完成时统一处理
+    // 流式追加期间跳过语法高亮（节省性能），由 streamEnd 分支统一处理
     if (typeof window.__scrollToBottom === 'function') {
         window.__scrollToBottom('smooth');
     }
@@ -847,10 +847,6 @@ window._showCopyFeedback=function(msgIndex){
                     // 清除状态栏文本
                     var st = document.getElementById('status-text');
                     if (st) st.textContent = '';
-                }else if(msg.type==='streamStatus'){
-                    // 仅更新状态栏（避免额外通信）
-                    var st=document.getElementById('status-text');
-                    if(st&&msg.text)st.textContent=msg.text;
                 }else if(msg.type==='prependHtml'){
                     var cc2=document.getElementById('chat-container');
                     if(cc2){cc2.insertAdjacentHTML('afterbegin',msg.html);}
@@ -936,12 +932,6 @@ window._showCopyFeedback=function(msgIndex){
             // 更新光标
             if(cursor&&msg.f!==undefined){
                 cursor.style.display=msg.f?'none':'inline-block';
-            }
-
-            // 更新状态栏
-            if(msg.s){
-                var st=document.getElementById('status-text');
-                if(st)st.textContent=msg.s;
             }
         }
 

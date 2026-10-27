@@ -49,28 +49,6 @@ public class BuildAgentTests
         handoff.Prompt.Should().Be("summary");
     }
 
-    [Fact]
-    public void AppendBuildResult_IncludesFinalToolResult()
-    {
-        var prompt = BuildAgent.AppendBuildResult("summary", "Build succeeded");
-
-        prompt.Should().Contain("summary");
-        prompt.Should().Contain("本次构建结果");
-        prompt.Should().Contain("Build succeeded");
-    }
-
-    [Fact]
-    public void AppendBuildResult_TruncatesLongOutput()
-    {
-        string longOutput = new string('E', 10000);
-        var prompt = BuildAgent.AppendBuildResult("summary", longOutput);
-
-        prompt.Should().Contain("summary");
-        prompt.Should().Contain("本次构建结果");
-        prompt.Should().Contain("已截断");
-        prompt.Length.Should().BeLessThan(5000);
-    }
-
     /// <summary>
     /// 构建任务是「当前任务目标」：该 user 由 BuildContextAwareMessages 追加
     /// （deduplicateCurrentUser: false），不经过 Handoff 分支的前缀逻辑，

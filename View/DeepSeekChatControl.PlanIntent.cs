@@ -323,25 +323,8 @@ namespace DeepSeek_v4_for_VisualStudio.View
                                 context.ActivePlan = plan;
                                 context.IsPlanningMode = true;
 
-                                // 重建 PlanFilePath
-                                string baseDir = Path.Combine(
-                                    Environment.GetFolderPath(Environment.SpecialFolder.LocalApplicationData),
-                                    "DeepSeekVS", "plans");
-                                string subDir;
-                                if (!string.IsNullOrEmpty(_solutionPath))
-                                {
-                                    using (var sha256 = SHA256.Create())
-                                    {
-                                        var hashBytes = sha256.ComputeHash(Encoding.UTF8.GetBytes(_solutionPath));
-                                        var hash = BitConverter.ToString(hashBytes).Replace("-", "").Substring(0, 16);
-                                        subDir = Path.Combine(baseDir, $"proj_{hash}");
-                                    }
-                                }
-                                else
-                                {
-                                    subDir = Path.Combine(baseDir, "_unsaved");
-                                }
-                                context.PlanFilePath = Path.Combine(subDir, "plan.md");
+                                // 重建 PlanFilePath（路径规则统一由 StoragePaths 提供）
+                                context.PlanFilePath = StoragePaths.PlanFilePath(_solutionPath);
 
                                 Logger.Info($"[PlanContext] 从 PlanJson 恢复 ActivePlan: {plan.Steps.Count} 个步骤 (PlanId={plan.PlanId})");
                                 return;

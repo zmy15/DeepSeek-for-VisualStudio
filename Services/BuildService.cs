@@ -32,7 +32,7 @@ namespace DeepSeek_v4_for_VisualStudio.Services
             await ThreadHelper.JoinableTaskFactory.SwitchToMainThreadAsync();
 
             // ── 解析工作区根目录 ──
-            string? workspaceDir = NormalizeToDirectory(solutionPath);
+            string? workspaceDir = StoragePaths.NormalizeToDirectory(solutionPath);
 
             // ── 检测是否为 CMake / Open Folder 项目（用于日志）──
             bool isCmakeProject = IsCmakeProject(workspaceDir);
@@ -188,8 +188,8 @@ namespace DeepSeek_v4_for_VisualStudio.Services
                     Logger.Info("[BuildService] CMake 构建超时/取消，正在终止进程...");
                     try
                     {
-                        // KillProcessTree: 先杀父进程，再通过 taskkill /T 清理残留子进程树
-                        KillProcessTree(process);
+                        // 先杀父进程，再通过 taskkill /T 清理残留子进程树
+                        ProcessTreeKiller.Kill(process, "[BuildService]");
                     }
                     catch (Exception killEx)
                     {
@@ -1397,45 +1397,6 @@ namespace DeepSeek_v4_for_VisualStudio.Services
             }
         }
 
-        /// <summary>
-        /// 终止进程及其子进程树。兼容 .NET Framework 4.7.2（不支持 Process.Kill(entireProcessTree)）。
-        /// 先尝试 Kill 主进程，再通过 taskkill /T 确保子进程树完全清理。
-        /// </summary>
-        private static void KillProcessTree(Process process)
-        {
-            int pid = process.Id;
-            try
-            {
-                // 先尝试直接 Kill 主进程
-                if (!process.HasExited)
-                    process.Kill();
-            }
-            catch (Exception ex)
-            {
-                Logger.Warn($"[BuildService] Kill 主进程 (PID={pid}) 失败: {ex.Message}");
-            }
-
-            // 通过 taskkill /T 清理残留的子进程树（cmd.exe → cmake.exe → cl.exe 等）
-            try
-            {
-                var killPsi = new ProcessStartInfo
-                {
-                    FileName = "taskkill",
-                    Arguments = $"/T /F /PID {pid}",
-                    RedirectStandardOutput = true,
-                    RedirectStandardError = true,
-                    UseShellExecute = false,
-                    CreateNoWindow = true,
-                };
-                using var killer = Process.Start(killPsi);
-                killer?.WaitForExit(5000);
-            }
-            catch (Exception ex)
-            {
-                Logger.Warn($"[BuildService] taskkill /T (PID={pid}) 失败: {ex.Message}");
-            }
-        }
-
         #endregion
 
         #region Project Detection
@@ -1465,23 +1426,6 @@ namespace DeepSeek_v4_for_VisualStudio.Services
             {
                 return false;
             }
-        }
-
-        private static string? NormalizeToDirectory(string? solutionPath)
-        {
-            if (string.IsNullOrEmpty(solutionPath))
-                return null;
-
-            try
-            {
-                if (File.Exists(solutionPath))
-                    return Path.GetDirectoryName(solutionPath);
-                if (Directory.Exists(solutionPath))
-                    return solutionPath;
-            }
-            catch { }
-
-            return null;
         }
 
         #endregion

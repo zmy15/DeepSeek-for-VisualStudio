@@ -1306,15 +1306,6 @@ namespace DeepSeek_v4_for_VisualStudio.Services.EditTools
             return level;
         }
 
-        /// <summary>
-        /// 推断行的缩进字符（优先制表符，否则空格）。
-        /// </summary>
-        internal static string GetIndentChar(string line)
-        {
-            if (line.Length > 0 && line[0] == '\t') return "\t";
-            return " ";
-        }
-
         #endregion
 
         #region Add / Delete / Move

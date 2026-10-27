@@ -415,14 +415,6 @@ namespace DeepSeek_v4_for_VisualStudio.Services.EditTools
         }
 
         /// <summary>
-        /// 检查编辑后是否引入了新的诊断错误。
-        /// </summary>
-        protected static async Task<List<string>> CheckDiagnosticsAsync(string filePath)
-        {
-            return await EditPatchService.CheckNewDiagnosticsAsync(filePath);
-        }
-
-        /// <summary>
         /// 路径解析（委托给 EditPatchService）。
         /// </summary>
         protected static string ResolvePath(string filePath, string workspaceRoot)

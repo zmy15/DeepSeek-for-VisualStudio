@@ -157,17 +157,8 @@ namespace DeepSeek_v4_for_VisualStudio.View
                 return;
             }
 
-            // 仅在 ApiService 未初始化时创建，避免重置累计 Token 计数器
-            if (_apiService == null)
-            {
-                InitializeApiService();
-            }
-            if (_apiService == null)
-            {
-                lock (_lock) { _isGenerating = false; }
-                UpdateButtonsState();
+            if (!EnsureApiServiceInitialized())
                 return;
-            }
 
             // ── 单轮 Cache 统计快照：本次问答开始时的累计值 ──
             _apiService?.TakeCacheSnapshot();
@@ -1129,27 +1120,24 @@ namespace DeepSeek_v4_for_VisualStudio.View
         /// </summary>
         /// <param name="round">当前工具调用轮次（0 表示非工具循环模式）</param>
         private void LogCacheHitRate(int round = 0)
+            => CacheUsageLogger.Log(_apiService?.LastUsage, round);
+
+        /// <summary>
+        /// 确保 ApiService 可用：仅在未初始化时创建，避免重置累计 Token 计数器。
+        /// 不可用时复位生成态并返回 false（调用方直接 return）。
+        /// 发送与重发两条入口共用，此前是两段相同的就地代码。
+        /// </summary>
+        private bool EnsureApiServiceInitialized()
         {
-            try
-            {
-                var usage = _apiService?.LastUsage;
-                if (usage == null) return;
+            if (_apiService == null)
+                InitializeApiService();
 
-                int hit = usage.EffectiveHitTokens;
-                int miss = usage.EffectiveMissTokens;
-                int total = hit + miss;
-                double rate = usage.CacheHitRate;
+            if (_apiService != null)
+                return true;
 
-                string roundInfo = round > 0 ? $"[轮次#{round}] " : "";
-                string level = rate >= 0.90 ? "🟢" : rate >= 0.50 ? "🟡" : rate >= 0.20 ? "🟠" : "🔴";
-
-                Logger.Info($"[Cache] {level} {roundInfo}命中率: {usage.CacheHitRatePercent} " +
-                    $"(命中 {hit:N0} / 未命中 {miss:N0} / 总计 {total:N0} tokens)");
-            }
-            catch (Exception ex)
-            {
-                Logger.Warn($"[Cache] 记录命中率异常: {ex.Message}");
-            }
+            lock (_lock) { _isGenerating = false; }
+            UpdateButtonsState();
+            return false;
         }
 
         #endregion

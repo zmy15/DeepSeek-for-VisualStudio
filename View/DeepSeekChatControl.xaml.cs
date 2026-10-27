@@ -235,14 +235,7 @@ namespace DeepSeek_v4_for_VisualStudio.View
         private string GetInputHistoryFilePath()
         {
             Directory.CreateDirectory(_historyBaseDir);
-            if (string.IsNullOrWhiteSpace(_solutionPath))
-                return Path.Combine(_historyBaseDir, "_unsaved.json");
-            using (var sha256 = System.Security.Cryptography.SHA256.Create())
-            {
-                var hashBytes = sha256.ComputeHash(Encoding.UTF8.GetBytes(_solutionPath));
-                var hash = BitConverter.ToString(hashBytes).Replace("-", "").Substring(0, 16);
-                return Path.Combine(_historyBaseDir, $"proj_{hash}.json");
-            }
+            return StoragePaths.ProjectFilePath(_historyBaseDir, _solutionPath);
         }
 
         /// <summary>
@@ -2409,7 +2402,6 @@ namespace DeepSeek_v4_for_VisualStudio.View
             public StringBuilder ContentDelta = new(256);
             public StringBuilder Reasoning = new(64);
             public StringBuilder ReasoningDelta = new(256);
-            public string? PendingStatus;
             public bool IsComplete;
             public long LastFlushTicks;
             /// <summary>上次刷新时的完整 Reason 长度，用于兼容全量更新调用点</summary>
@@ -2468,7 +2460,6 @@ namespace DeepSeek_v4_for_VisualStudio.View
             int messageIndex,
             string? content = null,
             string? reasoning = null,
-            string? status = null,
             bool isComplete = false,
             string? reasoningDelta = null,
             string? contentDelta = null)
@@ -2516,8 +2507,6 @@ namespace DeepSeek_v4_for_VisualStudio.View
                 }
                 if (reasoningDelta != null)
                     state.ReasoningDelta.Append(reasoningDelta);
-                if (status != null)
-                    state.PendingStatus = status;
                 if (isComplete)
                     state.IsComplete = true;
 
@@ -2565,13 +2554,11 @@ namespace DeepSeek_v4_for_VisualStudio.View
                         contentSnapshot,
                         reasoningSnapshot,
                         state.IsComplete,
-                        state.PendingStatus,
                         reasoningDeltaSnapshot,
                         contentDeltaSnapshot);
                     state.ContentDelta.Clear();
                     state.ReasoningDelta.Clear();
                     state.ContentDirty = false;
-                    state.PendingStatus = null;
                     if (state.IsComplete)
                         _streamBatchStates.Remove(messageIndex);
                 }

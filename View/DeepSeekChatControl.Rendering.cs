@@ -1220,7 +1220,6 @@ namespace DeepSeek_v4_for_VisualStudio.View
             string? content,
             string? reasoningContent,
             bool isComplete,
-            string? statusText = null,
             string? reasoningDelta = null,
             string? contentDelta = null)
         {
@@ -1233,7 +1232,6 @@ namespace DeepSeek_v4_for_VisualStudio.View
                     content,
                     reasoningContent,
                     isComplete,
-                    statusText,
                     reasoningDelta,
                     contentDelta);
                 ChatWebView.CoreWebView2.PostWebMessageAsString(json);

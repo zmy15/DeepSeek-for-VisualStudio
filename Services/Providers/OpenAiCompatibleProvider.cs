@@ -1300,10 +1300,6 @@ namespace DeepSeek_v4_for_VisualStudio.Services.Providers
             DefaultIgnoreCondition = System.Text.Json.Serialization.JsonIgnoreCondition.WhenWritingNull
         };
 
-        /// <summary>按当前消息重新序列化请求体（降级重发前调用）。</summary>
-        private static byte[] SerializeRequestBody(DeepSeekChatRequest request)
-            => Encoding.UTF8.GetBytes(SerializeRequest(request));
-
         /// <summary>
         /// 判断 400 响应体是否为「服务端加载图片失败」。
         /// 服务端在无法下载 image_url 指向的图片时返回该错误，

@@ -244,27 +244,6 @@ namespace DeepSeek_v4_for_VisualStudio.Services.Agents
             };
         }
 
-        internal static string AppendBuildResult(string prompt, string? buildResult)
-        {
-            if (string.IsNullOrWhiteSpace(buildResult))
-                return prompt;
-
-            const int maxChars = 4000;
-            string trimmed = buildResult!.Trim();
-            if (trimmed.Length > maxChars)
-            {
-                const int headChars = 1500;
-                int tailChars = maxChars - headChars;
-                trimmed = trimmed.Substring(0, headChars)
-                    + "\n\n...(构建输出过长，已截断，完整内容请查看 VS 构建输出 / Error List)...\n\n"
-                    + trimmed.Substring(trimmed.Length - tailChars);
-            }
-
-            return prompt.TrimEnd()
-                + "\n\n## 本次构建结果\n\n"
-                + trimmed;
-        }
-
         /// <summary>
         /// 构建增强用户消息：附加当前编译错误上下文和变更文件信息。
         /// </summary>

@@ -716,48 +716,6 @@ namespace DeepSeek_v4_for_VisualStudio.Services
         }
 
         /// <summary>
-        /// 根据文件扩展名获取 Markdown 代码块语言标识。
-        /// </summary>
-        private static string GetLanguageFromExtension(string extension)
-        {
-            if (string.IsNullOrWhiteSpace(extension)) return string.Empty;
-
-            return extension.ToLowerInvariant() switch
-            {
-                ".py" => "python",
-                ".cs" => "csharp",
-                ".cpp" or ".cc" or ".cxx" or ".c" or ".h" or ".hpp" => "cpp",
-                ".java" => "java",
-                ".js" or ".jsx" => "javascript",
-                ".ts" or ".tsx" => "typescript",
-                ".html" or ".htm" => "html",
-                ".css" => "css",
-                ".xml" or ".xaml" or ".axml" => "xml",
-                ".json" => "json",
-                ".yaml" or ".yml" => "yaml",
-                ".md" => "markdown",
-                ".sql" => "sql",
-                ".php" => "php",
-                ".rb" => "ruby",
-                ".go" => "go",
-                ".rs" => "rust",
-                ".swift" => "swift",
-                ".kt" => "kotlin",
-                ".scala" => "scala",
-                ".lua" => "lua",
-                ".sh" or ".bash" => "bash",
-                ".ps1" => "powershell",
-                ".bat" => "batch",
-                ".ini" or ".cfg" or ".conf" or ".editorconfig" => "ini",
-                ".r" => "r",
-                ".dockerfile" => "dockerfile",
-                ".cmake" => "cmake",
-                ".proto" => "protobuf",
-                _ => string.Empty,
-            };
-        }
-
-        /// <summary>
         /// 获取面向用户的文件类型描述。
         /// </summary>
         private static string GetFileKind(string extension)
