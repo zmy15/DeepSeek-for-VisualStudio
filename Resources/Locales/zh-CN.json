@@ -1062,6 +1062,7 @@
     "agent.toolNotAvailableHandoff": "请立即调用 request_handoff 移交给合适的 Agent。",
     "agent.toolNotAvailableExplain": "请直接说明无法完成的原因。",
     "agent.toolNotAvailableTerminate": "\n再次发生白名单外工具调用将终止本轮工具循环。",
+    "agent.ocrToolDisabledForVision": "[BLOCKED] 当前模型原生支持视觉，OCR 工具已禁用。要主动读图请改用 read_file（传绝对路径，png/jpg/jpeg/gif/webp 会直接作为图像交给模型查看）；窗口截图用 capture_window，网页截图用 capture_webpage。用户已附在消息里的图片直接分析即可。确需 OCR 时，请让用户在消息中明确说明。",
     "agent.none": "无",
     "agent.noToolCallsTerminated": "\n\n>  连续 {0} 轮调用白名单外工具: {1}。",
     "agent.noToolCallsTerminatedHint": "\n> 已终止工具循环。请检查阶段工具配置后重新发起任务。",

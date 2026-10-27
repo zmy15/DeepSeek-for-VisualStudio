@@ -95,6 +95,20 @@ public class EditAgentTests
         edits[0].ToolName.Should().Be("apply_patch");
     }
 
+    [Theory]
+    [InlineData("plan-final-summary.md", true)]
+    [InlineData("PLAN-FINAL-SUMMARY.MD", true)]
+    [InlineData("step-01-summary.md", true)]
+    [InlineData("step-99-summary.md", true)]
+    [InlineData("step-1-summary.md", false)]      // 必须是两位序号
+    [InlineData("step-100-summary.md", false)]
+    [InlineData("step-01-summary.md.bak", false)]
+    [InlineData("other-memory.md", false)]
+    [InlineData("", false)]
+    [InlineData(null, false)]
+    public void IsPlanSummaryFileName_MatchesOnlyPlanArtifacts(string? fileName, bool expected)
+        => EditAgent.IsPlanSummaryFileName(fileName).Should().Be(expected);
+
     [Fact]
     public void TruncateBuildResultForHandoff_ShortKeepsFull()
     {

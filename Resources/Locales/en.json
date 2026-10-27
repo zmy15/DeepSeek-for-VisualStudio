@@ -427,6 +427,7 @@
     "agent.toolNotAvailableHandoff": "call request_handoff immediately to hand off to a suitable Agent.",
     "agent.toolNotAvailableExplain": "state directly why it cannot be completed.",
     "agent.toolNotAvailableTerminate": "\nCalling a non-whitelisted tool again will terminate this tool loop.",
+    "agent.ocrToolDisabledForVision": "[BLOCKED] OCR tools are disabled because the current model reads images natively. To inspect an image, call read_file with its absolute path (png/jpg/jpeg/gif/webp are passed to the model as an image); use capture_window for a window screenshot and capture_webpage for a web page screenshot. Images already attached to the conversation can be analyzed directly. If OCR is genuinely required, ask the user to request it explicitly.",
     "agent.none": "none",
     "agent.noToolCallsTerminated": "\n\n>  {0} consecutive rounds called non-whitelisted tools: {1}.",
     "agent.noToolCallsTerminatedHint": "\n> The tool loop has been terminated. Please check the phase tool configuration and start the task again.",

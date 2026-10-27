@@ -387,9 +387,8 @@ namespace DeepSeek_v4_for_VisualStudio.View
                     // 不裁剪：该值会并回 agentResult 并最终持久化/回传。
                     string chainPreReasoning = agentResult.ReasoningContent ?? string.Empty;
 
-                    await ThreadHelper.JoinableTaskFactory.SwitchToMainThreadAsync();
-                    StatusLabel.Text = string.Format(LocalizationService.Instance["status.agentSwitched"], nextHandoff.TargetAgent);
-
+                    var chainPrepWatch = System.Diagnostics.Stopwatch.StartNew();
+                    SetAgentSwitchedStatus(nextHandoff.TargetAgent);
                     await TaskScheduler.Default;
 
                     // ── 切换并执行链式 Handoff ──
@@ -407,6 +406,11 @@ namespace DeepSeek_v4_for_VisualStudio.View
                     var chainAgent = _agentFactory.GetAgent(nextHandoff.TargetAgent);
                     SwitchActiveAgent(chainAgent, context);
                     context.IsChainBackContinuation = nextHandoff.IsChainBackContinuation;
+                    if (chainPrepWatch.ElapsedMilliseconds >= 20)
+                    {
+                        Logger.Info($"[HandoffTiming] chain-prep={chainPrepWatch.ElapsedMilliseconds}ms " +
+                            "(capture+status+switch)");
+                    }
                     try
                     {
                         agentResult = await _activeAgent.ExecuteHandoffAsync(nextHandoff, context, _activePlan, _agentFactory);

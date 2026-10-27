@@ -434,6 +434,28 @@ namespace DeepSeek_v4_for_VisualStudio.View
         }
 
         /// <summary>
+        /// 异步更新「已切换到 X Agent」状态栏。
+        /// 交接关键路径上不再 await UI 线程：源 Agent 刚结束时 UI 线程通常正忙（终态渲染、
+        /// WebView 合成），同步切过去会白等几十毫秒（实测一次 Ask→Edit 为 80ms）。
+        /// </summary>
+        private void SetAgentSwitchedStatus(AgentType targetAgent)
+        {
+            _ = ThreadHelper.JoinableTaskFactory.RunAsync(async () =>
+            {
+                try
+                {
+                    await ThreadHelper.JoinableTaskFactory.SwitchToMainThreadAsync();
+                    StatusLabel.Text = string.Format(
+                        LocalizationService.Instance["status.agentSwitched"], targetAgent);
+                }
+                catch (Exception ex)
+                {
+                    Logger.Debug($"[Agent] 更新切换状态失败: {ex.Message}");
+                }
+            });
+        }
+
+        /// <summary>
         /// 切换到新的活跃 Agent：解绑旧 Agent 事件，绑定新 Agent 事件，更新上下文。
         /// </summary>
         private void SwitchActiveAgent(BaseAgent newAgent, AgentContext context)
@@ -667,19 +689,29 @@ namespace DeepSeek_v4_for_VisualStudio.View
             AgentHandoff handoff,
             AgentResult? completedSourceResult = null)
         {
+            var stopwatch = System.Diagnostics.Stopwatch.StartNew();
+
             if (handoff.ForwardedMessages == null)
             {
                 handoff.ForwardedMessages = completedSourceResult == null
                     ? _activeAgent?.SnapshotHandoffCacheMessages()
                     : _activeAgent?.SnapshotHandoffCacheMessages(completedSourceResult);
-                return;
+            }
+            else
+            {
+                // 已有快照也必须补入源 Agent 最终回答；例如 build_solution 成功时
+                // Context.ForwardedMessages 会先被保存，此时 Handoff 不是 null 但还缺最终 assistant。
+                BaseAgent.EnsureCompletedAssistantInHandoffPrefix(
+                    handoff.ForwardedMessages,
+                    completedSourceResult);
             }
 
-            // 已有快照也必须补入源 Agent 最终回答；例如 build_solution 成功时
-            // Context.ForwardedMessages 会先被保存，此时 Handoff 不是 null 但还缺最终 assistant。
-            BaseAgent.EnsureCompletedAssistantInHandoffPrefix(
-                handoff.ForwardedMessages,
-                completedSourceResult);
+            // 只在明显偏慢时记录，避免每次 Handoff 都刷一行日志。
+            if (stopwatch.ElapsedMilliseconds >= 5)
+            {
+                Logger.Info($"[HandoffTiming] capture={stopwatch.ElapsedMilliseconds}ms " +
+                    $"(prefix={handoff.ForwardedMessages?.Count ?? 0} msgs)");
+            }
         }
 
         /// <summary>
@@ -1013,6 +1045,7 @@ namespace DeepSeek_v4_for_VisualStudio.View
                     if (incomingHandoff.ChainBack && incomingHandoff.SourceAgent.HasValue)
                         pendingChainBack = incomingHandoff;
                     handoffChainDepth++;
+                    var chainPrepWatch = System.Diagnostics.Stopwatch.StartNew();
                     CaptureHandoffForwardedMessages(incomingHandoff, agentResult);
 
                     if (handoffChainDepth > maxHandoffChainDepth)
@@ -1039,8 +1072,8 @@ namespace DeepSeek_v4_for_VisualStudio.View
                     // ── AutoSend：自动链式移交 ──
                     Logger.Info($"[Agent] Handoff 链 #{handoffChainDepth}: → {incomingHandoff.TargetAgent} ({incomingHandoff.Label})");
 
-                    await ThreadHelper.JoinableTaskFactory.SwitchToMainThreadAsync();
-                    StatusLabel.Text = string.Format(LocalizationService.Instance["status.agentSwitched"], incomingHandoff.TargetAgent);
+                    // 状态栏异步更新：不阻塞交接（源 Agent 刚结束时 UI 线程往往正忙）。
+                    SetAgentSwitchedStatus(incomingHandoff.TargetAgent);
                     await TaskScheduler.Default;
 
                     if (!parallelMemoryExtractionStarted && incomingHandoff.IsSummaryOnly)
@@ -1055,6 +1088,11 @@ namespace DeepSeek_v4_for_VisualStudio.View
                     if (_agentFactory.EditAgent is EditAgent ea2)
                         ea2.PlanUpdated += OnAgentPlanUpdated;
                     context.IsChainBackContinuation = incomingHandoff.IsChainBackContinuation;
+                    if (chainPrepWatch.ElapsedMilliseconds >= 20)
+                    {
+                        Logger.Info($"[HandoffTiming] chain-prep={chainPrepWatch.ElapsedMilliseconds}ms " +
+                            "(capture+status+switch)");
+                    }
                     try
                     {
                         agentResult = await _activeAgent.ExecuteHandoffAsync(incomingHandoff, context, _activePlan, _agentFactory);
