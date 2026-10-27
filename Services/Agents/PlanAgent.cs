@@ -173,7 +173,7 @@ namespace DeepSeek_v4_for_VisualStudio.Services.Agents
                     // ── 将对齐阶段的规划概要前置到结果最前面 ──
                     if (!string.IsNullOrWhiteSpace(alignmentSummary))
                     {
-                        result.Content = "##  规划概要\n\n" + alignmentSummary + "\n\n---\n\n" + result.Content;
+                        result.Content = L["plan.format.summaryTitle"] + "\n\n" + alignmentSummary + "\n\n---\n\n" + result.Content;
                     }
 
                     // ── 生成详细 plan.md 文件 ──
@@ -369,17 +369,9 @@ namespace DeepSeek_v4_for_VisualStudio.Services.Agents
 
             // ── 并行子代理策略（仅探索时相关）──
             sb.AppendLine();
-            sb.AppendLine("## 探索策略（仅在需要探索时参考）");
-            sb.AppendLine("- 需要探索多个独立区域时，在一次回复中同时调用多个 runSubagent（最多 3 个并行）");
-            sb.AppendLine("- **为每个子代理分配不同的探索区域**，避免重复探索相同的文件或目录");
-            sb.AppendLine("- 例如：子代理 1 探索存储层，子代理 2 探索执行引擎，子代理 3 探索索引结构");
-            sb.AppendLine("- 如果文件已被之前子代理读取（cached=\"true\"），直接使用缓存内容，无需重复读取");
-            sb.AppendLine("- 探索完成后汇总所有子代理的发现，形成完整的分析报告");
+            sb.AppendLine(L["plan.discovery.strategyBlock"]);
             sb.AppendLine();
-            sb.AppendLine("##  关键规则");
-            sb.AppendLine("- 如果用户消息 + 已有上下文已足够制定实现计划 → **直接回复 DONE，不调用任何工具**");
-            sb.AppendLine("- 如果缺少关键信息（项目结构、相关代码等）→ 使用 runSubagent 探索后再回复 DONE");
-            sb.AppendLine("- DONE 必须是纯文本，不要包裹在 markdown、代码块或 JSON 中");
+            sb.AppendLine(L["plan.discovery.rulesBlock"]);
 
             return sb.ToString();
         }
@@ -425,7 +417,7 @@ namespace DeepSeek_v4_for_VisualStudio.Services.Agents
             }
 
             if (truncated)
-                sb.AppendLine("\n>  前序探索结果较多，已按总量上限截断。");
+                sb.AppendLine("\n" + LocalizationService.Instance["plan.discovery.truncated"]);
 
             return sb.ToString().Trim();
         }
@@ -487,7 +479,7 @@ namespace DeepSeek_v4_for_VisualStudio.Services.Agents
             }
 
             // 按层级分组展示目录树
-            sb.AppendLine("## 项目结构 (来自缓存)");
+            sb.AppendLine(LocalizationService.Instance["plan.discovery.structureTitle"]);
             sb.AppendLine();
 
             // 列出顶级目录
@@ -518,11 +510,11 @@ namespace DeepSeek_v4_for_VisualStudio.Services.Agents
                     if (file.StartsWith(prefix, StringComparison.OrdinalIgnoreCase))
                         count++;
                 }
-                sb.AppendLine($"-  {d}/ ({count} 个文件)");
+                sb.AppendLine(string.Format(LocalizationService.Instance["plan.discovery.structureDirLine"], d, count));
             }
 
             sb.AppendLine();
-            sb.AppendLine($"共 {cachedFiles.Count} 个文件, {dirs.Count} 个目录");
+            sb.AppendLine(string.Format(LocalizationService.Instance["plan.discovery.structureTotal"], cachedFiles.Count, dirs.Count));
             return sb.ToString();
         }
 
@@ -707,9 +699,7 @@ namespace DeepSeek_v4_for_VisualStudio.Services.Agents
                         " CRITICAL: You are in tool_choice=none mode. You have ZERO tools available. " +
                         "Do NOT output DSML, function_calls, tool_calls, XML invoke tags, or any " +
                         "tool invocation syntax. Your ONLY valid output is a raw JSON object.",
-                        " 严格指令：你只能输出 JSON 对象。不要调用任何工具（你无法调用工具）。" +
-                        "不要输出任何 DSML、function_calls、tool_calls、XML invoke 标签、markdown、分析文字、" +
-                        "代码块标记、或解释。直接以 { 字符开始，输出纯 JSON。违反此规则将导致系统故障。",
+                        L["agent.plan.jsonRetryStrict"],
                         extraSystemMessages,
                         maxRecentTurns: 0);
 
@@ -910,9 +900,9 @@ namespace DeepSeek_v4_for_VisualStudio.Services.Agents
             sb.AppendLine();
             sb.AppendLine(SB["plan.creation.jsonFormat"]);
             sb.AppendLine("{");
-            sb.AppendLine("  \"title\": \"任务标题\",");
+            sb.AppendLine($"  \"title\": \"{SB["plan.creation.jsonExampleTitle"]}\",");
             sb.AppendLine("  \"steps\": [");
-            sb.AppendLine("    { \"index\": 1, \"title\": \"步骤标题\", \"description\": \"详细描述\", \"requiresApproval\": false }");
+            sb.AppendLine($"    {{ \"index\": 1, \"title\": \"{SB["plan.creation.jsonExampleStepTitle"]}\", \"description\": \"{SB["plan.creation.jsonExampleStepDesc"]}\", \"requiresApproval\": false }}");
             sb.AppendLine("  ]");
             sb.AppendLine("}");
             sb.AppendLine();
@@ -938,7 +928,7 @@ namespace DeepSeek_v4_for_VisualStudio.Services.Agents
             {
                 var step = plan.Steps[i];
                 string prefix = step.RequiresApproval ? "⚠️ " : "";
-                sb.AppendLine($"{prefix} **步骤 {step.Index}**: {step.Title}");
+                sb.AppendLine($"{prefix} " + string.Format(L["plan.format.step"], step.Index, step.Title));
 
                 if (!string.IsNullOrWhiteSpace(step.Description))
                 {
@@ -1384,7 +1374,7 @@ namespace DeepSeek_v4_for_VisualStudio.Services.Agents
             sb.AppendLine(L["plan.md.savedTitle"]);
             sb.AppendLine();
             sb.AppendLine(string.Format(L["plan.md.savedGeneratedAt"], DateTime.Now.ToString("yyyy-MM-dd HH:mm:ss")));
-            sb.AppendLine(string.Format(L["plan.md.savedSolution"], context.SolutionPath ?? "（无）"));
+            sb.AppendLine(string.Format(L["plan.md.savedSolution"], context.SolutionPath ?? L["plan.md.noSolution"]));
             sb.AppendLine();
             sb.AppendLine("---");
             sb.AppendLine();
