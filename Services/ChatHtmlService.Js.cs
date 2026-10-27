@@ -451,7 +451,7 @@ window.__appendMessageHtml=function(html){
     } else {
         container.appendChild(fragment);
     }
-    // 流式追加期间跳过语法高亮（节省性能），由 BuildFinalRenderJs 在完成时统一处理
+    // 流式追加期间跳过语法高亮（节省性能），由 streamEnd 分支统一处理
     if (typeof window.__scrollToBottom === 'function') {
         window.__scrollToBottom('smooth');
     }
@@ -847,10 +847,6 @@ window._showCopyFeedback=function(msgIndex){
                     // 清除状态栏文本
                     var st = document.getElementById('status-text');
                     if (st) st.textContent = '';
-                }else if(msg.type==='streamStatus'){
-                    // 仅更新状态栏（避免额外通信）
-                    var st=document.getElementById('status-text');
-                    if(st&&msg.text)st.textContent=msg.text;
                 }else if(msg.type==='prependHtml'){
                     var cc2=document.getElementById('chat-container');
                     if(cc2){cc2.insertAdjacentHTML('afterbegin',msg.html);}
@@ -903,8 +899,11 @@ window._showCopyFeedback=function(msgIndex){
                     container.appendChild(textNode);
                     container.style.whiteSpace='pre-line';  // 流式内容保留换行
                 }
-                if(msg.c!==undefined)textNode.textContent=msg.c;
-                else if(msg.cd!==undefined)textNode.appendData(msg.cd);
+                if(msg.c!==undefined){
+                    // 内容未变时不重写文本节点：textContent 赋值会触发整块文本重排版。
+                    // C# 侧已按「仅正文变化才带 c」裁剪，这里再兜一层幂等保护。
+                    if(textNode.data!==msg.c)textNode.textContent=msg.c;
+                }else if(msg.cd!==undefined)textNode.appendData(msg.cd);
             }
 
             // 更新推理面板。rd 是增量追加路径，避免长 thinking 反复替换整段 DOM。
@@ -934,19 +933,15 @@ window._showCopyFeedback=function(msgIndex){
             if(cursor&&msg.f!==undefined){
                 cursor.style.display=msg.f?'none':'inline-block';
             }
-
-            // 更新状态栏
-            if(msg.s){
-                var st=document.getElementById('status-text');
-                if(st)st.textContent=msg.s;
-            }
         }
 
         _streamBuf={};
         _rafPending=false;
         if(_rafTimer){clearTimeout(_rafTimer);_rafTimer=null;}
+        // 流式期间用 auto：高频刷新下反复发起 smooth 滚动会互相打断，
+        // 在合成器里堆积动画，是长会话流式卡顿的常见来源。
         if (typeof window.__scrollToBottom === 'function') {
-            window.__scrollToBottom('smooth');
+            window.__scrollToBottom('auto');
         }
     }
 })();";

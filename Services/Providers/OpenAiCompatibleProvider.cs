@@ -833,52 +833,43 @@ namespace DeepSeek_v4_for_VisualStudio.Services.Providers
                 }
             }
 
-            // ── 记录请求元数据 + 消息结构诊断 ──
+            // ── 请求诊断：合并为单条日志 ──
+            //   Logger 每条都是同步 File.AppendAllText（约 1ms/行）。本函数原先每笔请求写
+            //   6~7 条诊断，交接/首包时这些毫秒全落在关键路径上；合并后信息不变，文件只开一次。
+            //   同时复用静态 JsonSerializerOptions —— 每次 new 选项都会让 STJ 重建类型元数据，
+            //   而这里原本每笔请求要 new 两次、并对 141KB 的历史做两次完整序列化。
             int diagSys = request.Messages.Count(m => m.Role == "system");
             int diagUser = request.Messages.Count(m => m.Role == "user");
             int diagAst = request.Messages.Count(m => m.Role == "assistant");
             int diagTool = request.Messages.Count(m => m.Role == "tool");
             int diagAstTc = request.Messages.Count(m => m.Role == "assistant" && m.ToolCalls != null && m.ToolCalls.Count > 0);
-            Logger.Info($"[API] 发送请求: {requestBodyBytes.Length / 1024}KB, 消息数={request.Messages.Count}, 工具数={tools?.Count ?? 0}, maxTokens={maxTokens}");
-            Logger.Info($"[API] 消息结构(清洗后): system={diagSys}, user={diagUser}, assistant={diagAst}, tool={diagTool} (含工具调用={diagAstTc})");
+            var diag = new StringBuilder(512);
+            diag.Append("[API] 发送请求: ").Append(requestBodyBytes.Length / 1024).Append("KB, 消息数=")
+                .Append(request.Messages.Count).Append(", 工具数=").Append(tools?.Count ?? 0)
+                .Append(", maxTokens=").Append(maxTokens)
+                .Append("\n[API] 消息结构(清洗后): system=").Append(diagSys)
+                .Append(", user=").Append(diagUser)
+                .Append(", assistant=").Append(diagAst)
+                .Append(", tool=").Append(diagTool)
+                .Append(" (含工具调用=").Append(diagAstTc).Append(')');
 
             // ── messages 前缀分段诊断（DeepSeek 缓存仅匹配 messages 字段）──
-            int msg0Length = 0;
+            int msg0Length = 0;   // 供 FlushCacheDiagnostics 估算 messages[0] 的 token 占比
             try
             {
                 if (request.Messages.Count > 0)
                 {
-                    // 单独序列化 messages[0] 估算其 token 占比
-                    var msg0Json = JsonSerializer.Serialize(request.Messages[0], new JsonSerializerOptions
-                    {
-                        DefaultIgnoreCondition = System.Text.Json.Serialization.JsonIgnoreCondition.WhenWritingNull
-                    });
-                    msg0Length = Encoding.UTF8.GetByteCount(msg0Json);
+                    msg0Length = JsonSerializer.SerializeToUtf8Bytes(
+                        request.Messages[0], DiagnosticsJsonOptions).Length;
+                    int allMsgLength = JsonSerializer.SerializeToUtf8Bytes(
+                        request.Messages, DiagnosticsJsonOptions).Length;
 
-                    // 序列化全部 messages 估算总长度
-                    var allMsgJson = JsonSerializer.Serialize(request.Messages, new JsonSerializerOptions
-                    {
-                        DefaultIgnoreCondition = System.Text.Json.Serialization.JsonIgnoreCondition.WhenWritingNull
-                    });
-                    int allMsgLength = Encoding.UTF8.GetByteCount(allMsgJson);
-
-                    Logger.Info($"[Cache] 前缀分段: messages[0]≈{msg0Length / 1024.0:F1}KB | " +
-                        $"全部messages≈{allMsgLength / 1024.0:F1}KB | " +
-                        $"总请求体={requestBodyBytes.Length / 1024.0:F1}KB | " +
-                        $"工具数={tools?.Count ?? 0}(不参与缓存)");
+                    diag.Append("\n[Cache] 前缀分段: messages[0]≈")
+                        .Append((msg0Length / 1024.0).ToString("F1")).Append("KB")
+                        .Append(" | 全部messages≈").Append((allMsgLength / 1024.0).ToString("F1")).Append("KB")
+                        .Append(" | 总请求体=").Append((requestBodyBytes.Length / 1024.0).ToString("F1")).Append("KB")
+                        .Append(" | 工具数=").Append(tools?.Count ?? 0).Append("(不参与缓存)");
                 }
-            }
-            catch { }
-
-            // ── 消息结构分解日志（诊断缓存命中率用）──
-            try
-            {
-                int sysCount = request.Messages.Count(m => m.Role == "system");
-                int userCount = request.Messages.Count(m => m.Role == "user");
-                int asstCount = request.Messages.Count(m => m.Role == "assistant");
-                int toolCount = request.Messages.Count(m => m.Role == "tool");
-                int asstWithToolCalls = request.Messages.Count(m => m.Role == "assistant" && m.ToolCalls != null && m.ToolCalls.Count > 0);
-                Logger.Info($"[Cache] 消息结构: system={sysCount}, user={userCount}, assistant={asstCount}, tool={toolCount} (含工具调用={asstWithToolCalls})");
             }
             catch { }
 
@@ -905,12 +896,17 @@ namespace DeepSeek_v4_for_VisualStudio.Services.Providers
                     if (!driftInfo.IsInitialPin)
                     {
                         string driftTag = driftInfo.HasDrift ? " 漂移" : " 稳定";
-                        Logger.Info($"[Cache] 前缀指纹状态: {driftTag} | 稳定性={PrefixCache.StabilityRatio:P1} ({PrefixCache.StableChecks}/{PrefixCache.TotalChecks})");
+                        diag.Append("\n[Cache] 前缀指纹状态: ").Append(driftTag)
+                            .Append(" | 稳定性=").Append(PrefixCache.StabilityRatio.ToString("P1"))
+                            .Append(" (").Append(PrefixCache.StableChecks).Append('/')
+                            .Append(PrefixCache.TotalChecks).Append(')');
                     }
                 }
                 else
                 {
-                    Logger.Info($"[Cache] 前缀指纹检查跳过: 非标准前缀 (len={systemPrompt?.Length ?? 0}), 不参与 PrefixCache 基准");
+                    diag.Append("\n[Cache] 前缀指纹检查跳过: 非标准前缀 (len=")
+                        .Append(systemPrompt?.Length ?? 0)
+                        .Append("), 不参与 PrefixCache 基准");
                 }
             }
             else
@@ -931,13 +927,15 @@ namespace DeepSeek_v4_for_VisualStudio.Services.Providers
                 if (prefixHashes.Count > 0)
                 {
                     string hashLog = PrefixCacheManager.FormatPrefixHashes(prefixHashes, request.Messages.Count);
-                    Logger.Info($"[Cache] 消息前缀哈希: {hashLog}");
+                    diag.Append("\n[Cache] 消息前缀哈希: ").Append(hashLog);
                 }
             }
             catch (Exception ex)
             {
                 Logger.Warn($"[Cache] 消息前缀哈希计算失败: {ex.Message}");
             }
+
+            Logger.Info(diag.ToString());
 
             // ── HTTP 层重试（指数退避：1s, 2s, 4s；最多 3 次额外重试）──
             HttpResponseMessage? response = null;
@@ -1300,9 +1298,15 @@ namespace DeepSeek_v4_for_VisualStudio.Services.Providers
             DefaultIgnoreCondition = System.Text.Json.Serialization.JsonIgnoreCondition.WhenWritingNull
         };
 
-        /// <summary>按当前消息重新序列化请求体（降级重发前调用）。</summary>
-        private static byte[] SerializeRequestBody(DeepSeekChatRequest request)
-            => Encoding.UTF8.GetBytes(SerializeRequest(request));
+        /// <summary>
+        /// 请求诊断用的序列化选项（仅用于统计字节数）。
+        /// 必须是静态单例：每次 new 选项都会让 System.Text.Json 重建类型元数据，
+        /// 而诊断代码每笔请求要序列化两次 messages（最大 141KB）。
+        /// </summary>
+        private static readonly JsonSerializerOptions DiagnosticsJsonOptions = new JsonSerializerOptions
+        {
+            DefaultIgnoreCondition = System.Text.Json.Serialization.JsonIgnoreCondition.WhenWritingNull
+        };
 
         /// <summary>
         /// 判断 400 响应体是否为「服务端加载图片失败」。

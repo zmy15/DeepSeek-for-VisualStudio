@@ -95,36 +95,19 @@ public class EditAgentTests
         edits[0].ToolName.Should().Be("apply_patch");
     }
 
-    [Fact]
-    public void BuildPlanProgressSnapshot_ListsStepsAndMarksCurrent()
-    {
-        var plan = new AgentTaskPlan
-        {
-            CurrentStepIndex = 2,
-            Steps = new List<AgentStep>
-            {
-                new() { Index = 1, Title = "提交修复", Status = AgentStepStatus.Completed },
-                new() { Index = 2, Title = "合并到 dev", Status = AgentStepStatus.InProgress },
-                new() { Index = 3, Title = "验证报告", Status = AgentStepStatus.Pending },
-            },
-        };
-
-        var snapshot = EditAgent.BuildPlanProgressSnapshot(plan);
-
-        snapshot.Should().Contain("## 计划进度");
-        snapshot.Should().Contain("步骤 1: 提交修复");
-        snapshot.Should().Contain("已完成");
-        snapshot.Should().Contain("步骤 2: 合并到 dev");
-        snapshot.Should().Contain("▶ 当前");
-        snapshot.Should().Contain("步骤 3: 验证报告");
-        snapshot.Should().Contain("待执行");
-    }
-
-    [Fact]
-    public void BuildPlanProgressSnapshot_EmptyPlan_ReturnsEmpty()
-    {
-        EditAgent.BuildPlanProgressSnapshot(new AgentTaskPlan()).Should().BeEmpty();
-    }
+    [Theory]
+    [InlineData("plan-final-summary.md", true)]
+    [InlineData("PLAN-FINAL-SUMMARY.MD", true)]
+    [InlineData("step-01-summary.md", true)]
+    [InlineData("step-99-summary.md", true)]
+    [InlineData("step-1-summary.md", false)]      // 必须是两位序号
+    [InlineData("step-100-summary.md", false)]
+    [InlineData("step-01-summary.md.bak", false)]
+    [InlineData("other-memory.md", false)]
+    [InlineData("", false)]
+    [InlineData(null, false)]
+    public void IsPlanSummaryFileName_MatchesOnlyPlanArtifacts(string? fileName, bool expected)
+        => EditAgent.IsPlanSummaryFileName(fileName).Should().Be(expected);
 
     [Fact]
     public void TruncateBuildResultForHandoff_ShortKeepsFull()

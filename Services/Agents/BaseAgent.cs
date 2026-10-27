@@ -154,42 +154,47 @@ namespace DeepSeek_v4_for_VisualStudio.Services.Agents
         }
 
         /// <summary>
+        /// 判断视觉模型下是否应禁用 OCR 工具（执行层判定）。
+        /// 用户显式要求 OCR（消息中含 OCR / 文字识别等）时返回 false，放行。
+        /// </summary>
+        internal static bool ShouldSuppressOcrTools(bool isVisionModel, string? userMessage)
+            => isVisionModel && !DeepSeekChatControl.IsOcrExplicitlyRequested(userMessage, null);
+
+        /// <summary>
         /// 构建完整工具集（不过滤白名单），用于 DeepSeek Prefix Cache 稳定。
         /// 常规工具调用统一发送此完整工具集，保持 tools JSON 不变。
         /// 明确不需要工具的辅助调用可通过 includeTools=false 完全省略工具字段。
         /// 工具调用由客户端按 Agent 白名单拦截。
         /// 
-        ///  双重合并：优先通过 BuiltInToolService 获取（已合并内置+MCP），
-        ///    同时兜底直接查询 McpManager 确保 MCP 工具不遗漏。
+        /// 双重合并：优先通过 BuiltInToolService 获取（已合并内置+MCP），
+        /// 同时兜底直接查询 McpManager 确保 MCP 工具不遗漏。
         /// </summary>
-        internal static bool ShouldSuppressOcrTools(bool isVisionModel, string? userMessage)
-            => isVisionModel && !DeepSeekChatControl.IsOcrExplicitlyRequested(userMessage, null);
-
         protected List<ToolDefinition> BuildFullToolSet()
         {
             var fullSet = new List<ToolDefinition>();
             var seenNames = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
 
+            // ── MCP 定义只取一次：既用于兜底合并，也避免重复构建定义 ──
+            var mcpDefs = McpManager != null && McpManager.AllTools.Count > 0
+                ? McpManager.GetToolDefinitions()
+                : null;
+
+            bool autoSkillRoutingEnabled =
+                Settings.DeepSeekOptionsPage.Instance?.EnableAutoSkillRouting == true;
+
             if (BuiltInTools != null)
             {
-                var defs = BuiltInTools.GetFullToolDefinitions();
-                bool autoSkillRoutingEnabled =
-                    Settings.DeepSeekOptionsPage.Instance?.EnableAutoSkillRouting == true;
-                bool suppressOcrTools = ShouldSuppressOcrTools(
-                    _apiService?.CurrentIsVision == true,
-                    Context?.CurrentUserContent);
-                foreach (var def in defs)
+                foreach (var def in BuiltInTools.GetFullToolDefinitions())
                 {
                     if (!autoSkillRoutingEnabled &&
                         string.Equals(def.Function.Name, "load_skill", StringComparison.OrdinalIgnoreCase))
                     {
                         continue;
                     }
-                    if (suppressOcrTools && DeepSeekChatControl.IsOcrToolName(def.Function.Name))
-                    {
-                        continue;
-                    }
 
+                    // 注意：视觉模型的 OCR 工具不在此处剔除。
+                    // 工具集必须保持稳定（缺失/新增都会改写请求前缀，打断 DeepSeek Prefix Cache），
+                    // 视觉模式下改为在执行层禁用：模型仍能看到工具，但调用会被拒绝并收到明确指引。
                     fullSet.Add(def);
                     seenNames.Add(def.Function.Name);
                 }
@@ -197,27 +202,39 @@ namespace DeepSeek_v4_for_VisualStudio.Services.Agents
 
             // ──  兜底合并：直接从 McpManager 获取 MCP 工具（防止 BuiltInToolService 的
             //    _mcpManager 引用因初始化时序问题而过时）──
-            if (McpManager != null && McpManager.AllTools.Count > 0)
+            if (mcpDefs != null)
             {
-                var mcpDefs = McpManager.GetToolDefinitions();
-                int added = 0;
+                var addedNames = new List<string>();
                 foreach (var def in mcpDefs)
                 {
-                    if (!seenNames.Contains(def.Function.Name))
-                    {
-                        fullSet.Add(def);
-                        seenNames.Add(def.Function.Name);
-                        added++;
-                    }
+                    if (seenNames.Contains(def.Function.Name))
+                        continue;
+
+                    fullSet.Add(def);
+                    seenNames.Add(def.Function.Name);
+                    addedNames.Add(def.Function.Name);
                 }
-                if (added > 0)
+                if (addedNames.Count > 0)
                 {
-                    Logger.Info($"[Agent:{Definition.Name}] 兜底合并了 {added} 个 MCP 工具（BuiltInToolService 中缺失）");
+                    Logger.Info($"[Agent:{Definition.Name}] 兜底合并了 {addedNames.Count} 个 MCP 工具" +
+                        $"（BuiltInToolService 未返回）: {string.Join(", ", addedNames)}");
                 }
             }
 
             return fullSet;
         }
+
+        /// <summary>
+        /// 视觉模型下的 OCR 工具禁用判定。
+        ///
+        /// 该判定作用于<b>执行层</b>，而不是工具集：OCR 工具始终随完整工具集发送，
+        /// 以保持请求前缀稳定（前缀缓存），视觉模型调用时直接拒绝并返回指引。
+        /// 用户显式要求 OCR（消息中含 OCR/文字识别等）时放行。
+        /// </summary>
+        internal static bool ShouldBlockOcrToolExecution(
+            string toolName, bool isVisionModel, string? userMessage)
+            => ShouldSuppressOcrTools(isVisionModel, userMessage)
+               && DeepSeekChatControl.IsOcrToolName(toolName);
 
         /// <summary>
         /// 获取当前会话的完整工具集（缓存，避免重复构建）。
@@ -1988,6 +2005,17 @@ namespace DeepSeek_v4_for_VisualStudio.Services.Agents
                                 AskDirectExplorationCallLimit));
                         }
 
+                        // ── 视觉模型：OCR 工具禁用（仍随工具集发送，保持前缀稳定）──
+                        if (ShouldBlockOcrToolExecution(
+                                tc.Function.Name,
+                                _apiService?.CurrentIsVision == true,
+                                Context?.CurrentUserContent))
+                        {
+                            Logger.Info($"[Agent:{Definition.Name}] 视觉模型下禁用 OCR 工具调用: {tc.Function.Name}");
+                            return Task.FromResult(
+                                LocalizationService.Instance["agent.ocrToolDisabledForVision"]);
+                        }
+
                         // ── 白名单拦截：不在白名单中的工具不执行，返回拒绝消息 ──
                         if (blockedToolIndices != null && blockedToolIndices.Contains(idx))
                         {
@@ -2447,28 +2475,7 @@ namespace DeepSeek_v4_for_VisualStudio.Services.Agents
         /// </summary>
         /// <param name="round">当前工具调用轮次（0 表示非工具循环模式）</param>
         private void LogCacheHitRate(int round = 0)
-        {
-            try
-            {
-                var usage = _apiService?.LastUsage;
-                if (usage == null) return;
-
-                int hit = usage.EffectiveHitTokens;
-                int miss = usage.EffectiveMissTokens;
-                int total = hit + miss;
-                double rate = usage.CacheHitRate;
-
-                string roundInfo = round > 0 ? $"[轮次#{round}] " : "";
-                string level = rate >= 0.90 ? "🟢" : rate >= 0.50 ? "🟡" : rate >= 0.20 ? "🟠" : "🔴";
-
-                Logger.Info($"[Cache] {level} {roundInfo}命中率: {usage.CacheHitRatePercent} " +
-                    $"(命中 {hit:N0} / 未命中 {miss:N0} / 总计 {total:N0} tokens)");
-            }
-            catch (Exception ex)
-            {
-                Logger.Warn($"[Cache] 记录命中率异常: {ex.Message}");
-            }
-        }
+            => CacheUsageLogger.Log(_apiService?.LastUsage, round);
 
         /// <summary>
         /// 记录本次工作流的 Cache 命中率汇总到日志（与 UI 显示一致）。
@@ -2487,14 +2494,15 @@ namespace DeepSeek_v4_for_VisualStudio.Services.Agents
                 double aggregateRate = (double)totalHit / totalCacheable;
                 string level = aggregateRate >= 0.90 ? "🟢" : aggregateRate >= 0.50 ? "🟡" : aggregateRate >= 0.20 ? "🟠" : "🔴";
 
-                Logger.Info($"[Cache] ═══════════════════════════════════════");
-                Logger.Info($"[Cache] {level} 本次工作流汇总 ({finalRound} 轮)");
-                Logger.Info($"[Cache]   Cache 命中率: {aggregateRate * 100:F1}%");
-                Logger.Info($"[Cache]   命中: {totalHit:N0} tokens");
-                Logger.Info($"[Cache]   未命中: {totalMiss:N0} tokens");
-                Logger.Info($"[Cache]   Prompt: {delta.Prompt:N0} tokens");
-                Logger.Info($"[Cache]   Completion: {delta.Completion:N0} tokens");
-                Logger.Info($"[Cache] ═══════════════════════════════════════");
+                Logger.Info(
+                    $"[Cache] ═══════════════════════════════════════\n" +
+                    $"[Cache] {level} 本次工作流汇总 ({finalRound} 轮)\n" +
+                    $"[Cache]   Cache 命中率: {aggregateRate * 100:F1}%\n" +
+                    $"[Cache]   命中: {totalHit:N0} tokens\n" +
+                    $"[Cache]   未命中: {totalMiss:N0} tokens\n" +
+                    $"[Cache]   Prompt: {delta.Prompt:N0} tokens\n" +
+                    $"[Cache]   Completion: {delta.Completion:N0} tokens\n" +
+                    $"[Cache] ═══════════════════════════════════════");
             }
             catch (Exception ex)
             {
@@ -3226,6 +3234,7 @@ namespace DeepSeek_v4_for_VisualStudio.Services.Agents
             AgentFactory? agentFactory = null)
         {
             Logger.Info($"[{Definition.Name}] Handoff: → {handoff.TargetAgent} ({handoff.Label})");
+            var handoffStopwatch = System.Diagnostics.Stopwatch.StartNew();
 
             // ── 计算有效计划：原计划非空且未完成时优先；否则按移交携带的 EditSteps 构造轻量计划 ──
             AgentTaskPlan? effectivePlan = activePlan;
@@ -3258,7 +3267,10 @@ namespace DeepSeek_v4_for_VisualStudio.Services.Agents
             //     目标 Agent 通过 BuildApiMessages 读取历史时，仅包含边界前的条目，
             //     排除 Handoff 过渡消息（步骤完成通知、最终构建结果等），
             //     使 DeepSeek Prefix Cache 在跨 Agent 切换时仍能命中。
-            context.ContextManager?.SnapshotForCache();
+            //     例外：Edit 目标不会用到它 —— ExecutePlanAsync 在第一步之前就 ClearCacheSnapshot，
+            //     而目标首轮走 ForwardedMessages 分支、根本不查边界。快照只会「存了立刻丢」。
+            if (handoff.TargetAgent != AgentType.Edit)
+                context.ContextManager?.SnapshotForCache();
 
             // ── 构建 Handoff prompt ──
             // 精简原则（v1.1.14）：handoff 只承载「目标 Agent 是谁」+「移交方要求做什么」
@@ -3278,14 +3290,45 @@ namespace DeepSeek_v4_for_VisualStudio.Services.Agents
             string handoffMessage = sb.ToString();
             // ── 保留 context 中已有的 ActivePlan，仅在非 null 时覆盖 ──
             context.ActivePlan = effectivePlan ?? context.ActivePlan;
-            // ── 刷新 ConversationHistory ──
-            if (context.ContextManager != null)
-                context.ConversationHistory = context.ContextManager.GetConversationHistory();
+            // 注：不再刷新 context.ConversationHistory。该字段在生产代码中没有任何读取方
+            //     （UI/Agent 都直接读 ContextManager），每次 Handoff 重建它只是一次 O(entries)
+            //     的无效分配，恰好落在交接关键路径上。
             // ── Planning 模式仅对 Edit/Build 等执行类 Agent 生效 ──
             if (handoff.TargetAgent == AgentType.Edit || handoff.TargetAgent == AgentType.Build)
                 context.IsPlanningMode = true;
 
-            return await targetAgent.ExecuteAsync(handoffMessage, context);
+            // ── 耗时探针：prepare（交接准备） / firstToken（目标首个流式分片） / total ──
+            //     prepare 覆盖计划选择、快照克隆、缓存边界、提示词组装；
+            //     firstToken−prepare 即目标 Agent 的上下文组装 + 网络 + 模型首 token。
+            long prepareMs = handoffStopwatch.ElapsedMilliseconds;
+            long firstTokenMs = -1;
+            var originalThinking = context.OnThinkingChunk;
+            var originalContent = context.OnContentChunk;
+            if (originalThinking != null || originalContent != null)
+            {
+                void MarkFirstToken()
+                {
+                    if (firstTokenMs < 0)
+                        firstTokenMs = handoffStopwatch.ElapsedMilliseconds;
+                }
+
+                context.OnThinkingChunk = chunk => { MarkFirstToken(); originalThinking?.Invoke(chunk); };
+                context.OnContentChunk = chunk => { MarkFirstToken(); originalContent?.Invoke(chunk); };
+            }
+
+            try
+            {
+                return await targetAgent.ExecuteAsync(handoffMessage, context);
+            }
+            finally
+            {
+                context.OnThinkingChunk = originalThinking;
+                context.OnContentChunk = originalContent;
+                Logger.Info($"[HandoffTiming] {Definition.Name}→{handoff.TargetAgent}: " +
+                    $"prepare={prepareMs}ms, " +
+                    $"firstToken={(firstTokenMs < 0 ? "n/a" : firstTokenMs + "ms")}, " +
+                    $"total={handoffStopwatch.ElapsedMilliseconds}ms");
+            }
         }
 
         /// <summary>
@@ -4449,148 +4492,6 @@ namespace DeepSeek_v4_for_VisualStudio.Services.Agents
                 else if (c == ']') bracketDepth--;
             }
             return braceDepth == 0 && bracketDepth == 0;
-        }
-
-        /// <summary>
-        /// 从 AI 返回结果中解析文件变更。
-        /// 支持三种编辑格式：
-        /// 1. ```file: 代码块（create_file / 全文件替换）
-        /// 2. *** Begin Patch / *** End Patch（apply_patch）
-        /// 3. ```insert_edit_into_file: 或 ```edit: 代码块
-        /// </summary>
-        protected static List<FileChangeSummary> ParseCodeChangesFromResult(string aiResult)
-        {
-            var changes = new List<FileChangeSummary>();
-            if (string.IsNullOrWhiteSpace(aiResult)) return changes;
-
-            // ── 格式1：```file: 代码块（原有格式）──
-            var fileRegex = new System.Text.RegularExpressions.Regex(
-                @"```file:\s*(?<path>[^\r\n]+)[\r\n]+(?<content>.*?)```",
-                System.Text.RegularExpressions.RegexOptions.Singleline);
-
-            var fileMatches = fileRegex.Matches(aiResult);
-            foreach (System.Text.RegularExpressions.Match match in fileMatches)
-            {
-                string filePath = match.Groups["path"].Value.Trim();
-                string newContent = match.Groups["content"].Value;
-                if (string.IsNullOrWhiteSpace(filePath)) continue;
-
-                AddChangeFromContent(changes, filePath, newContent);
-            }
-
-            // ── 格式2：*** Begin Patch / *** End Patch ──
-            var patchRegex = new System.Text.RegularExpressions.Regex(
-                @"\*\*\*\s*Begin\s*Patch\s*\r?\n(.*?)\r?\n\s*\*\*\*\s*End\s*Patch",
-                System.Text.RegularExpressions.RegexOptions.Singleline | System.Text.RegularExpressions.RegexOptions.IgnoreCase);
-
-            var patchMatches = patchRegex.Matches(aiResult);
-            foreach (System.Text.RegularExpressions.Match match in patchMatches)
-            {
-                string body = match.Groups[1].Value;
-
-                // 提取文件路径
-                var fileHeaderMatch = System.Text.RegularExpressions.Regex.Match(body,
-                    @"\*\*\*\s*(?:Update|Add|Delete)\s*File\s*:\s*(?<path>[^\r\n]+)",
-                    System.Text.RegularExpressions.RegexOptions.IgnoreCase);
-
-                if (fileHeaderMatch.Success)
-                {
-                    string filePath = fileHeaderMatch.Groups["path"].Value.Trim();
-                    if (string.IsNullOrWhiteSpace(filePath)) continue;
-
-                    // 提取 + 行作为新增内容
-                    var addedLines = new System.Text.StringBuilder();
-                    foreach (System.Text.RegularExpressions.Match lineMatch in
-                        System.Text.RegularExpressions.Regex.Matches(body, @"^\+(.*)$", System.Text.RegularExpressions.RegexOptions.Multiline))
-                    {
-                        addedLines.AppendLine(lineMatch.Groups[1].Value);
-                    }
-
-                    // 统计 - 行数
-                    int removedCount = System.Text.RegularExpressions.Regex.Matches(
-                        body, @"^\-", System.Text.RegularExpressions.RegexOptions.Multiline).Count;
-
-                    string newContent = addedLines.ToString();
-                    int newLines = CountLines(newContent);
-
-                    changes.Add(new FileChangeSummary
-                    {
-                        FilePath = filePath,
-                        NewContent = newContent,
-                        LinesAdded = newLines,
-                        LinesRemoved = removedCount,
-                        BriefDescription = System.IO.Path.GetFileName(filePath) + " (patch)",
-                    });
-                }
-            }
-
-            // ── 格式3：```insert_edit_into_file: 或 ```edit: 代码块 ──
-            var insertEditRegex = new System.Text.RegularExpressions.Regex(
-                @"```(?:insert_edit_into_file|edit)\s*:\s*(?<path>[^\r\n]+)[\r\n]+(?<content>.*?)```",
-                System.Text.RegularExpressions.RegexOptions.Singleline | System.Text.RegularExpressions.RegexOptions.IgnoreCase);
-
-            var insertMatches = insertEditRegex.Matches(aiResult);
-            foreach (System.Text.RegularExpressions.Match match in insertMatches)
-            {
-                string filePath = match.Groups["path"].Value.Trim();
-                string fullContent = match.Groups["content"].Value;
-                if (string.IsNullOrWhiteSpace(filePath)) continue;
-
-                // 去除 ...existing code... 标记，估算总行数
-                string cleanedContent = System.Text.RegularExpressions.Regex.Replace(
-                    fullContent,
-                    @"\/\/\s*\.\.\.existing\s*code\.\.\.|#\s*\.\.\.existing\s*code\.\.\.|<!--\s*\.\.\.existing\s*code\.\.\.\s*-->",
-                    "",
-                    System.Text.RegularExpressions.RegexOptions.IgnoreCase);
-
-                int newLines = CountLines(cleanedContent);
-
-                changes.Add(new FileChangeSummary
-                {
-                    FilePath = filePath,
-                    NewContent = fullContent,
-                    LinesAdded = newLines,
-                    LinesRemoved = 0,
-                    BriefDescription = System.IO.Path.GetFileName(filePath) + " (insert_edit)",
-                });
-            }
-
-            return changes;
-        }
-
-        /// <summary>
-        /// 辅助方法：从文件内容创建 FileChangeSummary 并添加到列表。
-        /// </summary>
-        private static void AddChangeFromContent(
-            List<FileChangeSummary> changes, string filePath, string newContent)
-        {
-            int newLines = CountLines(newContent);
-            int linesAdded = newLines;
-            int linesRemoved = 0;
-
-            if (System.IO.File.Exists(filePath))
-            {
-                try
-                {
-                    // RAG-SOURCE: file-read 读取文件原始内容（计算变更行数）
-                    string oldContent = FileEncodingHelper.ReadAllText(filePath);
-                    // 使用精确的逐行差异算法（CodeDiffService），而非简单行数减法
-                    CountDiffLines(oldContent, newContent, out int added, out int removed);
-                    linesAdded = added;
-                    linesRemoved = removed;
-                }
-                catch { }
-            }
-
-            changes.Add(new FileChangeSummary
-            {
-                FilePath = filePath,
-                NewContent = newContent,
-                LinesAdded = linesAdded,
-                LinesRemoved = linesRemoved,
-                BriefDescription = System.IO.Path.GetFileName(filePath)
-                    + (System.IO.File.Exists(filePath) ? " (修改)" : " (新建)"),
-            });
         }
 
         /// <summary>

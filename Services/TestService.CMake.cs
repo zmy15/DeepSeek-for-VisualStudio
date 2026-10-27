@@ -71,7 +71,7 @@ namespace DeepSeek_v4_for_VisualStudio.Services
         /// <inheritdoc />
         public IReadOnlyList<string> FindCppTestProjects(string? solutionPath)
         {
-            string? root = NormalizeToDirectory(solutionPath);
+            string? root = StoragePaths.NormalizeToDirectory(solutionPath);
             if (root == null || !Directory.Exists(root))
                 return Array.Empty<string>();
 
@@ -221,7 +221,7 @@ namespace DeepSeek_v4_for_VisualStudio.Services
             }
             catch { }
 
-            string? root = NormalizeToDirectory(solutionPath);
+            string? root = StoragePaths.NormalizeToDirectory(solutionPath);
             return root ?? Path.GetFullPath(projectPath);
         }
 
@@ -908,7 +908,7 @@ namespace DeepSeek_v4_for_VisualStudio.Services
             catch (OperationCanceledException)
             {
                 Logger.Info($"[TestService] {Path.GetFileName(fileName)} timed out or was cancelled, killing process...");
-                KillProcessTree(process);
+                ProcessTreeKiller.Kill(process, "[TestService]");
                 throw;
             }
 

@@ -132,6 +132,11 @@ with `requestAnimationFrame`; C#→JS messaging prefers `PostWebMessageAsString`
 `ExecuteScriptAsync` and finally a full re-render. JS→C# messages funnel through a single `__sendToHost` entry
 point into `CoreWebView2_WebMessageReceived`, carrying actions such as approve, apply, retry, and navigate.
 
+Streaming frames are throttled in two tiers: body snapshots on a 60 ms window — carried only when the body
+actually changed — and reasoning deltas on a 30 ms window, so a reasoning-only tick no longer re-serializes a
+body that grows with the tool timeline. A terminal render dropped while the page is being rebuilt (theme or
+language switch, WebView recovery) is queued and replayed on `__pageReady__` instead of being lost.
+
 ## Dependency injection
 
 `CompositionRoot` is a static service locator built once during package initialization; `AddDeepSeekServices()`
@@ -406,6 +411,10 @@ DeepSeek-v4-for-VisualStudio/
 C#→JS 消息优先用 `PostWebMessageAsString`，失败降级到 `ExecuteScriptAsync`，再失败才全量重渲染。
 JS→C# 消息统一经 `__sendToHost` 进入 `CoreWebView2_WebMessageReceived`，
 承载审批、应用、重试、导航等动作。
+
+流式帧分两档节流：正文快照 60 毫秒一档，且仅在正文确实变化时随帧携带；思考增量 30 毫秒一档 ——
+纯思考刷新不再重新序列化随工具时间线增长的整段正文。页面重建期间（主题/语言切换、WebView 恢复）
+被丢弃的终态渲染会先入队，在 `__pageReady__` 后补发，而不是静默丢失。
 
 ## 依赖注入
 

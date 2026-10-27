@@ -64,7 +64,7 @@ namespace DeepSeek_v4_for_VisualStudio.Services.IdeContext
             var s = new IdeContextSnapshot();
 
             // ── 编辑器上下文（可选：非文本视图/无活动视图时跳过）──
-            var view = TryGetActiveWpfTextView();
+            var view = EditorViewHelper.TryGetActiveWpfTextView();
             if (view != null && view.TextSnapshot.Length > 0)
             {
                 // ── 文件路径 ──
@@ -134,24 +134,6 @@ namespace DeepSeek_v4_for_VisualStudio.Services.IdeContext
                 CapturedAt = DateTime.Now,
             };
             return snapshot.HasContent ? snapshot : null;
-        }
-
-        /// <summary>获取当前活动视图（与 CodeActions 的 IVsTextManager 方案一致）。</summary>
-        private static IWpfTextView? TryGetActiveWpfTextView()
-        {
-            ThreadHelper.ThrowIfNotOnUIThread();
-
-            var textManager = (IVsTextManager?)Package.GetGlobalService(typeof(SVsTextManager));
-            if (textManager == null) return null;
-
-            textManager.GetActiveView(1, null, out IVsTextView vsTextView);
-            if (vsTextView == null) return null;
-
-            var componentModel = (IComponentModel?)Package.GetGlobalService(typeof(SComponentModel));
-            var adapter = componentModel?.DefaultExportProvider
-                .GetExport<IVsEditorAdaptersFactoryService>()?.Value;
-
-            return adapter?.GetWpfTextView(vsTextView);
         }
 
         /// <summary>

@@ -1,4 +1,5 @@
 using DeepSeek_v4_for_VisualStudio.Models;
+using System.Collections.Generic;
 using System.Threading.Tasks;
 
 namespace DeepSeek_v4_for_VisualStudio.Services
@@ -69,6 +70,12 @@ namespace DeepSeek_v4_for_VisualStudio.Services
             string path,
             string? sessionId = null,
             string? solutionPath = null);
+
+        /// <summary>
+        /// 列出会话记忆目录下的直接文件名（不含子目录）。
+        /// 批量清理前做一次性枚举，避免逐个文件名探测的异常与控制流开销。
+        /// </summary>
+        IReadOnlyList<string> ListSessionFileNames(string? sessionId);
 
         /// <summary>
         /// 重命名/移动记忆文件或目录。

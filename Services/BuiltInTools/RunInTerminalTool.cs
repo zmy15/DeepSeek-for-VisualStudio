@@ -1367,7 +1367,7 @@ namespace DeepSeek_v4_for_VisualStudio.Services.BuiltInTools
                 lowered, @"(^|[\s""\\/&|;])ctest(\.exe)?(""|\s|$)");
         }
 
-        private static bool IsBuildCommand(string command)
+        internal static bool IsBuildCommand(string command)
         {
             if (string.IsNullOrWhiteSpace(command)) return false;
 
@@ -1420,7 +1420,8 @@ namespace DeepSeek_v4_for_VisualStudio.Services.BuiltInTools
                 normalized.Contains("gradlew build", StringComparison.OrdinalIgnoreCase) ||
                 normalized.Contains("mvn ", StringComparison.OrdinalIgnoreCase) ||
                 normalized.Contains("mvnw ", StringComparison.OrdinalIgnoreCase) ||
-                normalized.Contains("pip install", StringComparison.OrdinalIgnoreCase) ||
+                // 注：pip install 等包安装命令不在此拦截 —— 它们不归 build_solution 管，
+                //     统一交给审批模式（SmartBlock 下 RequiresApproval 会要求用户确认）。
                 normalized.Contains("nuget restore", StringComparison.OrdinalIgnoreCase))
                 return true;
 

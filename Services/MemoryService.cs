@@ -263,6 +263,28 @@ namespace DeepSeek_v4_for_VisualStudio.Services
         }
 
         /// <inheritdoc />
+        public IReadOnlyList<string> ListSessionFileNames(string? sessionId)
+        {
+            try
+            {
+                string dir = GetScopeDir(MemoryScope.Session, sessionId, null);
+                if (!Directory.Exists(dir))
+                    return Array.Empty<string>();
+
+                return Directory.EnumerateFiles(dir, "*.md", SearchOption.TopDirectoryOnly)
+                    .Select(Path.GetFileName)
+                    .Where(name => !string.IsNullOrEmpty(name))
+                    .Select(name => name!)
+                    .ToList();
+            }
+            catch
+            {
+                // 枚举失败不应影响主流程；调用方按"无旧文件"处理。
+                return Array.Empty<string>();
+            }
+        }
+
+        /// <inheritdoc />
         public Task<string> RenameAsync(
             MemoryScope scope, string oldPath, string newPath,
             string? sessionId = null, string? solutionPath = null)

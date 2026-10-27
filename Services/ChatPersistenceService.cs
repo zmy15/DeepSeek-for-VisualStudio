@@ -17,9 +17,7 @@ namespace DeepSeek_v4_for_VisualStudio.Services
     /// </summary>
     internal static class ChatPersistenceService
     {
-        private static readonly string BaseDir = Path.Combine(
-            Environment.GetFolderPath(Environment.SpecialFolder.LocalApplicationData),
-            "DeepSeekVS", "conversations");
+        private static readonly string BaseDir = StoragePaths.ConversationsDirectory;
 
         private static readonly JsonSerializerOptions JsonOptions = new()
         {
@@ -34,16 +32,7 @@ namespace DeepSeek_v4_for_VisualStudio.Services
         public static string GetStoragePath(string? solutionPath)
         {
             Directory.CreateDirectory(BaseDir);
-
-            if (string.IsNullOrWhiteSpace(solutionPath))
-                return Path.Combine(BaseDir, "_unsaved.json");
-
-            using (var sha256 = SHA256.Create())
-            {
-                var hashBytes = sha256.ComputeHash(Encoding.UTF8.GetBytes(solutionPath));
-                var hash = BitConverter.ToString(hashBytes).Replace("-", "").Substring(0, 16);
-                return Path.Combine(BaseDir, $"proj_{hash}.json");
-            }
+            return StoragePaths.ProjectFilePath(BaseDir, solutionPath);
         }
 
         #region Public Methods - Session Level

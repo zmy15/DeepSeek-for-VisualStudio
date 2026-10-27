@@ -105,6 +105,40 @@ namespace DeepSeek_v4_for_VisualStudio.Utils
         }
 
         /// <summary>
+        /// 把全文切成「高亮层可直接渲染」的片段序列：token 与 token 之间的普通文本都保留，
+        /// 所有片段按原文顺序拼接后恒等于原文。
+        ///
+        /// 输入框高亮层是叠在 TextBox 之上的独立 TextBlock，必须逐字符复现原文排版。
+        /// 若只渲染 token 而丢掉中间的空格/普通文本，后续 token 会整体左移，
+        /// 表现为「空格消失、末尾多出未覆盖的底层字符」。
+        /// </summary>
+        /// <param name="text">待切分的完整原文，可为 null。</param>
+        /// <returns>按原文顺序排列的（片段文本, token 类型）列表；普通文本的 token 类型为 null。</returns>
+        public static List<(string Text, MentionTokenKind? Kind)> SplitForHighlight(string? text)
+        {
+            var segments = new List<(string Text, MentionTokenKind? Kind)>();
+            if (string.IsNullOrEmpty(text))
+                return segments;
+
+            var tokens = FindTokens(text);
+            int position = 0;
+
+            foreach (var token in tokens)
+            {
+                if (token.Start > position)
+                    segments.Add((text.Substring(position, token.Start - position), null));
+
+                segments.Add((text.Substring(token.Start, token.Length), token.Kind));
+                position = token.Start + token.Length;
+            }
+
+            if (position < text.Length)
+                segments.Add((text.Substring(position), null));
+
+            return segments;
+        }
+
+        /// <summary>
         /// 判断某一行的内容是否为 Markdown 代码围栏（允许行首缩进）。
         /// </summary>
         /// <param name="text">完整原文。</param>

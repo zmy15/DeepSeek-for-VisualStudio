@@ -2837,6 +2837,8 @@ namespace DeepSeek_v4_for_VisualStudio.View
                 {
                     _pageReady = true;
                     Logger.Info("[Render] WebView2 页面就绪信号收到");
+                    // 重建窗口内被丢弃的终态渲染必须补发，否则气泡会停在占位/纯文本状态。
+                    TryReplayPendingStreamEnd();
                     return;
                 }
 

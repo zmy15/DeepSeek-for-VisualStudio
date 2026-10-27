@@ -196,12 +196,23 @@ public class RunInTerminalToolTests
     public async Task ExecuteAsync_StillBlocksBuildCommands()
     {
         var tool = new RunInTerminalTool();
-        var args = ParseArgs("{\"command\":\"pip install numpy\",\"explanation\":\"test\"}");
+        var args = ParseArgs("{\"command\":\"dotnet build MyApp.csproj\",\"explanation\":\"test\"}");
 
         var result = await tool.ExecuteAsync(args, null);
 
         result.Should().Contain("build_solution");
     }
+
+    [Theory]
+    [InlineData("dotnet build MyApp.csproj", true)]
+    [InlineData("msbuild My.sln", true)]
+    [InlineData("npm run build", true)]
+    // 包安装不归 build_solution 管：不再硬拦截，改由审批模式确认。
+    [InlineData("pip install numpy", false)]
+    [InlineData("pip3 install -r requirements.txt", false)]
+    [InlineData("npm install", false)]
+    public void IsBuildCommand_DoesNotTreatPackageInstallAsBuild(string command, bool expected)
+        => RunInTerminalTool.IsBuildCommand(command).Should().Be(expected);
 
     /// <summary>
     /// C++ 测试命令必须被引导到 run_tests（而不是 build_solution），

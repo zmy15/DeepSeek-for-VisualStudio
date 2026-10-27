@@ -249,11 +249,12 @@ namespace DeepSeek_v4_for_VisualStudio.View
                 };
 
                 // ── 设置实时推理流回调 ──
-                // Handoff 路径同样按 60ms 聚合 thinking chunk，避免每个 token 都切换一次
-                // UI 线程造成任务堆积，使思考面板显示明显滞后于实际生成速度。
+                // Handoff 路径同样做增量聚合，避免每个 token 都切换一次 UI 线程造成任务堆积。
+                // 思考用 30ms 窗（与 UI 批处理的思考窗一致），比正文的 60ms 更密。
                 var capturedRetryMsgIdx = _agentStreamingMsgIndex;
-                const long StreamFlushSyncIntervalTicks = 60 * TimeSpan.TicksPerMillisecond;
-                long lastThinkingFlushTicks = DateTime.UtcNow.Ticks;
+                long reasoningFlushIntervalTicks =
+                    (long)(System.Diagnostics.Stopwatch.Frequency * 0.030);
+                long lastThinkingFlushTicks = System.Diagnostics.Stopwatch.GetTimestamp();
                 var streamingReasoningDeltaSb = new StringBuilder();
 
                 context.OnThinkingChunk = (chunk) =>
@@ -265,8 +266,8 @@ namespace DeepSeek_v4_for_VisualStudio.View
                         _streamingReasoning.Append(chunk);
                         streamingReasoningDeltaSb.Append(chunk);
 
-                        long nowTicks = DateTime.UtcNow.Ticks;
-                        syncDue = nowTicks - lastThinkingFlushTicks >= StreamFlushSyncIntervalTicks;
+                        long nowTicks = System.Diagnostics.Stopwatch.GetTimestamp();
+                        syncDue = nowTicks - lastThinkingFlushTicks >= reasoningFlushIntervalTicks;
                         if (!syncDue)
                             return;
 
@@ -324,26 +325,8 @@ namespace DeepSeek_v4_for_VisualStudio.View
                     _activePlan = restoredPlan;
                     Logger.Info($"[AgentHandoff] 从 PlanJson 恢复了计划: {restoredPlan.Steps.Count} 个步骤 (PlanId={restoredPlan.PlanId}, IsFromPlanAgent={restoredPlan.IsFromPlanAgent})");
 
-                    // 重建 PlanFilePath（用于 ExecuteHandoffAsync 加载 plan.md）
-                    // 与 PlanAgent.SavePlanMarkdownAsync 保持相同的路径计算逻辑
-                    string baseDir = Path.Combine(
-                        Environment.GetFolderPath(Environment.SpecialFolder.LocalApplicationData),
-                        "DeepSeekVS", "plans");
-                    string subDir;
-                    if (!string.IsNullOrEmpty(_solutionPath))
-                    {
-                        using (var sha256 = SHA256.Create())
-                        {
-                            var hashBytes = sha256.ComputeHash(Encoding.UTF8.GetBytes(_solutionPath));
-                            var hash = BitConverter.ToString(hashBytes).Replace("-", "").Substring(0, 16);
-                            subDir = Path.Combine(baseDir, $"proj_{hash}");
-                        }
-                    }
-                    else
-                    {
-                        subDir = Path.Combine(baseDir, "_unsaved");
-                    }
-                    context.PlanFilePath = Path.Combine(subDir, "plan.md");
+                    // 重建 PlanFilePath（与 PlanAgent.SavePlanMarkdownAsync 共用同一套路径规则）
+                    context.PlanFilePath = StoragePaths.PlanFilePath(_solutionPath);
 
                     Logger.Info($"[AgentHandoff] 从 PlanJson 恢复了计划: {restoredPlan.Steps.Count} 个步骤 (PlanId={restoredPlan.PlanId}, Source={restoredPlan.Source})");
                 }
@@ -404,9 +387,8 @@ namespace DeepSeek_v4_for_VisualStudio.View
                     // 不裁剪：该值会并回 agentResult 并最终持久化/回传。
                     string chainPreReasoning = agentResult.ReasoningContent ?? string.Empty;
 
-                    await ThreadHelper.JoinableTaskFactory.SwitchToMainThreadAsync();
-                    StatusLabel.Text = string.Format(LocalizationService.Instance["status.agentSwitched"], nextHandoff.TargetAgent);
-
+                    var chainPrepWatch = System.Diagnostics.Stopwatch.StartNew();
+                    SetAgentSwitchedStatus(nextHandoff.TargetAgent);
                     await TaskScheduler.Default;
 
                     // ── 切换并执行链式 Handoff ──
@@ -424,6 +406,11 @@ namespace DeepSeek_v4_for_VisualStudio.View
                     var chainAgent = _agentFactory.GetAgent(nextHandoff.TargetAgent);
                     SwitchActiveAgent(chainAgent, context);
                     context.IsChainBackContinuation = nextHandoff.IsChainBackContinuation;
+                    if (chainPrepWatch.ElapsedMilliseconds >= 20)
+                    {
+                        Logger.Info($"[HandoffTiming] chain-prep={chainPrepWatch.ElapsedMilliseconds}ms " +
+                            "(capture+status+switch)");
+                    }
                     try
                     {
                         agentResult = await _activeAgent.ExecuteHandoffAsync(nextHandoff, context, _activePlan, _agentFactory);
@@ -1329,17 +1316,8 @@ namespace DeepSeek_v4_for_VisualStudio.View
                 return;
             }
 
-            // 仅在 ApiService 未初始化时创建，避免重置累计 Token 计数器
-            if (_apiService == null)
-            {
-                InitializeApiService();
-            }
-            if (_apiService == null)
-            {
-                lock (_lock) { _isGenerating = false; }
-                UpdateButtonsState();
+            if (!EnsureApiServiceInitialized())
                 return;
-            }
 
             if (existingCts?.IsCancellationRequested == true)
             {

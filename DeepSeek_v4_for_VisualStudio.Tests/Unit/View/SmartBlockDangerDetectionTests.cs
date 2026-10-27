@@ -33,4 +33,36 @@ public class SmartBlockDangerDetectionTests
         DeepSeekChatControl.IsDangerousCommand(command, "terminal_command")
             .Should().BeTrue();
     }
+
+    [Theory]
+    [InlineData("pip install requests")]
+    [InlineData("pip3 install -r requirements.txt")]
+    [InlineData("python -m pip install -U pip")]
+    [InlineData("npm install")]
+    [InlineData("pnpm add axios")]
+    [InlineData("yarn add lodash")]
+    [InlineData("dotnet add package Newtonsoft.Json")]
+    [InlineData("cargo install ripgrep")]
+    [InlineData("go install golang.org/x/tools/gopls@latest")]
+    [InlineData("gem install rails")]
+    [InlineData("winget install Git.Git")]
+    public void RequiresApproval_PackageInstalls_NeedApproval(string command)
+    {
+        // 包安装不再硬拦截，但 SmartBlock 下必须弹审批。
+        DeepSeekChatControl.RequiresApproval(command, "terminal_command")
+            .Should().BeTrue();
+    }
+
+    [Theory]
+    [InlineData("pip list")]
+    [InlineData("pip --version")]
+    [InlineData("npm run test")]
+    [InlineData("python script.py")]
+    [InlineData("git status")]
+    [InlineData("dotnet test")]
+    public void RequiresApproval_SafeCommands_DoNotNeedApproval(string command)
+    {
+        DeepSeekChatControl.RequiresApproval(command, "terminal_command")
+            .Should().BeFalse();
+    }
 }

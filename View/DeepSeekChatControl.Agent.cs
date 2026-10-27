@@ -434,6 +434,28 @@ namespace DeepSeek_v4_for_VisualStudio.View
         }
 
         /// <summary>
+        /// 异步更新「已切换到 X Agent」状态栏。
+        /// 交接关键路径上不再 await UI 线程：源 Agent 刚结束时 UI 线程通常正忙（终态渲染、
+        /// WebView 合成），同步切过去会白等几十毫秒（实测一次 Ask→Edit 为 80ms）。
+        /// </summary>
+        private void SetAgentSwitchedStatus(AgentType targetAgent)
+        {
+            _ = ThreadHelper.JoinableTaskFactory.RunAsync(async () =>
+            {
+                try
+                {
+                    await ThreadHelper.JoinableTaskFactory.SwitchToMainThreadAsync();
+                    StatusLabel.Text = string.Format(
+                        LocalizationService.Instance["status.agentSwitched"], targetAgent);
+                }
+                catch (Exception ex)
+                {
+                    Logger.Debug($"[Agent] 更新切换状态失败: {ex.Message}");
+                }
+            });
+        }
+
+        /// <summary>
         /// 切换到新的活跃 Agent：解绑旧 Agent 事件，绑定新 Agent 事件，更新上下文。
         /// </summary>
         private void SwitchActiveAgent(BaseAgent newAgent, AgentContext context)
@@ -667,19 +689,29 @@ namespace DeepSeek_v4_for_VisualStudio.View
             AgentHandoff handoff,
             AgentResult? completedSourceResult = null)
         {
+            var stopwatch = System.Diagnostics.Stopwatch.StartNew();
+
             if (handoff.ForwardedMessages == null)
             {
                 handoff.ForwardedMessages = completedSourceResult == null
                     ? _activeAgent?.SnapshotHandoffCacheMessages()
                     : _activeAgent?.SnapshotHandoffCacheMessages(completedSourceResult);
-                return;
+            }
+            else
+            {
+                // 已有快照也必须补入源 Agent 最终回答；例如 build_solution 成功时
+                // Context.ForwardedMessages 会先被保存，此时 Handoff 不是 null 但还缺最终 assistant。
+                BaseAgent.EnsureCompletedAssistantInHandoffPrefix(
+                    handoff.ForwardedMessages,
+                    completedSourceResult);
             }
 
-            // 已有快照也必须补入源 Agent 最终回答；例如 build_solution 成功时
-            // Context.ForwardedMessages 会先被保存，此时 Handoff 不是 null 但还缺最终 assistant。
-            BaseAgent.EnsureCompletedAssistantInHandoffPrefix(
-                handoff.ForwardedMessages,
-                completedSourceResult);
+            // 只在明显偏慢时记录，避免每次 Handoff 都刷一行日志。
+            if (stopwatch.ElapsedMilliseconds >= 5)
+            {
+                Logger.Info($"[HandoffTiming] capture={stopwatch.ElapsedMilliseconds}ms " +
+                    $"(prefix={handoff.ForwardedMessages?.Count ?? 0} msgs)");
+            }
         }
 
         /// <summary>
@@ -868,14 +900,19 @@ namespace DeepSeek_v4_for_VisualStudio.View
                 UpdateBrowser();
                 await TaskScheduler.Default;
 
-                // ── 设置实时推理流回调：每个 thinking chunk 立即推送到 WebView2 思考面板 ──
-                // ── P3: 流式增量累积的节流局部状态。与 BatchStreamingUpdate 内部 60ms 节流对齐，
-                //    将"每 chunk 一次 O(n) 全量拷贝/ToString/线程切换"降为每 60ms 一次，
-                //    长输出时整体字符搬运从 O(n²) 降为近似 O(n)；最终完整性由收尾的
-                //    FinalizeAgentMessage(isComplete) 全量推送兜底 ──
+                // ── 设置实时推理流回调：每个 thinking chunk 增量推送到 WebView2 思考面板 ──
+                // ── P3: 流式增量累积的节流局部状态。正文与 BatchStreamingUpdate 的 60ms 窗对齐，
+                //    思考单独用 30ms 窗；将"每 chunk 一次 O(n) 全量拷贝/ToString/线程切换"
+                //    降为每窗口一次，长输出时整体字符搬运从 O(n²) 降为近似 O(n)；
+                //    最终完整性由收尾的 FinalizeAgentMessage(isComplete) 全量推送兜底 ──
                 const long StreamFlushSyncIntervalTicks = 60 * TimeSpan.TicksPerMillisecond;
-                long lastContentFlushTicks = DateTime.UtcNow.Ticks;
-                long lastThinkingFlushTicks = DateTime.UtcNow.Ticks;
+                // 思考用更短的刷新窗（30ms）：思考是纯追加的小文本，且 UI 侧批处理已单独为
+                // 思考放宽到 30ms；两处保持一致，否则 Agent 层的 60ms 门会成为唯一瓶颈。
+                // 改用 Stopwatch 单调时钟，避免 DateTime.UtcNow 受系统时间校准影响而节流失准。
+                long reasoningFlushIntervalTicks =
+                    (long)(System.Diagnostics.Stopwatch.Frequency * 0.030);
+                long lastContentFlushTicks = System.Diagnostics.Stopwatch.GetTimestamp();
+                long lastThinkingFlushTicks = System.Diagnostics.Stopwatch.GetTimestamp();
                 var streamingReasoningDeltaSb = new StringBuilder();
                 var streamingContentDeltaSb = new StringBuilder();
 
@@ -891,8 +928,8 @@ namespace DeepSeek_v4_for_VisualStudio.View
                         messageIndex = streamingTarget.MessageIndex;
                         _streamingReasoning.Append(chunk);
                         streamingReasoningDeltaSb.Append(chunk);
-                        long nowTicks = DateTime.UtcNow.Ticks;
-                        syncDue = nowTicks - lastThinkingFlushTicks >= StreamFlushSyncIntervalTicks;
+                        long nowTicks = System.Diagnostics.Stopwatch.GetTimestamp();
+                        syncDue = nowTicks - lastThinkingFlushTicks >= reasoningFlushIntervalTicks;
                         if (!syncDue) return;
                         lastThinkingFlushTicks = nowTicks;
                         delta = streamingReasoningDeltaSb.ToString();
@@ -928,7 +965,7 @@ namespace DeepSeek_v4_for_VisualStudio.View
                         _streamingContent.Append(chunk);
                         streamingContentDeltaSb.Append(chunk);
 
-                        long nowTicks = DateTime.UtcNow.Ticks;
+                        long nowTicks = System.Diagnostics.Stopwatch.GetTimestamp();
                         syncDue = nowTicks - lastContentFlushTicks >= StreamFlushSyncIntervalTicks;
                         if (!syncDue) return;
 
@@ -1008,6 +1045,7 @@ namespace DeepSeek_v4_for_VisualStudio.View
                     if (incomingHandoff.ChainBack && incomingHandoff.SourceAgent.HasValue)
                         pendingChainBack = incomingHandoff;
                     handoffChainDepth++;
+                    var chainPrepWatch = System.Diagnostics.Stopwatch.StartNew();
                     CaptureHandoffForwardedMessages(incomingHandoff, agentResult);
 
                     if (handoffChainDepth > maxHandoffChainDepth)
@@ -1034,8 +1072,8 @@ namespace DeepSeek_v4_for_VisualStudio.View
                     // ── AutoSend：自动链式移交 ──
                     Logger.Info($"[Agent] Handoff 链 #{handoffChainDepth}: → {incomingHandoff.TargetAgent} ({incomingHandoff.Label})");
 
-                    await ThreadHelper.JoinableTaskFactory.SwitchToMainThreadAsync();
-                    StatusLabel.Text = string.Format(LocalizationService.Instance["status.agentSwitched"], incomingHandoff.TargetAgent);
+                    // 状态栏异步更新：不阻塞交接（源 Agent 刚结束时 UI 线程往往正忙）。
+                    SetAgentSwitchedStatus(incomingHandoff.TargetAgent);
                     await TaskScheduler.Default;
 
                     if (!parallelMemoryExtractionStarted && incomingHandoff.IsSummaryOnly)
@@ -1050,6 +1088,11 @@ namespace DeepSeek_v4_for_VisualStudio.View
                     if (_agentFactory.EditAgent is EditAgent ea2)
                         ea2.PlanUpdated += OnAgentPlanUpdated;
                     context.IsChainBackContinuation = incomingHandoff.IsChainBackContinuation;
+                    if (chainPrepWatch.ElapsedMilliseconds >= 20)
+                    {
+                        Logger.Info($"[HandoffTiming] chain-prep={chainPrepWatch.ElapsedMilliseconds}ms " +
+                            "(capture+status+switch)");
+                    }
                     try
                     {
                         agentResult = await _activeAgent.ExecuteHandoffAsync(incomingHandoff, context, _activePlan, _agentFactory);
@@ -2692,18 +2735,18 @@ namespace DeepSeek_v4_for_VisualStudio.View
                     return;
                 }
 
-                // ── 审批模式检查：智能拦截 → 仅危险命令需要审批 ──
+                // ── 审批模式检查：智能拦截 → 危险命令与包安装需要审批 ──
                 if (approvalMode == Models.ApprovalMode.SmartBlock)
                 {
-                    bool isDangerous = IsDangerousCommand(request.Command, request.ActionType);
-                    if (!isDangerous)
+                    bool needsApproval = RequiresApproval(request.Command, request.ActionType);
+                    if (!needsApproval)
                     {
                         Logger.Info($"[Agent] 审批模式=智能拦截，安全命令自动放行: {request.Title}");
                         var permAgent = _agentFactory?.FindAgentWithPendingPermission(request.RequestId) ?? _activeAgent;
                         permAgent?.RespondToPermission(request.RequestId, true);
                         return;
                     }
-                    Logger.Info($"[Agent] 审批模式=智能拦截，检测到危险命令，需要审批: {request.Command}");
+                    Logger.Info($"[Agent] 审批模式=智能拦截，命令需要审批: {request.Command}");
                 }
 
                 // ── 审批 UI 串行化：入队后由队列决定何时显示 ──

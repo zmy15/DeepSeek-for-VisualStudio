@@ -1218,9 +1218,8 @@ namespace DeepSeek_v4_for_VisualStudio.View
         private void PostStreamingUpdate(
             int messageIndex,
             string? content,
-            string reasoningContent,
+            string? reasoningContent,
             bool isComplete,
-            string? statusText = null,
             string? reasoningDelta = null,
             string? contentDelta = null)
         {
@@ -1233,7 +1232,6 @@ namespace DeepSeek_v4_for_VisualStudio.View
                     content,
                     reasoningContent,
                     isComplete,
-                    statusText,
                     reasoningDelta,
                     contentDelta);
                 ChatWebView.CoreWebView2.PostWebMessageAsString(json);
@@ -1245,12 +1243,66 @@ namespace DeepSeek_v4_for_VisualStudio.View
         }
 
         /// <summary>
+        /// 页面重建窗口内被丢弃的终态渲染快照，等 <c>__pageReady__</c> 后补发。
+        /// </summary>
+        private readonly struct PendingStreamEnd
+        {
+            public PendingStreamEnd(int messageIndex, Models.ChatMessage message, string fullContent, string reasoningContent, string? footerHtml)
+            {
+                MessageIndex = messageIndex;
+                Message = message;
+                FullContent = fullContent;
+                ReasoningContent = reasoningContent;
+                FooterHtml = footerHtml;
+            }
+
+            public int MessageIndex { get; }
+
+            /// <summary>被渲染的消息实例：用于重放前校验，防止跨会话把旧内容注入同下标气泡。</summary>
+            public Models.ChatMessage Message { get; }
+
+            public string FullContent { get; }
+            public string ReasoningContent { get; }
+            public string? FooterHtml { get; }
+        }
+
+        private readonly object _pendingStreamEndLock = new();
+        private PendingStreamEnd? _pendingStreamEnd;
+
+        /// <summary>
         /// 通过 PostWebMessageAsString 非阻塞推送流式完成（含 Markdown 渲染 HTML）。
         /// 若消息过大导致 PostWebMessageAsString 失败，自动降级为全量页面刷新。
+        /// 页面尚在重建时不能静默丢弃，否则气泡会永远停在占位/纯文本状态。
         /// </summary>
         private void PostStreamEnd(int messageIndex, string fullContent, string reasoningContent, string? extraFooterHtml = null)
         {
-            if (ChatWebView.CoreWebView2 == null || !_pageReady) return;
+            if (ChatWebView?.CoreWebView2 == null || !_pageReady)
+            {
+                // ── 页面重建窗口（主题/语言切换、WebView 重建、会话切换）──
+                // 此前的实现直接 return：这条气泡会停在占位或纯文本状态，既没有 Markdown
+                // 也没有重试/复制按钮，直到下一次全量重建才恢复。改为缓存最后一次终态渲染，
+                // 由 __pageReady__ 处理器补发（后到覆盖先到，重复补发幂等）。
+                Models.ChatMessage? message = null;
+                lock (_lock)
+                {
+                    if (messageIndex >= 0 && messageIndex < _messages.Count)
+                        message = _messages[messageIndex];
+                }
+                if (message != null)
+                {
+                    lock (_pendingStreamEndLock)
+                    {
+                        _pendingStreamEnd = new PendingStreamEnd(
+                            messageIndex,
+                            message,
+                            fullContent ?? string.Empty,
+                            reasoningContent ?? string.Empty,
+                            extraFooterHtml);
+                    }
+                    Logger.Info($"[Render] 页面未就绪，已缓存 streamEnd 等待重放 (idx={messageIndex})");
+                }
+                return;
+            }
 
             try
             {
@@ -1307,6 +1359,52 @@ namespace DeepSeek_v4_for_VisualStudio.View
                 {
                     Logger.Error($"[Render] PostStreamEnd 全量刷新降级也失败: {fallbackEx.Message}", fallbackEx);
                 }
+            }
+        }
+
+        /// <summary>
+        /// 页面就绪后补发重建窗口内被丢弃的 <c>streamEnd</c>。
+        /// 幂等：重复补发只是用同一份最终 HTML 再覆盖一次。
+        /// </summary>
+        private void TryReplayPendingStreamEnd()
+        {
+            // 由 CoreWebView2_WebMessageReceived 的 __pageReady__ 分支调用，必须在 UI 线程。
+            Microsoft.VisualStudio.Shell.ThreadHelper.ThrowIfNotOnUIThread();
+
+            PendingStreamEnd? pending;
+            lock (_pendingStreamEndLock)
+            {
+                pending = _pendingStreamEnd;
+                _pendingStreamEnd = null;
+            }
+
+            if (!pending.HasValue)
+                return;
+
+            var snapshot = pending.Value;
+
+            // 校验：期间可能已切换/清空会话，同一下标可能已指向另一条消息。
+            bool stillCurrent;
+            lock (_lock)
+            {
+                stillCurrent = snapshot.MessageIndex >= 0
+                    && snapshot.MessageIndex < _messages.Count
+                    && ReferenceEquals(_messages[snapshot.MessageIndex], snapshot.Message);
+            }
+            if (!stillCurrent)
+            {
+                Logger.Info("[Render] 缓存的 streamEnd 已过期（会话已切换），丢弃");
+                return;
+            }
+
+            Logger.Info($"[Render] 页面就绪，补发被丢弃的 streamEnd (idx={snapshot.MessageIndex})");
+            try
+            {
+                PostStreamEnd(snapshot.MessageIndex, snapshot.FullContent, snapshot.ReasoningContent, snapshot.FooterHtml);
+            }
+            catch (Exception ex)
+            {
+                Logger.Warn($"[Render] 补发 streamEnd 失败: {ex.Message}");
             }
         }
 

@@ -77,7 +77,7 @@ namespace DeepSeek_v4_for_VisualStudio.Commands
             await _package.LoadPersistedOptionsAsync();
 
             // ── 选区捕获（序号 15）──
-            var view = TryGetActiveWpfTextView();
+            var view = EditorViewHelper.TryGetActiveWpfTextView();
             if (view == null) return;
 
             var initialSel = view.Selection.SelectedSpans;
@@ -205,23 +205,6 @@ namespace DeepSeek_v4_for_VisualStudio.Commands
         }
 
         // ────────────────────────── 辅助方法 ──────────────────────────
-
-        private static IWpfTextView? TryGetActiveWpfTextView()
-        {
-            ThreadHelper.ThrowIfNotOnUIThread();
-
-            var textManager = (IVsTextManager?)Package.GetGlobalService(typeof(SVsTextManager));
-            if (textManager == null) return null;
-
-            textManager.GetActiveView(1, null, out IVsTextView vsTextView);
-            if (vsTextView == null) return null;
-
-            var componentModel = (IComponentModel?)Package.GetGlobalService(typeof(SComponentModel));
-            var adapter = componentModel?.DefaultExportProvider
-                .GetExport<IVsEditorAdaptersFactoryService>()?.Value;
-
-            return adapter?.GetWpfTextView(vsTextView);
-        }
 
         private static IVsTextView? TryGetTextViewAdapter(IWpfTextView view)
         {

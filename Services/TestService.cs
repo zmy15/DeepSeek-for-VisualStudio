@@ -54,7 +54,7 @@ namespace DeepSeek_v4_for_VisualStudio.Services
         /// <inheritdoc />
         public IReadOnlyList<string> FindTestProjects(string? solutionPath)
         {
-            string? root = NormalizeToDirectory(solutionPath);
+            string? root = StoragePaths.NormalizeToDirectory(solutionPath);
             if (root == null || !Directory.Exists(root))
                 return Array.Empty<string>();
 
@@ -134,23 +134,6 @@ namespace DeepSeek_v4_for_VisualStudio.Services
             {
                 return false;
             }
-        }
-
-        private static string? NormalizeToDirectory(string? solutionPath)
-        {
-            if (string.IsNullOrEmpty(solutionPath))
-                return null;
-
-            try
-            {
-                if (File.Exists(solutionPath))
-                    return Path.GetDirectoryName(solutionPath);
-                if (Directory.Exists(solutionPath))
-                    return solutionPath;
-            }
-            catch { }
-
-            return null;
         }
 
         #endregion
@@ -353,7 +336,7 @@ namespace DeepSeek_v4_for_VisualStudio.Services
             catch (OperationCanceledException)
             {
                 Logger.Info("[TestService] Test run timed out or was cancelled, killing process...");
-                KillProcessTree(process);
+                ProcessTreeKiller.Kill(process, "[TestService]");
                 throw;
             }
 
@@ -386,43 +369,6 @@ namespace DeepSeek_v4_for_VisualStudio.Services
                 return string.Empty;
 
             return string.Join("\n", lines.Skip(Math.Max(0, lines.Count - OutputTailLines)));
-        }
-
-        /// <summary>
-        /// 终止进程及其子进程树。兼容 .NET Framework 4.7.2
-        /// （不支持 Process.Kill(entireProcessTree)）。
-        /// </summary>
-        private static void KillProcessTree(Process process)
-        {
-            int pid = process.Id;
-            try
-            {
-                if (!process.HasExited)
-                    process.Kill();
-            }
-            catch (Exception ex)
-            {
-                Logger.Warn($"[TestService] Killing main process (PID={pid}) failed: {ex.Message}");
-            }
-
-            try
-            {
-                var killPsi = new ProcessStartInfo
-                {
-                    FileName = "taskkill",
-                    Arguments = $"/T /F /PID {pid}",
-                    RedirectStandardOutput = true,
-                    RedirectStandardError = true,
-                    UseShellExecute = false,
-                    CreateNoWindow = true,
-                };
-                using var killer = Process.Start(killPsi);
-                killer?.WaitForExit(5000);
-            }
-            catch (Exception ex)
-            {
-                Logger.Warn($"[TestService] taskkill /T (PID={pid}) failed: {ex.Message}");
-            }
         }
 
         /// <summary>

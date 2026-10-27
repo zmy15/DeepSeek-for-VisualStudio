@@ -857,85 +857,6 @@ public class AskAgentTests
     #endregion
 
 
-    #region ParseCodeChangesFromResult (inherited from BaseAgent)
-
-    [Fact]
-    public void ParseCodeChangesFromResult_NullOrEmpty_ReturnsEmpty()
-    {
-        var result1 = ParseCodeChangesPublic(null!);
-        var result2 = ParseCodeChangesPublic("");
-        var result3 = ParseCodeChangesPublic("   ");
-
-        result1.Should().BeEmpty();
-        result2.Should().BeEmpty();
-        result3.Should().BeEmpty();
-    }
-
-    [Fact]
-    public void ParseCodeChangesFromResult_FileFormat_ParsesPathAndContent()
-    {
-        var input = @"```file: src/app.ts
-export const App = () => <div>Hello</div>;
-```";
-
-        var changes = ParseCodeChangesPublic(input);
-
-        changes.Should().HaveCount(1);
-        changes[0].FilePath.Should().Be("src/app.ts");
-        changes[0].NewContent.Should().Contain("Hello");
-    }
-
-    [Fact]
-    public void ParseCodeChangesFromResult_MultipleFiles_ParsesAll()
-    {
-        var input = @"```file: src/a.ts
-content a
-```
-```file: src/b.ts
-content b
-```";
-
-        var changes = ParseCodeChangesPublic(input);
-
-        changes.Should().HaveCount(2);
-        changes[0].FilePath.Should().Be("src/a.ts");
-        changes[1].FilePath.Should().Be("src/b.ts");
-    }
-
-    [Fact]
-    public void ParseCodeChangesFromResult_InsertEditFormat_Parsed()
-    {
-        var input = @"```insert_edit_into_file: src/utils.ts
-const x = 1;
-// ...existing code...
-const y = 2;
-```";
-
-        var changes = ParseCodeChangesPublic(input);
-
-        changes.Should().HaveCount(1);
-        changes[0].FilePath.Should().Be("src/utils.ts");
-        changes[0].BriefDescription.Should().Contain("insert_edit");
-    }
-
-    [Fact]
-    public void ParseCodeChangesFromResult_PatchFormat_Parsed()
-    {
-        var input = @"*** Begin Patch
-*** Update File: src/config.json
-+  ""debug"": true,
-*** End Patch";
-
-        var changes = ParseCodeChangesPublic(input);
-
-        changes.Should().HaveCount(1);
-        changes[0].FilePath.Should().Be("src/config.json");
-        changes[0].BriefDescription.Should().Contain("patch");
-    }
-
-    #endregion
-
-
     // ──────────── Reflection helpers for testing private methods ────────────
 
     private static string SummarizeForLogPublic(string? message)
@@ -951,13 +872,6 @@ const y = 2;
         var method = typeof(AskAgent).GetMethod("BuildContextualPrompt",
             System.Reflection.BindingFlags.NonPublic | System.Reflection.BindingFlags.Static);
         return (string)method!.Invoke(null, new object[] { userMessage, context })!;
-    }
-
-    private static List<FileChangeSummary> ParseCodeChangesPublic(string aiResult)
-    {
-        var method = typeof(BaseAgent).GetMethod("ParseCodeChangesFromResult",
-            System.Reflection.BindingFlags.NonPublic | System.Reflection.BindingFlags.Static);
-        return (List<FileChangeSummary>)method!.Invoke(null, new object[] { aiResult })!;
     }
 
     private static string StripToolCallMarkersPublic(string text)
