@@ -52,7 +52,7 @@ and tests, operate Git, and drive a browser, all under an approval model you con
 
 | | |
 |---|---|
-| **Version** | 1.3.0 |
+| **Version** | 1.3.1 |
 | **Target** | Visual Studio 2022 / 2026, `amd64`, `[17.14, )` |
 | **Runtime** | .NET Framework 4.7.2, C# 14 |
 | **License** | MIT |

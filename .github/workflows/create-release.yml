@@ -72,6 +72,8 @@ jobs:
           @{ Path = 'DeepSeek_v4_for_VisualStudioPackage.cs'; Pattern = '(public const string Version = ")[^"]*(")'; Replacement = '${1}' + $version + '${2}' },
           @{ Path = 'README.md'; Pattern = '(badge/VSIX-)[0-9.]+(-success)'; Replacement = '${1}' + $version + '${2}' },
           @{ Path = 'README.zh-CN.md'; Pattern = '(badge/VSIX-)[0-9.]+(-success)'; Replacement = '${1}' + $version + '${2}' },
+          @{ Path = 'README.md'; Pattern = '(\|\s*\*\*Version\*\*\s*\|\s*)[0-9][0-9.]*(\s*\|)'; Replacement = '${1}' + $version + '${2}' },
+          @{ Path = 'README.zh-CN.md'; Pattern = '(\|\s*\*\*版本\*\*\s*\|\s*)[0-9][0-9.]*(\s*\|)'; Replacement = '${1}' + $version + '${2}' },
           @{ Path = 'benchmark/tasks.sample.json'; Pattern = '("extension_version"\s*:\s*")[^"]*(")'; Replacement = '${1}' + $version + '${2}' }
         )
 
@@ -84,6 +86,22 @@ jobs:
             Set-Content -LiteralPath $update.Path -Value $updated -NoNewline
             Write-Host "$($update.Path) 版本号已更新为 $version"
           }
+        }
+
+        # ── 校验：README 版本表格必须同步 ──
+        # 徽章与表格是两处独立文本，正则一旦与 Markdown 实际写法漂移就会静默漏改
+        # （此前只改了徽章，表格一直停留在旧版本）。这里显式断言，格式变化时让发版失败而不是发出去。
+        $readmeChecks = @(
+          @{ Path = 'README.md'; Label = 'Version' },
+          @{ Path = 'README.zh-CN.md'; Label = '版本' }
+        )
+        foreach ($check in $readmeChecks) {
+          $content = Get-Content -LiteralPath $check.Path -Raw
+          $tablePattern = '\*\*' + [regex]::Escape($check.Label) + '\*\*\s*\|\s*' + [regex]::Escape($version) + '\s*\|'
+          if ($content -notmatch $tablePattern) {
+            throw "$($check.Path) 的版本表格未同步到 $version（请检查表格行格式是否变化）"
+          }
+          Write-Host "$($check.Path) 版本表格已确认: $version"
         }
 
         git config user.name "github-actions[bot]"
