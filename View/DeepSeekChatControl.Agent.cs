@@ -868,14 +868,19 @@ namespace DeepSeek_v4_for_VisualStudio.View
                 UpdateBrowser();
                 await TaskScheduler.Default;
 
-                // ── 设置实时推理流回调：每个 thinking chunk 立即推送到 WebView2 思考面板 ──
-                // ── P3: 流式增量累积的节流局部状态。与 BatchStreamingUpdate 内部 60ms 节流对齐，
-                //    将"每 chunk 一次 O(n) 全量拷贝/ToString/线程切换"降为每 60ms 一次，
-                //    长输出时整体字符搬运从 O(n²) 降为近似 O(n)；最终完整性由收尾的
-                //    FinalizeAgentMessage(isComplete) 全量推送兜底 ──
+                // ── 设置实时推理流回调：每个 thinking chunk 增量推送到 WebView2 思考面板 ──
+                // ── P3: 流式增量累积的节流局部状态。正文与 BatchStreamingUpdate 的 60ms 窗对齐，
+                //    思考单独用 30ms 窗；将"每 chunk 一次 O(n) 全量拷贝/ToString/线程切换"
+                //    降为每窗口一次，长输出时整体字符搬运从 O(n²) 降为近似 O(n)；
+                //    最终完整性由收尾的 FinalizeAgentMessage(isComplete) 全量推送兜底 ──
                 const long StreamFlushSyncIntervalTicks = 60 * TimeSpan.TicksPerMillisecond;
-                long lastContentFlushTicks = DateTime.UtcNow.Ticks;
-                long lastThinkingFlushTicks = DateTime.UtcNow.Ticks;
+                // 思考用更短的刷新窗（30ms）：思考是纯追加的小文本，且 UI 侧批处理已单独为
+                // 思考放宽到 30ms；两处保持一致，否则 Agent 层的 60ms 门会成为唯一瓶颈。
+                // 改用 Stopwatch 单调时钟，避免 DateTime.UtcNow 受系统时间校准影响而节流失准。
+                long reasoningFlushIntervalTicks =
+                    (long)(System.Diagnostics.Stopwatch.Frequency * 0.030);
+                long lastContentFlushTicks = System.Diagnostics.Stopwatch.GetTimestamp();
+                long lastThinkingFlushTicks = System.Diagnostics.Stopwatch.GetTimestamp();
                 var streamingReasoningDeltaSb = new StringBuilder();
                 var streamingContentDeltaSb = new StringBuilder();
 
@@ -891,8 +896,8 @@ namespace DeepSeek_v4_for_VisualStudio.View
                         messageIndex = streamingTarget.MessageIndex;
                         _streamingReasoning.Append(chunk);
                         streamingReasoningDeltaSb.Append(chunk);
-                        long nowTicks = DateTime.UtcNow.Ticks;
-                        syncDue = nowTicks - lastThinkingFlushTicks >= StreamFlushSyncIntervalTicks;
+                        long nowTicks = System.Diagnostics.Stopwatch.GetTimestamp();
+                        syncDue = nowTicks - lastThinkingFlushTicks >= reasoningFlushIntervalTicks;
                         if (!syncDue) return;
                         lastThinkingFlushTicks = nowTicks;
                         delta = streamingReasoningDeltaSb.ToString();
@@ -928,7 +933,7 @@ namespace DeepSeek_v4_for_VisualStudio.View
                         _streamingContent.Append(chunk);
                         streamingContentDeltaSb.Append(chunk);
 
-                        long nowTicks = DateTime.UtcNow.Ticks;
+                        long nowTicks = System.Diagnostics.Stopwatch.GetTimestamp();
                         syncDue = nowTicks - lastContentFlushTicks >= StreamFlushSyncIntervalTicks;
                         if (!syncDue) return;
 

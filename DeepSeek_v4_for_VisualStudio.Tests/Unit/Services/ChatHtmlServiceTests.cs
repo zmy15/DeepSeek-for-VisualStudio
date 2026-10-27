@@ -401,6 +401,50 @@ public class ChatHtmlServiceTests
     }
 
     [Fact]
+    public void BuildInitialPage_StreamFlush_SkipsRedundantTextWriteAndUsesInstantScroll()
+    {
+        string html = ChatHtmlService.BuildInitialPage(new List<ChatMessage>());
+
+        // 内容未变化时不重写 textNode：避免整块文本重排版（C# 侧已按 dirty 裁剪，JS 再兜一层）。
+        html.Should().Contain("if(textNode.data!==msg.c)");
+        // 流式期间使用 auto 滚动：高频 smooth 会互相打断并在合成器里堆积动画。
+        html.Should().Contain("window.__scrollToBottom('auto');");
+    }
+
+    [Fact]
+    public void BuildStreamUpdateJson_ReasoningOnlyFrame_OmitsBodyAndReasoningSnapshots()
+    {
+        // 与 StreamFlushPolicy 的契约：纯思考帧只带 rd，不重发整段正文 c / 思考快照 r。
+        string json = ChatHtmlService.BuildStreamUpdateJson(
+            messageIndex: 3,
+            streamingContent: null,
+            reasoningContent: null,
+            isComplete: false,
+            statusText: null,
+            reasoningDelta: "思考增量",
+            contentDelta: null);
+
+        json.Should().Contain("\"type\":\"stream\"");
+        json.Should().Contain("\"rd\":\"思考增量\"");
+        json.Should().NotContain("\"c\":");
+        json.Should().NotContain("\"r\":");
+    }
+
+    [Fact]
+    public void BuildStreamUpdateJson_CompletedFrame_CarriesFullSnapshots()
+    {
+        string json = ChatHtmlService.BuildStreamUpdateJson(
+            messageIndex: 3,
+            streamingContent: "时间线\n最终回答",
+            reasoningContent: "完整思考",
+            isComplete: true);
+
+        json.Should().Contain("\"c\":\"时间线\\n最终回答\"");
+        json.Should().Contain("\"r\":\"完整思考\"");
+        json.Should().Contain("\"f\":true");
+    }
+
+    [Fact]
     public void BuildInitialPage_RegistersF7ViewCodeForwarding()
     {
         string html = ChatHtmlService.BuildInitialPage(new List<ChatMessage>());

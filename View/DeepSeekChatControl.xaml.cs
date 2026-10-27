@@ -100,12 +100,8 @@ namespace DeepSeek_v4_for_VisualStudio.View
 
         private static string ApiKeyMissingMessage => AiPrompts.ApiKeyMissingMessage;
 
-        /// <summary>
-        /// 流式更新间隔（字符数），配合时间节流实现双重控制，减少 JS 跨进程调用。
-        /// 使用 PostWebMessageAsString 非阻塞通道后，可适当增大间隔以减少消息频率。
-        /// 2026-05-21 调优：字符阈值 200→100，时间阈值 120→80ms，提升流式输出响应速度。
-        /// </summary>
-        private const int StreamRenderInterval = 100;
+        // 流式刷新的时间窗 / 增长阈值统一由 StreamFlushPolicy 提供（可单测），
+        // 此处不再保留重复常量，避免两处调参漂移。
 
         #endregion
 
@@ -2420,14 +2416,14 @@ namespace DeepSeek_v4_for_VisualStudio.View
             public int LastFlushedReasoningLength;
             /// <summary>上次刷新时的整段正文长度，用于按"增长量"而非"绝对长度"节流。</summary>
             public int LastFlushedContentLength;
+            /// <summary>整段正文自上次推送后是否变化过（含整体替换），决定本帧是否携带 <c>c</c>。</summary>
+            public bool ContentDirty;
             /// <summary>整段正文替换后是否已经收到过增量，用于补段落分隔符。</summary>
             public bool ContentDeltaStarted;
         }
 
         private readonly Dictionary<int, StreamBatchState> _streamBatchStates = new();
         private readonly object _streamBatchLock = new();
-
-        private const long StreamBatchMinIntervalTicks = 60_0000; // 60ms (Stopwatch ticks)
 
         /// <summary>
         /// 空闲超时定时器：每次 BatchStreamingUpdate 调用后重置 300ms，
@@ -2492,6 +2488,8 @@ namespace DeepSeek_v4_for_VisualStudio.View
                     // 整段替换（工具时间线 / 最终定稿）之后，后续增量属于"新段落"。
                     StreamBatchContentRules.ResetAfterFullContent(
                         ref state.ContentDeltaStarted, ref state.LastFlushedContentLength);
+                    // 整段被替换：本帧必须携带 c（即使长度变短，例如时间线被重排）。
+                    state.ContentDirty = true;
                 }
                 if (contentDelta != null)
                 {
@@ -2504,6 +2502,11 @@ namespace DeepSeek_v4_for_VisualStudio.View
                             state.Content, contentDelta, ref state.ContentDeltaStarted))
                     {
                         state.ContentDelta.Append(contentDelta);
+                    }
+                    else
+                    {
+                        // 增量已并入整段正文：本帧需要带 c，否则这段文本要等到下次阈值才出现。
+                        state.ContentDirty = true;
                     }
                 }
                 if (reasoning != null)
@@ -2519,47 +2522,45 @@ namespace DeepSeek_v4_for_VisualStudio.View
                     state.IsComplete = true;
 
                 long now = Stopwatch.GetTimestamp();
-                long elapsed = now - state.LastFlushTicks;
+                // 用 Stopwatch.Frequency 折算毫秒：旧实现把 60_0000 当成固定 tick 数，
+                // 隐含假设 QPC 频率恒为 10MHz；其他机器上会得到错误的时间窗。
+                long elapsedMs = state.LastFlushTicks == 0
+                    ? long.MaxValue
+                    : (long)((now - state.LastFlushTicks) * 1000.0 / Stopwatch.Frequency);
 
-                // 仅当满足条件时实际推送：已完成 / 内容显著变化 / 思考显著变化 / 间隔达标且有任意内容
-                // 用"自上次刷新以来的增长量"判定，避免正文变长后每次都触发整段重推。
-                bool contentChanged = StreamBatchContentRules.GrewEnough(
-                    state.Content.Length, state.LastFlushedContentLength, StreamRenderInterval);
-                bool contentDeltaChanged = state.ContentDelta.Length >= StreamRenderInterval;
-                bool reasoningChanged =
-                    (state.Reasoning.Length > 0
-                        && state.Reasoning.Length - state.LastFlushedReasoningLength >= 50)
-                    || state.ReasoningDelta.Length >= 50;
-                bool timeElapsed = elapsed >= StreamBatchMinIntervalTicks;
-                // 思考增量只写入 ReasoningDelta（不写 Content/Reasoning），
-                // 时间兜底必须覆盖它，否则慢速思考要攒满 50 字符才推送一次，流式观感很差。
-                bool hasAnyPending = state.Content.Length > 0
-                    || state.ContentDelta.Length > 0
-                    || state.Reasoning.Length > 0
-                    || state.ReasoningDelta.Length > 0;
+                // 刷新决策已抽到 StreamFlushPolicy（可单测）：
+                // 纯思考增量只带 rd，不再重发整段正文 c —— 这是长会话里「思考越流越卡」的根因。
+                var plan = StreamFlushPolicy.Decide(
+                    state.IsComplete,
+                    state.ContentDirty,
+                    state.Content.Length,
+                    state.LastFlushedContentLength,
+                    state.ContentDelta.Length,
+                    state.Reasoning.Length,
+                    state.LastFlushedReasoningLength,
+                    state.ReasoningDelta.Length,
+                    elapsedMs);
 
-                if (state.IsComplete || contentChanged || contentDeltaChanged || reasoningChanged
-                    || (timeElapsed && hasAnyPending))
+                if (plan.Flush)
                 {
                     state.LastFlushTicks = now;
                     state.LastFlushedReasoningLength = state.Reasoning.Length;
                     state.LastFlushedContentLength = state.Content.Length;
 
-                    // 整段正文已由增量同步维护，直接推整段（c）即可；
-                    // 不再走 cd，避免"整段快照挤掉增量"的旧问题，也省去 JS 侧增量拼接。
-                    string? contentSnapshot = state.Content.Length > 0
+                    string? contentSnapshot = plan.IncludeContentSnapshot
                         ? state.Content.ToString()
                         : null;
-                    // 无整段正文时（例如纯思考先到）才退回增量路径。
-                    string? contentDeltaSnapshot = contentSnapshot == null && state.ContentDelta.Length > 0
+                    // 整段正文为空（纯问答流式）时才退回增量路径。
+                    string? contentDeltaSnapshot = plan.IncludeContentDelta
                         ? state.ContentDelta.ToString()
                         : null;
-                    string reasoningSnapshot = state.Reasoning.Length > 0
+                    string? reasoningSnapshot = plan.IncludeReasoningSnapshot
                         ? state.Reasoning.ToString()
-                        : string.Empty;
-                    string? reasoningDeltaSnapshot = state.ReasoningDelta.Length > 0
+                        : null;
+                    string? reasoningDeltaSnapshot = plan.IncludeReasoningDelta
                         ? state.ReasoningDelta.ToString()
                         : null;
+
                     PostStreamingUpdate(state.MessageIndex,
                         contentSnapshot,
                         reasoningSnapshot,
@@ -2569,13 +2570,21 @@ namespace DeepSeek_v4_for_VisualStudio.View
                         contentDeltaSnapshot);
                     state.ContentDelta.Clear();
                     state.ReasoningDelta.Clear();
+                    state.ContentDirty = false;
                     state.PendingStatus = null;
                     if (state.IsComplete)
                         _streamBatchStates.Remove(messageIndex);
                 }
 
-                // ── 有任意内容且未完成：重置空闲超时定时器（300ms 无新输入则强制刷新）──
-                if (!state.IsComplete && hasAnyPending)
+                // ── 仍有未推送的变化且未完成：重置空闲超时定时器（300ms 无新输入则强制刷新）──
+                // 注意：判定的是「尚未推送的变化」，不是「缓冲区非空」；
+                // 后者会让每次刷新后都空转一次 300ms 定时器（旧实现的冗余推送来源之一）。
+                bool hasUnflushed = state.ContentDirty
+                    || state.ContentDelta.Length > 0
+                    || state.ReasoningDelta.Length > 0
+                    || (state.Reasoning.Length > 0
+                        && state.Reasoning.Length != state.LastFlushedReasoningLength);
+                if (!state.IsComplete && hasUnflushed)
                 {
                     EnsureFlushIdleTimer();
                     _flushIdleTimer?.Stop();

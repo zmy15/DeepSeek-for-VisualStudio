@@ -903,8 +903,11 @@ window._showCopyFeedback=function(msgIndex){
                     container.appendChild(textNode);
                     container.style.whiteSpace='pre-line';  // 流式内容保留换行
                 }
-                if(msg.c!==undefined)textNode.textContent=msg.c;
-                else if(msg.cd!==undefined)textNode.appendData(msg.cd);
+                if(msg.c!==undefined){
+                    // 内容未变时不重写文本节点：textContent 赋值会触发整块文本重排版。
+                    // C# 侧已按「仅正文变化才带 c」裁剪，这里再兜一层幂等保护。
+                    if(textNode.data!==msg.c)textNode.textContent=msg.c;
+                }else if(msg.cd!==undefined)textNode.appendData(msg.cd);
             }
 
             // 更新推理面板。rd 是增量追加路径，避免长 thinking 反复替换整段 DOM。
@@ -945,8 +948,10 @@ window._showCopyFeedback=function(msgIndex){
         _streamBuf={};
         _rafPending=false;
         if(_rafTimer){clearTimeout(_rafTimer);_rafTimer=null;}
+        // 流式期间用 auto：高频刷新下反复发起 smooth 滚动会互相打断，
+        // 在合成器里堆积动画，是长会话流式卡顿的常见来源。
         if (typeof window.__scrollToBottom === 'function') {
-            window.__scrollToBottom('smooth');
+            window.__scrollToBottom('auto');
         }
     }
 })();";

@@ -229,7 +229,7 @@ namespace DeepSeek_v4_for_VisualStudio.Services
         /// r=reasoning, rd=reasoning delta, f=isFinished, s=status
         /// </summary>
         public static string BuildStreamUpdateJson(int messageIndex, string? streamingContent,
-            string reasoningContent, bool isComplete, string? statusText = null,
+            string? reasoningContent, bool isComplete, string? statusText = null,
             string? reasoningDelta = null, string? contentDelta = null)
         {
             // 使用手动拼接 JSON 避免 System.Text.Json 的分配开销（高频调用场景）

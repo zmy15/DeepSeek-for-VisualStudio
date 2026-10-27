@@ -249,11 +249,12 @@ namespace DeepSeek_v4_for_VisualStudio.View
                 };
 
                 // ── 设置实时推理流回调 ──
-                // Handoff 路径同样按 60ms 聚合 thinking chunk，避免每个 token 都切换一次
-                // UI 线程造成任务堆积，使思考面板显示明显滞后于实际生成速度。
+                // Handoff 路径同样做增量聚合，避免每个 token 都切换一次 UI 线程造成任务堆积。
+                // 思考用 30ms 窗（与 UI 批处理的思考窗一致），比正文的 60ms 更密。
                 var capturedRetryMsgIdx = _agentStreamingMsgIndex;
-                const long StreamFlushSyncIntervalTicks = 60 * TimeSpan.TicksPerMillisecond;
-                long lastThinkingFlushTicks = DateTime.UtcNow.Ticks;
+                long reasoningFlushIntervalTicks =
+                    (long)(System.Diagnostics.Stopwatch.Frequency * 0.030);
+                long lastThinkingFlushTicks = System.Diagnostics.Stopwatch.GetTimestamp();
                 var streamingReasoningDeltaSb = new StringBuilder();
 
                 context.OnThinkingChunk = (chunk) =>
@@ -265,8 +266,8 @@ namespace DeepSeek_v4_for_VisualStudio.View
                         _streamingReasoning.Append(chunk);
                         streamingReasoningDeltaSb.Append(chunk);
 
-                        long nowTicks = DateTime.UtcNow.Ticks;
-                        syncDue = nowTicks - lastThinkingFlushTicks >= StreamFlushSyncIntervalTicks;
+                        long nowTicks = System.Diagnostics.Stopwatch.GetTimestamp();
+                        syncDue = nowTicks - lastThinkingFlushTicks >= reasoningFlushIntervalTicks;
                         if (!syncDue)
                             return;
 
