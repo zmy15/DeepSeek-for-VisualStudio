@@ -236,4 +236,53 @@ public class MentionTokenizerTests
     }
 
     #endregion
+
+    #region 高亮片段切分（输入框叠加层必须逐字符复现原文）
+
+    [Fact]
+    public void SplitForHighlight_AgentAndSkill_KeepsSpaceBetweenThem()
+    {
+        // 回归：叠加层曾只渲染 token，丢掉 @agent 与 /skill 之间的空格，
+        // 导致两个 token 在视觉上粘连、末尾露出未被覆盖的底层字符。
+        const string text = "@explore /improve-codebase-architecture";
+
+        var segments = MentionTokenizer.SplitForHighlight(text);
+
+        segments.Select(s => s.Text)
+            .Should().Equal("@explore", " ", "/improve-codebase-architecture");
+        segments.Select(s => s.Kind)
+            .Should().Equal(MentionTokenKind.Agent, (MentionTokenKind?)null, MentionTokenKind.Skill);
+        string.Concat(segments.Select(s => s.Text)).Should().Be(text);
+    }
+
+    [Fact]
+    public void SplitForHighlight_PlainTextAroundToken_KeepsAllText()
+    {
+        const string text = "hello @ask world";
+
+        var segments = MentionTokenizer.SplitForHighlight(text);
+
+        string.Concat(segments.Select(s => s.Text)).Should().Be(text);
+        segments.Select(s => s.Text).Should().Equal("hello ", "@ask", " world");
+        segments[1].Kind.Should().Be(MentionTokenKind.Agent);
+    }
+
+    [Fact]
+    public void SplitForHighlight_NoToken_ReturnsWholeTextAsPlain()
+    {
+        var segments = MentionTokenizer.SplitForHighlight("普通文本");
+
+        segments.Should().ContainSingle();
+        segments[0].Kind.Should().BeNull();
+        segments[0].Text.Should().Be("普通文本");
+    }
+
+    [Fact]
+    public void SplitForHighlight_Empty_ReturnsEmpty()
+    {
+        MentionTokenizer.SplitForHighlight(null).Should().BeEmpty();
+        MentionTokenizer.SplitForHighlight(string.Empty).Should().BeEmpty();
+    }
+
+    #endregion
 }

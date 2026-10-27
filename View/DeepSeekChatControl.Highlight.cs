@@ -28,6 +28,19 @@ namespace DeepSeek_v4_for_VisualStudio.View
         /// <summary>高亮层当前是否已按「滚动条可见」补过右侧内边距，避免重复累加。</summary>
         private bool _highlightPaddingCompensated;
 
+        /// <summary>是否已把基础内边距（含 TextBoxView 左内缩）写入高亮层。</summary>
+        private bool _highlightPaddingInitialized;
+
+        /// <summary>
+        /// TextBoxView 相对 Padding 的额外左内缩（DIP）。
+        /// 实测 TextBox 的文字起点恒为 Padding.Left + 2（padding 0/10/20 均如此），
+        /// 叠加层若直接用 Padding.Left，整串文字会左移 2px，末尾露出底层灰字。
+        /// </summary>
+        private double _highlightLeftInset = 2;
+
+        /// <summary>是否已成功用运行时测量值覆盖 <see cref="_highlightLeftInset"/> 的保底值。</summary>
+        private bool _highlightLeftInsetResolved;
+
         /// <summary>是否已完成一次性初始化（订阅 SelectionChanged、挂接内部 ScrollViewer）。</summary>
         private bool _inputHighlightInitialized;
 
@@ -47,6 +60,21 @@ namespace DeepSeek_v4_for_VisualStudio.View
 
             EnsureInputHighlightInitialized();
 
+            // ── 选区期间整体隐藏高亮层 ──
+            // 高亮层是叠在 TextBox 之上的不透明覆盖层（用背景刷盖住底层灰字），
+            // 但选区底色由 TextBox 自己绘制。若选区期间继续显示覆盖层，就会出现：
+            //   · 覆盖背景盖住选区填充，只在选区上下边缘和末尾露出蓝色，看起来像"蓝框/色块"；
+            //   · 蓝色 token 文字压在选区底色上，与底层文字重影。
+            // 这里直接隐藏，交给 TextBox 原生渲染；同时清掉内容缓存，保证选区消失后必定重建。
+            if (InputTextBox.SelectionLength > 0)
+            {
+                _lastHighlightedText = null;
+                _lastHighlightedTextLength = -1;
+                InputHighlightLayer.Inlines.Clear();
+                InputHighlightLayer.Visibility = Visibility.Collapsed;
+                return;
+            }
+
             var text = InputTextBox.Text ?? string.Empty;
 
             // 内容未变则直接返回：SelectionChanged 触发频繁，靠长度 + 内容双重比较短路
@@ -62,11 +90,23 @@ namespace DeepSeek_v4_for_VisualStudio.View
 
             InputHighlightLayer.Inlines.Clear();
 
-            var tokens = string.IsNullOrEmpty(text)
-                ? null
-                : MentionTokenizer.FindTokens(text);
+            // ── 按原文片段渲染，而不是只渲染 token ──
+            // 高亮层是独立 TextBlock：只放 token 会丢掉中间的空格/普通文本，
+            // 导致后面的 token 整体左移（空格"消失"、末尾露出未被覆盖的底层字符）。
+            // 普通片段用透明前景占位，只贡献排版宽度；token 片段才上色并铺覆盖背景。
+            var segments = MentionTokenizer.SplitForHighlight(text);
 
-            if (tokens == null || tokens.Count == 0)
+            bool hasToken = false;
+            foreach (var segment in segments)
+            {
+                if (segment.Kind != null)
+                {
+                    hasToken = true;
+                    break;
+                }
+            }
+
+            if (!hasToken)
             {
                 // 没有可着色的 token 时折叠，避免无意义的叠加绘制开销
                 InputHighlightLayer.Visibility = Visibility.Collapsed;
@@ -75,32 +115,24 @@ namespace DeepSeek_v4_for_VisualStudio.View
 
             var coverBrush = GetHighlightCoverBrush();
 
-            // 当前选区范围：与选区重叠的 token 不能铺不透明覆盖背景，
-            // 否则会遮住底层 TextBox 的选区高亮，导致选区在 token 处出现断裂/异常色块
-            int selectionStart = InputTextBox.SelectionStart;
-            int selectionEnd = selectionStart + InputTextBox.SelectionLength;
-            bool hasSelection = InputTextBox.SelectionLength > 0;
-
-            foreach (var token in tokens)
+            foreach (var segment in segments)
             {
-                int tokenEnd = token.Start + token.Length;
-                bool inSelection = hasSelection
-                    && token.Start < selectionEnd
-                    && selectionStart < tokenEnd;
-
-                var run = new Run(text.Substring(token.Start, token.Length))
+                if (segment.Kind == null)
                 {
-                    Foreground = GetMentionForeground(token.Kind),
-                };
-
-                // 覆盖刷铺在 Run 背景上，遮住底层 TextBox 的灰色字形，避免蓝色与灰色重影；
-                // 但选区内的 token 需透出选区底色，故跳过覆盖背景
-                if (!inSelection)
-                {
-                    run.Background = coverBrush;
+                    InputHighlightLayer.Inlines.Add(new Run(segment.Text)
+                    {
+                        Foreground = Brushes.Transparent,
+                    });
                 }
-
-                InputHighlightLayer.Inlines.Add(run);
+                else
+                {
+                    InputHighlightLayer.Inlines.Add(new Run(segment.Text)
+                    {
+                        Foreground = GetMentionForeground(segment.Kind.Value),
+                        // 覆盖刷铺在 Run 背景上，遮住底层 TextBox 的灰色字形，避免蓝色与灰色重影
+                        Background = coverBrush,
+                    });
+                }
             }
 
             InputHighlightLayer.Visibility = Visibility.Visible;
@@ -247,7 +279,8 @@ namespace DeepSeek_v4_for_VisualStudio.View
 
         /// <summary>
         /// 依据 ScrollViewer.ComputedVerticalScrollBarVisibility 动态给高亮层补右侧内边距，
-        /// 抵消滚动条出现后 TextBox 内容区变窄导致的换行点不一致。
+        /// 抵消滚动条出现后 TextBox 内容区变窄导致的换行点不一致；
+        /// 左侧同时补上 TextBoxView 的固定内缩，保证两层的文字起点逐像素一致。
         /// </summary>
         private void EnsureHighlightPaddingCompensation()
         {
@@ -255,20 +288,55 @@ namespace DeepSeek_v4_for_VisualStudio.View
                 return;
 
             var needCompensation = _inputScrollViewer.ComputedVerticalScrollBarVisibility == Visibility.Visible;
-            if (needCompensation == _highlightPaddingCompensated)
+            // 内缩尚未量到（布局未就绪）时不要短路，后续更新继续重试
+            if (needCompensation == _highlightPaddingCompensated
+                && _highlightPaddingInitialized
+                && _highlightLeftInsetResolved)
                 return;
 
-            // 滚动条只压缩内容宽度，因此仅在右侧追加滚动条宽度，其余边距与 TextBox 保持逐项一致
+            // 滚动条只压缩内容宽度，因此仅在右侧追加滚动条宽度；
+            // 左右两侧都补 TextBoxView 的固定内缩（实测各 2 DIP，ViewportWidth 比
+            // ActualWidth - Padding 少 4），保证文字起点与换行宽度都与 TextBox 一致。
             var basePadding = InputTextBox.Padding;
-            InputHighlightLayer.Padding = needCompensation
-                ? new Thickness(
-                    basePadding.Left,
-                    basePadding.Top,
-                    basePadding.Right + SystemParameters.VerticalScrollBarWidth,
-                    basePadding.Bottom)
-                : basePadding;
+            var inset = ResolveHighlightLeftInset();
+            InputHighlightLayer.Padding = new Thickness(
+                basePadding.Left + inset,
+                basePadding.Top,
+                basePadding.Right + inset
+                    + (needCompensation ? SystemParameters.VerticalScrollBarWidth : 0),
+                basePadding.Bottom);
 
             _highlightPaddingCompensated = needCompensation;
+            _highlightPaddingInitialized = true;
+        }
+
+        /// <summary>
+        /// 解析 TextBoxView 的固定左内缩（实测 2 DIP）。运行时测量一次并缓存；
+        /// 控件尚未完成布局（rect 为 NaN/Infinity）时退回保底值 2。
+        /// </summary>
+        private double ResolveHighlightLeftInset()
+        {
+            if (_highlightLeftInsetResolved || InputTextBox == null)
+                return _highlightLeftInset;
+
+            try
+            {
+                if (!string.IsNullOrEmpty(InputTextBox.Text))
+                {
+                    var firstCharRect = InputTextBox.GetRectFromCharacterIndex(0, false);
+                    if (!double.IsNaN(firstCharRect.X) && !double.IsInfinity(firstCharRect.X))
+                    {
+                        _highlightLeftInset = Math.Max(0, firstCharRect.X - InputTextBox.Padding.Left);
+                        _highlightLeftInsetResolved = true;
+                    }
+                }
+            }
+            catch
+            {
+                // 布局尚未就绪时保持保底值，下次重试
+            }
+
+            return _highlightLeftInset;
         }
 
         #endregion
