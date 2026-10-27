@@ -358,7 +358,7 @@ The extension is an **MCP (Model Context Protocol) client**, so external tool se
   and **Edit**/**Build** receive write-like ones.
 - **Resilience:** a single failed server is logged and skipped rather than aborting startup.
 
-> **Screenshot placeholder** — `docs/images/mcp-dialog.png`
+![MCP Support](https://raw.githubusercontent.com/zmy15/DeepSeek-for-VisualStudio/master/docs/images/en_us/14.png)
 
 ---
 

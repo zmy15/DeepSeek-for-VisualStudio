@@ -335,7 +335,7 @@ Ask Agent 也可以在多选题不足以决策时，弹出结构化提问卡片�
   **Edit**/**Build** 获得写类工具。
 - **健壮性：** 单个服务器连接失败只记录日志并跳过，不会中断启动。
 
-> **截图占位** —— `docs/images/mcp-dialog.png`
+![MCP 支持](https://raw.githubusercontent.com/zmy15/DeepSeek-for-VisualStudio/master/docs/images/zh_cn/14.png)
 
 ---
 
