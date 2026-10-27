@@ -2735,18 +2735,18 @@ namespace DeepSeek_v4_for_VisualStudio.View
                     return;
                 }
 
-                // ── 审批模式检查：智能拦截 → 仅危险命令需要审批 ──
+                // ── 审批模式检查：智能拦截 → 危险命令与包安装需要审批 ──
                 if (approvalMode == Models.ApprovalMode.SmartBlock)
                 {
-                    bool isDangerous = IsDangerousCommand(request.Command, request.ActionType);
-                    if (!isDangerous)
+                    bool needsApproval = RequiresApproval(request.Command, request.ActionType);
+                    if (!needsApproval)
                     {
                         Logger.Info($"[Agent] 审批模式=智能拦截，安全命令自动放行: {request.Title}");
                         var permAgent = _agentFactory?.FindAgentWithPendingPermission(request.RequestId) ?? _activeAgent;
                         permAgent?.RespondToPermission(request.RequestId, true);
                         return;
                     }
-                    Logger.Info($"[Agent] 审批模式=智能拦截，检测到危险命令，需要审批: {request.Command}");
+                    Logger.Info($"[Agent] 审批模式=智能拦截，命令需要审批: {request.Command}");
                 }
 
                 // ── 审批 UI 串行化：入队后由队列决定何时显示 ──

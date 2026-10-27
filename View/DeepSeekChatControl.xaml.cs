@@ -2237,6 +2237,54 @@ namespace DeepSeek_v4_for_VisualStudio.View
                 System.Text.RegularExpressions.RegexOptions.IgnoreCase);
 
         /// <summary>
+        /// 包安装类命令（pip / npm / nuget / cargo / go / gem / choco / winget 等）。
+        /// 这类命令会改动本机或项目依赖，不应硬拦截（build_solution 也管不到），
+        /// 但必须进入审批流程由用户确认。
+        /// </summary>
+        internal static bool IsPackageInstallCommand(string command)
+        {
+            if (string.IsNullOrWhiteSpace(command))
+                return false;
+
+            string cmd = command.ToLowerInvariant();
+
+            string[] patterns =
+            {
+                "pip install", "pip3 install",
+                "python -m pip install", "py -m pip install",
+                "npm install", "npm i ", "npm add ",
+                "yarn add ", "yarn install",
+                "pnpm add ", "pnpm install",
+                "nuget install", "nuget add ",
+                "dotnet add package", "dotnet tool install",
+                "cargo add ", "cargo install",
+                "go get ", "go install ",
+                "gem install",
+                "choco install", "winget install", "scoop install",
+                "composer require",
+                "apt-get install", "apt install", "brew install",
+            };
+
+            foreach (string pattern in patterns)
+            {
+                if (cmd.Contains(pattern, StringComparison.Ordinal))
+                    return true;
+            }
+
+            return false;
+        }
+
+        /// <summary>
+        /// 智能拦截模式（SmartBlock）下是否需要用户审批：
+        /// 真正的危险命令，或会改动依赖的包安装命令。
+        /// 注意：这里返回 true 只表示「弹审批」，硬拦截仍由
+        /// <c>RunInTerminalTool.DetectDangerousCommand</c> 负责。
+        /// </summary>
+        internal static bool RequiresApproval(string command, string actionType)
+            => IsDangerousCommand(command, actionType)
+               || IsPackageInstallCommand(command);
+
+        /// <summary>
         /// 检测命令是否危险（用于智能拦截模式）。
         /// 检查终端命令、文件删除等操作中是否包含危险模式。
         /// </summary>
