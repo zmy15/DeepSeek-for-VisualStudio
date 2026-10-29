@@ -166,12 +166,23 @@ a custom OpenAI-compatible endpoint can be configured instead.
 
 ## Getting Started
 
-1. **Set your API key.** Open `Tools → Options → DeepSeek Chat → General`, paste the key, and verify it with
-   **Test Connection**. The key is stored in **Visual Studio Credential Storage**, not in plain text in the
-   settings store.
+1. **Set your API key and endpoint.** Open `Tools → Options → DeepSeek Chat → General` and choose one of the
+   two connection modes under the **Model Settings** category:
+   - **DeepSeek official models (default):** fill in `01. DeepSeek API Key` only and leave
+     `02. API Endpoint (Base URL)` empty — the model list is fetched from the official catalog automatically.
+   - **Custom OpenAI-compatible endpoint:** enter the endpoint URL in `02. API Endpoint (Base URL)`
+     (for example `https://api.example.com/v1`) and its key in `03. API Key (Custom Endpoint)`, then add
+     models under `05. Model Settings` (**+ Add model** → **Fetch from endpoint...**, or type the model names
+     manually) and pick an entry suffixed with **(Custom)** in `06. Selected Model` or the chat dropdown.
+     Setting the endpoint enables custom mode by default, so requests use that endpoint's key and models
+     (you can still switch back to an official model in the chat dropdown).
+
+   Use `04. Test Connection` to verify whichever endpoint, model, and key are currently active.
+   Both keys are stored in **Visual Studio Credential Storage**, not in plain text in the settings store.
 2. **Open the chat window.** Press <kbd>Ctrl</kbd>+<kbd>Shift</kbd>+<kbd>D</kbd>, or use
    `View → Other Windows → DeepSeek Chat`, or the toolbar button.
-3. **Pick a model** from the dropdown at the bottom of the chat window.
+3. **Pick a model** from the dropdown at the bottom of the chat window — official models, or custom
+   endpoint models suffixed with **(Custom)**.
 4. **Ask something.** For example:
    - `Explain the architecture of this solution`
    - `Find all implementations of IDiffHost and describe how they differ`
@@ -192,7 +203,7 @@ Typing `@` opens the **agent suggestion list**; typing `/` opens the **skill sug
 
 > **Screenshot placeholder** — first-run flow
 > `docs/images/first-run.gif`
-> Record: open Options → paste key → Test Connection → open chat → first answer.
+> Record: open Options → configure endpoint and key → Test Connection → open chat → first answer.
 
 ---
 
