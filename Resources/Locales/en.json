@@ -236,7 +236,7 @@
     "settings.apiDebugDump.displayName": "Developer: Dump Full API Traffic",
     "settings.apiDebugDump.description": "DEVELOPER ONLY. When enabled, writes the full request body and the full raw response stream of every API call to %LocalAppData%\\DeepSeekVS\\api-dump\\, one request/response file pair per call. Use it to analyze cache hits, tool calls and message cleanup offline. The dumps contain your complete prompts and code and can be several MB per call, so leave it off unless you are actively debugging. Files older than 7 days are cleaned up automatically.",
     "settings.ocrEngine.displayName": "OCR Engine",
-    "settings.ocrEngine.description": "Select image OCR engine:\n  • Windows Built-in — System built-in, no configuration needed, moderate accuracy\n  • PaddleOCR-Sharp — Local offline recognition with higher Chinese accuracy\n  • Remote OCR service via MCP protocol",
+    "settings.ocrEngine.description": "Select image OCR engine:\n  • Windows Built-in — System built-in, no configuration needed, moderate accuracy\n  • Remote OCR service via MCP protocol",
     "settings.autocompleteEnabled.displayName": "Enable Code Completion",
     "settings.autocompleteEnabled.description": "Enable inline code completion (ghost text) in the editor. When enabled, DeepSeek will provide code completion suggestions as you type. Press Tab to accept, Escape to cancel.",
     "settings.autocompleteDelay.displayName": "Completion Delay (ms)",
