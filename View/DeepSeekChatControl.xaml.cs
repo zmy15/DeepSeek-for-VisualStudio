@@ -477,6 +477,9 @@ namespace DeepSeek_v4_for_VisualStudio.View
         private System.Windows.Threading.DispatcherTimer? _balanceTimer;
         private BalanceResponse? _lastBalance;
 
+        /// <summary>执行中快照定时器：任务执行期间周期性把已接收内容落盘，供崩溃/重建后恢复。</summary>
+        private System.Windows.Threading.DispatcherTimer? _inflightSnapshotTimer;
+
         // ── 当前计价时段徽标 ──
         private System.Windows.Threading.DispatcherTimer? _pricingPeriodTimer;
         private bool? _lastPricingPeriodIsPeak;
@@ -1785,6 +1788,7 @@ namespace DeepSeek_v4_for_VisualStudio.View
             CancelStreaming();
             DisposeStreamingCts();
             StopBalanceTimer();
+            StopInflightSnapshotTimer();
             StopPricingPeriodTimer();
             StopConversationElapsedTimer();
             _conversationElapsedTimer = null;

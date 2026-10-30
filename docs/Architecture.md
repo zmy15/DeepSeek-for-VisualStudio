@@ -284,6 +284,11 @@ very differently from a real solution switch:
 - **Crash-safe run marker.** `ChatSession.ActiveRun` is written when a run starts and cleared on every exit
   path. A session that still carries the marker on load reports "previous run was interrupted" instead of
   silently presenting a truncated turn.
+- **In-flight snapshots.** Every 5 s while a run is active, the received content/timeline/reasoning is written
+  to `conversations/inflight/<project>/<session>.json` (kept apart from the authoritative session file). On load,
+  a leftover snapshot becomes an `IsIncomplete` assistant message, so a hard kill shows the partial output and
+  offers retry instead of looking like "the task never ran". The write stays synchronous on the UI thread, so the
+  last snapshot can never race the delete performed after a normal completion.
 - **Streaming writes are anchored to the message object.** `_agentStreamingMessage` (not just the index) is
   verified before every streamed write; if the list was replaced, the write is dropped instead of landing on an
   unrelated message.
@@ -566,6 +571,10 @@ Agent 改写 `.sln`/`.slnx`/`.csproj`/`Directory.Build.props` 时，Visual Studi
   等任务收尾后再应用。运行中保存只会落一份半截快照，而重载会把 Agent 正在写入的活动状态整体替换掉。
 - **可崩溃恢复的执行标记。** `ChatSession.ActiveRun` 在任务开始时写入、在所有退出路径上清除。
   加载时若标记仍在，会提示「上次执行被中断」，而不是把截断的轮次当成完整历史。
+- **执行中快照。** 任务执行期间每 5 秒把已接收正文/时间线/推理写入
+  `conversations/inflight/<project>/<session>.json`（与会话权威文件分离）。加载时若发现残留快照，
+  会补成一条 `IsIncomplete` 助手消息——强杀后能看到已产出的部分并直接重试，而不是像「任务没执行」。
+  写入在 UI 线程同步完成，保证「最后一次快照」不会与正常收尾后的删除竞争、复活陈旧快照。
 - **流式写回锚定在消息对象上。** 每次写回前校验 `_agentStreamingMessage`（而不只是下标）；
   列表被整体替换时放弃本次写回，而不是把内容写到无关消息上。
 - **Handoff 按钮是一次性的。** 开始执行即清除并持久化 `HandoffJson`，

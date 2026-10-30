@@ -1353,12 +1353,22 @@ namespace DeepSeek_v4_for_VisualStudio.View
                 Logger.Warn($"[会话] 检测到上次执行未正常收尾: agent={run.AgentType}, " +
                     $"turn={run.TurnId}, started={run.StartedAt:O}；按「已中断」处理");
 
-                _activeSession.ActiveRun = null;
                 foreach (var msg in _messages)
                 {
                     if (msg.IsStreaming) msg.IsStreaming = false;
                 }
 
+                // 会话文件只在任务开始/收尾时落盘，执行中的输出只存在于快照里。
+                // 有快照就补成一条「未完成」助手消息，让用户看到已经产出的内容并可直接重试。
+                // 注意顺序：先恢复再清标记——若在两者之间被再次强杀，标记还在，下次仍会尝试恢复。
+                if (TryRestoreInflightSnapshot(_activeSession))
+                {
+                    // 树已被改写（追加了恢复消息），上下文保持磁盘上的权威状态不变：
+                    // 未完成的半截输出不进入 API 历史，避免污染后续请求。
+                    Logger.Info("[会话] 已用执行中快照补回未完成的助手消息");
+                }
+
+                _activeSession.ActiveRun = null;
                 interruptedRunRecovered = true;
             }
 

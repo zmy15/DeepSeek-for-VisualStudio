@@ -410,6 +410,7 @@
     "chat.html.handoffButton": "开始实现",
     "chat.html.handoffButtonTitle": "将计划移交 Edit Agent 执行",
     "chat.html.executing": "执行中...",
+ "chat.inflightRestoredNotice": "_本轮执行被中断（Visual Studio 重启或聊天窗口被重建），以下仅为中断前已接收到的输出。_",
     "chat.html.cacheHit": "命中",
     "chat.html.cacheMiss": "未命中",
     "chat.html.cacheRound": "轮",

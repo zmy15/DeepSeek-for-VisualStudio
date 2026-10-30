@@ -162,6 +162,7 @@ namespace DeepSeek_v4_for_VisualStudio.View
             };
 
             SaveCurrentSession();
+            StartInflightSnapshotTimer();
             Logger.Info($"[任务标记] 已写入执行中标记: agent={_activeSession.ActiveRun.AgentType}, " +
                 $"turn={_activeSession.ActiveRun.TurnId}");
         }
@@ -177,7 +178,10 @@ namespace DeepSeek_v4_for_VisualStudio.View
         /// </summary>
         private void CompleteActiveRunMarker()
         {
+            StopInflightSnapshotTimer();
+
             bool changed = false;
+            var solutionPath = _solutionPath;
 
             if (_activeSession?.ActiveRun != null)
             {
@@ -189,6 +193,11 @@ namespace DeepSeek_v4_for_VisualStudio.View
             {
                 foreach (var session in _sessionsContainer.Sessions)
                 {
+                    // 快照与标记同生命周期：任务正常收尾后快照不应残留，
+                    // 否则下次加载会把一轮已完成的输出误报成「被中断」。
+                    if (session != null)
+                        InflightTurnSnapshotService.Delete(solutionPath, session.Id);
+
                     if (session?.ActiveRun == null) continue;
                     session.ActiveRun = null;
                     changed = true;
@@ -226,6 +235,157 @@ namespace DeepSeek_v4_for_VisualStudio.View
 
             SaveCurrentSession();
             Logger.Info($"[AgentHandoff] 已清除 {cleared} 条消息上的持久化 HandoffJson");
+        }
+
+        /// <summary>执行中快照的落盘间隔。5 秒足以覆盖「强杀/重建」丢失的尾部内容，又不会抖动 UI。</summary>
+        private static readonly TimeSpan InflightSnapshotInterval = TimeSpan.FromSeconds(5);
+
+        /// <summary>开始周期性抓取执行中快照（任务开始时调用）。</summary>
+        private void StartInflightSnapshotTimer()
+        {
+            if (!Dispatcher.CheckAccess())
+            {
+                _ = Dispatcher.InvokeAsync(StartInflightSnapshotTimer);
+                return;
+            }
+
+            _inflightSnapshotTimer ??= new System.Windows.Threading.DispatcherTimer
+            {
+                Interval = InflightSnapshotInterval,
+            };
+
+            _inflightSnapshotTimer.Tick -= OnInflightSnapshotTick;
+            _inflightSnapshotTimer.Tick += OnInflightSnapshotTick;
+            _inflightSnapshotTimer.Start();
+            Logger.Info($"[Inflight] 已启动执行中快照定时器 ({InflightSnapshotInterval.TotalSeconds:F0}s)");
+        }
+
+        /// <summary>停止周期性快照（任务收尾时调用）。</summary>
+        private void StopInflightSnapshotTimer()
+        {
+            if (!Dispatcher.CheckAccess())
+            {
+                _ = Dispatcher.InvokeAsync(StopInflightSnapshotTimer);
+                return;
+            }
+
+            if (_inflightSnapshotTimer == null) return;
+
+            _inflightSnapshotTimer.Stop();
+            _inflightSnapshotTimer.Tick -= OnInflightSnapshotTick;
+        }
+
+        private void OnInflightSnapshotTick(object? sender, EventArgs e) => CaptureInflightSnapshot();
+
+        /// <summary>
+        /// 抓取当前流式气泡已接收到的内容并落盘。
+        /// <para>
+        /// 写入是同步的：定时器与「收尾时删除快照」都在 UI 线程，同步写保证
+        /// 「最后一次快照」一定先于「删除」发生。若改成后台写，收尾删除之后迟到的写入
+        /// 会复活一个陈旧快照，下次加载就会凭空多出一条「被中断」的重复消息。
+        /// 单次写入通常是几十 KB 到几百 KB，5 秒一次，代价可接受。
+        /// </para>
+        /// </summary>
+        private void CaptureInflightSnapshot()
+        {
+            if (_disposed) return;
+
+            InflightTurnSnapshot? snapshot = null;
+            var solutionPath = _solutionPath;
+
+            lock (_lock)
+            {
+                int index = ResolveAgentStreamingIndex();
+                if (index < 0 || index >= _messages.Count || _activeSession == null)
+                    return;
+
+                var msg = _messages[index];
+                if (msg.Role != "assistant")
+                    return;
+
+                // 优先取流式累积缓冲（收尾前的正文/时间线还在 StringBuilder 里，
+                // 尚未回写到消息对象）；为空时退回消息上的已落值。
+                string content = _streamingContent.Length > 0
+                    ? _streamingContent.ToString()
+                    : msg.Content ?? string.Empty;
+                string timeline = _agentTimelineContent.Length > 0
+                    ? _agentTimelineContent.ToString()
+                    : msg.TimelineContent ?? string.Empty;
+                string reasoning = _streamingReasoning.Length > 0
+                    ? _streamingReasoning.ToString()
+                    : msg.ReasoningContent ?? string.Empty;
+
+                if (string.IsNullOrEmpty(content) && string.IsNullOrEmpty(timeline) && string.IsNullOrEmpty(reasoning))
+                    return;
+
+                snapshot = new InflightTurnSnapshot
+                {
+                    SessionId = _activeSession.Id,
+                    TurnId = _agentStreamingTurnId ?? _currentAgentTurnId ?? string.Empty,
+                    AgentType = msg.AgentType.ToString(),
+                    Content = content,
+                    TimelineContent = timeline,
+                    ReasoningContent = reasoning,
+                    CapturedAt = DateTime.Now,
+                };
+            }
+
+            InflightTurnSnapshotService.Save(solutionPath, snapshot);
+        }
+
+        /// <summary>
+        /// 崩溃/强杀后恢复执行中快照：把已接收到的部分输出补成一条「未完成」助手消息。
+        /// 必须在会话加载（树已重建、消息已同步）之后、渲染之前调用。
+        /// </summary>
+        /// <returns>是否恢复出了部分内容。</returns>
+        private bool TryRestoreInflightSnapshot(ChatSession session)
+        {
+            if (session == null) return false;
+
+            var snapshot = InflightTurnSnapshotService.Load(_solutionPath, session.Id);
+            if (snapshot == null) return false;
+
+            // 无论能否补出内容，快照都已消费，避免下次加载重复恢复
+            InflightTurnSnapshotService.Delete(_solutionPath, session.Id);
+
+            bool hasContent = !string.IsNullOrWhiteSpace(snapshot.Content)
+                || !string.IsNullOrWhiteSpace(snapshot.TimelineContent)
+                || !string.IsNullOrWhiteSpace(snapshot.ReasoningContent);
+            if (!hasContent)
+            {
+                Logger.Info("[Inflight] 快照中没有可恢复内容，已丢弃");
+                return false;
+            }
+
+            string notice = LocalizationService.Instance["chat.inflightRestoredNotice"];
+            var restored = new ChatMessage
+            {
+                Role = "assistant",
+                Content = snapshot.Content,
+                TimelineContent = string.IsNullOrWhiteSpace(snapshot.TimelineContent)
+                    ? notice
+                    : notice + "\n" + snapshot.TimelineContent,
+                ReasoningContent = snapshot.ReasoningContent,
+                Timestamp = DateTime.Now,
+                IsRendered = true,
+                // 未完成标记：复用既有重试/编辑路径，让用户可以直接续做而不是重新描述任务
+                IsIncomplete = true,
+                TurnId = string.IsNullOrWhiteSpace(snapshot.TurnId) ? null : snapshot.TurnId,
+                AgentType = Enum.TryParse<AgentType>(snapshot.AgentType, out var agentType)
+                    ? agentType
+                    : AgentType.Ask,
+            };
+
+            lock (_lock)
+            {
+                EnsureTree().AddChildMessage(restored);
+                SyncMessagesFromTree();
+            }
+            _browserInitialized = false;
+
+            Logger.Info($"[Inflight] 已恢复执行中快照: content={restored.Content.Length} 字符, " +
+                $"timeline={restored.TimelineContent.Length} 字符, capturedAt={snapshot.CapturedAt:O}");
+            return true;
         }
 
         /// <summary>

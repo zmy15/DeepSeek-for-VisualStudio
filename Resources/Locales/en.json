@@ -514,6 +514,7 @@
     "edit.healingHeaderOriginalReplace": "The previous replacement did not match. Here are the arguments you provided (fix oldString to match the current file content, then retry):",
     "edit.healingInstructionReplace": "Fix oldString so it exactly matches the current file content, then call replace_string_in_file again.",
     "chat.html.executing": "Executing...",
+ "chat.inflightRestoredNotice": "_This turn was interrupted (Visual Studio restarted or the chat window was rebuilt). Only the output received before the interruption is shown below._",
     "chat.html.cacheHit": "hit",
     "chat.html.cacheMiss": "miss",
     "chat.html.cacheRound": "round(s)",
