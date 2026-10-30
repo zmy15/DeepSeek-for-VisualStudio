@@ -950,69 +950,62 @@ namespace DeepSeek_v4_for_VisualStudio.View
         }
 
         /// <summary>
-        /// 用户打开解决方案时：保存当前对话，加载新解决方案的对话记录。
+        /// 用户打开解决方案时：
+        /// 1) 同一解决方案被重载（VS 检测到 .sln/.slnx/.csproj 被外部修改）→ 保留内存中的对话，只同步配置；
+        /// 2) 任务执行中 → 只记录意图，任务收尾后再切换；
+        /// 3) 确实切换到另一个解决方案 → 保存当前对话并加载新解决方案的对话。
+        /// <para>
+        /// 历史缺陷：旧实现不区分 1 和 3，一律「保存 → 清空 → 从磁盘重载」。
+        /// 当 AI 改写解决方案文件触发 VS 重载时，正在执行的对话会被磁盘上的半截快照替换，
+        /// 界面回滚到任务执行前，而后台 Agent 仍在继续跑（并写进已被替换的状态）。
+        /// </para>
         /// </summary>
         private void OnSolutionOpened()
         {
-            Logger.Info("[会话] 检测到解决方案已打开，准备切换对话存储");
+            // SolutionEvents 由 VS 在 UI 线程触发，因此这里可以同步解析路径。
+            // 路径解析必须同步完成：一旦把「解析 → 判定是否运行中」拆到异步续体里，
+            // 判定就会晚于任务收尾，出现「刚跑完的任务被当场重载成磁盘快照」的竞态。
+            string? newPath = ResolveSolutionPathOnMainThread();
 
-            _ = Microsoft.VisualStudio.Shell.ThreadHelper.JoinableTaskFactory.RunAsync(async () =>
+            if (IsRunInProgress())
+            {
+                _pendingSolutionChange = PendingSolutionChange.Opened;
+                _pendingSolutionPath = newPath;
+                Logger.Info($"[会话] 任务执行中收到解决方案打开事件，延后到任务收尾: → {newPath ?? "(无)"}");
+                return;
+            }
+
+            if (SolutionIdentity.IsSame(newPath, _boundSolutionPath))
+            {
+                _solutionPath = newPath;
+                Logger.Info($"[会话] 同一解决方案重载，保留当前对话（不保存、不清空、不重载）: {newPath}");
+
+                // 配置同步含异步 IO（GetDialogPage / Unified Settings），推到 JTF，
+                // 避免把 VS 的解决方案事件回调阻塞在 UI 线程上。
+                _ = ThreadHelper.JoinableTaskFactory.RunAsync(async () =>
+                {
+                    try
+                    {
+                        await SyncApiSettingsAfterSolutionChangeAsync();
+                        ShowTransientStatus(LocalizationService.Instance["status.solutionReloaded"]);
+                    }
+                    catch (Exception ex)
+                    {
+                        Logger.Error("[会话] 同一解决方案重载后同步配置失败", ex);
+                    }
+                });
+                return;
+            }
+
+            _ = ThreadHelper.JoinableTaskFactory.RunAsync(async () =>
             {
                 try
                 {
-                    // 启动页可能长时间停留。API 服务不能继续依赖启动早期加载的配置快照，
-                    // 打开解决方案时重新同步一次持久化设置，确保最新 API Key 生效。
-                    if (_package != null)
-                    {
-                        var persistedOptions = await _package.LoadPersistedOptionsAsync();
-                        await Microsoft.VisualStudio.Shell.ThreadHelper.JoinableTaskFactory.SwitchToMainThreadAsync();
+                    await SyncApiSettingsAfterSolutionChangeAsync();
 
-                        string? oldApiKey = _options?.ApiKey;
-                        string? oldCustomApiKey = _options?.CustomApiKey;
-                        string? oldModel = _options?.SelectedModel;
-                        string? oldBaseUrl = _options?.ApiBaseUrl;
-                        string? oldCustomModel = _options?.CustomModelName;
-                        string? oldActiveCustomModel = _options?.ActiveCustomModel;
-                        string? oldModelSource = _options?.ActiveModelSource;
-                        bool oldThinking = _options?.IsThinkingEnabled ?? true;
-                        string? oldEffort = _options?.ReasoningEffort;
-
-                        _options = persistedOptions;
-                        RefreshCoreControlsFromSettings();
-
-                        bool apiConfigChanged =
-                            _apiService == null ||
-                            !string.Equals(oldApiKey, _options.ApiKey, StringComparison.Ordinal) ||
-                            !string.Equals(oldCustomApiKey, _options.CustomApiKey, StringComparison.Ordinal) ||
-                            !string.Equals(oldModel, _options.SelectedModel, StringComparison.Ordinal) ||
-                            !string.Equals(oldBaseUrl, _options.ApiBaseUrl, StringComparison.Ordinal) ||
-                            !string.Equals(oldCustomModel, _options.CustomModelName, StringComparison.Ordinal) ||
-                            !string.Equals(oldActiveCustomModel, _options.ActiveCustomModel, StringComparison.Ordinal) ||
-                            !string.Equals(oldModelSource, _options.ActiveModelSource, StringComparison.Ordinal) ||
-                            oldThinking != _options.IsThinkingEnabled ||
-                            !string.Equals(oldEffort, _options.ReasoningEffort, StringComparison.Ordinal);
-
-                        if (apiConfigChanged)
-                        {
-                            Logger.Info("[Settings] 解决方案打开后同步 API 配置，重建 API 服务");
-                            InitializeApiService();
-                        }
-
-                        RecordRuntimeSettingsApplied();
-                    }
-
-                    // 先保存当前对话
+                    // 先把当前对话存回它自己的解决方案文件，再切到新路径
                     SaveCurrentSession();
-
-                    // 解析新路径并重载
-                    await ResolveSolutionPathAsync();
-
-                    // ── 重置浏览器状态，切换解决方案时强制全量刷新 ──
-                    _browserInitialized = false;
-
-                    await LoadAndShowAsync();
-
-                    Logger.Info($"[会话] 对话已切换到新解决方案: {_solutionPath ?? "(无)"}");
+                    await SwitchConversationToSolutionAsync(newPath);
                 }
                 catch (Exception ex)
                 {
@@ -1022,28 +1015,26 @@ namespace DeepSeek_v4_for_VisualStudio.View
         }
 
         /// <summary>
-        /// 用户关闭解决方案时：保存当前对话，切换到无解决方案状态。
-        /// 复用 LoadAndShowAsync 以避免每次关闭都创建新的空会话。
+        /// 用户关闭解决方案时：保存当前对话并切换到「无解决方案」状态。
+        /// 任务执行中只记录意图，不保存也不清空——否则会把运行中的对话替换成磁盘快照。
         /// </summary>
         private void OnSolutionClosed()
         {
-            Logger.Info("[会话] 检测到解决方案已关闭，保存并清空对话");
+            if (IsRunInProgress())
+            {
+                _pendingSolutionChange = PendingSolutionChange.Closed;
+                _pendingSolutionPath = null;
+                Logger.Info("[会话] 任务执行中收到解决方案关闭事件，暂不保存/清空，等任务收尾");
+                return;
+            }
 
-            _ = Microsoft.VisualStudio.Shell.ThreadHelper.JoinableTaskFactory.RunAsync(async () =>
+            _ = ThreadHelper.JoinableTaskFactory.RunAsync(async () =>
             {
                 try
                 {
-                    // 保存当前解决方案的对话
+                    await ThreadHelper.JoinableTaskFactory.SwitchToMainThreadAsync();
                     SaveCurrentSession();
-
-                    // 切换到无解决方案状态
-                    _solutionPath = null;
-
-                    // ── 重置浏览器状态，切换时强制全量刷新 ──
-                    _browserInitialized = false;
-
-                    await LoadAndShowAsync();
-
+                    await SwitchConversationToSolutionAsync(null);
                     Logger.Info("[会话] 对话已清空（解决方案已关闭）");
                 }
                 catch (Exception ex)
@@ -1052,6 +1043,163 @@ namespace DeepSeek_v4_for_VisualStudio.View
                 }
             });
         }
+
+        /// <summary>
+        /// 把对话切换到指定解决方案（null = 无解决方案，写 _unsaved.json）。
+        /// 调用方负责在此之前把旧解决方案的对话保存好。
+        /// </summary>
+        private async Task SwitchConversationToSolutionAsync(string? newPath)
+        {
+            _solutionPath = newPath;
+            _boundSolutionPath = newPath;
+
+            // ── 重置浏览器状态，切换解决方案时强制全量刷新 ──
+            _browserInitialized = false;
+
+            await LoadAndShowAsync();
+            Logger.Info($"[会话] 对话已切换到解决方案: {newPath ?? "(无)"}");
+        }
+
+        /// <summary>
+        /// 任务收尾后应用执行期间被延后的解决方案事件。
+        /// 「关闭 + 重新打开同一解决方案」在这里被识别为重载并直接丢弃。
+        /// 必须在 UI 线程调用。
+        /// </summary>
+        private async Task ApplyPendingSolutionChangeIfAnyAsync()
+        {
+            var kind = _pendingSolutionChange;
+            if (kind == PendingSolutionChange.None) return;
+
+            string? path = _pendingSolutionPath;
+            _pendingSolutionChange = PendingSolutionChange.None;
+            _pendingSolutionPath = null;
+
+            Logger.Info($"[会话] 任务已收尾，应用延后的解决方案事件: kind={kind}, path={path ?? "(无)"}");
+
+            try
+            {
+                if (kind == PendingSolutionChange.Opened)
+                {
+                    if (SolutionIdentity.IsSame(path, _boundSolutionPath))
+                    {
+                        _solutionPath = path;
+                        Logger.Info($"[会话] 延后事件为同一解决方案重载，保留当前对话: {path}");
+                        ShowTransientStatus(LocalizationService.Instance["status.solutionReloaded"]);
+                        return;
+                    }
+
+                    await SyncApiSettingsAfterSolutionChangeAsync();
+                    SaveCurrentSession();
+                    await SwitchConversationToSolutionAsync(path);
+                    return;
+                }
+
+                // Closed
+                SaveCurrentSession();
+                await SwitchConversationToSolutionAsync(null);
+                Logger.Info("[会话] 延后的解决方案关闭已应用，对话已清空");
+            }
+            catch (Exception ex)
+            {
+                Logger.Error("[会话] 应用延后的解决方案事件失败", ex);
+            }
+        }
+
+        /// <summary>
+        /// 在 UI 线程解析当前解决方案/工作区路径（不修改 <see cref="_solutionPath"/>）。
+        /// IVsSolution / DTE 都是 UI 线程服务，调用方必须已切到主线程。
+        /// </summary>
+        private static string? ResolveSolutionPathOnMainThread()
+        {
+            var path = GetSolutionPathFromIVsSolution();
+            if (string.IsNullOrEmpty(path))
+            {
+                // DTE 是只读回退路径：宿主未提供该服务（如单元测试）时必须安静降级
+                try
+                {
+                    var dte = Package.GetGlobalService(typeof(EnvDTE.DTE)) as EnvDTE.DTE;
+                    path = GetSolutionPathFromDTE(dte);
+                }
+                catch (Exception ex)
+                {
+                    Logger.Warn($"[Workspace] DTE 回退失败: {ex.GetType().Name}: {ex.Message}");
+                }
+            }
+
+            Logger.Info($"[Workspace] 解析解决方案路径: {path ?? "(无)"}");
+            return path;
+        }
+
+        /// <summary>
+        /// 解决方案变化后重新同步持久化设置（API Key / 端点 / 模型可能已被改过）。
+        /// 与原 OnSolutionOpened 内联逻辑一致，抽出以便「同一解决方案重载」也能复用。
+        /// </summary>
+        private async Task SyncApiSettingsAfterSolutionChangeAsync()
+        {
+            if (_package == null) return;
+
+            var persistedOptions = await _package.LoadPersistedOptionsAsync();
+            await ThreadHelper.JoinableTaskFactory.SwitchToMainThreadAsync();
+
+            string? oldApiKey = _options?.ApiKey;
+            string? oldCustomApiKey = _options?.CustomApiKey;
+            string? oldModel = _options?.SelectedModel;
+            string? oldBaseUrl = _options?.ApiBaseUrl;
+            string? oldCustomModel = _options?.CustomModelName;
+            string? oldActiveCustomModel = _options?.ActiveCustomModel;
+            string? oldModelSource = _options?.ActiveModelSource;
+            bool oldThinking = _options?.IsThinkingEnabled ?? true;
+            string? oldEffort = _options?.ReasoningEffort;
+
+            _options = persistedOptions;
+            RefreshCoreControlsFromSettings();
+
+            bool apiConfigChanged =
+                _apiService == null ||
+                !string.Equals(oldApiKey, _options.ApiKey, StringComparison.Ordinal) ||
+                !string.Equals(oldCustomApiKey, _options.CustomApiKey, StringComparison.Ordinal) ||
+                !string.Equals(oldModel, _options.SelectedModel, StringComparison.Ordinal) ||
+                !string.Equals(oldBaseUrl, _options.ApiBaseUrl, StringComparison.Ordinal) ||
+                !string.Equals(oldCustomModel, _options.CustomModelName, StringComparison.Ordinal) ||
+                !string.Equals(oldActiveCustomModel, _options.ActiveCustomModel, StringComparison.Ordinal) ||
+                !string.Equals(oldModelSource, _options.ActiveModelSource, StringComparison.Ordinal) ||
+                oldThinking != _options.IsThinkingEnabled ||
+                !string.Equals(oldEffort, _options.ReasoningEffort, StringComparison.Ordinal);
+
+            if (apiConfigChanged)
+            {
+                Logger.Info("[Settings] 解决方案打开后同步 API 配置，重建 API 服务");
+                InitializeApiService();
+            }
+
+            RecordRuntimeSettingsApplied();
+        }
+
+        /// <summary>
+        /// 短暂显示一条状态提示，之后自动恢复为「就绪」。
+        /// 事件可能来自后台线程，内部统一封送到 UI 线程。
+        /// </summary>
+        private void ShowTransientStatus(string text, int durationMs = 4000)
+        {
+            if (string.IsNullOrEmpty(text)) return;
+
+            if (!Dispatcher.CheckAccess())
+            {
+                _ = Dispatcher.InvokeAsync(() => ShowTransientStatus(text, durationMs));
+                return;
+            }
+
+            StatusLabel.Text = text;
+            _ = Task.Delay(durationMs).ContinueWith(t =>
+            {
+                _ = Dispatcher.InvokeAsync(() =>
+                {
+                    if (!IsRunInProgress() && string.Equals(StatusLabel.Text, text, StringComparison.Ordinal))
+                        StatusLabel.Text = LocalizationService.Instance["status.ready"];
+                });
+            });
+        }
+
 
         /// <summary>
         /// 触发代码索引：在后台线程执行，不阻塞 UI。
@@ -1104,6 +1252,9 @@ namespace DeepSeek_v4_for_VisualStudio.View
 
             // 加载所有会话
             _sessionsContainer = ChatPersistenceService.LoadSessions(_solutionPath);
+
+            // 记录「这份对话属于哪个解决方案」：解决方案事件处理靠它识别「同一解决方案重载」。
+            _boundSolutionPath = _solutionPath;
 
             // 确定活跃会话
             if (!string.IsNullOrEmpty(_sessionsContainer.ActiveSessionId))
@@ -1193,6 +1344,24 @@ namespace DeepSeek_v4_for_VisualStudio.View
                 }
             }
 
+            // ── 上次执行未正常收尾？（VS 被强杀 / 窗口在任务执行中被重建）──
+            // 必须显式告知并清理，否则界面会停在「生成中」，而磁盘上又没有最终答复。
+            bool interruptedRunRecovered = false;
+            if (_activeSession.ActiveRun != null)
+            {
+                var run = _activeSession.ActiveRun;
+                Logger.Warn($"[会话] 检测到上次执行未正常收尾: agent={run.AgentType}, " +
+                    $"turn={run.TurnId}, started={run.StartedAt:O}；按「已中断」处理");
+
+                _activeSession.ActiveRun = null;
+                foreach (var msg in _messages)
+                {
+                    if (msg.IsStreaming) msg.IsStreaming = false;
+                }
+
+                interruptedRunRecovered = true;
+            }
+
             // 没有消息则显示欢迎语
             if (_messages.Count == 0)
             {
@@ -1262,7 +1431,16 @@ namespace DeepSeek_v4_for_VisualStudio.View
                 // ── 无论成功与否，重置抑制标志 ──
                 _suppressWebViewUpdate = false;
             }
+
+            // 中断标记已清理：落盘一次，避免每次加载都重复提示。
+            // 提示放在渲染之后，防止被上面的初始化流程覆盖状态栏。
+            if (interruptedRunRecovered)
+            {
+                SaveCurrentSession();
+                ShowTransientStatus(LocalizationService.Instance["status.runInterrupted"], 8000);
+            }
         }
+
 
         /// <summary>
         /// 初始化 WebView2 环境。返回 true 表示初始化成功。

@@ -469,6 +469,9 @@ namespace DeepSeek_v4_for_VisualStudio.View
                         var capturedMsgIdx = capturedUserMsgIndex;
                         var capturedCurrentUserContent = fullUserContent;
 
+                        // ── 记录"本轮执行中"标记：崩溃/强杀后可从磁盘识别未收尾任务 ──
+                        BeginActiveRunMarker();
+
                         _ = Task.Run(async () =>
                         {
                             try
@@ -489,6 +492,12 @@ namespace DeepSeek_v4_for_VisualStudio.View
                             {
                                 await ThreadHelper.JoinableTaskFactory.SwitchToMainThreadAsync();
                                 lock (_lock) { _isGenerating = false; }
+
+                                // ── 先清执行中标记，再应用执行期间被延后的解决方案事件 ──
+                                // 顺序不能反：延后事件可能会清空/切换对话，标记必须在旧会话上收尾。
+                                CompleteActiveRunMarker();
+                                await ApplyPendingSolutionChangeIfAnyAsync();
+
                                 if (!TryStartQueuedAppend())
                                 {
                                     UpdateButtonsState();

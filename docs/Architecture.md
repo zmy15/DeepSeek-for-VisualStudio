@@ -268,6 +268,28 @@ rendering), `gitState` (avoiding repeated Git probing), `chainBack`, and `Forwar
 Sub-agents get an isolated context manager and file-read cache copy, run up to 3 in parallel behind a semaphore,
 and are guarded by a watchdog timeout (default 900 s).
 
+### Solution reload vs. solution switch
+
+When the agent rewrites `.sln`/`.slnx`/`.csproj`/`Directory.Build.props`, Visual Studio closes and reopens the
+same solution — an `OnAfterCloseSolution` → `OnAfterOpenSolution` pair. The chat window treats the two events
+very differently from a real solution switch:
+
+- **Same path ⇒ reload, not switch.** `_boundSolutionPath` records which solution the in-memory conversation
+  belongs to; `SolutionIdentity.IsSame` compares normalized paths. A reload keeps `_messages`, `_tree` and the
+  context manager untouched and only re-syncs persisted settings — no save, no clear, no disk reload.
+- **Never mutate a running conversation.** While `_isGenerating` is true, solution events are recorded in
+  `_pendingSolutionChange` and applied *after* the run finishes (`ApplyPendingSolutionChangeIfAnyAsync`).
+  Saving mid-run would persist a half snapshot, and reloading would replace the live state the agent is still
+  writing into.
+- **Crash-safe run marker.** `ChatSession.ActiveRun` is written when a run starts and cleared on every exit
+  path. A session that still carries the marker on load reports "previous run was interrupted" instead of
+  silently presenting a truncated turn.
+- **Streaming writes are anchored to the message object.** `_agentStreamingMessage` (not just the index) is
+  verified before every streamed write; if the list was replaced, the write is dropped instead of landing on an
+  unrelated message.
+- **Handoff buttons are single-use.** `HandoffJson` is cleared and saved as soon as execution starts, so a
+  reload can never resurrect a clickable "start implementing" button that would launch a second concurrent run.
+
 ## Code completion pipeline
 
 A MEF-exported `IVsTextViewCreationListener` (content type `code`, editable role) attaches an
@@ -531,6 +553,23 @@ AI 提出修改
 调用方等待结果后继续。移交会携带 `editSteps`（进度渲染）、`gitState`（免去重复 Git 探测）、
 `chainBack` 与 `ForwardedMessages`（保持前缀命中）。子代理拥有独立的上下文管理器与文件读缓存副本，
 经信号量限制最多 3 个并行，并受看门狗超时保护（默认 900 秒）。
+
+### 解决方案重载 vs. 切换解决方案
+
+Agent 改写 `.sln`/`.slnx`/`.csproj`/`Directory.Build.props` 时，Visual Studio 会先关闭再打开同一个解决方案
+（`OnAfterCloseSolution` → `OnAfterOpenSolution`）。聊天窗口必须把这种情况与「切换到另一个解决方案」区分开：
+
+- **路径相同 ⇒ 是重载，不是切换。** `_boundSolutionPath` 记录内存中的对话属于哪个解决方案，
+  `SolutionIdentity.IsSame` 做规范化路径比较。重载时保留 `_messages`/`_tree`/上下文管理器，只重新同步配置——
+  不保存、不清空、不从磁盘重载。
+- **运行中的对话绝不被改写。** `_isGenerating` 为真时，解决方案事件只记入 `_pendingSolutionChange`，
+  等任务收尾后再应用。运行中保存只会落一份半截快照，而重载会把 Agent 正在写入的活动状态整体替换掉。
+- **可崩溃恢复的执行标记。** `ChatSession.ActiveRun` 在任务开始时写入、在所有退出路径上清除。
+  加载时若标记仍在，会提示「上次执行被中断」，而不是把截断的轮次当成完整历史。
+- **流式写回锚定在消息对象上。** 每次写回前校验 `_agentStreamingMessage`（而不只是下标）；
+  列表被整体替换时放弃本次写回，而不是把内容写到无关消息上。
+- **Handoff 按钮是一次性的。** 开始执行即清除并持久化 `HandoffJson`，
+  这样重载后不会复活一个可点击的「开始实现」，进而并发启动第二个任务。
 
 ## 代码补全管线
 

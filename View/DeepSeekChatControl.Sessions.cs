@@ -142,6 +142,93 @@ namespace DeepSeek_v4_for_VisualStudio.View
         }
 
         /// <summary>
+        /// 任务开始时在会话上写入「执行中」标记并落盘。
+        /// <para>
+        /// 目的：VS 被强杀、或窗口在任务执行中被重建时，磁盘上能明确看出「这一轮没有收尾」，
+        /// 下次加载据此提示「上次执行被中断」，而不是把半截对话当成完整历史静默继续。
+        /// Handoff 链共用同一次任务，标记已存在时不重复写入。
+        /// </para>
+        /// </summary>
+        private void BeginActiveRunMarker()
+        {
+            if (_activeSession == null) return;
+            if (_activeSession.ActiveRun != null) return;
+
+            _activeSession.ActiveRun = new SessionActiveRun
+            {
+                TurnId = _currentAgentTurnId ?? string.Empty,
+                AgentType = (_activeAgent?.Definition.Type ?? AgentType.Ask).ToString(),
+                StartedAt = DateTime.Now,
+            };
+
+            SaveCurrentSession();
+            Logger.Info($"[任务标记] 已写入执行中标记: agent={_activeSession.ActiveRun.AgentType}, " +
+                $"turn={_activeSession.ActiveRun.TurnId}");
+        }
+
+        /// <summary>
+        /// 任务正常收尾（含取消/异常）时清除「执行中」标记并落盘。
+        /// <para>
+        /// 清除范围是容器内的全部会话，而不只是 <see cref="_activeSession"/>：
+        /// 任务执行中切换会话时，<see cref="_activeSession"/> 已经换成了新会话，
+        /// 而标记仍挂在旧会话对象上；只清当前会话会留下一个永久的「未收尾」标记，
+        /// 让下次加载误报「上次执行被中断」。
+        /// </para>
+        /// </summary>
+        private void CompleteActiveRunMarker()
+        {
+            bool changed = false;
+
+            if (_activeSession?.ActiveRun != null)
+            {
+                _activeSession.ActiveRun = null;
+                changed = true;
+            }
+
+            if (_sessionsContainer != null)
+            {
+                foreach (var session in _sessionsContainer.Sessions)
+                {
+                    if (session?.ActiveRun == null) continue;
+                    session.ActiveRun = null;
+                    changed = true;
+                }
+            }
+
+            if (!changed) return;
+
+            SaveCurrentSession();
+            Logger.Info("[任务标记] 已清除执行中标记");
+        }
+
+        /// <summary>
+        /// 清除所有消息上持久化的 HandoffJson 并落盘。
+        /// <para>
+        /// Handoff 一旦开始执行，「继续执行」按钮就不再成立。若继续留在会话里，
+        /// 任务执行期间一旦发生解决方案重载/窗口重建，恢复逻辑会把它重新注入成可点击按钮，
+        /// 用户再点一次就会对同一批文件并发启动第二个 Agent。
+        /// </para>
+        /// </summary>
+        private void ClearPersistedHandoffJson()
+        {
+            int cleared = 0;
+            lock (_lock)
+            {
+                foreach (var msg in _messages)
+                {
+                    if (string.IsNullOrEmpty(msg.HandoffJson)) continue;
+                    msg.HandoffJson = null;
+                    cleared++;
+                }
+            }
+
+            if (cleared == 0) return;
+
+            SaveCurrentSession();
+            Logger.Info($"[AgentHandoff] 已清除 {cleared} 条消息上的持久化 HandoffJson");
+        }
+
+        /// <summary>
         /// 根据第一条用户消息，标记等待 AI 生成会话标题。
         /// 首轮对话完成后，由流式响应结束逻辑调用 GenerateAiTitleAsync 实际生成标题。
         /// </summary>

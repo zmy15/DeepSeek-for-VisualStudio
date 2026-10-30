@@ -123,6 +123,15 @@ namespace DeepSeek_v4_for_VisualStudio.View
         {
             if (_activeAgent == null || _agentFactory == null) return;
 
+            // ── 并发守卫 ──
+            // 历史上解决方案重载会把 UI 重建成"任务未执行"的样子，并重新注入"开始实现"按钮；
+            // 此时后台任务其实还在跑，再点一次就会对同一批文件并发启动第二个 Agent。
+            if (IsRunInProgress())
+            {
+                Logger.Warn($"[AgentHandoff] 已有任务在执行，忽略重复的 Handoff 触发 (target={targetAgent})");
+                return;
+            }
+
             // ── 单轮 Cache 统计快照：本次 Handoff 执行开始时的累计值 ──
             _apiService?.TakeCacheSnapshot();
 
@@ -166,6 +175,14 @@ namespace DeepSeek_v4_for_VisualStudio.View
             CancellationTokenSource? handoffCts = null;
             try
             {
+                // ── 立即消费持久化的 Handoff ──
+                // 必须在任务开始时清掉消息上的 HandoffJson：否则任务执行期间一旦 VS 重载解决方案
+                // 或重建窗口，恢复逻辑会从磁盘把"开始实现"按钮重新注入，用户再点一次就是并发第二个任务。
+                ClearPersistedHandoffJson();
+
+                // ── 记录"本轮执行中"标记（崩溃/强杀后可从磁盘识别未收尾任务）──
+                BeginActiveRunMarker();
+
                 handoffCts = CreateNewStreamingCts();
                 StartConversationElapsedTimer();
 
@@ -211,10 +228,11 @@ namespace DeepSeek_v4_for_VisualStudio.View
                 lock (_lock)
                 {
                     _messages.Add(thinkingMsg);
-                    _agentStreamingMsgIndex = _messages.Count - 1;
                 }
+                // 锚定到消息对象本身：消息列表若被整体替换（加载会话/解决方案重载），
+                // 下标会失效，锚点可让后续写回安全失败而不是改错消息。
+                SetAgentStreamingTarget(_messages.Count - 1);
                 AddMessagesHtml("assistant", thinkingMsg.Content);
-                _currentStreamingMsgIndex = _agentStreamingMsgIndex;
                 UpdateBrowser();
 
                 // 冷启动路径没有经过 SendMessageCoreAsync，必须在这里恢复固定
@@ -457,6 +475,12 @@ namespace DeepSeek_v4_for_VisualStudio.View
                     _pendingHandoff = agentResult.Handoff;
                 }
 
+                // ── 收尾前刷新流式气泡锚点 ──
+                // 任务期间消息列表若被整体替换，旧下标会指向别的消息；这里修正为有效值或 -1，
+                // 后续带 bounds 检查的收尾逻辑便不会把结果写到无关消息上。
+                await ThreadHelper.JoinableTaskFactory.SwitchToMainThreadAsync();
+                ResolveAgentStreamingIndex();
+
                 // ── 清除所有消息中的 HandoffJson，避免后续消息误触发 Plan 上下文覆盖 ──
                 // 此前仅清除 _agentStreamingMsgIndex（当前 Edit 响应消息），但 HandoffJson
                 // 实际保存在 Plan Agent 的原始响应消息上。Edit Handoff 消费后必须清除全部
@@ -632,6 +656,11 @@ namespace DeepSeek_v4_for_VisualStudio.View
                 if (handoffCts != null)
                     DisposeStreamingCts(handoffCts);
                 StopConversationElapsedTimer();
+
+                // ── 收尾执行中标记（取消/异常同样要清，否则下次加载会误报"中断"）──
+                CompleteActiveRunMarker();
+                await ApplyPendingSolutionChangeIfAnyAsync();
+
                 if (!TryStartQueuedAppend())
                     UpdateButtonsState();
             }

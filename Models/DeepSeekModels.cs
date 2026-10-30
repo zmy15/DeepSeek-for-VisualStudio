@@ -894,6 +894,18 @@ namespace DeepSeek_v4_for_VisualStudio.Models
         [DataMember]
         public string? TreeDataJson { get; set; }
 
+        /// <summary>
+        /// 尚未正常收尾的 Agent 任务标记。任务开始时写入，收尾（含异常/取消）时清除。
+        /// <para>
+        /// 用途：VS 被强杀、窗口在任务执行中被重建、或解决方案在任务执行中被重载时，
+        /// 磁盘上的会话不会再出现「界面提示任务未执行、实际后台已跑完」的静默错位——
+        /// 下次加载只要看到该标记非空，就能明确告知用户「上次执行被中断」，
+        /// 而不是把半截对话当成完整历史继续使用。
+        /// </para>
+        /// </summary>
+        [DataMember]
+        public SessionActiveRun? ActiveRun { get; set; }
+
         // ── 累计 Cache 统计（跨会话持久化，重启后恢复显示）──
 
         /// <summary>累计 Cache 命中 Token 数</summary>
@@ -927,6 +939,25 @@ namespace DeepSeek_v4_for_VisualStudio.Models
         /// <summary>累计官方 Fetch 成功调用次数（跨会话持久化，重启后恢复显示）</summary>
         [DataMember]
         public int CumulativeOfficialFetchCount { get; set; }
+    }
+
+    /// <summary>
+    /// 会话中尚未收尾的一次 Agent 任务。
+    /// </summary>
+    [DataContract]
+    public class SessionActiveRun
+    {
+        /// <summary>该轮次标识（与 <see cref="ChatMessage.TurnId"/> 对应，Ask 模式可能为空）。</summary>
+        [DataMember]
+        public string TurnId { get; set; } = string.Empty;
+
+        /// <summary>执行该任务的 Agent 类型（如 Ask / Plan / Edit / Build）。</summary>
+        [DataMember]
+        public string AgentType { get; set; } = string.Empty;
+
+        /// <summary>任务开始时间。</summary>
+        [DataMember]
+        public DateTime StartedAt { get; set; } = DateTime.Now;
     }
 
     /// <summary>

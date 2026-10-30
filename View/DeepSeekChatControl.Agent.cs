@@ -65,6 +65,10 @@ namespace DeepSeek_v4_for_VisualStudio.View
             // 仅标记属于当前轮次的过程消息；Ask 模式不会调用此处，字段保持默认值
             message.TurnId = _currentAgentTurnId;
             message.IsProcessMessage = isProcess;
+
+            // 流式锚点跟着消息一起补上轮次标识，便于诊断与兜底定位
+            if (ReferenceEquals(message, _agentStreamingMessage))
+                _agentStreamingTurnId = message.TurnId;
         }
 
         /// <summary>
@@ -792,7 +796,7 @@ namespace DeepSeek_v4_for_VisualStudio.View
                     _streamingReasoning.Clear();
                     _agentTurnToolCallCount = 0;
                 }
-                _agentStreamingMsgIndex = -1;
+                ClearAgentStreamingTarget();
                 _lastReportedStepIndex = 0;
                 _lastReportedStepStatus = string.Empty;
                 _pendingHandoff = null;
@@ -860,7 +864,7 @@ namespace DeepSeek_v4_for_VisualStudio.View
                         {
                             // 复用占位，更新内容为 Agent 分析状态
                             lastNode.Message.Content = LocalizationService.Instance["agent.status.analyzing"];
-                            _agentStreamingMsgIndex = _messages.Count - 1;
+                            SetAgentStreamingTarget(_messages.Count - 1);
                             reusedPlaceholder = true;
                             Logger.Info($"[Agent] 复用 retry fork 占位 (idx={_agentStreamingMsgIndex})");
                         }
@@ -882,8 +886,8 @@ namespace DeepSeek_v4_for_VisualStudio.View
                     lock (_lock)
                     {
                         _messages.Add(thinkingMsg);
-                        _agentStreamingMsgIndex = _messages.Count - 1;
                     }
+                    SetAgentStreamingTarget(_messages.Count - 1);
                     AddMessagesHtml("assistant", thinkingMsg.Content);
                 }
                 else
@@ -893,10 +897,10 @@ namespace DeepSeek_v4_for_VisualStudio.View
                 var streamingTarget = new AgentStreamingTarget
                 {
                     MessageIndex = _agentStreamingMsgIndex,
+                    TurnId = _agentStreamingTurnId,
                 };
                 context.OnGuidanceTurnRequested = item =>
                     BeginGuidanceTurnAsync(item, streamingTarget);
-                _currentStreamingMsgIndex = _agentStreamingMsgIndex;
                 UpdateBrowser();
                 await TaskScheduler.Default;
 
@@ -1134,6 +1138,12 @@ namespace DeepSeek_v4_for_VisualStudio.View
                 agentResult.ReasoningContent = mergedReasoning;
 
                 await ThreadHelper.JoinableTaskFactory.SwitchToMainThreadAsync();
+
+                // ── 收尾前刷新流式锚点 ──
+                // 消息列表若在任务期间被整体替换（从磁盘重载/切换会话），旧下标会指向别的消息。
+                // 这里把 _agentStreamingMsgIndex 修正为有效值或 -1；下面的收尾逻辑全部带
+                // bounds 检查，-1 会自然跳过写回，避免把别的消息改成最终答复。
+                ResolveAgentStreamingIndex();
 
                 if (agentResult.Success && agentResult.Plan != null)
                 {
@@ -1523,8 +1533,8 @@ namespace DeepSeek_v4_for_VisualStudio.View
         {
             try
             {
-                int msgIndex = _agentStreamingMsgIndex;
-                if (msgIndex < 0 || msgIndex >= _messages.Count)
+                int msgIndex = ResolveAgentStreamingIndex();
+                if (msgIndex < 0)
                     return;
 
                 // 已 finalize 的气泡不再是流式态，直接跳过，避免覆盖正常收尾结果
@@ -1576,12 +1586,16 @@ namespace DeepSeek_v4_for_VisualStudio.View
         /// </summary>
         private async Task InjectPendingHandoffButtonAsync()
         {
-            if (_pendingHandoff == null || _agentStreamingMsgIndex < 0) return;
+            if (_pendingHandoff == null) return;
+
+            int msgIndex = ResolveAgentStreamingIndex();
+            if (msgIndex < 0) return;
+
             try
             {
                 string targetAgentStr = _pendingHandoff.TargetAgent.ToString();
                 string handoffBtnJs = ChatHtmlService.BuildHandoffButtonJs(
-                    _agentStreamingMsgIndex, targetAgentStr, _pendingHandoff.Label);
+                    msgIndex, targetAgentStr, _pendingHandoff.Label);
                 await ChatWebView.CoreWebView2.ExecuteScriptAsync(handoffBtnJs);
             }
             catch
@@ -2044,13 +2058,15 @@ namespace DeepSeek_v4_for_VisualStudio.View
 
                 lock (_lock)
                 {
-                    if (_agentStreamingMsgIndex < 0 || _agentStreamingMsgIndex >= _messages.Count)
+                    int streamingIndex = ResolveAgentStreamingIndex();
+                    if (streamingIndex < 0)
                     {
-                        Logger.Warn($"[Agent→Tree] 无效的 _agentStreamingMsgIndex={_agentStreamingMsgIndex}, _messages.Count={_messages.Count}");
+                        Logger.Warn($"[Agent→Tree] 流式气泡锚点已失效（_messages.Count={_messages.Count}），" +
+                            "本轮最终答复未写回树/上下文");
                         return;
                     }
 
-                    var agentResponseMsg = _messages[_agentStreamingMsgIndex];
+                    var agentResponseMsg = _messages[streamingIndex];
 
                     // 确保消息状态正确
                     agentResponseMsg.IsStreaming = false;
@@ -2113,7 +2129,13 @@ namespace DeepSeek_v4_for_VisualStudio.View
             {
                 previousIndex = streamingTarget.MessageIndex;
                 if (previousIndex < 0 || previousIndex >= _messages.Count)
-                    return;
+                {
+                    // 消息列表可能已被整体替换（加载会话/解决方案重载），捕获的下标随之失效：
+                    // 回退到当前流式锚点，仍定位不到就安全放弃这次引导轮，避免改错消息。
+                    previousIndex = ResolveAgentStreamingIndex();
+                    if (previousIndex < 0) return;
+                    streamingTarget.MessageIndex = previousIndex;
+                }
 
                 var previousMessage = _messages[previousIndex];
                 previousContent = _streamingContent.ToString().Trim();
@@ -2162,8 +2184,11 @@ namespace DeepSeek_v4_for_VisualStudio.View
                 assistantIndex = _messages.Count - 1;
 
                 _agentStreamingMsgIndex = assistantIndex;
+                _agentStreamingMessage = assistantMessage;
+                _agentStreamingTurnId = assistantMessage.TurnId;
                 _currentStreamingMsgIndex = assistantIndex;
                 streamingTarget.MessageIndex = assistantIndex;
+                streamingTarget.TurnId = assistantMessage.TurnId;
 
                 _agentTimelineContent.Clear();
                 _streamingContent.Clear();
@@ -2378,8 +2403,17 @@ namespace DeepSeek_v4_for_VisualStudio.View
                 }
 
                 // ── 在锁外执行 JS 注入：Handoff 按钮 ──
+                // 任务执行中不注入：按钮此刻没有意义，且一旦被恢复成可点击状态，
+                // 用户点下去就是第二个并发任务（ExecuteAgentHandoffAsync 的守卫也会拒绝，但不应给出假入口）。
+                bool runInProgress = IsRunInProgress();
                 foreach (var (msgIndex, handoff) in handoffsToRebuild)
                 {
+                    if (runInProgress)
+                    {
+                        Logger.Warn($"[Panel] 任务执行中，跳过 Handoff 按钮注入: msgIdx={msgIndex}, target={handoff.TargetAgent}");
+                        continue;
+                    }
+
                     try
                     {
                         string targetAgentStr = handoff.TargetAgent.ToString();
@@ -2395,10 +2429,17 @@ namespace DeepSeek_v4_for_VisualStudio.View
                 }
 
                 // ── 恢复 _pendingHandoff，使重启后点击按钮不会因 null 而直接返回 ──
-                if (handoffsToRebuild.Count > 0)
+                // 任务执行中绝不恢复：消息上的 HandoffJson 只代表"最近一次规划产出的待执行按钮"，
+                // 一旦已经开始执行却还没走完，恢复它等于把"开始实现"重新变成可点击状态，
+                // 用户再点一次就会对同一批文件并发启动第二个 Agent。
+                if (handoffsToRebuild.Count > 0 && !IsRunInProgress())
                 {
                     _pendingHandoff = handoffsToRebuild[handoffsToRebuild.Count - 1].Handoff;
                     Logger.Info($"[Panel] 恢复 _pendingHandoff: target={_pendingHandoff.TargetAgent}, label={_pendingHandoff.Label}");
+                }
+                else if (handoffsToRebuild.Count > 0)
+                {
+                    Logger.Warn("[Panel] 任务执行中，跳过恢复 Handoff 按钮，避免并发触发第二个任务");
                 }
             }
             catch (Exception ex)
@@ -2441,7 +2482,8 @@ namespace DeepSeek_v4_for_VisualStudio.View
             string displayContent;
             lock (_lock)
             {
-                if (_agentStreamingMsgIndex < 0 || _agentStreamingMsgIndex >= _messages.Count)
+                msgIndex = ResolveAgentStreamingIndex();
+                if (msgIndex < 0)
                     return;
 
                 if (_agentTimelineContent.Length > 0)
@@ -2453,7 +2495,6 @@ namespace DeepSeek_v4_for_VisualStudio.View
                 if (!string.IsNullOrWhiteSpace(line))
                     _currentAgentTurnProducedProcess = true;
 
-                msgIndex = _agentStreamingMsgIndex;
                 var msg = _messages[msgIndex];
                 msg.TimelineContent = _agentTimelineContent.ToString();
                 displayContent = ChatHtmlService.BuildAssistantDisplayContent(
@@ -2472,13 +2513,14 @@ namespace DeepSeek_v4_for_VisualStudio.View
         {
             lock (_lock)
             {
-                if (_agentStreamingMsgIndex < 0 || _agentStreamingMsgIndex >= _messages.Count)
+                int index = ResolveAgentStreamingIndex();
+                if (index < 0)
                     return;
 
                 string segment = _streamingContent.ToString().Trim();
                 _streamingContent.Clear();
 
-                var msg = _messages[_agentStreamingMsgIndex];
+                var msg = _messages[index];
                 msg.Content = string.Empty;
 
                 if (!string.IsNullOrWhiteSpace(segment) && !IsAgentStatusPlaceholder(segment))

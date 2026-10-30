@@ -677,6 +677,8 @@
     "status.toolCallCompleted": "工具调用完成",
     "status.toolCallAnalyzing": "AI 正在分析结果…",
     "status.stopped": "已停止",
+    "status.solutionReloaded": "解决方案已重新加载，当前对话保持不变。",
+    "status.runInterrupted": "上次任务未正常结束（Visual Studio 被关闭或窗口被重建），最终答复可能缺失。",
     "status.editMessageHint": "编辑消息（Esc 取消，点击「确认修改」提交）",
     "status.apiError": "抱歉，发生了错误，请重试。\n\n```\n{0}\n```",
     "status.compressionTriggered": "上下文使用率 {0:F0}% — 已触发压缩",
