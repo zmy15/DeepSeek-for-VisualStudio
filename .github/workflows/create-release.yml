@@ -1,5 +1,11 @@
 name: Create Release (手动发版)
 
+# 一次手动触发 = 一个 tag + 一个 Release + 两个 VSIX：
+#   1. 标准版：直接在 master 上构建
+#   2. No-Local-OCR 版：在同一工作区运行 tools/remove-paddleocr.py 后再构建一次
+# 两个包共享同一份版本号、同一个 tag 与同一个 Release，不再需要选择 variant，
+# 也不再依赖 no-local-paddleocr 分支（避免版本号提交与分支同步之间的竞态）。
+
 on:
   workflow_dispatch:
     inputs:
@@ -7,14 +13,6 @@ on:
         description: '版本号（不含 v 前缀，例如 1.1.14）'
         required: true
         type: string
-      variant:
-        description: '发布版本类型'
-        required: true
-        type: choice
-        default: 'standard'
-        options:
-          - standard
-          - no-local-ocr
       release_description:
         description: '版本描述（可选，将显示在 Release 说明开头；留空则仅显示自动生成的更新日志）。注意：GitHub 输入框不支持多行，请用字面量 \n 表示换行，例如：修复了A\n新增了B'
         required: false
@@ -23,16 +21,20 @@ on:
 permissions:
   contents: write
 
+# 同一次发版流程内串行；防止两次手动发版并发时版本号提交与 tag 互相覆盖
+concurrency:
+  group: manual-release
+  cancel-in-progress: false
+
 jobs:
   release:
     runs-on: windows-latest
 
     steps:
-    - name: 检出目标分支
+    - name: 检出 master 分支
       uses: actions/checkout@v4
       with:
-        # 根据发布类型选择分支：标准版用 master，无 OCR 版用 no-local-paddleocr
-        ref: ${{ github.event.inputs.variant == 'no-local-ocr' && 'no-local-paddleocr' || 'master' }}
+        ref: master
         fetch-depth: 0
 
     - name: 计算 tag 名称
@@ -44,8 +46,7 @@ jobs:
         if ($version -notmatch '^\d+\.\d+(\.\d+)?$') {
           throw "版本号格式无效，应为 x.y 或 x.y.z（如 1.1.14），实际为: $version"
         }
-        $variant = "${{ github.event.inputs.variant }}"
-        $tag = if ($variant -eq 'no-local-ocr') { "v${version}-No-Local-OCR" } else { "v${version}" }
+        $tag = "v${version}"
         Write-Host "将创建 tag: $tag"
         "tag=$tag" >> $env:GITHUB_OUTPUT
         "version=$version" >> $env:GITHUB_OUTPUT
@@ -64,7 +65,6 @@ jobs:
       shell: pwsh
       env:
         RELEASE_VERSION: ${{ steps.tag.outputs.version }}
-        TARGET_BRANCH: ${{ github.event.inputs.variant == 'no-local-ocr' && 'no-local-paddleocr' || 'master' }}
       run: |
         $version = $env:RELEASE_VERSION.Trim()
         $updates = @(
@@ -112,8 +112,8 @@ jobs:
         } else {
           git add -- source.extension.vsixmanifest DeepSeek_v4_for_VisualStudioPackage.cs README.md README.zh-CN.md benchmark/tasks.sample.json
           git commit -m "chore(release): bump version to $version"
-          git push origin "HEAD:$env:TARGET_BRANCH"
-          Write-Host "版本号提交已推送到 $env:TARGET_BRANCH"
+          git push origin "HEAD:master"
+          Write-Host "版本号提交已推送到 master"
         }
 
     - name: 创建并推送 tag
@@ -147,18 +147,59 @@ jobs:
         }
         Write-Host "VSIX 版本号已确认: $env:RELEASE_VERSION"
 
-    - name: 构建 VSIX
+    # ── 第一次构建：标准版 ──
+    - name: 构建标准版 VSIX
       run: msbuild DeepSeek_v4_for_VisualStudio.csproj /t:Build /p:Configuration=Release /p:DeployExtension=false
 
-    - name: 重命名 VSIX（含版本号）
+    - name: 归档标准版 VSIX
+      shell: pwsh
+      env:
+        RELEASE_VERSION: ${{ steps.tag.outputs.version }}
+      run: |
+        $vsix = Get-ChildItem bin\Release\net472\*.vsix | Select-Object -First 1
+        if (-not $vsix) { throw "未找到标准版 VSIX 构建产物" }
+        New-Item -ItemType Directory -Force -Path release-assets | Out-Null
+        $newName = "DeepSeek_v4_for_VisualStudio-v$($env:RELEASE_VERSION).vsix"
+        Move-Item -LiteralPath $vsix.FullName -Destination "release-assets\$newName"
+        Write-Host "已归档标准版: $newName"
+
+    # ── 第二次构建：No-Local-OCR 版（同一份源码 + 程序化移除，保证版本号一致）──
+    - name: 生成 No-Local-OCR 变体源码
+      run: python tools/remove-paddleocr.py
+
+    - name: 清理旧产物并重新还原
       shell: pwsh
       run: |
-        $tag = "${{ steps.tag.outputs.tag }}"
-        $version = $tag -replace '^v', ''
+        # 标准版构建残留的 PaddleOCR/OpenCV 原生 DLL 必须清掉，否则会被第二次打包带进 VSIX
+        Remove-Item -Recurse -Force bin,obj -ErrorAction SilentlyContinue
+        dotnet restore
+
+    - name: 构建 No-Local-OCR VSIX
+      run: msbuild DeepSeek_v4_for_VisualStudio.csproj /t:Build /p:Configuration=Release /p:DeployExtension=false
+
+    - name: 校验并归档 No-Local-OCR VSIX
+      shell: pwsh
+      env:
+        RELEASE_VERSION: ${{ steps.tag.outputs.version }}
+      run: |
         $vsix = Get-ChildItem bin\Release\net472\*.vsix | Select-Object -First 1
-        $newName = "DeepSeek_v4_for_VisualStudio-v$version.vsix"
-        Rename-Item $vsix.FullName $newName
-        Write-Host "已重命名为: $newName"
+        if (-not $vsix) { throw "未找到 No-Local-OCR VSIX 构建产物" }
+
+        # 兜底校验：变体包内不允许残留 PaddleOCR/OpenCV 组件
+        Add-Type -AssemblyName System.IO.Compression.FileSystem
+        $zip = [System.IO.Compression.ZipFile]::OpenRead($vsix.FullName)
+        try {
+          $leftovers = @($zip.Entries | Where-Object { $_.FullName -match '(?i)paddle|opencv' })
+          if ($leftovers.Count -gt 0) {
+            throw "No-Local-OCR 包内仍残留 PaddleOCR/OpenCV 组件，例如: $($leftovers[0].FullName)"
+          }
+        } finally {
+          $zip.Dispose()
+        }
+
+        $newName = "DeepSeek_v4_for_VisualStudio-v$($env:RELEASE_VERSION)-No-Local-OCR.vsix"
+        Move-Item -LiteralPath $vsix.FullName -Destination "release-assets\$newName"
+        Write-Host "已归档 No-Local-OCR 版: $newName"
 
     - name: '处理版本描述（\n 还原为换行）'
       id: release_notes
@@ -182,12 +223,13 @@ jobs:
           Write-Host "版本描述为空，仅使用自动生成的更新日志"
         }
 
-    - name: 发布 Release 并上传 VSIX
+    - name: 发布 Release 并上传两个 VSIX
       uses: softprops/action-gh-release@v2
       with:
         tag_name: ${{ steps.tag.outputs.tag }}
         body: ${{ steps.release_notes.outputs.body }}
-        files: bin/Release/net472/*.vsix
+        files: release-assets/*.vsix
         generate_release_notes: true
+        fail_on_unmatched_files: true
       env:
         GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
