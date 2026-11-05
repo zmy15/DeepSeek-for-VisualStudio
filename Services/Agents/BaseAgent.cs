@@ -401,7 +401,7 @@ namespace DeepSeek_v4_for_VisualStudio.Services.Agents
         /// <summary>
         /// 当前待确认的权限请求字典（RequestId → AgentPermissionRequest）。
         /// 支持多个并发权限请求（工具调用并行执行时每个工具可能独立请求权限）。
-        /// 请使用 TryGetPendingPermission(requestId) 或 TryRemovePendingPermission(requestId) 按 RequestId 精确查找。
+        /// 请使用 TryGetPendingPermission(requestId) 按 RequestId 精确查找。
         /// </summary>
         private readonly ConcurrentDictionary<string, AgentPermissionRequest> _pendingPermissions = new();
 
@@ -459,81 +459,10 @@ namespace DeepSeek_v4_for_VisualStudio.Services.Agents
         #region Shared AI Call Methods
 
         /// <summary>
-        /// 调用 AI 进行简短回答（用于分类、路由判断等）。
-        /// </summary>
-        public async Task<string> CallAiShortAsync(string systemPrompt, string userPrompt, CancellationToken ct, int maxTokens = 512)
-        {
-            var messages = BuildContextAwareMessages(systemPrompt, userPrompt);
-
-            var sb = new StringBuilder();
-            // toolChoice: "none" — 简短回答无需工具调用，防止 AI 生成工具调用 XML 污染输出
-            //  传入完整工具集以保持 Prefix Cache 稳定
-            await foreach (var chunk in _apiService.ChatStreamAsync(messages, TryGetFullToolSet(), ct, maxTokens, toolChoice: "none"))
-            {
-                if (IsContentChunk(chunk))
-                    sb.Append(chunk);
-            }
-            LogCacheHitRate();
-            return sb.ToString().Trim();
-        }
-
-        /// <summary>
-        /// 调用 AI 进行长回答（用于代码生成、分析等）。
-        /// </summary>
-        protected async Task<string> CallAiLongAsync(string systemPrompt, string userPrompt, CancellationToken ct, int? maxTokens = null, double? temperature = null, string? responseFormat = null, Action<string>? onThinking = null)
-        {
-            var messages = BuildContextAwareMessages(systemPrompt, userPrompt);
-
-            var sb = new StringBuilder();
-            //  传入完整工具集 + toolChoice:"none" 以保持 Prefix Cache 稳定
-            await foreach (var chunk in _apiService.ChatStreamAsync(messages, TryGetFullToolSet(), ct, maxTokens, temperature: temperature, responseFormat: responseFormat, toolChoice: "none"))
-            {
-                if (chunk.StartsWith("[THINKING]"))
-                    onThinking?.Invoke(chunk.Substring(10));
-                else if (IsContentChunk(chunk))
-                    sb.Append(chunk);
-            }
-            LogCacheHitRate();
-            return sb.ToString().Trim();
-        }
-
-        /// <summary>
-        /// 调用 AI 进行长回答，支持注入额外的系统级上下文（如 discoveryContext）。
-        /// extraSystemMessages 插入在历史与用户消息之间，保持 messages[0] 稳定可缓存。
-        /// </summary>
-        /// <param name="toolChoice">工具调用策略。Plan Agent Design 阶段应传 "none" 以禁用工具调用，避免 DSML 泄露。</param>
-        /// <param name="temperature">采样温度。Plan Agent Design 阶段应传 0.0 以确保 JSON 输出确定性。</param>
-        protected async Task<string> CallAiLongAsync(
-            string systemPrompt,
-            string userPrompt,
-            List<ChatApiMessage> extraSystemMessages,
-            CancellationToken ct,
-            int? maxTokens = null,
-            string? toolChoice = null,
-            double? temperature = null,
-            string? responseFormat = null,
-            Action<string>? onThinking = null)
-        {
-            var messages = BuildContextAwareMessages(systemPrompt, userPrompt, extraSystemMessages);
-
-            var sb = new StringBuilder();
-            //  传入完整工具集以保持 Prefix Cache 稳定
-            await foreach (var chunk in _apiService.ChatStreamAsync(messages, TryGetFullToolSet(), ct, maxTokens, toolChoice, temperature, responseFormat))
-            {
-                if (chunk.StartsWith("[THINKING]"))
-                    onThinking?.Invoke(chunk.Substring(10));
-                else if (IsContentChunk(chunk))
-                    sb.Append(chunk);
-            }
-            LogCacheHitRate();
-            return sb.ToString().Trim();
-        }
-
-        /// <summary>
         /// 使用预构建消息列表调用 AI（支持 toolChoice 和 temperature 参数）。
         ///
-        /// 缓存关键：与 CallAiLongAsync 不同，此方法直接使用传入的 messages，
-        /// 不通过 BuildContextAwareMessages 重建。这使得跨阶段的对话延续成为可能——
+        /// 缓存关键：此方法直接使用传入的 messages，不通过 BuildContextAwareMessages 重建。
+        /// 这使得跨阶段的对话延续成为可能——
         /// 对齐阶段的 tool call 历史可以直接传递给设计阶段，DeepSeek Prefix Cache
         /// 可以匹配整个对齐对话前缀，而非仅匹配 system prompt。
         /// </summary>
@@ -573,7 +502,7 @@ namespace DeepSeek_v4_for_VisualStudio.Services.Agents
                     sb.Append(chunk);
             }
             // ── 单次工具无关调用（路由/分类等）：不属于主流程对话内容，不写历史 ──
-            LogCacheHitRate();
+            CacheUsageLogger.Log(_apiService?.LastUsage);
             return sb.ToString().Trim();
         }
 
@@ -1626,7 +1555,7 @@ namespace DeepSeek_v4_for_VisualStudio.Services.Agents
                 }
 
                 // ── 记录本轮 Cache 命中率 ──
-                LogCacheHitRate(round);
+                CacheUsageLogger.Log(_apiService?.LastUsage, round);
 
                 // ── 每轮 API usage 返回后立即校准，工具循环中也能及时反映真实 token。──
                 var turnUsage = _apiService?.LastUsage;
@@ -2432,14 +2361,6 @@ namespace DeepSeek_v4_for_VisualStudio.Services.Agents
         }
 
         /// <summary>
-        /// 记录 DeepSeek Prompt Cache 命中率到日志（Agent 内部版）。
-        /// 从 _apiService.LastUsage 读取 cache 统计信息并格式化输出。
-        /// </summary>
-        /// <param name="round">当前工具调用轮次（0 表示非工具循环模式）</param>
-        private void LogCacheHitRate(int round = 0)
-            => CacheUsageLogger.Log(_apiService?.LastUsage, round);
-
-        /// <summary>
         /// 记录本次工作流的 Cache 命中率汇总到日志（与 UI 显示一致）。
         /// 在所有轮次结束后调用，输出本次工作流（自上次 TakeCacheSnapshot 以来）的增量总计。
         /// </summary>
@@ -2617,7 +2538,6 @@ namespace DeepSeek_v4_for_VisualStudio.Services.Agents
                             ContextManager = new ConversationContextManager(),
                             ExecutionDepth = (Context?.ExecutionDepth ?? 0) + 1,
                             FileReadCache = exploreFileCache,
-                            DiscoveredFiles = Context?.DiscoveredFiles,
                             //  子Agent缓存优化：继承父Agent当前消息列表作为前缀，
                             //    使ExploreAgent的首轮API调用可复用父Agent的缓存前缀。
                             ForwardedMessages = ctx.ForwardedMessages,
@@ -2698,11 +2618,6 @@ namespace DeepSeek_v4_for_VisualStudio.Services.Agents
                                 {
                                     Context.FileReadCache[kvp.Key] = kvp.Value;
                                 }
-                            }
-                            // 发现的文件列表
-                            if (exploreCtx.DiscoveredFiles != null && exploreCtx.DiscoveredFiles.Count > 0)
-                            {
-                                Context.DiscoveredFiles = exploreCtx.DiscoveredFiles;
                             }
                         }
 
@@ -4653,15 +4568,6 @@ namespace DeepSeek_v4_for_VisualStudio.Services.Agents
         public AgentPermissionRequest? TryGetPendingPermission(string requestId)
         {
             _pendingPermissions.TryGetValue(requestId, out var request);
-            return request;
-        }
-
-        /// <summary>
-        /// 按 RequestId 查找并移除待处理的权限请求。
-        /// </summary>
-        public AgentPermissionRequest? TryRemovePendingPermission(string requestId)
-        {
-            _pendingPermissions.TryRemove(requestId, out var request);
             return request;
         }
 

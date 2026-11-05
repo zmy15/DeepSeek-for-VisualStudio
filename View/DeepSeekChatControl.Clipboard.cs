@@ -368,7 +368,7 @@ namespace DeepSeek_v4_for_VisualStudio.View
                 encoder.Save(stream);
 
                 long fileSize = new System.IO.FileInfo(filePath).Length;
-                Logger.Info($"SaveClipboardImage: 保存成功，大小={FormatFileSize(fileSize)} ← {fileName}");
+                Logger.Info($"SaveClipboardImage: 保存成功，大小={FileSizeFormatter.Format(fileSize)} ← {fileName}");
 
                 return filePath;
             }
@@ -469,13 +469,6 @@ namespace DeepSeek_v4_for_VisualStudio.View
         /// <summary>
         /// 格式化文件大小为可读字符串。
         /// </summary>
-        private static string FormatFileSize(long bytes)
-        {
-            if (bytes < 1024) return $"{bytes} B";
-            if (bytes < 1024 * 1024) return $"{bytes / 1024.0:F1} KB";
-            return $"{bytes / (1024.0 * 1024.0):F1} MB";
-        }
-
         #endregion
     }
 }

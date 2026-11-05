@@ -96,11 +96,11 @@ namespace DeepSeek_v4_for_VisualStudio.Services
             var fileInfo = new FileInfo(imagePath);
             if (fileInfo.Length > MaxImageFileSizeBytes)
             {
-                Logger.Info($"[OCR] 跳过: 图像文件过大 ({FormatFileSize(fileInfo.Length)}) - {Path.GetFileName(imagePath)}");
+                Logger.Info($"[OCR] 跳过: 图像文件过大 ({FileSizeFormatter.Format(fileInfo.Length)}) - {Path.GetFileName(imagePath)}");
                 return null;
             }
 
-            Logger.Info($"[OCR] 开始识别: {Path.GetFileName(imagePath)} ({FormatFileSize(fileInfo.Length)}), 引擎={CurrentEngine}");
+            Logger.Info($"[OCR] 开始识别: {Path.GetFileName(imagePath)} ({FileSizeFormatter.Format(fileInfo.Length)}), 引擎={CurrentEngine}");
 
             try
             {
@@ -352,13 +352,6 @@ namespace DeepSeek_v4_for_VisualStudio.Services
         #endregion
 
         #region Private Helpers
-
-        private static string FormatFileSize(long bytes)
-        {
-            if (bytes < 1024) return $"{bytes} B";
-            if (bytes < 1024 * 1024) return $"{bytes / 1024.0:F1} KB";
-            return $"{bytes / (1024.0 * 1024.0):F1} MB";
-        }
 
         #endregion
 

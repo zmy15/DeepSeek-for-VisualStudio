@@ -1425,7 +1425,7 @@ namespace DeepSeek_v4_for_VisualStudio.View
             }
 
             // ── 记录 Cache 命中率 ──
-            LogCacheHitRate();
+            CacheUsageLogger.Log(_apiService?.LastUsage);
 
             // ── 一次回答结束后根据需要自动记录 memory（与 Handoff 路径共用）──
             if (!parallelMemoryExtractionStarted)

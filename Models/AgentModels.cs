@@ -160,17 +160,6 @@ namespace DeepSeek_v4_for_VisualStudio.Models
             set { if (value && Source == PlanSource.None) Source = PlanSource.PlanAgent; }
         }
 
-        // ═══════════════════════════════════════════════════════════════
-        // 缓存策略 — 以后会被 RAG 替代
-        // ═══════════════════════════════════════════════════════════════
-
-        /// <summary>
-        /// Plan Agent 发现阶段已扫描的源文件路径列表。
-        /// Edit Agent 可直接复用此列表，跳过重复的 DiscoverSolutionFilesAsync。
-        /// 以后会被 RAG 向量检索替代。
-        /// </summary>
-        [JsonIgnore]
-        public List<string> DiscoveredFiles { get; set; } = new();
     }
 
     /// <summary>

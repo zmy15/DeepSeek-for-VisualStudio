@@ -326,7 +326,6 @@ namespace DeepSeek_v4_for_VisualStudio.View
         // ── 树状对话结构 ──
         private ConversationTree? _tree;
 
-        private RagService? _ragService;
         private ContextCompressorService? _compressorService;
         private MemoryService? _memoryService;
         private bool _isGenerating;

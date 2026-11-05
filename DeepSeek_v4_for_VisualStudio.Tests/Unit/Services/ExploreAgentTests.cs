@@ -227,46 +227,6 @@ public class ExploreAgentTests
 
     #endregion
 
-    #region SourceFileExtensions
-
-    [Fact]
-    public void SourceFileExtensions_ContainsCommonExtensions()
-    {
-        var exts = GetSourceFileExtensionsPublic();
-
-        exts.Should().Contain(".cs");
-        exts.Should().Contain(".py");
-        exts.Should().Contain(".ts");
-        exts.Should().Contain(".js");
-        exts.Should().Contain(".json");
-        exts.Should().Contain(".md");
-        exts.Should().Contain(".xaml");
-        exts.Should().Contain(".csproj");
-    }
-
-    [Fact]
-    public void SourceFileExtensions_ContainsPopularLanguageExtensions()
-    {
-        var exts = GetSourceFileExtensionsPublic();
-
-        exts.Should().Contain(".go");
-        exts.Should().Contain(".rs");
-        exts.Should().Contain(".java");
-        exts.Should().Contain(".kt");
-        exts.Should().Contain(".swift");
-    }
-
-    [Fact]
-    public void SourceFileExtensions_CaseInsensitive()
-    {
-        var exts = GetSourceFileExtensionsPublic();
-
-        exts.Contains(".CS").Should().BeTrue();
-        exts.Contains(".Ts").Should().BeTrue();
-    }
-
-    #endregion
-
     // ──────────── Reflection helpers ────────────
 
     private static string BuildExplorePromptPublic(string userMessage, AgentContext context)
@@ -276,10 +236,4 @@ public class ExploreAgentTests
         return (string)method!.Invoke(null, new object[] { userMessage, context })!;
     }
 
-    private static HashSet<string> GetSourceFileExtensionsPublic()
-    {
-        var field = typeof(ExploreAgent).GetField("SourceFileExtensions",
-            System.Reflection.BindingFlags.NonPublic | System.Reflection.BindingFlags.Static);
-        return (HashSet<string>)field!.GetValue(null)!;
-    }
 }

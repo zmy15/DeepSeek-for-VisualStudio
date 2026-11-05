@@ -169,18 +169,6 @@ namespace DeepSeek_v4_for_VisualStudio.View
                     $"保留轮次={_options.PreserveRecentTurns}");
             }
 
-            // ── 初始化 RAG 服务 ──
-            if (_options.EnableRag)
-            {
-                _ragService = new RagService { IsEnabled = true };
-                Logger.Info("[ContextServices] RAG 服务已初始化（等待提供者注册）");
-            }
-            else
-            {
-                _ragService?.DeactivateProvider();
-                _ragService = null;
-            }
-
             // ── 注入 ActiveFileTracker 到 ContextManager（Working Set 追踪）──
             if (_builtInToolService?.ActiveFileTracker != null)
             {
@@ -665,13 +653,10 @@ namespace DeepSeek_v4_for_VisualStudio.View
         }
 
         /// <summary>读取设置中的网页抓取方式；非法值回退默认（官方 API）。</summary>
-        private static WebFetchMode ResolveWebFetchModeFromOptions(DeepSeekOptionsPage? options)
-            => string.Equals(options?.WebFetchMode, "local", StringComparison.OrdinalIgnoreCase)
+        private WebFetchMode ResolveWebFetchModeFromOptions()
+            => string.Equals(_options?.WebFetchMode, "local", StringComparison.OrdinalIgnoreCase)
                 ? WebFetchMode.Local
                 : WebFetchMode.Official;
-
-        private WebFetchMode ResolveWebFetchModeFromOptions()
-            => ResolveWebFetchModeFromOptions(_options);
 
         /// <summary>
         /// 后台异步校验所有已配置的 API Key 是否有效。

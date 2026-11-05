@@ -1124,14 +1124,6 @@ namespace DeepSeek_v4_for_VisualStudio.View
         }
 
         /// <summary>
-        /// 记录 DeepSeek Prompt Cache 命中率到日志。
-        /// 从 _apiService.LastUsage 读取 cache 统计信息并格式化输出。
-        /// </summary>
-        /// <param name="round">当前工具调用轮次（0 表示非工具循环模式）</param>
-        private void LogCacheHitRate(int round = 0)
-            => CacheUsageLogger.Log(_apiService?.LastUsage, round);
-
-        /// <summary>
         /// 确保 ApiService 可用：仅在未初始化时创建，避免重置累计 Token 计数器。
         /// 不可用时复位生成态并返回 false（调用方直接 return）。
         /// 发送与重发两条入口共用，此前是两段相同的就地代码。

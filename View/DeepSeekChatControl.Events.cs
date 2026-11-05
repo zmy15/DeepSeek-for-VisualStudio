@@ -2083,17 +2083,6 @@ namespace DeepSeek_v4_for_VisualStudio.View
             }
         }
 
-        // TODO: RagCheckBox 暂时注释掉，功能未完善
-        /*
-        private void RagCheckBox_Changed(object sender, RoutedEventArgs e)
-        {
-            bool enabled = RagCheckBox.IsChecked == true;
-            if (_ragService != null)
-                _ragService.IsEnabled = enabled;
-            Logger.Info($"代码索引: {(enabled ? "启用" : "禁用")}");
-        }
-        */
-
         private void EffortComboBox_SelectionChanged(object sender, SelectionChangedEventArgs e)
         {
             if (_isRefreshingCoreControls) return;
