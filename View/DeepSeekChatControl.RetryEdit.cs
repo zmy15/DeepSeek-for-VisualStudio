@@ -115,7 +115,7 @@ namespace DeepSeek_v4_for_VisualStudio.View
 
         /// <summary>
         /// 执行 Agent Handoff（从 Plan → Edit）。
-        /// 由 WebView 中的" 开始实现"按钮触发。
+        /// 由计划面板中的"执行当前计划"按钮触发。
         /// </summary>
         /// <param name="targetAgent">目标 Agent 类型字符串（如 "Edit"）</param>
         /// <param name="label">按钮标签（用于日志）</param>
@@ -124,7 +124,7 @@ namespace DeepSeek_v4_for_VisualStudio.View
             if (_activeAgent == null || _agentFactory == null) return;
 
             // ── 并发守卫 ──
-            // 历史上解决方案重载会把 UI 重建成"任务未执行"的样子，并重新注入"开始实现"按钮；
+            // 历史上解决方案重载会把 UI 重建成"任务未执行"的样子，并重新注入"执行当前计划"按钮；
             // 此时后台任务其实还在跑，再点一次就会对同一批文件并发启动第二个 Agent。
             if (IsRunInProgress())
             {
@@ -177,7 +177,7 @@ namespace DeepSeek_v4_for_VisualStudio.View
             {
                 // ── 立即消费持久化的 Handoff ──
                 // 必须在任务开始时清掉消息上的 HandoffJson：否则任务执行期间一旦 VS 重载解决方案
-                // 或重建窗口，恢复逻辑会从磁盘把"开始实现"按钮重新注入，用户再点一次就是并发第二个任务。
+                // 或重建窗口，恢复逻辑会从磁盘把"执行当前计划"按钮重新注入，用户再点一次就是并发第二个任务。
                 ClearPersistedHandoffJson();
 
                 // ── 记录"本轮执行中"标记（崩溃/强杀后可从磁盘识别未收尾任务）──
@@ -529,18 +529,19 @@ namespace DeepSeek_v4_for_VisualStudio.View
                         try
                         {
                             bool anyStepExecuted = plan.Steps.Any(s => s.Status != AgentStepStatus.Pending);
-                            if (anyStepExecuted)
+                            if (plan.Source != PlanSource.None)
                             {
-                                // 步骤已执行 → 更新面板为完成/进度状态
-                                string completeJs = ChatHtmlService.BuildAgentTaskPanelCompleteJs(plan);
-                                await ChatWebView.CoreWebView2.ExecuteScriptAsync(completeJs);
-                            }
-                            else if (plan.Source != PlanSource.None)
-                            {
-                                // 新创建的计划（PlanAgent 产出）→ 创建任务面板
+                                lock (_lock) { _createdPlanIds.Add(plan.PlanId); }
+
+                                // 始终幂等创建/更新，确保 Edit 自动拆分计划也能生成面板。
                                 string createJs = ChatHtmlService.BuildAgentTaskPanelCreateJs(plan);
                                 await ChatWebView.CoreWebView2.ExecuteScriptAsync(createJs);
-                                lock (_lock) { _createdPlanIds.Add(plan.PlanId); }
+
+                                if (anyStepExecuted || plan.IsCompleted || plan.IsCancelled)
+                                {
+                                    string completeJs = ChatHtmlService.BuildAgentTaskPanelCompleteJs(plan);
+                                    await ChatWebView.CoreWebView2.ExecuteScriptAsync(completeJs);
+                                }
                             }
                         }
                         catch { }

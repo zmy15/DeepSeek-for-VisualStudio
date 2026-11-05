@@ -401,9 +401,9 @@ namespace DeepSeek_v4_for_VisualStudio.Services
 
         /// <summary>
         /// 构建 Handoff 按钮的 JavaScript 注入脚本。
-        /// 在消息底部渲染一个" 开始实现"按钮，点击后触发 Agent Handoff。
+        /// 在计划面板底部渲染"执行当前计划"按钮，点击后触发 Agent Handoff。
         /// </summary>
-        /// <param name="messageIndex">要附加按钮的消息索引</param>
+        /// <param name="messageIndex">消息索引，用于生成按钮唯一 ID</param>
         /// <param name="targetAgent">目标 Agent 类型（如 "Edit"）</param>
         /// <param name="label">按钮显示文本</param>
         /// <returns>JavaScript 脚本字符串</returns>
@@ -413,23 +413,29 @@ namespace DeepSeek_v4_for_VisualStudio.Services
             string escapedTarget = EscapeJsString(targetAgent);
             return $@"
 (function(){{
-    var msgDiv=document.getElementById('msg-{messageIndex}');
-    if(!msgDiv) return;
-    var existingBtn=document.getElementById('handoff-btn-{messageIndex}');
+    var panel=document.querySelector('[id^=""agent-task-panel-""]');
+    if(!panel) return;
+    if(panel.getAttribute('data-plan-source')!=='PlanAgent') return;
+    var existingBtn=panel.querySelector('.handoff-btn');
     if(existingBtn) return;
 
     var btn=document.createElement('button');
     btn.id='handoff-btn-{messageIndex}';
-    btn.className='msg-action-btn handoff-btn';
-    btn.textContent='{escapedLabel}';
-    btn.title='{EscapeJsString(L["chat.html.handoffButtonTitle"])}';
-    btn.style.cssText='background:#28a745;color:#fff;border:none;padding:8px 20px;border-radius:6px;cursor:pointer;font-size:14px;margin:10px 0;font-weight:600;opacity:1;';
+    btn.className='msg-action-btn handoff-btn task-handoff-btn';
+    btn.textContent={escapedLabel};
+    btn.title={EscapeJsString(L["chat.html.handoffButtonTitle"])};
+    btn.style.cssText='display:block;width:100%;box-sizing:border-box;background:#28a745;color:#fff;border:none;padding:9px 20px;border-radius:6px;cursor:pointer;font-size:14px;margin:10px 0 2px 0;font-weight:600;opacity:1;';
     btn.onmouseover=function(){{this.style.background='#218838';}};
     btn.onmouseout=function(){{this.style.background='#28a745';}};
-    btn.onclick=function(){{window.__executeHandoff('{escapedTarget}','{escapedLabel}');}};
+    btn.onclick=function(){{window.__executeHandoff({escapedTarget},{escapedLabel});}};
 
-    var msgBody=document.getElementById('msg-body-{messageIndex}');
-    if(msgBody) msgBody.parentNode.insertBefore(btn,msgBody.nextSibling);
+    var actions=panel.querySelector('.agent-task-panel-actions');
+    if(!actions){{
+        actions=document.createElement('div');
+        actions.className='agent-task-panel-actions';
+        panel.appendChild(actions);
+    }}
+    actions.appendChild(btn);
 }})();";
         }
 
@@ -2140,6 +2146,7 @@ return "<!DOCTYPE html><html lang='" + htmlLang + "'><head><meta charset='UTF-8'
     var panel=document.createElement('div');
     panel.id='agent-task-panel-{pid}';
     panel.className='agent-task-panel';
+    panel.setAttribute('data-plan-source',{EscapeJsString(plan.Source.ToString())});
     panel.innerHTML=
         '<div class=""agent-task-panel-header"" onclick=""window.__toggleTaskPanel(\'{pid}\')"">'+
  '<span class=""task-icon""></span>'+

@@ -1155,19 +1155,27 @@ namespace DeepSeek_v4_for_VisualStudio.View
                     {
                         try
                         {
-                            if (anyStepExecuted)
+                            if (plan.Source != PlanSource.None)
                             {
-                                // 步骤已执行 → 更新面板为完成/进度状态
-                                string completeJs = ChatHtmlService.BuildAgentTaskPanelCompleteJs(plan);
-                                await ChatWebView.CoreWebView2.ExecuteScriptAsync(completeJs);
-                            }
-                            else if (plan.Source != PlanSource.None)
-                            {
-                                // 新创建的计划（PlanAgent 或 EditAgent 产出，所有步骤待执行）→ 创建任务面板
+                                bool firstCreation;
+                                lock (_lock)
+                                {
+                                    firstCreation = _createdPlanIds.Add(plan.PlanId);
+                                }
+
+                                // 始终执行一次创建/更新：事件回调可能已创建面板，也可能仍在异步注入。
+                                // BuildAgentTaskPanelCreateJs 对已存在面板是幂等更新，可消除收尾竞态。
                                 string createJs = ChatHtmlService.BuildAgentTaskPanelCreateJs(plan);
                                 await ChatWebView.CoreWebView2.ExecuteScriptAsync(createJs);
-                                lock (_lock) { _createdPlanIds.Add(plan.PlanId); }
-                                Logger.Info($"[Agent] 任务面板已创建: PlanId={plan.PlanId}, Source={plan.Source}, Steps={plan.Steps.Count}");
+                                if (firstCreation)
+                                    Logger.Info($"[Agent] 任务面板已创建: PlanId={plan.PlanId}, Source={plan.Source}, Steps={plan.Steps.Count}");
+
+                                if (anyStepExecuted || plan.IsCompleted || plan.IsCancelled)
+                                {
+                                    // Edit 自拆分计划在执行完成前没有独立创建入口，收尾时补创建并立即刷新为完成态。
+                                    string completeJs = ChatHtmlService.BuildAgentTaskPanelCompleteJs(plan);
+                                    await ChatWebView.CoreWebView2.ExecuteScriptAsync(completeJs);
+                                }
                             }
                             else
                             {
@@ -1257,7 +1265,7 @@ namespace DeepSeek_v4_for_VisualStudio.View
                     else
                         ClearAssistantMessageIncomplete(_agentStreamingMsgIndex);
 
-                    // ── 如果有待处理的 Handoff（如 Plan→Edit），注入"开始实现"按钮 ──
+                    // ── 如果有待处理的 Handoff（如 Plan→Edit），注入“执行当前计划”按钮 ──
                     await InjectPendingHandoffButtonAsync();
 
                     if (plan.ChangedFiles.Count > 0)
@@ -2223,16 +2231,24 @@ namespace DeepSeek_v4_for_VisualStudio.View
                 {
                     string pid = plan.PlanId;
 
-                    // ── 仅更新有来源的计划面板（PlanAgent 或 EditAgent 产出）──
-                    // 独立 Edit（无拆分计划）不创建/更新下方面板
+                    // ── 有来源的计划面板（PlanAgent 或 EditAgent 自动拆分）──
+                    // 单步 Edit 的 Source=None，不创建面板。
                     if (plan.Source != PlanSource.None)
                     {
-                        bool alreadyCreated;
-                        lock (_lock) { alreadyCreated = _createdPlanIds.Contains(pid); }
-
-                        if (alreadyCreated)
+                        bool shouldCreate;
+                        lock (_lock)
                         {
-                            // 更新任务面板进度
+                            shouldCreate = _createdPlanIds.Add(pid);
+                        }
+
+                        if (shouldCreate)
+                        {
+                            string createJs = ChatHtmlService.BuildAgentTaskPanelCreateJs(plan);
+                            await ChatWebView.CoreWebView2.ExecuteScriptAsync(createJs);
+                            Logger.Info($"[Agent] 任务面板已创建: PlanId={pid}, Source={plan.Source}, Steps={plan.Steps.Count}");
+                        }
+                        else
+                        {
                             string updateJs = ChatHtmlService.BuildAgentTaskPanelUpdateJs(plan);
                             await ChatWebView.CoreWebView2.ExecuteScriptAsync(updateJs);
                         }
@@ -2333,7 +2349,7 @@ namespace DeepSeek_v4_for_VisualStudio.View
                             try
                             {
                                 var plan = JsonSerializer.Deserialize<AgentTaskPlan>(msg.PlanJson, opts);
-                                if (plan != null && plan.IsFromPlanAgent && plan.Steps.Count > 0)
+                                if (plan != null && plan.Source != PlanSource.None && plan.Steps.Count > 0)
                                 {
                                     string pid = plan.PlanId;
                                     if (!_createdPlanIds.Contains(pid))
@@ -2378,27 +2394,23 @@ namespace DeepSeek_v4_for_VisualStudio.View
                 foreach (var (plan, needsTwoPass) in plansToRebuild)
                 {
                     string pid = plan.PlanId;
-                    string js;
-                    if (plan.IsCompleted || plan.Steps.All(s => s.Status == AgentStepStatus.Completed || s.Status == AgentStepStatus.Skipped))
+                    string createJs = ChatHtmlService.BuildAgentTaskPanelCreateJs(plan);
+                    await ChatWebView.CoreWebView2.ExecuteScriptAsync(createJs);
+
+                    bool isFinished = plan.IsCompleted || plan.IsCancelled
+                        || plan.Steps.All(s => s.Status == AgentStepStatus.Completed || s.Status == AgentStepStatus.Skipped);
+                    if (isFinished)
                     {
-                        js = ChatHtmlService.BuildAgentTaskPanelCompleteJs(plan);
+                        string completeJs = ChatHtmlService.BuildAgentTaskPanelCompleteJs(plan);
+                        await ChatWebView.CoreWebView2.ExecuteScriptAsync(completeJs);
                     }
-                    else if (plan.IsCancelled)
+                    else if (needsTwoPass)
                     {
-                        js = ChatHtmlService.BuildAgentTaskPanelCompleteJs(plan);
-                    }
-                    else
-                    {
-                        js = ChatHtmlService.BuildAgentTaskPanelCreateJs(plan);
-                        if (needsTwoPass)
-                        {
-                            _ = ChatWebView.CoreWebView2.ExecuteScriptAsync(js);
-                            await Task.Delay(100);
-                            js = ChatHtmlService.BuildAgentTaskPanelUpdateJs(plan);
-                        }
+                        await Task.Delay(100);
+                        string updateJs = ChatHtmlService.BuildAgentTaskPanelUpdateJs(plan);
+                        await ChatWebView.CoreWebView2.ExecuteScriptAsync(updateJs);
                     }
 
-                    _ = ChatWebView.CoreWebView2.ExecuteScriptAsync(js);
                     Logger.Info($"[Panel] 重建持久化任务面板: {plan.Title} (PlanId={pid}, Steps={plan.Steps.Count})");
                 }
 
@@ -2419,7 +2431,7 @@ namespace DeepSeek_v4_for_VisualStudio.View
                         string targetAgentStr = handoff.TargetAgent.ToString();
                         string handoffBtnJs = ChatHtmlService.BuildHandoffButtonJs(
                             msgIndex, targetAgentStr, handoff.Label);
-                        _ = ChatWebView.CoreWebView2.ExecuteScriptAsync(handoffBtnJs);
+                        await ChatWebView.CoreWebView2.ExecuteScriptAsync(handoffBtnJs);
                         Logger.Info($"[Panel] 重建 Handoff 按钮: msgIdx={msgIndex}, target={targetAgentStr}, label={handoff.Label}");
                     }
                     catch (Exception ex)
@@ -2430,7 +2442,7 @@ namespace DeepSeek_v4_for_VisualStudio.View
 
                 // ── 恢复 _pendingHandoff，使重启后点击按钮不会因 null 而直接返回 ──
                 // 任务执行中绝不恢复：消息上的 HandoffJson 只代表"最近一次规划产出的待执行按钮"，
-                // 一旦已经开始执行却还没走完，恢复它等于把"开始实现"重新变成可点击状态，
+                // 一旦已经开始执行却还没走完，恢复它等于把“执行当前计划”重新变成可点击状态，
                 // 用户再点一次就会对同一批文件并发启动第二个 Agent。
                 if (handoffsToRebuild.Count > 0 && !IsRunInProgress())
                 {

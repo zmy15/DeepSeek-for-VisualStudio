@@ -601,7 +601,7 @@ namespace DeepSeek_v4_for_VisualStudio.View
         // ── 最近一次 Agent 执行的文件变更（临时存储，RunAgentWorkflowAsync 写入，RecordAgentFileChanges 消费后清空）──
         private List<Models.FileChangeSummary>? _pendingAgentFileChanges;
 
-        /// <summary>最近一次 Agent 执行的 Handoff（用于 UI 渲染"开始实现"按钮）</summary>
+        /// <summary>最近一次 Agent 执行的 Handoff（用于 UI 渲染“执行当前计划”按钮）</summary>
         private Models.AgentHandoff? _pendingHandoff;
 
         // ── 已创建的计划 ID 集合（防止重复创建计划消息）──

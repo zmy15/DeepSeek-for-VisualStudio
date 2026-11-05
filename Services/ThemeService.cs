@@ -455,6 +455,7 @@ ul,ol{padding-left:22px;margin:6px 0}li{margin:2px 0}blockquote{border-left:3px 
 .task-close.finished{background:#3C1A1A;color:#E07878;border-color:#6A3A3A}
 .task-close.finished:hover{background:#c0392b;color:#fff;border-color:#c0392b}
 .agent-task-panel-body{padding:6px 10px;max-height:24vh;overflow-y:auto}
+.agent-task-panel-actions{padding:8px 10px;border-top:1px solid #2a3a4a}
 .terminal-approval-card{margin:12px 0;border:1px solid #5a4a2a;border-radius:10px;background:#1e1a12;overflow:hidden;box-shadow:0 2px 12px rgba(0,0,0,.3)}
 .terminal-approval-card-header{display:flex;align-items:center;gap:10px;padding:10px 14px;background:#2a2218;border-bottom:1px solid #3a2e1a;font-size:13px;font-weight:600;color:#e0c870}
 .terminal-approval-card-header .icon{font-size:18px}
@@ -569,6 +570,7 @@ ul,ol{padding-left:22px;margin:6px 0}li{margin:2px 0}blockquote{border-left:3px 
 .task-close.finished{background:#f8e0e0;color:#c04040;border-color:#d8a0a0}
 .task-close.finished:hover{background:#c0392b;color:#fff;border-color:#c0392b}
 .agent-task-panel-body{padding:6px 10px;max-height:24vh;overflow-y:auto}
+.agent-task-panel-actions{padding:8px 10px;border-top:1px solid #d0dce8}
 .terminal-approval-card{margin:12px 0;border:1px solid #d8c8a0;border-radius:10px;background:#fffdf5;overflow:hidden;box-shadow:0 2px 12px rgba(0,0,0,.08)}
 .terminal-approval-card-header{display:flex;align-items:center;gap:10px;padding:10px 14px;background:#faf5e8;border-bottom:1px solid #e8dcc0;font-size:13px;font-weight:600;color:#8a7030}
 .terminal-approval-card-header .icon{font-size:18px}

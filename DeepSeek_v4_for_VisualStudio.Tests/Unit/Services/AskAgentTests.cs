@@ -196,6 +196,20 @@ public class AskAgentTests
     }
 
     /// <summary>
+    /// 多步骤 Edit 计划必须由 Ask 通过 editSteps 提供，Edit 不再自行拆分。
+    /// </summary>
+    [Fact]
+    public void SystemPrompt_RequiresEditStepsForMultiStepEditHandoff()
+    {
+        string prompt = LocalizationService.Instance["agent.ask.systemPromptFragment"]
+            + LocalizationService.Instance["agent.ask.editStepsInstruction"];
+
+        prompt.Should().Contain("editSteps");
+        prompt.Should().Contain("2-4");
+        prompt.Should().Contain("Edit");
+    }
+
+    /// <summary>
     /// 回归：单纯的构建/测试请求要交给 Build Agent（它同时持有 build_solution 与 run_tests），
     /// 而不是 Edit —— 前者只需一个结果，后者才是改代码的场景。
     /// </summary>

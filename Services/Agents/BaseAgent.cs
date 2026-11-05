@@ -3063,7 +3063,7 @@ namespace DeepSeek_v4_for_VisualStudio.Services.Agents
         }
 
         /// <summary>
-        /// 根据移交携带的步骤构造轻量执行计划（不生成 plan.md、不落 JSON、不创建任务面板）。
+        /// 根据移交携带的步骤构造轻量执行计划（不生成 plan.md，但作为 Edit 计划显示并持久化面板）。
         /// </summary>
         /// <param name="handoff">移交定义（EditSteps 非空，调用方已保证）</param>
         internal static AgentTaskPlan BuildLightweightPlanFromHandoff(AgentHandoff handoff)
@@ -3087,7 +3087,8 @@ namespace DeepSeek_v4_for_VisualStudio.Services.Agents
                 Title = LocalizationService.Instance["plan.lightweightTitle"],
                 Steps = steps,
                 TaskDescription = handoff.Prompt, // 保留完整任务内容，Edit 步骤提示中再注入
-                Source = PlanSource.None,      // 不创建任务面板，仅思考气泡/执行时间线
+                // Edit 执行计划同样需要面板展示步骤进度；该来源不会显示“执行当前计划”按钮。
+                Source = PlanSource.EditAgent,
                 IsCompleted = false,
                 IsCancelled = false,
                 PlanFilePath = null,           // 无 plan.md；ExecuteHandoffAsync 的 File.Exists 判定会自动跳过

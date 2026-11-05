@@ -22,14 +22,14 @@ namespace DeepSeek_v4_for_VisualStudio.Models
     }
 
     /// <summary>
-    /// 任务规模分类：用于决定走 Plan Agent（大型）还是 Edit Agent 直处理（中小型）。
+    /// 任务规模分类：用于决定走 Plan Agent（大型）还是 Edit Agent 直接处理（中小型）。
     /// </summary>
     public enum TaskSize
     {
         /// <summary>小任务：单文件、简单修改（如改配置、修一行 bug）</summary>
         Small,
 
-        /// <summary>中任务：跨 2-5 个文件、非结构性改动</summary>
+        /// <summary>中任务：跨 2-5 个文件、非结构性改动；多步计划由 Ask 的 editSteps 提供</summary>
         Medium,
 
         /// <summary>大任务：新功能、跨模块重构、架构变更</summary>
@@ -47,7 +47,7 @@ namespace DeepSeek_v4_for_VisualStudio.Models
         /// <summary>Plan Agent 产出（生成 plan.md）</summary>
         PlanAgent = 1,
 
-        /// <summary>Edit Agent 自拆分（不生成 plan.md，但显示面板）</summary>
+        /// <summary>Edit 执行计划（自拆分或 Handoff 携带步骤；不生成 plan.md，但显示面板）</summary>
         EditAgent = 2,
     }
 

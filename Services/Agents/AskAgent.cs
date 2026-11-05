@@ -84,6 +84,7 @@ namespace DeepSeek_v4_for_VisualStudio.Services.Agents
         {
             return LocalizationService.Instance["agent.ask.systemPromptFragment"]
                 + AiPrompts.AskAgentPromptFragment
+                + LocalizationService.Instance["agent.ask.editStepsInstruction"]
                 + AiPrompts.AgentConclusionStopRule;
         }
 
