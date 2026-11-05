@@ -42,7 +42,7 @@ namespace DeepSeek_v4_for_VisualStudio.Services.Agents
             "run_tests",
             "replace_string_in_file", "multi_replace_string_in_file",
             "create_file", "delete_file", "apply_patch", "create_directory", "run_in_terminal",
-            "get_terminal_output", "load_skill", "read_skill_resource",
+            "get_terminal_output", "list_skills", "load_skill", "read_skill_resource",
             "VisualStudio_askQuestions", "runSubagent", "request_handoff",
             "git", "memory"
         };
@@ -179,19 +179,10 @@ namespace DeepSeek_v4_for_VisualStudio.Services.Agents
                 ? McpManager.GetToolDefinitions()
                 : null;
 
-            bool autoSkillRoutingEnabled =
-                Settings.DeepSeekOptionsPage.Instance?.EnableAutoSkillRouting == true;
-
             if (BuiltInTools != null)
             {
                 foreach (var def in BuiltInTools.GetFullToolDefinitions())
                 {
-                    if (!autoSkillRoutingEnabled &&
-                        string.Equals(def.Function.Name, "load_skill", StringComparison.OrdinalIgnoreCase))
-                    {
-                        continue;
-                    }
-
                     // 注意：视觉模型的 OCR 工具不在此处剔除。
                     // 工具集必须保持稳定（缺失/新增都会改写请求前缀，打断 DeepSeek Prefix Cache），
                     // 视觉模式下改为在执行层禁用：模型仍能看到工具，但调用会被拒绝并收到明确指引。
@@ -1319,15 +1310,10 @@ namespace DeepSeek_v4_for_VisualStudio.Services.Agents
                     effectiveWhitelist = toolWhitelist ?? Definition.AllowedTools;
                     if (effectiveWhitelist != null && effectiveWhitelist.Count > 0)
                     {
-                        // Skill loading is a read-only capability shared by every Agent.
-                        // When automatic routing is disabled, keep resource reads available
-                        // for explicitly invoked skills, but do not let the model load skills on its own.
-                        bool autoSkillRoutingEnabled =
-                            Settings.DeepSeekOptionsPage.Instance?.EnableAutoSkillRouting == true;
+                        // Skill discovery/loading is a read-only capability shared by every Agent.
+                        // The auto-routing setting only controls the pre-request routing pass.
                         effectiveWhitelist = effectiveWhitelist
-                            .Concat(autoSkillRoutingEnabled
-                                ? new[] { "load_skill", "read_skill_resource" }
-                                : new[] { "read_skill_resource" })
+                            .Concat(new[] { "list_skills", "load_skill", "read_skill_resource" })
                             .Distinct(StringComparer.OrdinalIgnoreCase)
                             .ToList();
                     }

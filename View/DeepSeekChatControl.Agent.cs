@@ -323,17 +323,14 @@ namespace DeepSeek_v4_for_VisualStudio.View
         {
             if (_contextManager == null || _skillDiscoveryResult == null) return;
 
+            string discoveryContext = SkillService.Instance.GenerateSkillsDiscoveryContext(_skillDiscoveryResult);
             string? skillContext = null;
-            if (IsAutoSkillRoutingEnabled())
+            if (!string.IsNullOrWhiteSpace(discoveryContext))
             {
-                string discoveryContext = SkillService.Instance.GenerateSkillsDiscoveryContext(_skillDiscoveryResult);
-                if (!string.IsNullOrWhiteSpace(discoveryContext))
-                {
-                    skillContext = AiPrompts.BuildSkillSystemPromptFragment(discoveryContext);
-                    string toolInstructions = LocalizationService.Instance["system.skillToolInstructions"];
-                    if (!string.IsNullOrWhiteSpace(toolInstructions))
-                        skillContext += "\n\n" + toolInstructions;
-                }
+                skillContext = AiPrompts.BuildSkillSystemPromptFragment(discoveryContext);
+                string toolInstructions = LocalizationService.Instance["system.skillToolInstructions"];
+                if (!string.IsNullOrWhiteSpace(toolInstructions))
+                    skillContext += "\n\n" + toolInstructions;
             }
 
             _contextManager.SetSkillContext(skillContext);
@@ -344,7 +341,7 @@ namespace DeepSeek_v4_for_VisualStudio.View
 
             if (skillContext == null)
             {
-                Logger.Info($"[Skill] 自动技能路由已关闭；始终注入技能: {_skillDiscoveryResult.AlwaysInjectSkills.Count} 个");
+                Logger.Info($"[Skill] 无可按需加载技能；始终注入技能: {_skillDiscoveryResult.AlwaysInjectSkills.Count} 个");
             }
             else
             {

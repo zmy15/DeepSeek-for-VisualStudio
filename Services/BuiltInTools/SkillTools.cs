@@ -3,11 +3,135 @@ using System;
 using System.Collections.Generic;
 using System.IO;
 using System.Linq;
+using System.Text;
 using System.Text.Json;
 using System.Threading.Tasks;
 
 namespace DeepSeek_v4_for_VisualStudio.Services.BuiltInTools
 {
+    /// <summary>Lists all skills available in the current workspace.</summary>
+    public sealed class ListSkillsTool : BuiltInToolBase
+    {
+        private readonly ISkillService _skillService;
+
+        public ListSkillsTool(ISkillService skillService)
+        {
+            _skillService = skillService ?? throw new ArgumentNullException(nameof(skillService));
+        }
+
+        public override string Name => "list_skills";
+
+        public override ToolDefinition GetDefinition()
+        {
+            return new ToolDefinition
+            {
+                Type = "function",
+                Function = new ToolFunction
+                {
+                    Name = Name,
+                    Description = L["tool.listSkills.desc"],
+                    Parameters = new
+                    {
+                        type = "object",
+                        properties = new { },
+                        required = Array.Empty<string>(),
+                    },
+                },
+            };
+        }
+
+        public override async Task<string> ExecuteAsync(
+            Dictionary<string, JsonElement> args,
+            string? workspaceRoot)
+        {
+            var discovery = await _skillService.DiscoverSkillsAsync(workspaceRoot);
+            return FormatSkills(discovery);
+        }
+
+        public override string GetDisplayText(Dictionary<string, JsonElement> args)
+            => L["tool.listSkills.displayText"];
+
+        public override string GetResultSummary(string toolResult)
+        {
+            if (string.IsNullOrEmpty(toolResult))
+                return L["tool.common.noResult"];
+            if (toolResult.StartsWith("Error: "))
+                return toolResult;
+            return L["tool.listSkills.resultSummary"];
+        }
+
+        private static string FormatSkills(SkillDiscoveryResult discovery)
+        {
+            var skills = discovery.Skills
+                .OrderBy(skill => skill.Name, StringComparer.OrdinalIgnoreCase)
+                .ThenBy(skill => skill.Source)
+                .ToList();
+            var builder = new StringBuilder();
+
+            builder.AppendLine(L.Format("tool.listSkills.resultHeader", skills.Count));
+            if (skills.Count == 0)
+            {
+                builder.AppendLine();
+                builder.Append(L["tool.listSkills.noSkills"]);
+                return builder.ToString();
+            }
+
+            builder.AppendLine();
+            builder.AppendLine(
+                $"| {L["tool.listSkills.tableName"]} | {L["tool.listSkills.tableDescription"]} | "
+                + $"{L["tool.listSkills.tableSource"]} | {L["tool.listSkills.tableUsage"]} |");
+            builder.AppendLine("|---|---|---|---|");
+
+            foreach (var skill in skills)
+            {
+                string description = EscapeTableCell(
+                    string.IsNullOrWhiteSpace(skill.Description) ? "-" : skill.Description);
+                builder.AppendLine(
+                    $"| `{EscapeTableCell(skill.Name)}` | {description} | "
+                    + $"{GetSourceLabel(skill.Source)} | {GetUsageLabel(skill)} |");
+            }
+
+            return builder.ToString().TrimEnd();
+        }
+
+        private static string GetSourceLabel(SkillSource source)
+        {
+            return source switch
+            {
+                SkillSource.Project => L["tool.listSkills.sourceProject"],
+                SkillSource.User => L["tool.listSkills.sourceUser"],
+                SkillSource.BuiltIn => L["tool.listSkills.sourceBuiltIn"],
+                _ => source.ToString(),
+            };
+        }
+
+        private static string GetUsageLabel(SkillDefinition skill)
+        {
+            if (skill.AlwaysInject)
+                return L["tool.listSkills.usageAlwaysInject"];
+            if (skill.DisableModelInvocation)
+            {
+                return skill.UserInvocable
+                    ? L["tool.listSkills.usageUserOnly"]
+                    : L["tool.listSkills.usageUnavailable"];
+            }
+            return skill.UserInvocable
+                ? L["tool.listSkills.usageModelAndUser"]
+                : L["tool.listSkills.usageModelOnly"];
+        }
+
+        private static string EscapeTableCell(string value)
+        {
+            return value
+                .Replace("\\", "\\\\")
+                .Replace("|", "\\|")
+                .Replace("`", "\\`")
+                .Replace("\r\n", "<br>")
+                .Replace("\r", "<br>")
+                .Replace("\n", "<br>");
+        }
+    }
+
     /// <summary>Supports loading full skill instructions by name.</summary>
     public sealed class LoadSkillTool : BuiltInToolBase
     {
