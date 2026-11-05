@@ -52,8 +52,15 @@ namespace DeepSeek_v4_for_VisualStudio.Models
         /// <summary>原始 Hunk 文本（用于匹配失败时的 healing）</summary>
         public string RawText { get; set; } = string.Empty;
 
-        /// <summary>是否为文件末尾 Hunk（由 *** End of File 标记）。匹配时优先从文件末尾搜索。</summary>
+        /// <summary>是否为文件末尾 Hunk（由 *** End of File 标记）。</summary>
         public bool IsEof { get; set; }
+
+        /// <summary>
+        /// 可选的唯一位置锚点（来自 apply_patch 的 expected）。
+        /// 锚点必须在目标文件中精确唯一，并位于 hunk 匹配位置附近。
+        /// </summary>
+        [JsonIgnore]
+        public string? ExpectedAnchor { get; set; }
     }
 
     /// <summary>

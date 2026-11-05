@@ -469,6 +469,9 @@ namespace DeepSeek_v4_for_VisualStudio.View
                         var capturedMsgIdx = capturedUserMsgIndex;
                         var capturedCurrentUserContent = fullUserContent;
 
+                        // ── 记录"本轮执行中"标记：崩溃/强杀后可从磁盘识别未收尾任务 ──
+                        BeginActiveRunMarker();
+
                         _ = Task.Run(async () =>
                         {
                             try
@@ -489,6 +492,12 @@ namespace DeepSeek_v4_for_VisualStudio.View
                             {
                                 await ThreadHelper.JoinableTaskFactory.SwitchToMainThreadAsync();
                                 lock (_lock) { _isGenerating = false; }
+
+                                // ── 先清执行中标记，再应用执行期间被延后的解决方案事件 ──
+                                // 顺序不能反：延后事件可能会清空/切换对话，标记必须在旧会话上收尾。
+                                CompleteActiveRunMarker();
+                                await ApplyPendingSolutionChangeIfAnyAsync();
+
                                 if (!TryStartQueuedAppend())
                                 {
                                     UpdateButtonsState();
@@ -1113,14 +1122,6 @@ namespace DeepSeek_v4_for_VisualStudio.View
                 return argumentsJson;
             }
         }
-
-        /// <summary>
-        /// 记录 DeepSeek Prompt Cache 命中率到日志。
-        /// 从 _apiService.LastUsage 读取 cache 统计信息并格式化输出。
-        /// </summary>
-        /// <param name="round">当前工具调用轮次（0 表示非工具循环模式）</param>
-        private void LogCacheHitRate(int round = 0)
-            => CacheUsageLogger.Log(_apiService?.LastUsage, round);
 
         /// <summary>
         /// 确保 ApiService 可用：仅在未初始化时创建，避免重置累计 Token 计数器。

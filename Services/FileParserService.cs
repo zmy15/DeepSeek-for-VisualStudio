@@ -167,7 +167,7 @@ namespace DeepSeek_v4_for_VisualStudio.Services
                 if (fileInfo.Length > warningSize)
                 {
                     Logger.Warn(string.Format(LocalizationService.Instance["file.tooLarge"],
-                        filePath, FormatFileSize(fileInfo.Length)));
+                        filePath, FileSizeFormatter.Format(fileInfo.Length)));
                 }
 
                 // 文本文件直接以 UTF-8 读取
@@ -806,13 +806,6 @@ namespace DeepSeek_v4_for_VisualStudio.Services
         /// <summary>
         /// 格式化文件大小为可读字符串。
         /// </summary>
-        private static string FormatFileSize(long bytes)
-        {
-            if (bytes < 1024) return $"{bytes} B";
-            if (bytes < 1024 * 1024) return $"{bytes / 1024.0:F1} KB";
-            return $"{bytes / (1024.0 * 1024.0):F1} MB";
-        }
-
         #endregion
     }
 

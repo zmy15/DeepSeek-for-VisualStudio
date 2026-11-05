@@ -23,8 +23,8 @@ namespace DeepSeek_v4_for_VisualStudio.Services.Agents
     /// </summary>
     public abstract class BaseAgent : IDisposable
     {
-        /// <summary>Ask Agent 直接探索工具的最大累计调用次数。</summary>
-        internal const int AskDirectExplorationCallLimit = 5;
+        /// <summary>Ask Agent 直接探索达到该次数后，追加一次非强制建议。</summary>
+        internal const int AskDirectExplorationHintThreshold = 8;
 
         protected readonly DeepSeekApiService _apiService;
         protected readonly List<AgentLogEntry> _logs = new();
@@ -42,7 +42,7 @@ namespace DeepSeek_v4_for_VisualStudio.Services.Agents
             "run_tests",
             "replace_string_in_file", "multi_replace_string_in_file",
             "create_file", "delete_file", "apply_patch", "create_directory", "run_in_terminal",
-            "get_terminal_output", "load_skill", "read_skill_resource",
+            "get_terminal_output", "list_skills", "load_skill", "read_skill_resource",
             "VisualStudio_askQuestions", "runSubagent", "request_handoff",
             "git", "memory"
         };
@@ -179,19 +179,10 @@ namespace DeepSeek_v4_for_VisualStudio.Services.Agents
                 ? McpManager.GetToolDefinitions()
                 : null;
 
-            bool autoSkillRoutingEnabled =
-                Settings.DeepSeekOptionsPage.Instance?.EnableAutoSkillRouting == true;
-
             if (BuiltInTools != null)
             {
                 foreach (var def in BuiltInTools.GetFullToolDefinitions())
                 {
-                    if (!autoSkillRoutingEnabled &&
-                        string.Equals(def.Function.Name, "load_skill", StringComparison.OrdinalIgnoreCase))
-                    {
-                        continue;
-                    }
-
                     // 注意：视觉模型的 OCR 工具不在此处剔除。
                     // 工具集必须保持稳定（缺失/新增都会改写请求前缀，打断 DeepSeek Prefix Cache），
                     // 视觉模式下改为在执行层禁用：模型仍能看到工具，但调用会被拒绝并收到明确指引。
@@ -401,7 +392,7 @@ namespace DeepSeek_v4_for_VisualStudio.Services.Agents
         /// <summary>
         /// 当前待确认的权限请求字典（RequestId → AgentPermissionRequest）。
         /// 支持多个并发权限请求（工具调用并行执行时每个工具可能独立请求权限）。
-        /// 请使用 TryGetPendingPermission(requestId) 或 TryRemovePendingPermission(requestId) 按 RequestId 精确查找。
+        /// 请使用 TryGetPendingPermission(requestId) 按 RequestId 精确查找。
         /// </summary>
         private readonly ConcurrentDictionary<string, AgentPermissionRequest> _pendingPermissions = new();
 
@@ -459,81 +450,10 @@ namespace DeepSeek_v4_for_VisualStudio.Services.Agents
         #region Shared AI Call Methods
 
         /// <summary>
-        /// 调用 AI 进行简短回答（用于分类、路由判断等）。
-        /// </summary>
-        public async Task<string> CallAiShortAsync(string systemPrompt, string userPrompt, CancellationToken ct, int maxTokens = 512)
-        {
-            var messages = BuildContextAwareMessages(systemPrompt, userPrompt);
-
-            var sb = new StringBuilder();
-            // toolChoice: "none" — 简短回答无需工具调用，防止 AI 生成工具调用 XML 污染输出
-            //  传入完整工具集以保持 Prefix Cache 稳定
-            await foreach (var chunk in _apiService.ChatStreamAsync(messages, TryGetFullToolSet(), ct, maxTokens, toolChoice: "none"))
-            {
-                if (IsContentChunk(chunk))
-                    sb.Append(chunk);
-            }
-            LogCacheHitRate();
-            return sb.ToString().Trim();
-        }
-
-        /// <summary>
-        /// 调用 AI 进行长回答（用于代码生成、分析等）。
-        /// </summary>
-        protected async Task<string> CallAiLongAsync(string systemPrompt, string userPrompt, CancellationToken ct, int? maxTokens = null, double? temperature = null, string? responseFormat = null, Action<string>? onThinking = null)
-        {
-            var messages = BuildContextAwareMessages(systemPrompt, userPrompt);
-
-            var sb = new StringBuilder();
-            //  传入完整工具集 + toolChoice:"none" 以保持 Prefix Cache 稳定
-            await foreach (var chunk in _apiService.ChatStreamAsync(messages, TryGetFullToolSet(), ct, maxTokens, temperature: temperature, responseFormat: responseFormat, toolChoice: "none"))
-            {
-                if (chunk.StartsWith("[THINKING]"))
-                    onThinking?.Invoke(chunk.Substring(10));
-                else if (IsContentChunk(chunk))
-                    sb.Append(chunk);
-            }
-            LogCacheHitRate();
-            return sb.ToString().Trim();
-        }
-
-        /// <summary>
-        /// 调用 AI 进行长回答，支持注入额外的系统级上下文（如 discoveryContext）。
-        /// extraSystemMessages 插入在历史与用户消息之间，保持 messages[0] 稳定可缓存。
-        /// </summary>
-        /// <param name="toolChoice">工具调用策略。Plan Agent Design 阶段应传 "none" 以禁用工具调用，避免 DSML 泄露。</param>
-        /// <param name="temperature">采样温度。Plan Agent Design 阶段应传 0.0 以确保 JSON 输出确定性。</param>
-        protected async Task<string> CallAiLongAsync(
-            string systemPrompt,
-            string userPrompt,
-            List<ChatApiMessage> extraSystemMessages,
-            CancellationToken ct,
-            int? maxTokens = null,
-            string? toolChoice = null,
-            double? temperature = null,
-            string? responseFormat = null,
-            Action<string>? onThinking = null)
-        {
-            var messages = BuildContextAwareMessages(systemPrompt, userPrompt, extraSystemMessages);
-
-            var sb = new StringBuilder();
-            //  传入完整工具集以保持 Prefix Cache 稳定
-            await foreach (var chunk in _apiService.ChatStreamAsync(messages, TryGetFullToolSet(), ct, maxTokens, toolChoice, temperature, responseFormat))
-            {
-                if (chunk.StartsWith("[THINKING]"))
-                    onThinking?.Invoke(chunk.Substring(10));
-                else if (IsContentChunk(chunk))
-                    sb.Append(chunk);
-            }
-            LogCacheHitRate();
-            return sb.ToString().Trim();
-        }
-
-        /// <summary>
         /// 使用预构建消息列表调用 AI（支持 toolChoice 和 temperature 参数）。
         ///
-        /// 缓存关键：与 CallAiLongAsync 不同，此方法直接使用传入的 messages，
-        /// 不通过 BuildContextAwareMessages 重建。这使得跨阶段的对话延续成为可能——
+        /// 缓存关键：此方法直接使用传入的 messages，不通过 BuildContextAwareMessages 重建。
+        /// 这使得跨阶段的对话延续成为可能——
         /// 对齐阶段的 tool call 历史可以直接传递给设计阶段，DeepSeek Prefix Cache
         /// 可以匹配整个对齐对话前缀，而非仅匹配 system prompt。
         /// </summary>
@@ -573,7 +493,7 @@ namespace DeepSeek_v4_for_VisualStudio.Services.Agents
                     sb.Append(chunk);
             }
             // ── 单次工具无关调用（路由/分类等）：不属于主流程对话内容，不写历史 ──
-            LogCacheHitRate();
+            CacheUsageLogger.Log(_apiService?.LastUsage);
             return sb.ToString().Trim();
         }
 
@@ -761,7 +681,9 @@ namespace DeepSeek_v4_for_VisualStudio.Services.Agents
             {
                 Role = "assistant",
                 Content = completedResult.Content,
-                ReasoningContent = completedResult.ReasoningContent,
+                // completedResult.ReasoningContent 是跨 API 子轮次聚合后的 UI 展示值，
+                // 不是某一次 assistant 响应自己的 reasoning_content。写入 API 历史
+                // 会破坏官方要求的「逐条、原样回传」语义，因此合成消息不携带该字段。
             });
             return true;
         }
@@ -1390,15 +1312,10 @@ namespace DeepSeek_v4_for_VisualStudio.Services.Agents
                     effectiveWhitelist = toolWhitelist ?? Definition.AllowedTools;
                     if (effectiveWhitelist != null && effectiveWhitelist.Count > 0)
                     {
-                        // Skill loading is a read-only capability shared by every Agent.
-                        // When automatic routing is disabled, keep resource reads available
-                        // for explicitly invoked skills, but do not let the model load skills on its own.
-                        bool autoSkillRoutingEnabled =
-                            Settings.DeepSeekOptionsPage.Instance?.EnableAutoSkillRouting == true;
+                        // Skill discovery/loading is a read-only capability shared by every Agent.
+                        // The auto-routing setting only controls the pre-request routing pass.
                         effectiveWhitelist = effectiveWhitelist
-                            .Concat(autoSkillRoutingEnabled
-                                ? new[] { "load_skill", "read_skill_resource" }
-                                : new[] { "read_skill_resource" })
+                            .Concat(new[] { "list_skills", "load_skill", "read_skill_resource" })
                             .Distinct(StringComparer.OrdinalIgnoreCase)
                             .ToList();
                     }
@@ -1444,13 +1361,29 @@ namespace DeepSeek_v4_for_VisualStudio.Services.Agents
                 // ── 流式调用 AI（带断点续传重试）──
                 bool streamSuccess = false;
                 int streamAttempt = 0;
-                const int maxStreamAttempts = 4; // 1 initial + 3 retries
+                int maxStreamAttempts = ApiRetryPolicy.GetMaxAttempts();
+                int maxStreamRetries = maxStreamAttempts - 1;
                 const int maxReasoningLoopRetries = 1;
                 int reasoningLoopRetryCount = 0;
                 bool reasoningLoopRetryPending = false;
                 string savedPartialContent = "";
                 string savedPartialReasoning = "";
                 var reasoningGuard = new ReasoningLoopGuard();
+
+                async Task PrepareAndWaitForStreamRetryAsync(
+                    Func<TimeSpan, string> createLogMessage)
+                {
+                    streamAttempt++;
+                    savedPartialContent = contentBuilder.ToString();
+                    savedPartialReasoning = reasoningBuilder.ToString();
+                    TimeSpan backoff = ApiRetryPolicy.GetBackoffDelay(streamAttempt);
+                    Logger.Warn(createLogMessage(backoff));
+                    metrics?.RecordStreamRetry();
+                    contentBuilder.Clear();
+                    reasoningBuilder.Clear();
+                    toolCallAccumulator.Clear();
+                    await Task.Delay(backoff, ct);
+                }
 
                 while (!streamSuccess && streamAttempt < maxStreamAttempts)
                 {
@@ -1531,39 +1464,18 @@ namespace DeepSeek_v4_for_VisualStudio.Services.Agents
                             VisionImageFetchService.CleanupBatch(token);
                         visionBatchTokens.Clear();
                     }
-                    catch (HttpRequestException ex) when (streamAttempt < maxStreamAttempts - 1)
+                    catch (HttpRequestException ex) when (
+                        !ApiRequestFailure.IsProviderHandled(ex) &&
+                        streamAttempt < maxStreamAttempts - 1)
                     {
-                        string msg = ex.Message;
-                        // 所有 4xx 客户端错误不重试（除 429 限流外）——请求本身有问题
-                        if (msg.Contains("400") || msg.Contains("401") || msg.Contains("402") ||
-                            msg.Contains("403") || msg.Contains("404") || msg.Contains("405") ||
-                            msg.Contains("409") || msg.Contains("422"))
-                            throw;
-
-                        streamAttempt++;
-                        savedPartialContent = contentBuilder.ToString();
-                        savedPartialReasoning = reasoningBuilder.ToString();
-                        double backoffSec = Math.Pow(2, streamAttempt);
-                        Logger.Warn($"[Agent:{Definition.Name}] 流中断 (尝试 {streamAttempt}/{maxStreamAttempts})，已收到 {savedPartialContent.Length} 字符，{backoffSec}s 后恢复…");
-                        metrics?.RecordStreamRetry();
-                        contentBuilder.Clear();
-                        reasoningBuilder.Clear();
-                        toolCallAccumulator.Clear();
-                        await Task.Delay(TimeSpan.FromSeconds(backoffSec), ct);
+                        await PrepareAndWaitForStreamRetryAsync(backoff =>
+                            $"[Agent:{Definition.Name}] 流中断 (尝试 {streamAttempt}/{maxStreamRetries})，已收到 {savedPartialContent.Length} 字符，{backoff.TotalSeconds:0}s 后恢复…");
                     }
                     catch (TaskCanceledException) when (!ct.IsCancellationRequested && streamAttempt < maxStreamAttempts - 1)
                     {
                         // 超时（非用户取消）
-                        streamAttempt++;
-                        savedPartialContent = contentBuilder.ToString();
-                        savedPartialReasoning = reasoningBuilder.ToString();
-                        double backoffSec = Math.Pow(2, streamAttempt);
-                        Logger.Warn($"[Agent:{Definition.Name}] 流超时 (尝试 {streamAttempt}/{maxStreamAttempts})，{backoffSec}s 后恢复…");
-                        metrics?.RecordStreamRetry();
-                        contentBuilder.Clear();
-                        reasoningBuilder.Clear();
-                        toolCallAccumulator.Clear();
-                        await Task.Delay(TimeSpan.FromSeconds(backoffSec), ct);
+                        await PrepareAndWaitForStreamRetryAsync(backoff =>
+                            $"[Agent:{Definition.Name}] 流超时 (尝试 {streamAttempt}/{maxStreamRetries})，{backoff.TotalSeconds:0}s 后恢复…");
                     }
                     catch (ObjectDisposedException) when (ct.IsCancellationRequested)
                     {
@@ -1576,16 +1488,8 @@ namespace DeepSeek_v4_for_VisualStudio.Services.Agents
                     catch (ObjectDisposedException) when (!ct.IsCancellationRequested && streamAttempt < maxStreamAttempts - 1)
                     {
                         // SSE 读取超时（v1.1.10）：120s 无数据 → 流被 Dispose → ReadLineAsync 抛 ObjectDisposedException
-                        streamAttempt++;
-                        savedPartialContent = contentBuilder.ToString();
-                        savedPartialReasoning = reasoningBuilder.ToString();
-                        double backoffSec = Math.Pow(2, streamAttempt);
-                        Logger.Warn($"[Agent:{Definition.Name}] SSE 流读取超时 (尝试 {streamAttempt}/{maxStreamAttempts})，已收到 {savedPartialContent.Length} 字符，{backoffSec}s 后恢复…");
-                        metrics?.RecordStreamRetry();
-                        contentBuilder.Clear();
-                        reasoningBuilder.Clear();
-                        toolCallAccumulator.Clear();
-                        await Task.Delay(TimeSpan.FromSeconds(backoffSec), ct);
+                        await PrepareAndWaitForStreamRetryAsync(backoff =>
+                            $"[Agent:{Definition.Name}] SSE 流读取超时 (尝试 {streamAttempt}/{maxStreamRetries})，已收到 {savedPartialContent.Length} 字符，{backoff.TotalSeconds:0}s 后恢复…");
                     }
                     catch (IOException) when (ct.IsCancellationRequested)
                     {
@@ -1598,15 +1502,8 @@ namespace DeepSeek_v4_for_VisualStudio.Services.Agents
                     catch (IOException) when (!ct.IsCancellationRequested && streamAttempt < maxStreamAttempts - 1)
                     {
                         // 网络错误导致的 IO 异常（非用户取消），尝试重试
-                        streamAttempt++;
-                        savedPartialContent = contentBuilder.ToString();
-                        savedPartialReasoning = reasoningBuilder.ToString();
-                        double backoffSec = Math.Pow(2, streamAttempt);
-                        Logger.Warn($"[Agent:{Definition.Name}] 流网络错误 (尝试 {streamAttempt}/{maxStreamAttempts})，已收到 {savedPartialContent.Length} 字符，{backoffSec}s 后恢复…");
-                        contentBuilder.Clear();
-                        reasoningBuilder.Clear();
-                        toolCallAccumulator.Clear();
-                        await Task.Delay(TimeSpan.FromSeconds(backoffSec), ct);
+                        await PrepareAndWaitForStreamRetryAsync(backoff =>
+                            $"[Agent:{Definition.Name}] 流网络错误 (尝试 {streamAttempt}/{maxStreamRetries})，已收到 {savedPartialContent.Length} 字符，{backoff.TotalSeconds:0}s 后恢复…");
                     }
                     catch (ReasoningLoopDetectedException ex) when (reasoningLoopRetryCount < maxReasoningLoopRetries)
                     {
@@ -1645,26 +1542,8 @@ namespace DeepSeek_v4_for_VisualStudio.Services.Agents
                     }
                 }
 
-                if (!streamSuccess)
-                {
-                    // 所有重试均失败，返回部分内容让用户可通过重试按钮继续
-                    Logger.Error($"[Agent:{Definition.Name}] 流式调用在 {maxStreamAttempts} 次尝试后全部失败");
-                    if (savedPartialContent.Length > 0 || contentBuilder.Length > 0)
-                    {
-                        string partial = contentBuilder.Length > 0 ? contentBuilder.ToString() : savedPartialContent;
-                        contentBuilder.Clear();
-                        contentBuilder.Append(partial);
-                        contentBuilder.Append(LocalizationService.Instance.Format("agent.streamRetryExhausted", maxStreamAttempts));
-                    }
-                    else
-                    {
-                        throw new InvalidOperationException(
-                            $"[Agent:{Definition.Name}] 流式调用在 {maxStreamAttempts} 次尝试后仍失败且无部分内容");
-                    }
-                }
-
                 // ── 记录本轮 Cache 命中率 ──
-                LogCacheHitRate(round);
+                CacheUsageLogger.Log(_apiService?.LastUsage, round);
 
                 // ── 每轮 API usage 返回后立即校准，工具循环中也能及时反映真实 token。──
                 var turnUsage = _apiService?.LastUsage;
@@ -1890,10 +1769,9 @@ namespace DeepSeek_v4_for_VisualStudio.Services.Agents
                         }
                     }
 
-                    // ── Ask Agent 直接探索预算：前 AskDirectExplorationCallLimit 次正常执行；
-                    //    第 limit+1 次不执行并回一条"考虑探索深度/改用 runSubagent"的提示，
-                    //    该提示每次工具循环只发一次，之后不再拦截（预算只是提醒，不是硬上限）。──
-                    HashSet<int>? blockedDirectExplorationIndices = null;
+                    // ── Ask Agent 直接探索提示：所有调用始终正常执行；
+                    //    达到阈值后，仅在本次真实工具结果末尾追加一次效率建议。──
+                    HashSet<int>? directExplorationHintIndices = null;
                     bool canDelegateAskExploration = Definition.Type == AgentType.Ask
                         && ExploreAgent != null
                         && effectiveWhitelist?.Contains("runSubagent", StringComparer.OrdinalIgnoreCase) == true;
@@ -1904,25 +1782,20 @@ namespace DeepSeek_v4_for_VisualStudio.Services.Agents
                             if (!IsDirectExplorationTool(toolCalls[idx].Function.Name))
                                 continue;
 
-                            if (askDirectExplorationCallCount < AskDirectExplorationCallLimit)
+                            askDirectExplorationCallCount++;
+                            if (!askDirectExplorationNoticeSent
+                                && askDirectExplorationCallCount > AskDirectExplorationHintThreshold)
                             {
-                                // 预算内的调用正常执行并计数。
-                                askDirectExplorationCallCount++;
-                            }
-                            else if (!askDirectExplorationNoticeSent)
-                            {
-                                // 首次超出预算：本次不执行，回一条"考虑探索深度"的提示。
                                 askDirectExplorationNoticeSent = true;
-                                (blockedDirectExplorationIndices ??= new HashSet<int>()).Add(idx);
+                                (directExplorationHintIndices ??= new HashSet<int>()).Add(idx);
                             }
-                            // 否则：提示已发过，直接放行（不再拦截）。预算只是提醒，不是硬性上限。
                         }
 
-                        if (blockedDirectExplorationIndices?.Count > 0)
+                        if (directExplorationHintIndices?.Count > 0)
                         {
-                            Logger.Warn(
-                                $"[Agent:{Definition.Name}] 直接探索已达 {askDirectExplorationCallCount} 次，"
-                                + "已提示考虑探索深度并要求改用 runSubagent；本次调用未执行");
+                            Logger.Info(
+                                $"[Agent:{Definition.Name}] 直接探索已执行 {askDirectExplorationCallCount} 次，"
+                                + "将在工具结果后追加一次非强制 Explore 建议");
                         }
                     }
 
@@ -1997,14 +1870,6 @@ namespace DeepSeek_v4_for_VisualStudio.Services.Agents
                                 LocalizationService.Instance["agent.ask.answerAlreadyReceived"]);
                         }
 
-                        if (blockedDirectExplorationIndices?.Contains(idx) == true)
-                        {
-                            return Task.FromResult(LocalizationService.Instance.Format(
-                                "tool.ask.explorationLimitReached",
-                                askDirectExplorationCallCount,
-                                AskDirectExplorationCallLimit));
-                        }
-
                         // ── 视觉模型：OCR 工具禁用（仍随工具集发送，保持前缀稳定）──
                         if (ShouldBlockOcrToolExecution(
                                 tc.Function.Name,
@@ -2062,6 +1927,18 @@ namespace DeepSeek_v4_for_VisualStudio.Services.Agents
                         foreach (int dupIdx in mapping.Value) // 重复调用的索引列表
                         {
                             toolResults[dupIdx] = dedupedResults[dedupedIndices.IndexOf(sourceIdx)];
+                        }
+                    }
+
+                    if (directExplorationHintIndices?.Count > 0)
+                    {
+                        string explorationHint = LocalizationService.Instance["tool.ask.explorationHint"];
+                        foreach (int hintIdx in directExplorationHintIndices)
+                        {
+                            string actualResult = toolResults[hintIdx] ?? string.Empty;
+                            toolResults[hintIdx] = string.IsNullOrWhiteSpace(actualResult)
+                                ? explorationHint
+                                : actualResult.TrimEnd() + "\n\n" + explorationHint;
                         }
                     }
 
@@ -2470,14 +2347,6 @@ namespace DeepSeek_v4_for_VisualStudio.Services.Agents
         }
 
         /// <summary>
-        /// 记录 DeepSeek Prompt Cache 命中率到日志（Agent 内部版）。
-        /// 从 _apiService.LastUsage 读取 cache 统计信息并格式化输出。
-        /// </summary>
-        /// <param name="round">当前工具调用轮次（0 表示非工具循环模式）</param>
-        private void LogCacheHitRate(int round = 0)
-            => CacheUsageLogger.Log(_apiService?.LastUsage, round);
-
-        /// <summary>
         /// 记录本次工作流的 Cache 命中率汇总到日志（与 UI 显示一致）。
         /// 在所有轮次结束后调用，输出本次工作流（自上次 TakeCacheSnapshot 以来）的增量总计。
         /// </summary>
@@ -2655,7 +2524,6 @@ namespace DeepSeek_v4_for_VisualStudio.Services.Agents
                             ContextManager = new ConversationContextManager(),
                             ExecutionDepth = (Context?.ExecutionDepth ?? 0) + 1,
                             FileReadCache = exploreFileCache,
-                            DiscoveredFiles = Context?.DiscoveredFiles,
                             //  子Agent缓存优化：继承父Agent当前消息列表作为前缀，
                             //    使ExploreAgent的首轮API调用可复用父Agent的缓存前缀。
                             ForwardedMessages = ctx.ForwardedMessages,
@@ -2736,11 +2604,6 @@ namespace DeepSeek_v4_for_VisualStudio.Services.Agents
                                 {
                                     Context.FileReadCache[kvp.Key] = kvp.Value;
                                 }
-                            }
-                            // 发现的文件列表
-                            if (exploreCtx.DiscoveredFiles != null && exploreCtx.DiscoveredFiles.Count > 0)
-                            {
-                                Context.DiscoveredFiles = exploreCtx.DiscoveredFiles;
                             }
                         }
 
@@ -3186,7 +3049,7 @@ namespace DeepSeek_v4_for_VisualStudio.Services.Agents
         }
 
         /// <summary>
-        /// 根据移交携带的步骤构造轻量执行计划（不生成 plan.md、不落 JSON、不创建任务面板）。
+        /// 根据移交携带的步骤构造轻量执行计划（不生成 plan.md，但作为 Edit 计划显示并持久化面板）。
         /// </summary>
         /// <param name="handoff">移交定义（EditSteps 非空，调用方已保证）</param>
         internal static AgentTaskPlan BuildLightweightPlanFromHandoff(AgentHandoff handoff)
@@ -3210,7 +3073,8 @@ namespace DeepSeek_v4_for_VisualStudio.Services.Agents
                 Title = LocalizationService.Instance["plan.lightweightTitle"],
                 Steps = steps,
                 TaskDescription = handoff.Prompt, // 保留完整任务内容，Edit 步骤提示中再注入
-                Source = PlanSource.None,      // 不创建任务面板，仅思考气泡/执行时间线
+                // Edit 执行计划同样需要面板展示步骤进度；该来源不会显示“执行当前计划”按钮。
+                Source = PlanSource.EditAgent,
                 IsCompleted = false,
                 IsCancelled = false,
                 PlanFilePath = null,           // 无 plan.md；ExecuteHandoffAsync 的 File.Exists 判定会自动跳过
@@ -4691,15 +4555,6 @@ namespace DeepSeek_v4_for_VisualStudio.Services.Agents
         public AgentPermissionRequest? TryGetPendingPermission(string requestId)
         {
             _pendingPermissions.TryGetValue(requestId, out var request);
-            return request;
-        }
-
-        /// <summary>
-        /// 按 RequestId 查找并移除待处理的权限请求。
-        /// </summary>
-        public AgentPermissionRequest? TryRemovePendingPermission(string requestId)
-        {
-            _pendingPermissions.TryRemove(requestId, out var request);
             return request;
         }
 

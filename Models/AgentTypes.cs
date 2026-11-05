@@ -233,14 +233,6 @@ namespace DeepSeek_v4_for_VisualStudio.Models
         public Dictionary<string, string> FileReadCache { get; set; } = new(StringComparer.OrdinalIgnoreCase);
 
         /// <summary>
-        /// 已发现的解决方案源文件列表（PlanAgent 产出，EditAgent 复用）。
-        /// 避免 EditAgent 重新调用 DiscoverSolutionFilesAsync。
-        /// 以后会被 RAG 向量检索替代。
-        /// </summary>
-        [JsonIgnore]
-        public List<string>? DiscoveredFiles { get; set; }
-
-        /// <summary>
         ///  Handoff 时源 Agent 的最终工具循环消息列表（v1.1.10 缓存优化）。
         /// 设置后，目标 Agent 的 BuildContextAwareMessages 将复用此列表作为前缀，
         /// 而非从 ContextManager 重建，确保 Handoff 前后消息结构一致，
@@ -347,7 +339,10 @@ namespace DeepSeek_v4_for_VisualStudio.Models
         /// <summary>生成的消息内容（Markdown 格式）</summary>
         public string? Content { get; set; }
 
-        /// <summary>推理/思考内容（DeepSeek reasoning_content），用于渲染思考面板</summary>
+        /// <summary>
+        /// 跨工具轮次/Handoff 聚合后的推理内容，仅用于渲染思考面板。
+        /// 它不是某一次 API 响应的原始 reasoning_content，禁止写入 API 历史。
+        /// </summary>
         public string? ReasoningContent { get; set; }
 
         /// <summary>文件变更列表（Edit Agent 产出）</summary>

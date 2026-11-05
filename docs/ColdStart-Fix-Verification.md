@@ -103,8 +103,9 @@ $dte.ExecuteCommand("DeepSeek_v4_for_VisualStudio.ShowChatWindowToolbar")   # �
 
 ## 五、实机交付后补充记录（2026-08-24 03:09 会话）
 
-- 用户实测会话：`Ctrl+Shift+D`/工具栏触发打开成功（Execute 于命令注册后立即命中，
-  系用户排队输入所致）；标记文件由显式打开写入（03:09:23）；
+- 用户实测会话：当时的 `Ctrl+Shift+D`/工具栏触发打开成功（Execute 于命令注册后立即命中，
+  系用户排队输入所致）；该键位现因与 VS 组合键前缀冲突改为 `Ctrl+Alt+Y`。
+  标记文件由显式打开写入（03:09:23）；
   `Auto-show (marker present)` 门控正确识别并空转（窗口已显示，仅聚焦）
 - USv2 Debug 探针于 init+10s 后台运行 8.8s 完成，UI 无感知
 - 用户随后切换推理强度（max→high）/联网搜索开关均正常工作；关闭窗口 Dispose 干净

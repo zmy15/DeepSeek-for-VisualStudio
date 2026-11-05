@@ -268,6 +268,33 @@ rendering), `gitState` (avoiding repeated Git probing), `chainBack`, and `Forwar
 Sub-agents get an isolated context manager and file-read cache copy, run up to 3 in parallel behind a semaphore,
 and are guarded by a watchdog timeout (default 900 s).
 
+### Solution reload vs. solution switch
+
+When the agent rewrites `.sln`/`.slnx`/`.csproj`/`Directory.Build.props`, Visual Studio closes and reopens the
+same solution — an `OnAfterCloseSolution` → `OnAfterOpenSolution` pair. The chat window treats the two events
+very differently from a real solution switch:
+
+- **Same path ⇒ reload, not switch.** `_boundSolutionPath` records which solution the in-memory conversation
+  belongs to; `SolutionIdentity.IsSame` compares normalized paths. A reload keeps `_messages`, `_tree` and the
+  context manager untouched and only re-syncs persisted settings — no save, no clear, no disk reload.
+- **Never mutate a running conversation.** While `_isGenerating` is true, solution events are recorded in
+  `_pendingSolutionChange` and applied *after* the run finishes (`ApplyPendingSolutionChangeIfAnyAsync`).
+  Saving mid-run would persist a half snapshot, and reloading would replace the live state the agent is still
+  writing into.
+- **Crash-safe run marker.** `ChatSession.ActiveRun` is written when a run starts and cleared on every exit
+  path. A session that still carries the marker on load reports "previous run was interrupted" instead of
+  silently presenting a truncated turn.
+- **In-flight snapshots.** Every 5 s while a run is active, the received content/timeline/reasoning is written
+  to `conversations/inflight/<project>/<session>.json` (kept apart from the authoritative session file). On load,
+  a leftover snapshot becomes an `IsIncomplete` assistant message, so a hard kill shows the partial output and
+  offers retry instead of looking like "the task never ran". The write stays synchronous on the UI thread, so the
+  last snapshot can never race the delete performed after a normal completion.
+- **Streaming writes are anchored to the message object.** `_agentStreamingMessage` (not just the index) is
+  verified before every streamed write; if the list was replaced, the write is dropped instead of landing on an
+  unrelated message.
+- **Handoff buttons are single-use.** `HandoffJson` is cleared and saved as soon as execution starts, so a
+  reload can never resurrect a clickable "start implementing" button that would launch a second concurrent run.
+
 ## Code completion pipeline
 
 A MEF-exported `IVsTextViewCreationListener` (content type `code`, editable role) attaches an
@@ -438,8 +465,11 @@ JS→C# 消息统一经 `__sendToHost` 进入 `CoreWebView2_WebMessageReceived`�
 状态 —— 也就是前缀缓存 —— 不会被扰动。清洗规则会移除孤立的 `tool` 消息、删除空 assistant、
 回填 `reasoning_content`、合并连续同角色消息，并剥离会导致 400 错误的未配对工具调用。
 
-重试最多 4 次并指数退避；4xx（429 除外）不重试。有一处特例：检测到 400 且错误体涉及不支持的图片数据时，
-会剥离 `image_url` 块后原样重发一次 —— 使单张无法读取的附件不至于打断整轮对话。
+网络失败统一按设置中的 `API 重试次数` 做指数退避（默认 3 次，1s / 2s / 4s…，0 表示不重试）；
+4xx（429 除外）不重试。响应体中的永久性错误码（如 `model_not_found`、`invalid_request_error`、
+额度/权限/上下文超限）即使被网关包装成 5xx，也不会重试。
+有一处特例：检测到 400 且错误体涉及不支持的图片数据时，会剥离 `image_url` 块后原样重发一次
+—— 使单张无法读取的附件不至于打断整轮对话。
 
 推理参数按各家方言推断（`ReasoningCapabilityConfig.Infer`），覆盖 DeepSeek 官方、OpenRouter、
 SiliconFlow/ModelScope、Kimi、GLM、Qwen/DashScope、MiniMax 与 OpenAI o-series/GPT-5。
@@ -515,8 +545,9 @@ AI 提出修改
 - **迭代与错误上限。** 默认：200 轮工具调用；连续 5 次完全相同的调用即中止；连续 5 次错误即中止。
   执行守卫另提供墙钟时间（≤7200 秒）、总 token（≤200 万）、工具调用数（≤10,000）与嵌套深度（3）预算，
   并通过滚动指纹检测「无进展」，在消耗达 80% 时告警。
-- **流式容错。** 最多 4 次尝试并指数退避；4xx（429 除外）不重试。流中断时从已接收的部分内容续写，
-  而不是重跑整轮。
+- **流式容错。** HTTP 请求与流中断续传共用同一个可配置重试次数和指数退避策略；
+  4xx（429 除外）和永久性错误码不重试。Provider 已处理并完成的 HTTP 失败不会在 Agent 层再放大一轮；
+  只有真正的流中断才从已接收的部分内容续写，而不是重跑整轮。
 - **成功后提前终止。** 在 Edit/Build 中，一旦构建完全成功，循环立即结束，
   不再让模型调用 `get_errors` 去「二次确认」。
 - **降级解析兜底。** 若提供方未返回原生 `tool_calls`，但内容中泄露了 DSML/XML `<invoke>` 标记
@@ -531,6 +562,27 @@ AI 提出修改
 调用方等待结果后继续。移交会携带 `editSteps`（进度渲染）、`gitState`（免去重复 Git 探测）、
 `chainBack` 与 `ForwardedMessages`（保持前缀命中）。子代理拥有独立的上下文管理器与文件读缓存副本，
 经信号量限制最多 3 个并行，并受看门狗超时保护（默认 900 秒）。
+
+### 解决方案重载 vs. 切换解决方案
+
+Agent 改写 `.sln`/`.slnx`/`.csproj`/`Directory.Build.props` 时，Visual Studio 会先关闭再打开同一个解决方案
+（`OnAfterCloseSolution` → `OnAfterOpenSolution`）。聊天窗口必须把这种情况与「切换到另一个解决方案」区分开：
+
+- **路径相同 ⇒ 是重载，不是切换。** `_boundSolutionPath` 记录内存中的对话属于哪个解决方案，
+  `SolutionIdentity.IsSame` 做规范化路径比较。重载时保留 `_messages`/`_tree`/上下文管理器，只重新同步配置——
+  不保存、不清空、不从磁盘重载。
+- **运行中的对话绝不被改写。** `_isGenerating` 为真时，解决方案事件只记入 `_pendingSolutionChange`，
+  等任务收尾后再应用。运行中保存只会落一份半截快照，而重载会把 Agent 正在写入的活动状态整体替换掉。
+- **可崩溃恢复的执行标记。** `ChatSession.ActiveRun` 在任务开始时写入、在所有退出路径上清除。
+  加载时若标记仍在，会提示「上次执行被中断」，而不是把截断的轮次当成完整历史。
+- **执行中快照。** 任务执行期间每 5 秒把已接收正文/时间线/推理写入
+  `conversations/inflight/<project>/<session>.json`（与会话权威文件分离）。加载时若发现残留快照，
+  会补成一条 `IsIncomplete` 助手消息——强杀后能看到已产出的部分并直接重试，而不是像「任务没执行」。
+  写入在 UI 线程同步完成，保证「最后一次快照」不会与正常收尾后的删除竞争、复活陈旧快照。
+- **流式写回锚定在消息对象上。** 每次写回前校验 `_agentStreamingMessage`（而不只是下标）；
+  列表被整体替换时放弃本次写回，而不是把内容写到无关消息上。
+- **Handoff 按钮是一次性的。** 开始执行即清除并持久化 `HandoffJson`，
+  这样重载后不会复活一个可点击的「开始实现」，进而并发启动第二个任务。
 
 ## 代码补全管线
 

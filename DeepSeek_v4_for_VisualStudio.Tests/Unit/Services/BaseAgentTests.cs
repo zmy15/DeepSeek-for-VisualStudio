@@ -494,7 +494,7 @@ public class BaseAgentTests
             "run_tests",
             "replace_string_in_file", "multi_replace_string_in_file",
             "create_file", "delete_file", "apply_patch", "create_directory", "run_in_terminal",
-            "get_terminal_output", "load_skill", "read_skill_resource",
+            "get_terminal_output", "list_skills", "load_skill", "read_skill_resource",
             "VisualStudio_askQuestions", "runSubagent", "request_handoff",
             "git", "memory"
         };

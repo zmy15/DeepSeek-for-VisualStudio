@@ -92,6 +92,28 @@ namespace DeepSeek_v4_for_VisualStudio.View
         private sealed class AgentStreamingTarget
         {
             public int MessageIndex { get; set; }
+
+            /// <summary>
+            /// 创建气泡时该消息所属的轮次标识。消息列表被整体替换后，
+            /// <see cref="MessageIndex"/> 会指向别的消息或越界，此时只能靠它重新定位。
+            /// </summary>
+            public string? TurnId { get; set; }
+        }
+
+        /// <summary>
+        /// 任务执行期间到达的解决方案事件。运行中的对话状态不允许被保存/清空/重载，
+        /// 因此这类事件只记录意图，等任务收尾后再统一应用。
+        /// </summary>
+        private enum PendingSolutionChange
+        {
+            /// <summary>无延后事件。</summary>
+            None,
+
+            /// <summary>打开（可能是同一解决方案重载，也可能是切换到另一个解决方案）。</summary>
+            Opened,
+
+            /// <summary>关闭解决方案。</summary>
+            Closed,
         }
 
         #region Constants
@@ -193,7 +215,107 @@ namespace DeepSeek_v4_for_VisualStudio.View
             StatusLabel.Text = LocalizationService.Instance["status.stopped"];
             return true;
         }
+
+        /// <summary>
+        /// 当前是否有 Agent 任务在执行。
+        /// <para>
+        /// 解决方案事件（打开/关闭/重载）必须以它为准：运行中的对话状态是唯一权威副本，
+        /// 一旦在此时保存并清空，就会把正在执行的对话回滚成磁盘上的半截快照。
+        /// </para>
+        /// </summary>
+        private bool IsRunInProgress()
+        {
+            lock (_lock) return _isGenerating;
+        }
+
+        /// <summary>
+        /// 把流式气泡锚定到指定下标对应的消息对象（同时记录轮次标识与停止按钮用的下标）。
+        /// </summary>
+        private void SetAgentStreamingTarget(int index)
+        {
+            lock (_lock)
+            {
+                _agentStreamingMsgIndex = index;
+                _agentStreamingMessage =
+                    (index >= 0 && index < _messages.Count) ? _messages[index] : null;
+                _agentStreamingTurnId = _agentStreamingMessage?.TurnId;
+                _currentStreamingMsgIndex = index;
+            }
+        }
+
+        /// <summary>清除流式气泡锚点（任务开始前/收尾后调用）。</summary>
+        private void ClearAgentStreamingTarget()
+        {
+            lock (_lock)
+            {
+                _agentStreamingMsgIndex = -1;
+                _agentStreamingMessage = null;
+                _agentStreamingTurnId = null;
+            }
+        }
+
+        /// <summary>
+        /// 解析当前流式气泡在 <see cref="_messages"/> 中的有效下标。
+        /// <para>
+        /// 返回 -1 表示锚点已失效（消息列表被整体替换成从磁盘反序列化的新对象），
+        /// 调用方必须跳过写回，而不是沿用旧下标去改别的消息。
+        /// </para>
+        /// </summary>
+        private int ResolveAgentStreamingIndex()
+        {
+            lock (_lock)
+            {
+                var anchor = _agentStreamingMessage;
+                if (anchor != null)
+                {
+                    if (_agentStreamingMsgIndex >= 0
+                        && _agentStreamingMsgIndex < _messages.Count
+                        && ReferenceEquals(_messages[_agentStreamingMsgIndex], anchor))
+                    {
+                        return _agentStreamingMsgIndex;
+                    }
+
+                    for (int i = 0; i < _messages.Count; i++)
+                    {
+                        if (ReferenceEquals(_messages[i], anchor))
+                        {
+                            _agentStreamingMsgIndex = i;
+                            return i;
+                        }
+                    }
+
+                    Logger.Warn(
+                        $"[AgentStream] 流式气泡已脱离当前消息列表 (turn={_agentStreamingTurnId ?? "null"}), 跳过本次写回");
+                    _agentStreamingMsgIndex = -1;
+                    _agentStreamingMessage = null;
+                    return -1;
+                }
+
+                // 兼容未锚定的早期路径：只能按原下标判断是否仍然有效
+                if (_agentStreamingMsgIndex >= 0 && _agentStreamingMsgIndex < _messages.Count)
+                    return _agentStreamingMsgIndex;
+
+                return -1;
+            }
+        }
+
         private string? _solutionPath;
+
+
+        /// <summary>
+        /// 当前内存中对话所绑定的解决方案路径（null = 内存里是「无解决方案」对话）。
+        /// <para>
+        /// 与 <see cref="_solutionPath"/> 的区别：它描述的是「这份对话属于谁」，
+        /// 而不是「下一段对话写到哪个文件」。VS 因解决方案文件被修改而自动重载时，
+        /// 会先 close 再 open；只有靠这个字段才能识别出「同一解决方案重载」，
+        /// 从而跳过「保存 + 清空 + 从磁盘重载」，避免执行中的对话被磁盘快照覆盖。
+        /// </para>
+        /// </summary>
+        private string? _boundSolutionPath;
+
+        /// <summary>任务执行期间收到的解决方案事件（延后到任务收尾再应用）。</summary>
+        private PendingSolutionChange _pendingSolutionChange;
+        private string? _pendingSolutionPath;
 
         // ── 解决方案事件已订阅标记（通过 Microsoft.VisualStudio.Shell.Events.SolutionEvents）──
 
@@ -204,7 +326,6 @@ namespace DeepSeek_v4_for_VisualStudio.View
         // ── 树状对话结构 ──
         private ConversationTree? _tree;
 
-        private RagService? _ragService;
         private ContextCompressorService? _compressorService;
         private MemoryService? _memoryService;
         private bool _isGenerating;
@@ -355,6 +476,9 @@ namespace DeepSeek_v4_for_VisualStudio.View
         private System.Windows.Threading.DispatcherTimer? _balanceTimer;
         private BalanceResponse? _lastBalance;
 
+        /// <summary>执行中快照定时器：任务执行期间周期性把已接收内容落盘，供崩溃/重建后恢复。</summary>
+        private System.Windows.Threading.DispatcherTimer? _inflightSnapshotTimer;
+
         // ── 当前计价时段徽标 ──
         private System.Windows.Threading.DispatcherTimer? _pricingPeriodTimer;
         private bool? _lastPricingPeriodIsPeak;
@@ -436,8 +560,8 @@ namespace DeepSeek_v4_for_VisualStudio.View
                 var msgs = _tree.GetActiveMessages();
                 // 注意：GetActiveMessages 返回的是树节点的**活引用**。
                 // 这里绝不能就地改写 msg.ReasoningContent——该字段会被 ConversationTree
-                // 持久化并在后续请求中回传给 API；官方要求携带 tools 时必须完整回传，
-                // 就地裁剪会永久破坏历史（且此前的 ClampStored 还会注入截断标记文本）。
+                // 持久化供 UI 回看。当前轮次仍完整回传，历史轮次不回传；
+                // 就地裁剪会永久破坏回看内容（且此前的 ClampStored 还会注入截断标记）。
                 _messages.AddRange(msgs);
             }
         }
@@ -449,8 +573,9 @@ namespace DeepSeek_v4_for_VisualStudio.View
         private void RebuildFromTree()
         {
             SyncMessagesFromTree();
-            _messagesHtml.Clear();
-            _lastRenderedMessagesLength = 0;
+            // 树同步后必须立即重建完整 HTML。只清空 _messagesHtml 会让后续
+            // Agent 流式气泡成为页面中唯一内容，导致用户提问和其他历史气泡丢失。
+            RebuildMessagesHtml();
             _browserInitialized = false;
         }
 
@@ -477,7 +602,7 @@ namespace DeepSeek_v4_for_VisualStudio.View
         // ── 最近一次 Agent 执行的文件变更（临时存储，RunAgentWorkflowAsync 写入，RecordAgentFileChanges 消费后清空）──
         private List<Models.FileChangeSummary>? _pendingAgentFileChanges;
 
-        /// <summary>最近一次 Agent 执行的 Handoff（用于 UI 渲染"开始实现"按钮）</summary>
+        /// <summary>最近一次 Agent 执行的 Handoff（用于 UI 渲染“执行当前计划”按钮）</summary>
         private Models.AgentHandoff? _pendingHandoff;
 
         // ── 已创建的计划 ID 集合（防止重复创建计划消息）──
@@ -493,6 +618,24 @@ namespace DeepSeek_v4_for_VisualStudio.View
 
         // ── Agent 实时思考气泡 ──
         private int _agentStreamingMsgIndex = -1;
+
+        /// <summary>
+        /// 当前流式气泡所属的轮次标识（与 <see cref="ChatMessage.TurnId"/> 对应）。
+        /// 仅用于诊断日志与兜底定位。
+        /// </summary>
+        private string? _agentStreamingTurnId;
+
+        /// <summary>
+        /// 当前流式气泡对应的消息对象本身。
+        /// <para>
+        /// 只靠下标不安全：加载会话/解决方案重载会把 <see cref="_messages"/> 整体换成
+        /// 从磁盘反序列化出来的新对象，旧下标会指向别的消息（历史缺陷：流式增量写错消息、
+        /// 收尾时索引越界导致最终答复不落库）。持有一个对象引用即可用
+        /// <see cref="object.ReferenceEquals"/> 判定「我还能不能安全地写回这条消息」。
+        /// </para>
+        /// </summary>
+        private ChatMessage? _agentStreamingMessage;
+
         private readonly StringBuilder _agentTimelineContent = new();
 
         /// <summary>
@@ -597,21 +740,10 @@ namespace DeepSeek_v4_for_VisualStudio.View
             ChatWebViewHost.Unloaded += ChatWebViewHost_Unloaded;
             ChatWebViewHost.IsVisibleChanged += ChatWebViewHost_IsVisibleChanged;
 
-            // ── 粘贴命令绑定：作为后备路径，支持剪贴板图片直接粘贴为附件 ──
-            // 主路径在 PreviewKeyDown 中通过隧道事件拦截 Ctrl+V，确保优先于 TextBox 内部处理。
-            CommandBindings.Add(new CommandBinding(ApplicationCommands.Paste,
-                (s, e) =>
-                {
-                    Logger.Info("CommandBinding.Paste Executed 触发");
-                    ExecutePasteImage(e);
-                },
-                (s, e) =>
-                {
-                    bool hasImage = CanPasteImage();
-                    e.CanExecute = hasImage;
-                    e.Handled = hasImage; // 仅在有图像时拦截，文本粘贴交给 TextBox 默认行为
-                    Logger.Info($"CommandBinding.Paste CanExecute: hasImage={hasImage}, CanExecute={e.CanExecute}, Handled={e.Handled}");
-                }));
+            // 不要在 UserControl 级注册 ApplicationCommands.Paste。
+            // WebView2 内的 textarea/input 需要接收浏览器原生 Ctrl+V；宿主级 Paste
+            // 命令在剪贴板无图片时会把 CanExecute 置为 false，从而吞掉文本粘贴。
+            // WPF 输入框的图片粘贴由 InputTextBox_PreviewKeyDown 单独处理。
         }
 
         /// <summary>
@@ -1645,6 +1777,7 @@ namespace DeepSeek_v4_for_VisualStudio.View
             CancelStreaming();
             DisposeStreamingCts();
             StopBalanceTimer();
+            StopInflightSnapshotTimer();
             StopPricingPeriodTimer();
             StopConversationElapsedTimer();
             _conversationElapsedTimer = null;

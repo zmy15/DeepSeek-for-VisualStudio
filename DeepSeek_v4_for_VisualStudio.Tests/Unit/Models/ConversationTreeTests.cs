@@ -180,6 +180,47 @@ public class ConversationTreeTests
     }
 
     [Fact]
+    public void ReplaceInPlace_IncompleteUserTurn_RemovesOldTurnFromActivePath()
+    {
+        var tree = new ConversationTree();
+        tree.AddChildMessage(new ChatMessage { Role = "user", Content = "已完成问题" });
+        var completedAssistant = tree.AddChildMessage(new ChatMessage { Role = "assistant", Content = "已完成回答" });
+        var oldUser = tree.AddChildMessage(new ChatMessage { Role = "user", Content = "旧问题" });
+        tree.AddChildMessage(new ChatMessage
+        {
+            Role = "assistant",
+            Content = "未完成的旧回复",
+            IsIncomplete = true,
+        });
+
+        tree.ReplaceInPlace(oldUser, new ChatMessage { Role = "user", Content = "修改后的问题" });
+
+        var activeContents = tree.GetActiveMessages().Select(m => m.Content).ToList();
+        activeContents.Should().Equal("已完成问题", "已完成回答", "修改后的问题");
+        activeContents.Should().NotContain("旧问题");
+        activeContents.Should().NotContain("未完成的旧回复");
+        completedAssistant.Children.Should().ContainSingle(n => n == oldUser);
+        oldUser.Children.Should().BeEmpty();
+    }
+
+    [Fact]
+    public void ForkAt_EditedUserTurn_ExcludesOldTurnFromActivePath()
+    {
+        var tree = new ConversationTree();
+        tree.AddChildMessage(new ChatMessage { Role = "user", Content = "已完成问题" });
+        tree.AddChildMessage(new ChatMessage { Role = "assistant", Content = "已完成回答" });
+        var oldUser = tree.AddChildMessage(new ChatMessage { Role = "user", Content = "旧问题" });
+        tree.AddChildMessage(new ChatMessage { Role = "assistant", Content = "旧的未完成回复" });
+
+        tree.ForkAt(oldUser, new ChatMessage { Role = "user", Content = "修改后的问题" }, "edit");
+
+        var activeContents = tree.GetActiveMessages().Select(m => m.Content).ToList();
+        activeContents.Should().Equal("已完成问题", "已完成回答", "修改后的问题");
+        activeContents.Should().NotContain("旧问题");
+        activeContents.Should().NotContain("旧的未完成回复");
+    }
+
+    [Fact]
     public void FindNode_ReturnsNodeById()
     {
         var tree = new ConversationTree();

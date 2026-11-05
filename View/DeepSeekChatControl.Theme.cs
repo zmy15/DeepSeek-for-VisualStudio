@@ -21,13 +21,6 @@ namespace DeepSeek_v4_for_VisualStudio.View
         #region Theme
 
         /// <summary>
-        /// 更新主题切换按钮图标（P2：独立切换已移除，保留空实现兼容调用点）。
-        /// </summary>
-        private void UpdateThemeToggleIcon()
-        {
-        }
-
-        /// <summary>
         /// VS 主题或用户设置变更时触发。
         /// </summary>
         private void OnThemeChanged(bool isLight)
@@ -38,7 +31,6 @@ namespace DeepSeek_v4_for_VisualStudio.View
             {
                 ThreadHelper.ThrowIfNotOnUIThread();
                 ApplyWpfTheme(isLight);
-                UpdateThemeToggleIcon();
                 ReloadWebViewForTheme();
             }
             catch (Exception ex)
@@ -536,7 +528,6 @@ namespace DeepSeek_v4_for_VisualStudio.View
 
                 // 应用 WPF 颜色
                 ApplyWpfTheme(isLight);
-                UpdateThemeToggleIcon();
 
                 // 如果 WebView2 已就绪且有消息，重载以应用正确 CSS
                 if (ChatWebView?.CoreWebView2 != null && _messages.Count > 0)

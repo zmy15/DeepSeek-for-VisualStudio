@@ -204,6 +204,105 @@ public class DeepSeekApiServiceTests
     }
 
     [Fact]
+    public async Task ChatStreamAsync_Http503ModelNotFound_DoesNotRetry()
+    {
+        const string errorBody =
+            """{"error":{"code":"model_not_found","message":"No available channel for model deepseek-v4-flash","type":"new_api_error"}}""";
+        var handler = new TestHttpMessageHandler(
+            Array.Empty<string>(),
+            HttpStatusCode.ServiceUnavailable,
+            errorBody);
+
+        var httpClient = new HttpClient(handler);
+        var service = new DeepSeekApiService(httpClient, "deepseek-v4-flash");
+        var messages = new List<ChatApiMessage>
+        {
+            new() { Role = "user", Content = "Hi" }
+        };
+
+        var ex = await Assert.ThrowsAsync<HttpRequestException>(async () =>
+        {
+            await foreach (var _ in service.ChatStreamAsync(messages)) { }
+        });
+
+        handler.RequestCount.Should().Be(1);
+        ApiRequestFailure.TryGet(ex, out ApiRequestFailureInfo failureInfo).Should().BeTrue();
+        failureInfo.StatusCode.Should().Be(503);
+        failureInfo.ErrorCode.Should().Be("model_not_found");
+        failureInfo.IsRetryable.Should().BeFalse();
+        ex.Message.Should().Contain("不可重试");
+        ex.Message.Should().Contain("No available channel for model");
+    }
+
+    [Fact]
+    public async Task ChatStreamAsync_Transient503_RetriesConfiguredCount()
+    {
+        const string errorBody =
+            """{"error":{"code":"server_error","message":"temporary failure"}}""";
+        var handler = new TestHttpMessageHandler(
+            Array.Empty<string>(),
+            HttpStatusCode.ServiceUnavailable,
+            errorBody);
+        var httpClient = new HttpClient(handler);
+        var service = new DeepSeekApiService(httpClient, "deepseek-v4-flash");
+        var messages = new List<ChatApiMessage>
+        {
+            new() { Role = "user", Content = "Hi" }
+        };
+
+        int? previous = ApiRetryPolicy.RetryCountOverrideForTests;
+        ApiRetryPolicy.RetryCountOverrideForTests = 1;
+        try
+        {
+            var ex = await Assert.ThrowsAsync<HttpRequestException>(async () =>
+            {
+                await foreach (var _ in service.ChatStreamAsync(messages)) { }
+            });
+
+            handler.RequestCount.Should().Be(2);
+            ApiRequestFailure.TryGet(ex, out ApiRequestFailureInfo failureInfo).Should().BeTrue();
+            failureInfo.IsRetryable.Should().BeTrue();
+        }
+        finally
+        {
+            ApiRetryPolicy.RetryCountOverrideForTests = previous;
+        }
+    }
+
+    [Fact]
+    public async Task ChatStreamAsync_Transient503_WithZeroRetries_RequestsOnce()
+    {
+        const string errorBody =
+            """{"error":{"code":"server_error","message":"temporary failure"}}""";
+        var handler = new TestHttpMessageHandler(
+            Array.Empty<string>(),
+            HttpStatusCode.ServiceUnavailable,
+            errorBody);
+        var httpClient = new HttpClient(handler);
+        var service = new DeepSeekApiService(httpClient, "deepseek-v4-flash");
+        var messages = new List<ChatApiMessage>
+        {
+            new() { Role = "user", Content = "Hi" }
+        };
+
+        int? previous = ApiRetryPolicy.RetryCountOverrideForTests;
+        ApiRetryPolicy.RetryCountOverrideForTests = 0;
+        try
+        {
+            await Assert.ThrowsAsync<HttpRequestException>(async () =>
+            {
+                await foreach (var _ in service.ChatStreamAsync(messages)) { }
+            });
+
+            handler.RequestCount.Should().Be(1);
+        }
+        finally
+        {
+            ApiRetryPolicy.RetryCountOverrideForTests = previous;
+        }
+    }
+
+    [Fact]
     public async Task CompleteAsync_Http400_ExceptionIncludesResponseDetails()
     {
         const string errorBody =
@@ -346,9 +445,14 @@ internal class TestHttpMessageHandler : HttpMessageHandler
         _configureResponse = configureResponse;
     }
 
+    private int _requestCount;
+
+    public int RequestCount => _requestCount;
+
     protected override async Task<HttpResponseMessage> SendAsync(
         HttpRequestMessage request, CancellationToken cancellationToken)
     {
+        Interlocked.Increment(ref _requestCount);
         LastRequestBody = request.Content == null
             ? null
             : await request.Content.ReadAsStringAsync();

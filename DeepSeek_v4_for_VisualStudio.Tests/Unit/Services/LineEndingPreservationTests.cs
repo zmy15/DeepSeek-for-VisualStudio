@@ -100,7 +100,6 @@ public class LineEndingPreservationTests : IDisposable
             filePath = file,
             oldString = "beta",
             newString = "BETA",
-            expected = "2|BETA",
         }));
 
         var result = await new ReplaceStringInFileTool().ExecuteAsync(args, workspaceRoot: null);
@@ -120,7 +119,6 @@ public class LineEndingPreservationTests : IDisposable
             filePath = file,
             oldString = "beta",
             newString = "BETA",
-            expected = "2|BETA",
         }));
 
         var result = await new ReplaceStringInFileTool().ExecuteAsync(args, workspaceRoot: null);

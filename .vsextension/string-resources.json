@@ -76,6 +76,8 @@
   "DeepSeek.Chat.Settings.LanguageChineseSimplified": "Chinese (Simplified)",
   "DeepSeek.Chat.settings.llmTimeoutSeconds.description": "Timeout for a single LLM API request. Default 300 seconds; streaming has a separate 120-second no-data disconnect detection that is unaffected by this setting.",
   "DeepSeek.Chat.settings.llmTimeoutSeconds.displayName": "LLM request timeout (seconds)",
+  "DeepSeek.Chat.settings.apiMaxRetryCount.description": "Number of additional retries after a transient network or server failure. Retries use exponential backoff (1s, 2s, 4s...). 0 disables retries. Default: 3.",
+  "DeepSeek.Chat.settings.apiMaxRetryCount.displayName": "API retry count",
   "DeepSeek.Chat.settings.maxConsecutiveErrors.description": "Terminate when all tool calls in N consecutive rounds return errors. Default: 5.",
   "DeepSeek.Chat.settings.maxConsecutiveErrors.displayName": "Consecutive Error Termination Threshold",
   "DeepSeek.Chat.settings.agentMaxDepth.description": "Maximum recursive depth for runSubagent child agents. Default: 3.",

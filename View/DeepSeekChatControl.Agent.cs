@@ -65,6 +65,10 @@ namespace DeepSeek_v4_for_VisualStudio.View
             // 仅标记属于当前轮次的过程消息；Ask 模式不会调用此处，字段保持默认值
             message.TurnId = _currentAgentTurnId;
             message.IsProcessMessage = isProcess;
+
+            // 流式锚点跟着消息一起补上轮次标识，便于诊断与兜底定位
+            if (ReferenceEquals(message, _agentStreamingMessage))
+                _agentStreamingTurnId = message.TurnId;
         }
 
         /// <summary>
@@ -195,13 +199,24 @@ namespace DeepSeek_v4_for_VisualStudio.View
         }
 
         /// <summary>
-        /// 构建重试/编辑时的富上下文内容。
+        /// 构建重试/编辑重发时实际发送的 user 内容。
+        /// 编辑重发必须保持纯文本，不得再拼接任何历史摘要。
         /// </summary>
-        private string BuildRetryEnrichedContent(ChatMessage userMsg, string currentContent)
+        /// <param name="currentContent">用户当前修改后的问题。</param>
+        /// <param name="isEditResend">是否为编辑后重发。</param>
+        /// <param name="conversationContextProvider">仅在普通重试时读取历史摘要。</param>
+        /// <returns>最终发送的 user 文本。</returns>
+        internal static string BuildResendPromptContent(
+            string currentContent,
+            bool isEditResend,
+            Func<string> conversationContextProvider)
         {
+            if (isEditResend)
+                return currentContent;
+
             var sb = new StringBuilder();
 
-            string conversationCtx = GetConversationContextForRetry();
+            string conversationCtx = conversationContextProvider();
             if (!string.IsNullOrEmpty(conversationCtx))
             {
                 sb.AppendLine("【对话历史】");
@@ -319,17 +334,14 @@ namespace DeepSeek_v4_for_VisualStudio.View
         {
             if (_contextManager == null || _skillDiscoveryResult == null) return;
 
+            string discoveryContext = SkillService.Instance.GenerateSkillsDiscoveryContext(_skillDiscoveryResult);
             string? skillContext = null;
-            if (IsAutoSkillRoutingEnabled())
+            if (!string.IsNullOrWhiteSpace(discoveryContext))
             {
-                string discoveryContext = SkillService.Instance.GenerateSkillsDiscoveryContext(_skillDiscoveryResult);
-                if (!string.IsNullOrWhiteSpace(discoveryContext))
-                {
-                    skillContext = AiPrompts.BuildSkillSystemPromptFragment(discoveryContext);
-                    string toolInstructions = LocalizationService.Instance["system.skillToolInstructions"];
-                    if (!string.IsNullOrWhiteSpace(toolInstructions))
-                        skillContext += "\n\n" + toolInstructions;
-                }
+                skillContext = AiPrompts.BuildSkillSystemPromptFragment(discoveryContext);
+                string toolInstructions = LocalizationService.Instance["system.skillToolInstructions"];
+                if (!string.IsNullOrWhiteSpace(toolInstructions))
+                    skillContext += "\n\n" + toolInstructions;
             }
 
             _contextManager.SetSkillContext(skillContext);
@@ -340,7 +352,7 @@ namespace DeepSeek_v4_for_VisualStudio.View
 
             if (skillContext == null)
             {
-                Logger.Info($"[Skill] 自动技能路由已关闭；始终注入技能: {_skillDiscoveryResult.AlwaysInjectSkills.Count} 个");
+                Logger.Info($"[Skill] 无可按需加载技能；始终注入技能: {_skillDiscoveryResult.AlwaysInjectSkills.Count} 个");
             }
             else
             {
@@ -746,6 +758,8 @@ namespace DeepSeek_v4_for_VisualStudio.View
             if (_activeAgent == null || _agentFactory == null) return;
             string? workflowSessionId = _activeSession?.Id;
             bool parallelMemoryExtractionStarted = false;
+            bool executingPlanFromText = routing?.TargetAgent == AgentType.Edit
+                && _pendingHandoff?.TargetAgent == AgentType.Edit;
 
             // ── 单轮 Cache 统计快照：本次问答开始时的累计值 ──
             _apiService?.TakeCacheSnapshot();
@@ -777,6 +791,14 @@ namespace DeepSeek_v4_for_VisualStudio.View
                     ResetActiveAgentToAsk();
                 }
 
+                if (executingPlanFromText && ChatWebView.CoreWebView2 != null)
+                {
+                    // 输入“开始”不走按钮点击路径，这里主动同步按钮视觉状态并防止重复触发。
+                    string executingJs = ChatHtmlService.BuildSetHandoffButtonsExecutingJs(
+                        LocalizationService.Instance["chat.html.executing"]);
+                    await ChatWebView.CoreWebView2.ExecuteScriptAsync(executingJs);
+                }
+
                 StatusLabel.Text = LocalizationService.Instance["agent.status.analyzing"];
 
                 CaptureAndPublishAgentExecutionContext();
@@ -792,7 +814,7 @@ namespace DeepSeek_v4_for_VisualStudio.View
                     _streamingReasoning.Clear();
                     _agentTurnToolCallCount = 0;
                 }
-                _agentStreamingMsgIndex = -1;
+                ClearAgentStreamingTarget();
                 _lastReportedStepIndex = 0;
                 _lastReportedStepStatus = string.Empty;
                 _pendingHandoff = null;
@@ -860,7 +882,7 @@ namespace DeepSeek_v4_for_VisualStudio.View
                         {
                             // 复用占位，更新内容为 Agent 分析状态
                             lastNode.Message.Content = LocalizationService.Instance["agent.status.analyzing"];
-                            _agentStreamingMsgIndex = _messages.Count - 1;
+                            SetAgentStreamingTarget(_messages.Count - 1);
                             reusedPlaceholder = true;
                             Logger.Info($"[Agent] 复用 retry fork 占位 (idx={_agentStreamingMsgIndex})");
                         }
@@ -882,8 +904,8 @@ namespace DeepSeek_v4_for_VisualStudio.View
                     lock (_lock)
                     {
                         _messages.Add(thinkingMsg);
-                        _agentStreamingMsgIndex = _messages.Count - 1;
                     }
+                    SetAgentStreamingTarget(_messages.Count - 1);
                     AddMessagesHtml("assistant", thinkingMsg.Content);
                 }
                 else
@@ -893,10 +915,10 @@ namespace DeepSeek_v4_for_VisualStudio.View
                 var streamingTarget = new AgentStreamingTarget
                 {
                     MessageIndex = _agentStreamingMsgIndex,
+                    TurnId = _agentStreamingTurnId,
                 };
                 context.OnGuidanceTurnRequested = item =>
                     BeginGuidanceTurnAsync(item, streamingTarget);
-                _currentStreamingMsgIndex = _agentStreamingMsgIndex;
                 UpdateBrowser();
                 await TaskScheduler.Default;
 
@@ -1135,6 +1157,12 @@ namespace DeepSeek_v4_for_VisualStudio.View
 
                 await ThreadHelper.JoinableTaskFactory.SwitchToMainThreadAsync();
 
+                // ── 收尾前刷新流式锚点 ──
+                // 消息列表若在任务期间被整体替换（从磁盘重载/切换会话），旧下标会指向别的消息。
+                // 这里把 _agentStreamingMsgIndex 修正为有效值或 -1；下面的收尾逻辑全部带
+                // bounds 检查，-1 会自然跳过写回，避免把别的消息改成最终答复。
+                ResolveAgentStreamingIndex();
+
                 if (agentResult.Success && agentResult.Plan != null)
                 {
                     var plan = agentResult.Plan;
@@ -1145,19 +1173,27 @@ namespace DeepSeek_v4_for_VisualStudio.View
                     {
                         try
                         {
-                            if (anyStepExecuted)
+                            if (plan.Source != PlanSource.None)
                             {
-                                // 步骤已执行 → 更新面板为完成/进度状态
-                                string completeJs = ChatHtmlService.BuildAgentTaskPanelCompleteJs(plan);
-                                await ChatWebView.CoreWebView2.ExecuteScriptAsync(completeJs);
-                            }
-                            else if (plan.Source != PlanSource.None)
-                            {
-                                // 新创建的计划（PlanAgent 或 EditAgent 产出，所有步骤待执行）→ 创建任务面板
+                                bool firstCreation;
+                                lock (_lock)
+                                {
+                                    firstCreation = _createdPlanIds.Add(plan.PlanId);
+                                }
+
+                                // 始终执行一次创建/更新：事件回调可能已创建面板，也可能仍在异步注入。
+                                // BuildAgentTaskPanelCreateJs 对已存在面板是幂等更新，可消除收尾竞态。
                                 string createJs = ChatHtmlService.BuildAgentTaskPanelCreateJs(plan);
                                 await ChatWebView.CoreWebView2.ExecuteScriptAsync(createJs);
-                                lock (_lock) { _createdPlanIds.Add(plan.PlanId); }
-                                Logger.Info($"[Agent] 任务面板已创建: PlanId={plan.PlanId}, Source={plan.Source}, Steps={plan.Steps.Count}");
+                                if (firstCreation)
+                                    Logger.Info($"[Agent] 任务面板已创建: PlanId={plan.PlanId}, Source={plan.Source}, Steps={plan.Steps.Count}");
+
+                                if (anyStepExecuted || plan.IsCompleted || plan.IsCancelled)
+                                {
+                                    // Edit 自拆分计划在执行完成前没有独立创建入口，收尾时补创建并立即刷新为完成态。
+                                    string completeJs = ChatHtmlService.BuildAgentTaskPanelCompleteJs(plan);
+                                    await ChatWebView.CoreWebView2.ExecuteScriptAsync(completeJs);
+                                }
                             }
                             else
                             {
@@ -1247,7 +1283,7 @@ namespace DeepSeek_v4_for_VisualStudio.View
                     else
                         ClearAssistantMessageIncomplete(_agentStreamingMsgIndex);
 
-                    // ── 如果有待处理的 Handoff（如 Plan→Edit），注入"开始实现"按钮 ──
+                    // ── 如果有待处理的 Handoff（如 Plan→Edit），注入“执行当前计划”按钮 ──
                     await InjectPendingHandoffButtonAsync();
 
                     if (plan.ChangedFiles.Count > 0)
@@ -1339,6 +1375,16 @@ namespace DeepSeek_v4_for_VisualStudio.View
             }
             finally
             {
+                if (executingPlanFromText && ChatWebView.CoreWebView2 != null)
+                {
+                    try
+                    {
+                        await ChatWebView.CoreWebView2.ExecuteScriptAsync(
+                            ChatHtmlService.BuildRemoveHandoffButtonsJs());
+                    }
+                    catch { }
+                }
+
                 StopConversationElapsedTimer();
                 _activePlan = null;
                 if (telemetry != null)
@@ -1415,7 +1461,7 @@ namespace DeepSeek_v4_for_VisualStudio.View
             }
 
             // ── 记录 Cache 命中率 ──
-            LogCacheHitRate();
+            CacheUsageLogger.Log(_apiService?.LastUsage);
 
             // ── 一次回答结束后根据需要自动记录 memory（与 Handoff 路径共用）──
             if (!parallelMemoryExtractionStarted)
@@ -1464,8 +1510,7 @@ namespace DeepSeek_v4_for_VisualStudio.View
             string footerHtml, string? extraFooterHtml = null)
         {
             // 不裁剪：reasoning 最终会写入消息对象（_messages[idx] 是 ConversationTree 的活引用），
-            // 进而被持久化并在后续请求中回传给 API。官方要求携带 tools 时必须完整回传
-            // reasoning_content，任何裁剪（尤其是注入截断标记）都会破坏历史。
+            // 并持久化供 UI 回看。当前轮次的完整思考仍会原样回传，历史轮次不回传。
 
             // ── 更新消息状态为最终完成态（下标无效时跳过更新，与旧分支行为一致）──
             string timelineContent;
@@ -1523,8 +1568,8 @@ namespace DeepSeek_v4_for_VisualStudio.View
         {
             try
             {
-                int msgIndex = _agentStreamingMsgIndex;
-                if (msgIndex < 0 || msgIndex >= _messages.Count)
+                int msgIndex = ResolveAgentStreamingIndex();
+                if (msgIndex < 0)
                     return;
 
                 // 已 finalize 的气泡不再是流式态，直接跳过，避免覆盖正常收尾结果
@@ -1576,12 +1621,16 @@ namespace DeepSeek_v4_for_VisualStudio.View
         /// </summary>
         private async Task InjectPendingHandoffButtonAsync()
         {
-            if (_pendingHandoff == null || _agentStreamingMsgIndex < 0) return;
+            if (_pendingHandoff == null) return;
+
+            int msgIndex = ResolveAgentStreamingIndex();
+            if (msgIndex < 0) return;
+
             try
             {
                 string targetAgentStr = _pendingHandoff.TargetAgent.ToString();
                 string handoffBtnJs = ChatHtmlService.BuildHandoffButtonJs(
-                    _agentStreamingMsgIndex, targetAgentStr, _pendingHandoff.Label);
+                    msgIndex, targetAgentStr, _pendingHandoff.Label);
                 await ChatWebView.CoreWebView2.ExecuteScriptAsync(handoffBtnJs);
             }
             catch
@@ -2044,13 +2093,15 @@ namespace DeepSeek_v4_for_VisualStudio.View
 
                 lock (_lock)
                 {
-                    if (_agentStreamingMsgIndex < 0 || _agentStreamingMsgIndex >= _messages.Count)
+                    int streamingIndex = ResolveAgentStreamingIndex();
+                    if (streamingIndex < 0)
                     {
-                        Logger.Warn($"[Agent→Tree] 无效的 _agentStreamingMsgIndex={_agentStreamingMsgIndex}, _messages.Count={_messages.Count}");
+                        Logger.Warn($"[Agent→Tree] 流式气泡锚点已失效（_messages.Count={_messages.Count}），" +
+                            "本轮最终答复未写回树/上下文");
                         return;
                     }
 
-                    var agentResponseMsg = _messages[_agentStreamingMsgIndex];
+                    var agentResponseMsg = _messages[streamingIndex];
 
                     // 确保消息状态正确
                     agentResponseMsg.IsStreaming = false;
@@ -2072,14 +2123,17 @@ namespace DeepSeek_v4_for_VisualStudio.View
                     }
 
                     // ── 添加到上下文管理器（供后续 API 调用使用）──
+                    // Agent 工具循环已经按每次 API 响应把各自的 reasoning_content
+                    // 写入 ContextManager。这里只补 UI 气泡正文；气泡上的 ReasoningContent
+                    // 是跨工具轮次/Handoff 聚合后的展示值，不能再写回 API 历史。
                     string content = agentResponseMsg.Content ?? string.Empty;
                     string reasoning = agentResponseMsg.ReasoningContent;
                     if (!string.IsNullOrWhiteSpace(content) || !string.IsNullOrWhiteSpace(reasoning))
                     {
                         _contextManager.AddAssistantMessage(
-                            string.IsNullOrWhiteSpace(content) ? null : content,
-                            string.IsNullOrWhiteSpace(reasoning) ? null : reasoning);
-                        Logger.Info($"[Agent→Context] Agent 响应已添加到上下文 (contentLen={content.Length}, reasoningLen={reasoning?.Length ?? 0})");
+                            string.IsNullOrWhiteSpace(content) ? null : content);
+                        Logger.Info($"[Agent→Context] Agent 响应已添加到上下文 " +
+                            $"(contentLen={content.Length}, displayReasoningChars={reasoning?.Length ?? 0}, apiReasoningWritten=false)");
                     }
                 }
 
@@ -2113,7 +2167,13 @@ namespace DeepSeek_v4_for_VisualStudio.View
             {
                 previousIndex = streamingTarget.MessageIndex;
                 if (previousIndex < 0 || previousIndex >= _messages.Count)
-                    return;
+                {
+                    // 消息列表可能已被整体替换（加载会话/解决方案重载），捕获的下标随之失效：
+                    // 回退到当前流式锚点，仍定位不到就安全放弃这次引导轮，避免改错消息。
+                    previousIndex = ResolveAgentStreamingIndex();
+                    if (previousIndex < 0) return;
+                    streamingTarget.MessageIndex = previousIndex;
+                }
 
                 var previousMessage = _messages[previousIndex];
                 previousContent = _streamingContent.ToString().Trim();
@@ -2162,8 +2222,11 @@ namespace DeepSeek_v4_for_VisualStudio.View
                 assistantIndex = _messages.Count - 1;
 
                 _agentStreamingMsgIndex = assistantIndex;
+                _agentStreamingMessage = assistantMessage;
+                _agentStreamingTurnId = assistantMessage.TurnId;
                 _currentStreamingMsgIndex = assistantIndex;
                 streamingTarget.MessageIndex = assistantIndex;
+                streamingTarget.TurnId = assistantMessage.TurnId;
 
                 _agentTimelineContent.Clear();
                 _streamingContent.Clear();
@@ -2198,16 +2261,24 @@ namespace DeepSeek_v4_for_VisualStudio.View
                 {
                     string pid = plan.PlanId;
 
-                    // ── 仅更新有来源的计划面板（PlanAgent 或 EditAgent 产出）──
-                    // 独立 Edit（无拆分计划）不创建/更新下方面板
+                    // ── 有来源的计划面板（PlanAgent 或 EditAgent 自动拆分）──
+                    // 单步 Edit 的 Source=None，不创建面板。
                     if (plan.Source != PlanSource.None)
                     {
-                        bool alreadyCreated;
-                        lock (_lock) { alreadyCreated = _createdPlanIds.Contains(pid); }
-
-                        if (alreadyCreated)
+                        bool shouldCreate;
+                        lock (_lock)
                         {
-                            // 更新任务面板进度
+                            shouldCreate = _createdPlanIds.Add(pid);
+                        }
+
+                        if (shouldCreate)
+                        {
+                            string createJs = ChatHtmlService.BuildAgentTaskPanelCreateJs(plan);
+                            await ChatWebView.CoreWebView2.ExecuteScriptAsync(createJs);
+                            Logger.Info($"[Agent] 任务面板已创建: PlanId={pid}, Source={plan.Source}, Steps={plan.Steps.Count}");
+                        }
+                        else
+                        {
                             string updateJs = ChatHtmlService.BuildAgentTaskPanelUpdateJs(plan);
                             await ChatWebView.CoreWebView2.ExecuteScriptAsync(updateJs);
                         }
@@ -2308,7 +2379,7 @@ namespace DeepSeek_v4_for_VisualStudio.View
                             try
                             {
                                 var plan = JsonSerializer.Deserialize<AgentTaskPlan>(msg.PlanJson, opts);
-                                if (plan != null && plan.IsFromPlanAgent && plan.Steps.Count > 0)
+                                if (plan != null && plan.Source != PlanSource.None && plan.Steps.Count > 0)
                                 {
                                     string pid = plan.PlanId;
                                     if (!_createdPlanIds.Contains(pid))
@@ -2353,39 +2424,44 @@ namespace DeepSeek_v4_for_VisualStudio.View
                 foreach (var (plan, needsTwoPass) in plansToRebuild)
                 {
                     string pid = plan.PlanId;
-                    string js;
-                    if (plan.IsCompleted || plan.Steps.All(s => s.Status == AgentStepStatus.Completed || s.Status == AgentStepStatus.Skipped))
+                    string createJs = ChatHtmlService.BuildAgentTaskPanelCreateJs(plan);
+                    await ChatWebView.CoreWebView2.ExecuteScriptAsync(createJs);
+
+                    bool isFinished = plan.IsCompleted || plan.IsCancelled
+                        || plan.Steps.All(s => s.Status == AgentStepStatus.Completed || s.Status == AgentStepStatus.Skipped);
+                    if (isFinished)
                     {
-                        js = ChatHtmlService.BuildAgentTaskPanelCompleteJs(plan);
+                        string completeJs = ChatHtmlService.BuildAgentTaskPanelCompleteJs(plan);
+                        await ChatWebView.CoreWebView2.ExecuteScriptAsync(completeJs);
                     }
-                    else if (plan.IsCancelled)
+                    else if (needsTwoPass)
                     {
-                        js = ChatHtmlService.BuildAgentTaskPanelCompleteJs(plan);
-                    }
-                    else
-                    {
-                        js = ChatHtmlService.BuildAgentTaskPanelCreateJs(plan);
-                        if (needsTwoPass)
-                        {
-                            _ = ChatWebView.CoreWebView2.ExecuteScriptAsync(js);
-                            await Task.Delay(100);
-                            js = ChatHtmlService.BuildAgentTaskPanelUpdateJs(plan);
-                        }
+                        await Task.Delay(100);
+                        string updateJs = ChatHtmlService.BuildAgentTaskPanelUpdateJs(plan);
+                        await ChatWebView.CoreWebView2.ExecuteScriptAsync(updateJs);
                     }
 
-                    _ = ChatWebView.CoreWebView2.ExecuteScriptAsync(js);
                     Logger.Info($"[Panel] 重建持久化任务面板: {plan.Title} (PlanId={pid}, Steps={plan.Steps.Count})");
                 }
 
                 // ── 在锁外执行 JS 注入：Handoff 按钮 ──
+                // 任务执行中不注入：按钮此刻没有意义，且一旦被恢复成可点击状态，
+                // 用户点下去就是第二个并发任务（ExecuteAgentHandoffAsync 的守卫也会拒绝，但不应给出假入口）。
+                bool runInProgress = IsRunInProgress();
                 foreach (var (msgIndex, handoff) in handoffsToRebuild)
                 {
+                    if (runInProgress)
+                    {
+                        Logger.Warn($"[Panel] 任务执行中，跳过 Handoff 按钮注入: msgIdx={msgIndex}, target={handoff.TargetAgent}");
+                        continue;
+                    }
+
                     try
                     {
                         string targetAgentStr = handoff.TargetAgent.ToString();
                         string handoffBtnJs = ChatHtmlService.BuildHandoffButtonJs(
                             msgIndex, targetAgentStr, handoff.Label);
-                        _ = ChatWebView.CoreWebView2.ExecuteScriptAsync(handoffBtnJs);
+                        await ChatWebView.CoreWebView2.ExecuteScriptAsync(handoffBtnJs);
                         Logger.Info($"[Panel] 重建 Handoff 按钮: msgIdx={msgIndex}, target={targetAgentStr}, label={handoff.Label}");
                     }
                     catch (Exception ex)
@@ -2395,10 +2471,17 @@ namespace DeepSeek_v4_for_VisualStudio.View
                 }
 
                 // ── 恢复 _pendingHandoff，使重启后点击按钮不会因 null 而直接返回 ──
-                if (handoffsToRebuild.Count > 0)
+                // 任务执行中绝不恢复：消息上的 HandoffJson 只代表"最近一次规划产出的待执行按钮"，
+                // 一旦已经开始执行却还没走完，恢复它等于把“执行当前计划”重新变成可点击状态，
+                // 用户再点一次就会对同一批文件并发启动第二个 Agent。
+                if (handoffsToRebuild.Count > 0 && !IsRunInProgress())
                 {
                     _pendingHandoff = handoffsToRebuild[handoffsToRebuild.Count - 1].Handoff;
                     Logger.Info($"[Panel] 恢复 _pendingHandoff: target={_pendingHandoff.TargetAgent}, label={_pendingHandoff.Label}");
+                }
+                else if (handoffsToRebuild.Count > 0)
+                {
+                    Logger.Warn("[Panel] 任务执行中，跳过恢复 Handoff 按钮，避免并发触发第二个任务");
                 }
             }
             catch (Exception ex)
@@ -2441,7 +2524,8 @@ namespace DeepSeek_v4_for_VisualStudio.View
             string displayContent;
             lock (_lock)
             {
-                if (_agentStreamingMsgIndex < 0 || _agentStreamingMsgIndex >= _messages.Count)
+                msgIndex = ResolveAgentStreamingIndex();
+                if (msgIndex < 0)
                     return;
 
                 if (_agentTimelineContent.Length > 0)
@@ -2453,7 +2537,6 @@ namespace DeepSeek_v4_for_VisualStudio.View
                 if (!string.IsNullOrWhiteSpace(line))
                     _currentAgentTurnProducedProcess = true;
 
-                msgIndex = _agentStreamingMsgIndex;
                 var msg = _messages[msgIndex];
                 msg.TimelineContent = _agentTimelineContent.ToString();
                 displayContent = ChatHtmlService.BuildAssistantDisplayContent(
@@ -2472,13 +2555,14 @@ namespace DeepSeek_v4_for_VisualStudio.View
         {
             lock (_lock)
             {
-                if (_agentStreamingMsgIndex < 0 || _agentStreamingMsgIndex >= _messages.Count)
+                int index = ResolveAgentStreamingIndex();
+                if (index < 0)
                     return;
 
                 string segment = _streamingContent.ToString().Trim();
                 _streamingContent.Clear();
 
-                var msg = _messages[_agentStreamingMsgIndex];
+                var msg = _messages[index];
                 msg.Content = string.Empty;
 
                 if (!string.IsNullOrWhiteSpace(segment) && !IsAgentStatusPlaceholder(segment))

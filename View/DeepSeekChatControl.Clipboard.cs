@@ -197,49 +197,6 @@ namespace DeepSeek_v4_for_VisualStudio.View
         }
 
         /// <summary>
-        /// 执行剪贴板图片粘贴（CommandBinding 回调，作为后备路径）。
-        /// 将剪贴板中的图像保存为临时 PNG 文件，并添加到附件列表中。
-        /// 仅在剪贴板包含图像时处理；文本粘贴由 TextBox 默认行为处理。
-        /// </summary>
-        private void ExecutePasteImage(ExecutedRoutedEventArgs e)
-        {
-            Logger.Info("ExecutePasteImage: CommandBinding 回调触发");
-
-            // 仅处理图像粘贴，文本粘贴交给 TextBox 默认行为
-            if (!System.Windows.Clipboard.ContainsImage())
-            {
-                Logger.Info("ExecutePasteImage: ContainsImage() = false，跳过。");
-                return;
-            }
-
-            try
-            {
-                Logger.Info("ExecutePasteImage: 开始保存剪贴板图片...");
-                string? tempFilePath = SaveClipboardImageToTempFile();
-                if (tempFilePath == null)
-                {
-                    Logger.Error("ExecutePasteImage: SaveClipboardImageToTempFile 返回 null");
-                    return;
-                }
-
-                if (!_attachedFilePaths.Contains(tempFilePath, StringComparer.OrdinalIgnoreCase))
-                {
-                    _attachedFilePaths.Add(tempFilePath);
-                    RefreshAttachedFilesUI();
-                    StatusLabel.Text = string.Format(LocalizationService.Instance["status.clipboardImagePasted"], System.IO.Path.GetFileName(tempFilePath));
-                    Logger.Info($"ExecutePasteImage: 图片已添加为附件 - {tempFilePath}");
-                }
-
-                e.Handled = true;
-            }
-            catch (Exception ex)
-            {
-                Logger.Error($"ExecutePasteImage 失败: {ex.Message}", ex);
-                StatusLabel.Text = string.Format(LocalizationService.Instance["status.clipboardPasteFailed"], ex.Message);
-            }
-        }
-
-        /// <summary>
         /// 将剪贴板中的图像保存为临时 PNG 文件。
         /// 支持多种剪贴板格式：WPF Image、DIB、Bitmap、PNG 流、FileDrop。
         /// 文件名格式：clipboard_yyyyMMdd_HHmmss_fff.png。
@@ -368,7 +325,7 @@ namespace DeepSeek_v4_for_VisualStudio.View
                 encoder.Save(stream);
 
                 long fileSize = new System.IO.FileInfo(filePath).Length;
-                Logger.Info($"SaveClipboardImage: 保存成功，大小={FormatFileSize(fileSize)} ← {fileName}");
+                Logger.Info($"SaveClipboardImage: 保存成功，大小={FileSizeFormatter.Format(fileSize)} ← {fileName}");
 
                 return filePath;
             }
@@ -469,13 +426,6 @@ namespace DeepSeek_v4_for_VisualStudio.View
         /// <summary>
         /// 格式化文件大小为可读字符串。
         /// </summary>
-        private static string FormatFileSize(long bytes)
-        {
-            if (bytes < 1024) return $"{bytes} B";
-            if (bytes < 1024 * 1024) return $"{bytes / 1024.0:F1} KB";
-            return $"{bytes / (1024.0 * 1024.0):F1} MB";
-        }
-
         #endregion
     }
 }

@@ -177,43 +177,18 @@ public class PlanAgentTests
         var context = new AgentContext();
         var userMessage = "实现用户认证模块";
 
-        var result = BuildUnifiedDiscoveryPromptPublic(userMessage, context, null);
+        var result = BuildUnifiedDiscoveryPromptPublic(userMessage, context);
 
         result.Should().Contain("实现用户认证模块");
     }
 
     [Fact]
-    public void BuildUnifiedDiscoveryPrompt_WithStructureCache_IncludesCacheContent()
-    {
-        var context = new AgentContext();
-        var structureCache = "## 项目结构 (来自缓存)\n\n-  src/ (15 个文件)";
-        var userMessage = "添加日志功能";
-
-        var result = BuildUnifiedDiscoveryPromptPublic(userMessage, context, structureCache);
-
-        result.Should().Contain("项目结构");
-        result.Should().Contain("src/");
-    }
-
-    [Fact]
-    public void BuildUnifiedDiscoveryPrompt_WithStructureCache_IncludesSkipHint()
-    {
-        var context = new AgentContext();
-        var structureCache = "cached structure";
-        var userMessage = "重构数据层";
-
-        var result = BuildUnifiedDiscoveryPromptPublic(userMessage, context, structureCache);
-
-        result.Should().Contain("跳过");
-    }
-
-    [Fact]
-    public void BuildUnifiedDiscoveryPrompt_WithoutCache_IncludesFirstExploreHint()
+    public void BuildUnifiedDiscoveryPrompt_IncludesFirstExploreHint()
     {
         var context = new AgentContext();
         var userMessage = "改进性能";
 
-        var result = BuildUnifiedDiscoveryPromptPublic(userMessage, context, null);
+        var result = BuildUnifiedDiscoveryPromptPublic(userMessage, context);
 
         result.Should().NotBeEmpty();
         result.Should().Contain("runSubagent");
@@ -228,7 +203,7 @@ public class PlanAgentTests
         };
         var userMessage = "修复内存泄漏";
 
-        var result = BuildUnifiedDiscoveryPromptPublic(userMessage, context, null);
+        var result = BuildUnifiedDiscoveryPromptPublic(userMessage, context);
 
         result.Should().Contain("D:\\Code\\MyProject");
     }
@@ -510,11 +485,11 @@ public class PlanAgentTests
 
     #endregion
 
-    private static string BuildUnifiedDiscoveryPromptPublic(string userMessage, AgentContext context, string? structureCache)
+    private static string BuildUnifiedDiscoveryPromptPublic(string userMessage, AgentContext context)
     {
         var method = typeof(PlanAgent).GetMethod("BuildUnifiedDiscoveryPrompt",
             System.Reflection.BindingFlags.NonPublic | System.Reflection.BindingFlags.Static);
-        return (string)method!.Invoke(null, new object[] { userMessage, context, structureCache! })!;
+        return (string)method!.Invoke(null, new object[] { userMessage, context })!;
     }
 
     private static string BuildPlanCreationPromptPublic(string userMessage, AgentContext context)

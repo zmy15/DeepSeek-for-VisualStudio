@@ -37,7 +37,7 @@ namespace DeepSeek_v4_for_VisualStudio.Services.Agents
         private CancellationTokenSource? _agentCts;
         private ExploreAgent? _exploreAgent;
 
-        // ── 累积累推理/思考内容（跨步骤收集，供 UI 渲染思考面板）──
+        // ── 累积展示用推理/思考内容（跨步骤收集，仅供 UI 思考面板）──
         private string? _accumulatedReasoning;
 
         // ── 用户原始消息（用于检测跳过构建的意图）──
@@ -205,32 +205,25 @@ namespace DeepSeek_v4_for_VisualStudio.Services.Agents
                 var taskSize = context.PreClassifiedTaskSize;
                 AddLog("INFO", string.Format(LocalizationService.Instance["agent.log.editTaskSize"], taskSize));
 
-                // ── 用户 @edit 显式指定时尊重用户意图，跳过自动移交 ──
-                if (taskSize == TaskSize.Large && context.IsExplicitRoute)
-                {
-                    AddLog("INFO", LocalizationService.Instance["agent.log.editExplicitRouteSkipHandoff"]);
-                    taskSize = TaskSize.Medium;
-                }
-
                 if (taskSize == TaskSize.Large)
                 {
-                    // ── Large 任务：移交 Plan Agent 进行深入规划 ──
-                    AddLog("INFO", LocalizationService.Instance["agent.log.editLargeTaskHandoff"]);
-                    return BuildLargeTaskHandoffResult(userMessage);
+                    if (context.IsExplicitRoute)
+                    {
+                        // 用户显式 @edit 时尊重其选择，直接按单步执行，不由 Edit 自行拆分。
+                        AddLog("INFO", LocalizationService.Instance["agent.log.editExplicitRouteSkipHandoff"]);
+                    }
+                    else
+                    {
+                        // ── Large 任务：移交 Plan Agent 进行深入规划 ──
+                        AddLog("INFO", LocalizationService.Instance["agent.log.editLargeTaskHandoff"]);
+                        return BuildLargeTaskHandoffResult(userMessage);
+                    }
                 }
-                else if (taskSize == TaskSize.Medium)
-                {
-                    // ── Medium 任务：AI 自主拆分步骤 ──
-                    AddLog("INFO", LocalizationService.Instance["agent.log.editAutoSplit"]);
-                    plan = await CreateAutoSplitPlanAsync(userMessage, context);
-                }
-                else
-                {
-                    // ── Small 任务：单步执行 ──
-                    AddLog("INFO", LocalizationService.Instance["agent.log.editNoPlan"]);
-                    plan = CreateSingleStepPlan(userMessage);
-                }
-                plan.Source = PlanSource.EditAgent;
+
+                // 多步骤计划统一由 Ask 在 request_handoff.editSteps 中提供；
+                // Edit 不再调用模型自行拆分，没有 editSteps 时按单步执行。
+                AddLog("INFO", LocalizationService.Instance["agent.log.editNoPlan"]);
+                plan = CreateSingleStepPlan(userMessage);
                 context.ActivePlan = plan;
                 await ExecutePlanAsync(plan, context);
             }
@@ -242,7 +235,7 @@ namespace DeepSeek_v4_for_VisualStudio.Services.Agents
             bool cancelled = plan.IsCancelled || context.CancellationToken.IsCancellationRequested;
             result.Handoff = cancelled ? null : ResolveHandoff(plan);
 
-            // ── 传递累积累的推理内容供 UI 渲染思考面板 ──
+            // ── 传递累积的展示用推理内容；API 历史已在工具循环中逐条落库 ──
             if (!string.IsNullOrEmpty(_accumulatedReasoning))
                 result.ReasoningContent = _accumulatedReasoning;
 

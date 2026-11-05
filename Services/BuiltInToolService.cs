@@ -310,6 +310,7 @@ namespace DeepSeek_v4_for_VisualStudio.Services
             Register(new GrepSearchTool());
             Register(new SymbolSearchTool());
             Register(new FileSymbolsTool());
+            Register(new ListSkillsTool(_skillService));
             Register(new LoadSkillTool(_skillService));
             Register(new ReadSkillResourceTool(_skillService));
             Register(new GetErrorsTool(_buildService));
@@ -459,6 +460,7 @@ namespace DeepSeek_v4_for_VisualStudio.Services
                 new GrepSearchTool(),
                 new SymbolSearchTool(),
                 new FileSymbolsTool(),
+                new ListSkillsTool(SkillService.Instance),
                 new LoadSkillTool(SkillService.Instance),
                 new ReadSkillResourceTool(SkillService.Instance),
                 new GetErrorsTool(),
@@ -618,7 +620,7 @@ namespace DeepSeek_v4_for_VisualStudio.Services
                     or "fetch_webpage" or "web_search" or "capture_window" or "capture_webpage" or "build_solution" or "run_tests"
                     or "replace_string_in_file" or "multi_replace_string_in_file" or "create_file" or "delete_file"
                     or "apply_patch" or "create_directory"
-                    or "load_skill" or "read_skill_resource"
+                    or "list_skills" or "load_skill" or "read_skill_resource"
                     or "run_in_terminal" or "get_terminal_output" or "VisualStudio_askQuestions" or "askQuestions"
                     or "runSubagent" or "request_handoff" or "memory" or "git" => true,
                 _ => false

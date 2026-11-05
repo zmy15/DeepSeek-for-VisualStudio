@@ -203,6 +203,51 @@ public class ChatPersistenceServiceTests
     }
 
     [Fact]
+    public void SaveAndLoad_ActiveRunMarker_RoundTrips()
+    {
+        // 「执行中」标记必须在磁盘上存活：VS 被强杀/窗口被重建后，
+        // 下一次加载靠它识别「上一轮没有收尾」，而不是把半截对话当成完整历史。
+        var testPath = string.Format(@"F:\TestData\ActiveRun{0}\Test.sln", Guid.NewGuid().ToString("N").Substring(0, 8));
+        var startedAt = new DateTime(2026, 10, 30, 15, 37, 4, DateTimeKind.Local);
+        var original = new SessionsContainer
+        {
+            SolutionPath = testPath,
+            Sessions = new List<ChatSession>
+            {
+                new()
+                {
+                    Id = "running-session",
+                    Title = "Running",
+                    ActiveRun = new SessionActiveRun
+                    {
+                        TurnId = "3f2a1b9c",
+                        AgentType = "Edit",
+                        StartedAt = startedAt,
+                    },
+                }
+            },
+            ActiveSessionId = "running-session",
+        };
+
+        try
+        {
+            ChatPersistenceService.SaveSessions(testPath, original);
+
+            var loaded = ChatPersistenceService.LoadSessions(testPath);
+
+            var session = loaded.Sessions.Should().ContainSingle().Subject;
+            session.ActiveRun.Should().NotBeNull();
+            session.ActiveRun!.TurnId.Should().Be("3f2a1b9c");
+            session.ActiveRun.AgentType.Should().Be("Edit");
+            session.ActiveRun.StartedAt.Should().Be(startedAt);
+        }
+        finally
+        {
+            ChatPersistenceService.DeleteAllSessions(testPath);
+        }
+    }
+
+    [Fact]
     public void DeleteAllSessions_NonExistentFile_DoesNotThrow()
     {
         var act = () => ChatPersistenceService.DeleteAllSessions(@"Z:\Never\Existed.sln");

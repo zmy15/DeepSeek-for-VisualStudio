@@ -233,10 +233,8 @@ public class ConversationContextManagerExtendedTests
         var messages = _manager.BuildApiMessages();
 
         var assistantMsg = messages.First(m => m.Role == "assistant");
-        // 官方要求（思考模式 / 工具调用）：携带 tools 的请求，后续所有请求必须**完整回传**
-        // reasoning_content——「即使该轮模型未实际进行工具调用」也不例外。
-        // 因此无 tool_calls 的 assistant 同样回传，不再丢弃。
-        // （未携带 tools 的请求即使传入该字段也会被 API 忽略，不会报错。）
+        // 当前轮次内，即使本轮 assistant 未实际调用工具，其 reasoning_content
+        // 也随当前轮一起回传；进入下一用户轮次后才停止回传。
         assistantMsg.ReasoningContent.Should().Be("This is my reasoning...");
     }
 

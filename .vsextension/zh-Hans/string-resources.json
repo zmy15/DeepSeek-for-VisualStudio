@@ -76,6 +76,8 @@
   "DeepSeek.Chat.Settings.LanguageChineseSimplified": "中文（简体）",
   "DeepSeek.Chat.settings.llmTimeoutSeconds.description": "单次 LLM API 请求的超时时间。默认 300 秒；流式场景另有 120 秒无数据断线检测，不受此项影响。",
   "DeepSeek.Chat.settings.llmTimeoutSeconds.displayName": "LLM 请求超时（秒）",
+  "DeepSeek.Chat.settings.apiMaxRetryCount.description": "网络或服务器临时失败后的额外重试次数，采用指数退避（1 秒、2 秒、4 秒……）。0 表示不重试。默认 3。",
+  "DeepSeek.Chat.settings.apiMaxRetryCount.displayName": "API 重试次数",
   "DeepSeek.Chat.settings.maxConsecutiveErrors.description": "连续 N 轮工具调用全部返回错误时强制终止。默认 5 轮。",
   "DeepSeek.Chat.settings.maxConsecutiveErrors.displayName": "连续错误终止阈值",
   "DeepSeek.Chat.settings.agentMaxDepth.description": "runSubagent 子 Agent 允许的最大递归深度。默认 3。",

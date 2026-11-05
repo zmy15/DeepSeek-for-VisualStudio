@@ -6,11 +6,13 @@ namespace DeepSeek_v4_for_VisualStudio.Tests.Unit.Services;
 public class FileSymbolsToolTests
 {
     [Fact]
-    public void Definition_RequiresFilePath()
+    public void Definition_DescribesCapabilityWithoutImplementationDetails()
     {
         var definition = new FileSymbolsTool().GetDefinition();
 
         definition.Function.Name.Should().Be("get_file_symbols");
+        definition.Function.Description.Should().NotContain("FileCodeModel");
+        definition.Function.Description.Should().NotContain("轮廓");
         definition.Function.Parameters.Should().NotBeNull();
     }
 

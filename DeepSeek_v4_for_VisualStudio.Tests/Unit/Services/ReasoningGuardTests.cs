@@ -114,12 +114,48 @@ public class ReasoningGuardTests
         var history = manager.GetConversationHistory();
         var assistant = history.Single(message => message.Role == "assistant");
         assistant.ReasoningContent.Should().NotBeNull();
-        // 存储阶段不裁剪：官方要求携带 tools 的请求必须完整回传 reasoning_content
+        // 存储阶段不裁剪：当前轮仍完整回传，历史轮保留供 UI 回看
         assistant.ReasoningContent.Should().Be(longReasoning);
     }
 
     [Fact]
-    public void BuildApiMessages_HistoricalToolCallReasoning_IsNotCompacted()
+    public void AddAssistantMessage_UiSummary_DoesNotOverwritePerTurnReasoning()
+    {
+        var manager = new ConversationContextManager();
+        manager.AddUserMessage("execute task");
+
+        manager.AddAssistantMessage(
+            "calling tool",
+            "tool-round reasoning",
+            new List<ToolCall>
+            {
+                new()
+                {
+                    Id = "call_1",
+                    Type = "function",
+                    Function = new ToolCallFunction { Name = "edit_file", Arguments = "{}" }
+                }
+            });
+        manager.AddToolResult("call_1", "edit_file", "ok");
+        manager.AddAssistantMessage("API final answer", "final-round reasoning");
+
+        // UI 收尾会把多个工具轮次/Handoff 的思考聚合成一个展示值。
+        // 该聚合值不得覆盖 API 最后一轮自己的 reasoning_content。
+        manager.AddAssistantMessage("programmatic summary");
+
+        var assistants = manager.BuildApiMessages()
+            .Where(m => m.Role == "assistant")
+            .ToList();
+
+        assistants.Should().HaveCount(2);
+        assistants[0].ReasoningContent.Should().Be("tool-round reasoning");
+        assistants[1].ReasoningContent.Should().Be("final-round reasoning");
+        assistants.Should().NotContain(m =>
+            (m.ReasoningContent ?? string.Empty).Contains("programmatic summary"));
+    }
+
+    [Fact]
+    public void BuildApiMessages_HistoricalToolCallReasoning_IsOmitted()
     {
         var manager = new ConversationContextManager();
         manager.AddUserMessage("first");
@@ -149,18 +185,15 @@ public class ReasoningGuardTests
             message.Role == "assistant"
             && message.ToolCalls != null
             && message.ToolCalls.Count > 0);
-        historicalAssistant.ReasoningContent.Should().NotBeNull();
-        // 历史轮次完整回传：既不受旧的 4_000 上限压缩，也不受存储上限压缩
-        historicalAssistant.ReasoningContent.Should().Be(longReasoning);
-        historicalAssistant.ReasoningContent.Should().NotContain("reasoning truncated");
+        historicalAssistant.ReasoningContent.Should().BeNull(
+            "历史轮次的思考只用于本地回看，不再回传以节省 token");
     }
 
     /// <summary>
-    /// 关键回归防护：同一个条目在「当前轮」与「历史轮」两种状态下回传的 reasoning_content
-    /// 必须逐字节一致——否则 TurnCount 递增就会改写同一段历史，击穿 DeepSeek 前缀缓存。
+    /// 当前轮保留思考，进入下一轮后同一 assistant 的 reasoning_content 不再回传。
     /// </summary>
     [Fact]
-    public void BuildApiMessages_CurrentVsHistoricalReasoning_AreByteIdentical()
+    public void BuildApiMessages_OnlyCurrentTurnReasoning_IsReplayed()
     {
         var manager = new ConversationContextManager();
         manager.AddUserMessage("first");
@@ -191,7 +224,38 @@ public class ReasoningGuardTests
             .ReasoningContent;
 
         asCurrentTurn.Should().Be(reasoning);
-        asHistoricalTurn.Should().Be(asCurrentTurn);
+        asHistoricalTurn.Should().BeNull(
+            "新用户轮次开始后，上一轮思考不再进入 API 请求");
+    }
+
+    [Fact]
+    public void BuildApiMessages_CurrentTurnToolLoop_RetainsEachRoundReasoning()
+    {
+        var manager = new ConversationContextManager();
+        manager.AddUserMessage("current turn");
+
+        manager.AddAssistantMessage(
+            "first tool call",
+            "first-round reasoning",
+            new List<ToolCall>
+            {
+                new()
+                {
+                    Id = "call_1",
+                    Type = "function",
+                    Function = new ToolCallFunction { Name = "read_file", Arguments = "{}" }
+                }
+            });
+        manager.AddToolResult("call_1", "read_file", "ok");
+        manager.AddAssistantMessage("final answer", "final-round reasoning");
+
+        var assistants = manager.BuildApiMessages()
+            .Where(m => m.Role == "assistant")
+            .ToList();
+
+        assistants.Should().HaveCount(2);
+        assistants[0].ReasoningContent.Should().Be("first-round reasoning");
+        assistants[1].ReasoningContent.Should().Be("final-round reasoning");
     }
 
     [Fact]

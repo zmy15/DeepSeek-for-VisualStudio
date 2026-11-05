@@ -13,8 +13,8 @@ using System.Threading.Tasks;
 namespace DeepSeek_v4_for_VisualStudio.Services.BuiltInTools
 {
     /// <summary>
-    /// get_file_symbols 工具 — 使用 Visual Studio CodeModel 返回单个文件中的符号定义。
-    /// CodeModel 由 VS 语言服务提供，不自行解析源码。
+    /// get_file_symbols 工具 — 使用 Visual Studio DTE FileCodeModel 返回当前项目中单个文件的符号定义。
+    /// FileCodeModel 由 VS 语言服务提供，不自行解析源码；非项目文件或不支持 CodeModel 的语言会失败。
     /// </summary>
     public class FileSymbolsTool : BuiltInToolBase
     {

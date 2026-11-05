@@ -29,6 +29,9 @@ namespace DeepSeek_v4_for_VisualStudio.Settings
         internal const bool DefaultEnableAutoSkillRouting = false;
         internal const AppendMessageMode DefaultAppendMessageMode = Models.AppendMessageMode.Queue;
         internal const int DefaultTokenBudgetPercent = ModelTokenLimitService.DefaultBudgetPercent;
+        internal const int MinApiMaxRetryCount = 0;
+        internal const int MaxApiMaxRetryCount = 10;
+        internal const int DefaultApiMaxRetryCount = 3;
 
         /// <summary>
         /// 推理强度兜底档位。官方模型以 /models 的 effort.supported_levels 为准，
@@ -933,6 +936,7 @@ namespace DeepSeek_v4_for_VisualStudio.Settings
             EnableTelemetryExport = true;
             EnableIdeContextInjection = true;
             LlmTimeoutSeconds = 300;
+            ApiMaxRetryCount = DefaultApiMaxRetryCount;
             Language = "auto";
             MaxToolCallRounds = 200;
             MaxRepeatedSameCall = 5;
@@ -1163,6 +1167,15 @@ namespace DeepSeek_v4_for_VisualStudio.Settings
         [LocalizedDescription("settings.llmTimeoutSeconds.description")]
         [DesignerSerializationVisibility(DesignerSerializationVisibility.Visible)]
         public int LlmTimeoutSeconds { get; set; } = 300;
+
+        /// <summary>
+        /// 网络请求失败后的额外重试次数（不含首次请求）。0 表示不重试。
+        /// </summary>
+        [LocalizedCategory("settings.category.context")]
+        [LocalizedDisplayName("settings.apiMaxRetryCount.displayName")]
+        [LocalizedDescription("settings.apiMaxRetryCount.description")]
+        [DesignerSerializationVisibility(DesignerSerializationVisibility.Visible)]
+        public int ApiMaxRetryCount { get; set; } = DefaultApiMaxRetryCount;
 
         // ═══════════════════════════════════════════════
         //  国际化 (i18n) 设置

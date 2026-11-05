@@ -401,9 +401,9 @@ namespace DeepSeek_v4_for_VisualStudio.Services
 
         /// <summary>
         /// 构建 Handoff 按钮的 JavaScript 注入脚本。
-        /// 在消息底部渲染一个" 开始实现"按钮，点击后触发 Agent Handoff。
+        /// 在计划面板底部渲染"执行当前计划"按钮，点击后触发 Agent Handoff。
         /// </summary>
-        /// <param name="messageIndex">要附加按钮的消息索引</param>
+        /// <param name="messageIndex">消息索引，用于生成按钮唯一 ID</param>
         /// <param name="targetAgent">目标 Agent 类型（如 "Edit"）</param>
         /// <param name="label">按钮显示文本</param>
         /// <returns>JavaScript 脚本字符串</returns>
@@ -413,24 +413,62 @@ namespace DeepSeek_v4_for_VisualStudio.Services
             string escapedTarget = EscapeJsString(targetAgent);
             return $@"
 (function(){{
-    var msgDiv=document.getElementById('msg-{messageIndex}');
-    if(!msgDiv) return;
-    var existingBtn=document.getElementById('handoff-btn-{messageIndex}');
+    var panel=document.querySelector('[id^=""agent-task-panel-""]');
+    if(!panel) return;
+    if(panel.getAttribute('data-plan-source')!=='PlanAgent') return;
+    var existingBtn=panel.querySelector('.handoff-btn');
     if(existingBtn) return;
 
     var btn=document.createElement('button');
     btn.id='handoff-btn-{messageIndex}';
-    btn.className='msg-action-btn handoff-btn';
-    btn.textContent='{escapedLabel}';
-    btn.title='{EscapeJsString(L["chat.html.handoffButtonTitle"])}';
-    btn.style.cssText='background:#28a745;color:#fff;border:none;padding:8px 20px;border-radius:6px;cursor:pointer;font-size:14px;margin:10px 0;font-weight:600;opacity:1;';
+    btn.className='msg-action-btn handoff-btn task-handoff-btn';
+    btn.textContent={escapedLabel};
+    btn.title={EscapeJsString(L["chat.html.handoffButtonTitle"])};
+    btn.style.cssText='display:block;width:100%;box-sizing:border-box;background:#28a745;color:#fff;border:none;padding:9px 20px;border-radius:6px;cursor:pointer;font-size:14px;margin:10px 0 2px 0;font-weight:600;opacity:1;';
     btn.onmouseover=function(){{this.style.background='#218838';}};
     btn.onmouseout=function(){{this.style.background='#28a745';}};
-    btn.onclick=function(){{window.__executeHandoff('{escapedTarget}','{escapedLabel}');}};
+    btn.onclick=function(){{window.__executeHandoff({escapedTarget},{escapedLabel});}};
 
-    var msgBody=document.getElementById('msg-body-{messageIndex}');
-    if(msgBody) msgBody.parentNode.insertBefore(btn,msgBody.nextSibling);
+    var actions=panel.querySelector('.agent-task-panel-actions');
+    if(!actions){{
+        actions=document.createElement('div');
+        actions.className='agent-task-panel-actions';
+        panel.appendChild(actions);
+    }}
+    actions.appendChild(btn);
 }})();";
+        }
+
+        /// <summary>
+        /// 构建将所有 Handoff 按钮切换为执行中状态的 JavaScript。
+        /// 输入“开始”与点击按钮必须共用同一视觉状态。
+        /// </summary>
+        public static string BuildSetHandoffButtonsExecutingJs(string label)
+        {
+            return $@"(function(){{
+    var btns=document.querySelectorAll('.handoff-btn');
+    for(var i=0;i<btns.length;i++){{
+        btns[i].disabled=true;
+        btns[i].textContent={EscapeJsString(label)};
+        btns[i].style.opacity='0.6';
+    }}
+}})();";
+        }
+
+        /// <summary>构建移除所有 Handoff 按钮的 JavaScript。</summary>
+        public static string BuildRemoveHandoffButtonsJs()
+        {
+            return @"(function(){
+    var btns=document.querySelectorAll('.handoff-btn');
+    for(var i=0;i<btns.length;i++){
+        if(btns[i].parentNode)btns[i].parentNode.removeChild(btns[i]);
+    }
+    var actions=document.querySelectorAll('.agent-task-panel-actions');
+    for(var j=0;j<actions.length;j++){
+        if(actions[j].querySelectorAll('.handoff-btn').length===0 && actions[j].parentNode)
+            actions[j].parentNode.removeChild(actions[j]);
+    }
+})();";
         }
 
         /// <summary>
@@ -1632,6 +1670,7 @@ return "<!DOCTYPE html><html lang='" + htmlLang + "'><head><meta charset='UTF-8'
         /// 构建向用户提问的 UI（VisualStudio_askQuestions 工具）。
         /// 多个问题合并为一个卡片，并按「一页一题」分页显示：用箭头在题目间切换，
         /// 提交按钮只在最后一题出现（回答在提交时统一收集）。
+        /// 左上角关闭按钮放弃整组提问；页脚「跳过本题」只跳过当前问题。
         /// </summary>
         public static string BuildAskQuestionsJs(AgentQuestionRequest request)
         {
@@ -1688,18 +1727,25 @@ return "<!DOCTYPE html><html lang='" + htmlLang + "'><head><meta charset='UTF-8'
                 pagesHtml.Append("</div>");
             }
 
-            // ── 页头：标题 + 进度（第 N / M 题；单题时不需要）──
+            // ── 页头：关闭 + 标题 + 进度（第 N / M 题；单题时不需要）──
             string progressTemplate = L["chat.html.questionProgress"];
+            string closeQuestionsLabel = EscapeHtmlAttribute(L["chat.html.closeQuestions"]);
             string headerHtml =
-                "<div style='display:flex;align-items:center;justify-content:space-between;margin-bottom:8px'>" +
+                "<div style='display:flex;align-items:center;gap:8px;margin-bottom:8px'>" +
+                $"<button id='agent-questions-close' type='button' onclick=\"window.__closeQuestions('{safeRequestId}')\" " +
+                $"title='{closeQuestionsLabel}' aria-label='{closeQuestionsLabel}' " +
+                $"style='width:22px;height:22px;padding:0;display:inline-flex;align-items:center;justify-content:center;" +
+                $"background:{p.SecondaryBtnBg};color:{p.SecondaryBtnText};border:1px solid {p.SecondaryBtnBorder};" +
+                $"border-radius:4px;cursor:pointer;font-size:14px;line-height:1'>&times;</button>" +
                 $"<div style='color:{p.Accent};font-size:12px;font-weight:600'>{EscapeHtml(L["chat.html.questionsTitle"])}</div>" +
+                "<div style='flex:1'></div>" +
                 (hasMultipleQuestions
                     ? $"<div id='agent-questions-progress' data-template='{EscapeHtmlAttribute(progressTemplate)}' style='color:{p.MutedText};font-size:11px'>" +
                       $"{EscapeHtml(LocalizationService.Instance.Format("chat.html.questionProgress", 1, totalQuestions))}</div>"
                     : "") +
                 "</div>";
 
-            // ── 页脚：上一题 / 下一题（切换箭头）+ 提交（仅最后一题）+ 跳过 ──
+            // ── 页脚：上一题 / 下一题（切换箭头）+ 跳过本题 + 提交（仅最后一题）──
             string navHtml = hasMultipleQuestions
                 ? "<button id='agent-questions-prev' type='button' " +
                   $"onclick=\"window.__askQuestionsNav('{safeRequestId}',-1)\" " +
@@ -1722,7 +1768,7 @@ return "<!DOCTYPE html><html lang='" + htmlLang + "'><head><meta charset='UTF-8'
                 $"<button id='agent-questions-submit' type='button' onclick=\"window.__answerQuestions('{safeRequestId}')\" " +
                 $"style='{submitStyle}background:{p.PrimaryBtnBg};color:{p.PrimaryBtnText};border:none;border-radius:4px;padding:6px 20px;cursor:pointer;font-size:12px;font-weight:600'>" +
                 $"{EscapeHtml(L["chat.html.submitAnswer"])}</button>" +
-                $"<button type='button' onclick=\"window.__skipQuestions('{safeRequestId}')\" " +
+                $"<button id='agent-questions-skip' type='button' onclick=\"window.__skipCurrentQuestion('{safeRequestId}')\" " +
                 $"style='background:{p.SecondaryBtnBg};color:{p.SecondaryBtnText};border:1px solid {p.SecondaryBtnBorder};border-radius:4px;padding:6px 16px;cursor:pointer;font-size:12px'>" +
                 $"{EscapeHtml(L["chat.html.skip"])}</button>" +
                 "</div>";
@@ -1739,6 +1785,14 @@ return "<!DOCTYPE html><html lang='" + htmlLang + "'><head><meta charset='UTF-8'
         div.id='agent-questions';
         div.style.cssText='border:1px solid {p.CardBorder};border-radius:8px;background:{p.CardBg};padding:12px;margin:8px 0;animation:fadeIn .3s';
         div.innerHTML={escapedInnerHtml};
+        div.addEventListener('input',function(e){{
+            var page=e.target&&e.target.closest?e.target.closest('.aq-page'):null;
+            if(page)page.removeAttribute('data-skipped');
+        }});
+        div.addEventListener('change',function(e){{
+            var page=e.target&&e.target.closest?e.target.closest('.aq-page'):null;
+            if(page)page.removeAttribute('data-skipped');
+        }});
 
         var container=document.getElementById('chat-container');
         if(!container){{window.__sendToHost({{type:'diagnostic',msg:'questions:chat-container not found'}});return;}}
@@ -2140,6 +2194,7 @@ return "<!DOCTYPE html><html lang='" + htmlLang + "'><head><meta charset='UTF-8'
     var panel=document.createElement('div');
     panel.id='agent-task-panel-{pid}';
     panel.className='agent-task-panel';
+    panel.setAttribute('data-plan-source',{EscapeJsString(plan.Source.ToString())});
     panel.innerHTML=
         '<div class=""agent-task-panel-header"" onclick=""window.__toggleTaskPanel(\'{pid}\')"">'+
  '<span class=""task-icon""></span>'+

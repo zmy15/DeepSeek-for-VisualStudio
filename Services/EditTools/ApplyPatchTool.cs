@@ -49,6 +49,8 @@ namespace DeepSeek_v4_for_VisualStudio.Services.EditTools
         private static readonly Regex PatchLineRegex = new(
             @"^([\s\-\+])(.*)$");
 
+        private const int ExpectedAnchorScopeRadius = 300;
+
         public ApplyPatchTool(DeepSeekApiService apiService, string workspaceRoot)
             : base(apiService, workspaceRoot)
         {
@@ -67,9 +69,7 @@ namespace DeepSeek_v4_for_VisualStudio.Services.EditTools
             foreach (Match match in matches)
             {
                 string body = match.Groups["body"].Value;
-                var patch = ParsePatchBody(body);
-                if (patch != null)
-                    patches.Add(patch);
+                patches.AddRange(ParsePatchBody(body));
             }
 
             return patches;
@@ -78,14 +78,59 @@ namespace DeepSeek_v4_for_VisualStudio.Services.EditTools
         /// <summary>
         /// 解析 Patch 块体内容。
         /// </summary>
-        private static PatchOperation? ParsePatchBody(string body)
+        private static List<PatchOperation> ParsePatchBody(string body)
         {
-            var fileMatch = PatchFileHeaderRegex.Match(body);
+            var patches = new List<PatchOperation>();
+            var fileMatches = PatchFileHeaderRegex.Matches(body);
+            var segmentStarts = new List<int>();
+            for (int i = 0; i < fileMatches.Count; i++)
+            {
+                int start = fileMatches[i].Index;
+                if (start > 0)
+                {
+                    int previousLineEnd = start;
+                    while (previousLineEnd > 0
+                        && (body[previousLineEnd - 1] == '\n'
+                            || body[previousLineEnd - 1] == '\r'))
+                    {
+                        previousLineEnd--;
+                    }
+
+                    int previousLineStart = previousLineEnd > 0
+                        ? body.LastIndexOf('\n', previousLineEnd - 1) + 1
+                        : 0;
+                    string previousLine = body.Substring(
+                        previousLineStart,
+                        previousLineEnd - previousLineStart).Trim();
+                    if (previousLine.StartsWith("*** Move to:", StringComparison.OrdinalIgnoreCase))
+                        start = previousLineStart;
+                }
+                segmentStarts.Add(start);
+            }
+
+            for (int i = 0; i < fileMatches.Count; i++)
+            {
+                int start = segmentStarts[i];
+                int end = i + 1 < fileMatches.Count
+                    ? segmentStarts[i + 1]
+                    : body.Length;
+                var patch = ParsePatchSegment(
+                    body.Substring(start, end - start));
+                if (patch != null)
+                    patches.Add(patch);
+            }
+
+            return patches;
+        }
+
+        private static PatchOperation? ParsePatchSegment(string segment)
+        {
+            var fileMatch = PatchFileHeaderRegex.Match(segment);
             if (!fileMatch.Success) return null;
 
             var patch = new PatchOperation
             {
-                RawText = body,
+                RawText = segment,
                 Action = fileMatch.Groups[1].Value.ToLowerInvariant() switch
                 {
                     "update" => PatchFileAction.Update,
@@ -96,11 +141,11 @@ namespace DeepSeek_v4_for_VisualStudio.Services.EditTools
                 FilePath = fileMatch.Groups["path"].Value.Trim(),
             };
 
-            var moveMatch = PatchMoveHeaderRegex.Match(body);
+            var moveMatch = PatchMoveHeaderRegex.Match(segment);
             if (moveMatch.Success)
                 patch.MoveToPath = moveMatch.Groups["path"].Value.Trim();
 
-            var lines = body.Split(new[] { "\r\n", "\n" }, StringSplitOptions.None);
+            var lines = segment.Split(new[] { "\r\n", "\n" }, StringSplitOptions.None);
             PatchHunk? currentHunk = null;
 
             foreach (var rawLine in lines)
@@ -193,6 +238,8 @@ namespace DeepSeek_v4_for_VisualStudio.Services.EditTools
             var results = new List<EditApplyResult>();
             var fileState = new Dictionary<string, string>(StringComparer.OrdinalIgnoreCase);
             var backups = new Dictionary<string, string?>(StringComparer.OrdinalIgnoreCase);
+            var workspaceSnapshots = new Dictionary<string, (bool Existed, string Content)>(
+                StringComparer.OrdinalIgnoreCase);
             bool anyFailed = false;
 
             foreach (var patch in patches)
@@ -208,6 +255,11 @@ namespace DeepSeek_v4_for_VisualStudio.Services.EditTools
                     if (Workspace != null)
                     {
                         original = Workspace.ReadFile(resolvedPath);
+                        if (!workspaceSnapshots.ContainsKey(resolvedPath))
+                        {
+                            workspaceSnapshots[resolvedPath] = (
+                                File.Exists(resolvedPath), original);
+                        }
                     }
                     else
                     {
@@ -261,7 +313,7 @@ namespace DeepSeek_v4_for_VisualStudio.Services.EditTools
                 if (!result.Success)
                     anyFailed = true;
             }
-            // ── 事务提交/回滚（仅直接写盘模式）──
+            // ── 事务提交/回滚 ──
             if (Workspace == null)
             {
                 if (anyFailed)
@@ -273,6 +325,17 @@ namespace DeepSeek_v4_for_VisualStudio.Services.EditTools
                 {
                     foreach (var kvp in backups)
                         BackupService.CleanupBackup(kvp.Value);
+                }
+            }
+            else if (anyFailed)
+            {
+                Logger.Warn("[Transaction] Workspace 模式部分 patch 失败，恢复本次调用前快照");
+                foreach (var kvp in workspaceSnapshots)
+                {
+                    if (kvp.Value.Existed)
+                        Workspace.WriteFile(kvp.Key, kvp.Value.Content);
+                    else if (File.Exists(kvp.Key))
+                        File.Delete(kvp.Key);
                 }
             }
 
@@ -329,23 +392,38 @@ namespace DeepSeek_v4_for_VisualStudio.Services.EditTools
             var fileLines = fileContent.Split(new[] { "\r\n", "\n" }, StringSplitOptions.None);
             var chunks = new List<(FileChunk chunk, string[] contextLines)>();
             var failedHunks = new List<PatchHunk>();
+            var failedHunkIndexes = new List<int>();
 
             // ── 幂等保护：补丁可能已经写入但上一次结果校验失败/超时。
             // 若每个 hunk 的“最终序列”都已按顺序存在，就返回成功且不重复修改。
             if (IsPatchAlreadyApplied(patch, fileLines))
             {
+                if (patch.Hunks.Any(h => !string.IsNullOrEmpty(h.ExpectedAnchor)))
+                {
+                    string? anchoredError = ValidateAnchoredPatchResult(
+                        patch, fileLines, filePath);
+                    if (anchoredError != null)
+                    {
+                        result.Success = false;
+                        result.ErrorMessage = anchoredError;
+                        return result;
+                    }
+                }
+
                 result.Success = true;
                 result.FinalContent = EditStringMatcher.NormalizeToCrLf(fileContent);
                 return result;
             }
 
             // ── 阶段 1：Hunk → FileChunk ──
-            foreach (var hunk in patch.Hunks)
+            for (int hi = 0; hi < patch.Hunks.Count; hi++)
             {
+                var hunk = patch.Hunks[hi];
                 var (chunk, contextArray) = HunkToChunk(hunk);
                 if (chunk == null)
                 {
                     failedHunks.Add(hunk);
+                    failedHunkIndexes.Add(hi);
                     continue;
                 }
                 chunks.Add((chunk, contextArray));
@@ -355,8 +433,43 @@ namespace DeepSeek_v4_for_VisualStudio.Services.EditTools
             {
                 result.Success = false;
                 result.FailedHunks = failedHunks;
-                result.ErrorMessage = LocalizationService.Instance.Format("tool.edit.applyPatch.hunkParseFailed", failedHunks.Count, patch.Hunks.Count);
+                result.ErrorMessage = BuildFailedHunkMessage(
+                    "tool.edit.applyPatch.hunkParseFailedDetailed",
+                    failedHunkIndexes,
+                    patch,
+                    result.FailedHunks);
                 return result;
+            }
+
+            // ── expected 位置锚点：必须在原文件中精确唯一 ──
+            if (patch.Hunks.Any(h => string.IsNullOrEmpty(h.ExpectedAnchor)))
+            {
+                result.Success = false;
+                result.ErrorMessage = LocalizationService.Instance[
+                    "tool.edit.applyPatch.locationAnchorRequired"];
+                return result;
+            }
+
+            var anchorLineByHunk = new Dictionary<int, int>();
+            for (int hi = 0; hi < patch.Hunks.Count; hi++)
+            {
+                string anchor = patch.Hunks[hi].ExpectedAnchor!;
+
+                int count = CountExactOccurrences(fileLines, anchor);
+                if (count != 1)
+                {
+                    result.Success = false;
+                    result.ErrorMessage = LocalizationService.Instance.Format(
+                        count == 0
+                            ? "tool.edit.applyPatch.locationAnchorMissing"
+                            : "tool.edit.applyPatch.locationAnchorNotUnique",
+                        anchor, count, Path.GetFileName(filePath));
+                    return result;
+                }
+
+                anchorLineByHunk[hi] = Array.FindIndex(
+                    fileLines,
+                    line => line.IndexOf(anchor, StringComparison.Ordinal) >= 0);
             }
 
             // ── 阶段 2：上下文匹配 ──
@@ -364,97 +477,61 @@ namespace DeepSeek_v4_for_VisualStudio.Services.EditTools
             for (int ci = 0; ci < chunks.Count; ci++)
             {
                 var (chunk, contextLines) = chunks[ci];
-                var hunkMarkers = patch.Hunks[ci].ContextMarkers;
+                int expectedAnchorLine = anchorLineByHunk[ci];
 
                 // ── 处理空上下文（全部为 + 行，无实际上下文）──
                 if (contextLines.Length == 0)
                 {
-                    // 回退到 @@ 标记定位
-                    int markerMatch = EditStringMatcher.MatchContextViaMarkers(
-                        fileLines, hunkMarkers, searchStartLine);
-                    if (markerMatch >= 0)
+                    if (patch.Hunks[ci].IsEof)
                     {
-                        // ── 验证标记匹配位置的结构合理性 ──
-                        // 如果标记匹配位置距 searchStartLine 超过 100 行，可能是误匹配
-                        if (markerMatch > searchStartLine + 100 && hunkMarkers.Count > 0)
-                        {
-                            // 尝试在 searchStartLine 附近重新搜索
-                            int nearbyMatch = EditStringMatcher.MatchContextViaMarkers(
-                                fileLines, hunkMarkers, Math.Max(0, searchStartLine - 20));
-                            if (nearbyMatch >= 0 && nearbyMatch <= searchStartLine + 100)
-                                markerMatch = nearbyMatch;
-                        }
+                        chunk.OrigIndex += fileLines.Length;
+                        searchStartLine = fileLines.Length;
+                        continue;
+                    }
 
-                        // 插入到标记行之后（+1），因为标记行本身不应被覆盖
-                        chunk.OrigIndex += markerMatch + 1;
-                        searchStartLine = markerMatch + 1;
-                    }
-                    else
-                    {
-                        // 既无上下文也无标记 → 无法定位
-                        failedHunks.Add(patch.Hunks[ci]);
-                    }
-                    continue;
+                    result.Success = false;
+                    result.ErrorMessage = LocalizationService.Instance[
+                        "tool.edit.applyPatch.pureInsertionNeedsContext"];
+                    return result;
                 }
 
-                int matchedLine = EditStringMatcher.MatchContextInFileLines(
-                    fileLines, contextLines, searchStartLine, out MatchLevel level);
-
-                // ── @@ 标记校验：上下文匹配成功后，验证标记是否在匹配位置附近 ──
-                // 防止因上下文过于通用而在错误位置匹配（如多个 struct 有相同字段）
-                if (matchedLine >= 0 && hunkMarkers.Count > 0)
-                {
-                    if (!IsMarkerNearPosition(fileLines, hunkMarkers, matchedLine, contextLines.Length))
-                    {
-                        // 标记不在附近 → 搜索下一个上下文匹配位置
-                        int nextMatch = EditStringMatcher.MatchContextInFileLines(
-                            fileLines, contextLines, matchedLine + 1, out level);
-                        if (nextMatch >= 0)
-                        {
-                            matchedLine = nextMatch;
-                        }
-                        // 下一个匹配也不满足标记约束 → 保留原匹配（允许标记不精确）
-                    }
-                }
+                int matchedLine = FindUniqueExactContextMatchNearAnchor(
+                    fileLines, contextLines, expectedAnchorLine,
+                    minimumStartLine: searchStartLine);
 
                 if (matchedLine < 0)
                 {
-                    // Fallback: @@ 标记定位
-                    matchedLine = EditStringMatcher.MatchContextViaMarkers(
-                        fileLines, hunkMarkers, searchStartLine);
-                }
-
-                if (matchedLine < 0)
-                {
-                    // 从文件开头回退搜索
-                    matchedLine = EditStringMatcher.MatchContextInFileLines(
-                        fileLines, contextLines, 0, out level);
-
-                    // @@ 标记校验（回退搜索也要验证）
-                    if (matchedLine >= 0 && hunkMarkers.Count > 0)
+                    int fallbackStart = Math.Max(
+                        searchStartLine,
+                        expectedAnchorLine - ExpectedAnchorScopeRadius);
+                    int fallbackMatch = EditStringMatcher.MatchContextInFileLines(
+                        fileLines, contextLines, fallbackStart, out _);
+                    if (fallbackMatch >= 0
+                        && Math.Abs(fallbackMatch - expectedAnchorLine)
+                            <= ExpectedAnchorScopeRadius)
                     {
-                        if (!IsMarkerNearPosition(fileLines, hunkMarkers, matchedLine, contextLines.Length))
-                        {
-                            int nextMatch = EditStringMatcher.MatchContextInFileLines(
-                                fileLines, contextLines, matchedLine + 1, out level);
-                            if (nextMatch >= 0) matchedLine = nextMatch;
-                        }
+                        matchedLine = fallbackMatch;
                     }
-                }
-
-                if (matchedLine < 0 && patch.Hunks[ci].IsEof)
-                {
-                    // ── EOF Hunk: 优先从文件末尾附近匹配 ──
-                    // 参考: parser.ts find_context 的 eof 优先逻辑
-                    int eofStart = Math.Max(0, fileLines.Length - contextLines.Length);
-                    matchedLine = EditStringMatcher.MatchContextInFileLines(
-                        fileLines, contextLines, eofStart, out level);
                 }
 
                 if (matchedLine < 0)
                 {
                     failedHunks.Add(patch.Hunks[ci]);
+                    failedHunkIndexes.Add(ci);
                     continue;
+                }
+
+                if (!IsMarkerNearPosition(
+                    fileLines,
+                    patch.Hunks[ci].ContextMarkers,
+                    matchedLine,
+                    contextLines.Length))
+                {
+                    // expected 唯一锚点与精确上下文已经确认位置；@@ 只是辅助信号，
+                    // 长方法中标记可能远离实际修改点，不能据此硬失败。
+                    Logger.Warn(
+                        $"[ApplyPatch] @@ 标记距离修改点较远，但 expected 锚点已确认位置: " +
+                        string.Join(" | ", patch.Hunks[ci].ContextMarkers));
                 }
 
                 // ── 匹配后验证：检查 DelLines 是否与匹配位置的实际内容一致 ──
@@ -462,6 +539,7 @@ namespace DeepSeek_v4_for_VisualStudio.Services.EditTools
                 if (!VerifyDeletionLinesMatchForSegments(chunk, fileLines, matchedLine, contextLines))
                 {
                     failedHunks.Add(patch.Hunks[ci]);
+                    failedHunkIndexes.Add(ci);
                     continue;
                 }
 
@@ -469,6 +547,7 @@ namespace DeepSeek_v4_for_VisualStudio.Services.EditTools
                 if (!VerifyInsertContextForSegments(chunk, fileLines, matchedLine, contextLines))
                 {
                     failedHunks.Add(patch.Hunks[ci]);
+                    failedHunkIndexes.Add(ci);
                     continue;
                 }
 
@@ -492,7 +571,11 @@ namespace DeepSeek_v4_for_VisualStudio.Services.EditTools
             {
                 result.Success = false;
                 result.FailedHunks = failedHunks;
-                result.ErrorMessage = LocalizationService.Instance.Format("tool.edit.applyPatch.hunkMatchFailed", failedHunks.Count, patch.Hunks.Count);
+                result.ErrorMessage = BuildFailedHunkMessage(
+                    "tool.edit.applyPatch.hunkMatchFailedDetailed",
+                    failedHunkIndexes,
+                    patch,
+                    result.FailedHunks);
                 return result;
             }
 
@@ -523,9 +606,34 @@ namespace DeepSeek_v4_for_VisualStudio.Services.EditTools
                 BuildReconstructionChunks(chunks));
             result.FinalContent = EditStringMatcher.NormalizeToCrLf(reconstructed);
 
-            // ── v1.1.11: 移除此处重复的结构完整性校验。
-            //     括号匹配检查已在 EditAgent.编辑后健全性检查 (行 ~909) 中统一完成，
-            //     此处的预写校验会产生误报并阻止合法编辑。
+            if (patch.Hunks.Any(h => !string.IsNullOrEmpty(h.ExpectedAnchor)))
+            {
+                var finalLines = result.FinalContent.Split(
+                    new[] { "\r\n", "\n" }, StringSplitOptions.None);
+                string? anchoredResultError = ValidateAnchoredPatchResult(
+                    patch, finalLines, filePath);
+                if (anchoredResultError != null)
+                {
+                    result.Success = false;
+                    result.ErrorMessage = anchoredResultError;
+                    return result;
+                }
+            }
+
+            var finalLinesForStructure = result.FinalContent.Split(
+                new[] { "\r\n", "\n" }, StringSplitOptions.None);
+            var structureErrors = ValidateStructureDelta(fileLines, finalLinesForStructure);
+            if (structureErrors.Count > 0)
+            {
+                result.Success = false;
+                result.ValidationErrors = structureErrors;
+                result.PostWriteValidationPassed = false;
+                result.ErrorMessage = LocalizationService.Instance.Format(
+                    "tool.edit.applyPatch.structureValidationFailed",
+                    Path.GetFileName(filePath),
+                    string.Join("; ", structureErrors));
+                return result;
+            }
 
             result.Success = true;
 
@@ -617,6 +725,312 @@ namespace DeepSeek_v4_for_VisualStudio.Services.EditTools
             };
 
             return (chunk, contextLines.ToArray());
+        }
+
+        internal static int FindUniqueExactContextMatchNearAnchor(
+            string[] fileLines,
+            string[] contextLines,
+            int anchorLine,
+            bool ignoreWhitespace = false,
+            int minimumStartLine = 0)
+        {
+            if (contextLines.Length == 0)
+                return anchorLine;
+
+            int searchStart = Math.Max(
+                Math.Max(0, minimumStartLine),
+                anchorLine - ExpectedAnchorScopeRadius);
+            int searchEnd = Math.Min(
+                fileLines.Length - contextLines.Length,
+                anchorLine + ExpectedAnchorScopeRadius);
+            if (searchEnd < searchStart)
+                return -1;
+
+            int bestMatch = -1;
+            int bestDistance = int.MaxValue;
+            bool ambiguous = false;
+            for (int start = searchStart; start <= searchEnd; start++)
+            {
+                bool matched = true;
+                for (int offset = 0; offset < contextLines.Length; offset++)
+                {
+                    string actual = EditStringMatcher.NormalizeUnicode(
+                        fileLines[start + offset]);
+                    string expected = EditStringMatcher.NormalizeUnicode(
+                        contextLines[offset]);
+                    if (ignoreWhitespace)
+                    {
+                        actual = actual.Trim();
+                        expected = expected.Trim();
+                    }
+
+                    if (!string.Equals(
+                        actual,
+                        expected,
+                        StringComparison.Ordinal))
+                    {
+                        matched = false;
+                        break;
+                    }
+                }
+
+                if (!matched)
+                    continue;
+
+                int distance = Math.Abs(start - anchorLine);
+                if (distance < bestDistance)
+                {
+                    bestDistance = distance;
+                    bestMatch = start;
+                    ambiguous = false;
+                }
+                else if (distance == bestDistance)
+                {
+                    ambiguous = true;
+                }
+            }
+
+            return ambiguous ? -1 : bestMatch;
+        }
+
+        private static string? ValidateAnchoredPatchResult(
+            PatchOperation patch,
+            string[] finalLines,
+            string filePath)
+        {
+            for (int hi = 0; hi < patch.Hunks.Count; hi++)
+            {
+                var hunk = patch.Hunks[hi];
+                string? anchor = hunk.ExpectedAnchor;
+                if (string.IsNullOrEmpty(anchor))
+                    continue;
+
+                int anchorCount = CountExactOccurrences(
+                    finalLines, anchor);
+                if (anchorCount != 1)
+                {
+                    return LocalizationService.Instance.Format(
+                        anchorCount == 0
+                            ? "tool.edit.applyPatch.locationAnchorMissingAfterPatch"
+                            : "tool.edit.applyPatch.locationAnchorNotUniqueAfterPatch",
+                        anchor, anchorCount, Path.GetFileName(filePath));
+                }
+
+                int anchorLine = Array.FindIndex(
+                    finalLines,
+                    line => line.IndexOf(anchor, StringComparison.Ordinal) >= 0);
+                string[] finalSequence = hunk.Lines
+                    .Where(line => line.Type != '-')
+                    .Select(line => line.Text)
+                    .ToArray();
+                if (finalSequence.Length == 0)
+                    continue;
+
+                int match = FindUniqueExactContextMatchNearAnchor(
+                    finalLines, finalSequence, anchorLine,
+                    ignoreWhitespace: true);
+                if (match < 0)
+                {
+                    return LocalizationService.Instance.Format(
+                        "tool.edit.applyPatch.postImageNotAtAnchor",
+                        hi + 1,
+                        anchor,
+                        Path.GetFileName(filePath));
+                }
+            }
+
+            return null;
+        }
+
+        private static string BuildFailedHunkMessage(
+            string localizationKey,
+            IReadOnlyList<int> failedHunkIndexes,
+            PatchOperation patch,
+            IReadOnlyList<PatchHunk> failedHunks)
+        {
+            var details = new List<string>();
+            foreach (int index in failedHunkIndexes.Distinct())
+            {
+                var hunk = patch.Hunks[index];
+                string marker = hunk.ContextMarkers.Count > 0
+                    ? string.Join(" | ", hunk.ContextMarkers.Take(3))
+                    : hunk.Lines
+                        .FirstOrDefault(line => line.Type != '+')?.Text
+                        ?.Trim() ?? string.Empty;
+                if (marker.Length > 80)
+                    marker = marker.Substring(0, 80) + "...";
+
+                details.Add(string.IsNullOrEmpty(marker)
+                    ? $"#{index + 1}"
+                    : $"#{index + 1} (@@ {marker})");
+            }
+
+            return LocalizationService.Instance.Format(
+                localizationKey,
+                failedHunks.Count,
+                patch.Hunks.Count,
+                string.Join(", ", details));
+        }
+
+        private static int CountExactOccurrences(
+            IReadOnlyList<string> lines,
+            string anchor)
+        {
+            int count = 0;
+            foreach (string line in lines)
+            {
+                if (line.IndexOf(anchor, StringComparison.Ordinal) >= 0)
+                    count++;
+            }
+            return count;
+        }
+
+        internal static List<string> ValidateStructureDelta(
+            string[] beforeLines,
+            string[] afterLines)
+        {
+            var before = AnalyzeStructure(string.Join("\n", beforeLines));
+            var after = AnalyzeStructure(string.Join("\n", afterLines));
+            var errors = new List<string>();
+
+            // 原文件本身就允许天然不平衡；只有修改前该分隔符平衡时，
+            // 才要求本次修改保持增量平衡，避免误伤修复半截代码的合法补丁。
+            if (before.CurlyOpen == before.CurlyClose)
+            {
+                AddDelimiterDeltaError(errors, "{}",
+                    after.CurlyOpen - before.CurlyOpen,
+                    after.CurlyClose - before.CurlyClose);
+            }
+            if (before.ParenOpen == before.ParenClose)
+            {
+                AddDelimiterDeltaError(errors, "()",
+                    after.ParenOpen - before.ParenOpen,
+                    after.ParenClose - before.ParenClose);
+            }
+            if (before.SquareOpen == before.SquareClose)
+            {
+                AddDelimiterDeltaError(errors, "[]",
+                    after.SquareOpen - before.SquareOpen,
+                    after.SquareClose - before.SquareClose);
+            }
+
+            if (!before.HasComplexStringSyntax
+                && !after.HasComplexStringSyntax
+                && before.EndsInBalancedState
+                && !after.EndsInBalancedState)
+            {
+                errors.Add(LocalizationService.Instance[
+                    "tool.edit.applyPatch.quoteBalanceRegression"]);
+            }
+
+            return errors;
+        }
+
+        private static void AddDelimiterDeltaError(
+            List<string> errors,
+            string pair,
+            int openDelta,
+            int closeDelta)
+        {
+            if (openDelta == closeDelta)
+                return;
+
+            errors.Add(LocalizationService.Instance.Format(
+                "tool.edit.applyPatch.delimiterDelta",
+                pair,
+                openDelta,
+                closeDelta));
+        }
+
+        private static StructureScanResult AnalyzeStructure(string content)
+        {
+            var result = new StructureScanResult();
+            char stringQuote = '\0';
+            bool inBlockComment = false;
+            bool inLineComment = false;
+
+            for (int i = 0; i < content.Length; i++)
+            {
+                char c = content[i];
+                char next = i + 1 < content.Length ? content[i + 1] : '\0';
+
+                if (inLineComment)
+                {
+                    if (c == '\n')
+                        inLineComment = false;
+                    continue;
+                }
+
+                if (inBlockComment)
+                {
+                    if (c == '*' && next == '/')
+                    {
+                        inBlockComment = false;
+                        i++;
+                    }
+                    continue;
+                }
+
+                if (stringQuote != '\0')
+                {
+                    if (c == '\\')
+                    {
+                        i++;
+                        continue;
+                    }
+                    if (c == stringQuote)
+                        stringQuote = '\0';
+                    continue;
+                }
+
+                if (c == '/' && next == '/')
+                {
+                    inLineComment = true;
+                    i++;
+                    continue;
+                }
+                if (c == '/' && next == '*')
+                {
+                    inBlockComment = true;
+                    i++;
+                    continue;
+                }
+                if (c == '"' || c == '\'' || c == '`')
+                {
+                    stringQuote = c;
+                    continue;
+                }
+
+                switch (c)
+                {
+                    case '{': result.CurlyOpen++; break;
+                    case '}': result.CurlyClose++; break;
+                    case '(': result.ParenOpen++; break;
+                    case ')': result.ParenClose++; break;
+                    case '[': result.SquareOpen++; break;
+                    case ']': result.SquareClose++; break;
+                }
+            }
+
+            result.EndsInBalancedState = stringQuote == '\0'
+                && !inBlockComment;
+            result.HasComplexStringSyntax =
+                content.IndexOf("\"\"\"", StringComparison.Ordinal) >= 0
+                || content.IndexOf("@\"", StringComparison.Ordinal) >= 0
+                || content.IndexOf("@'", StringComparison.Ordinal) >= 0;
+            return result;
+        }
+
+        private sealed class StructureScanResult
+        {
+            public int CurlyOpen { get; set; }
+            public int CurlyClose { get; set; }
+            public int ParenOpen { get; set; }
+            public int ParenClose { get; set; }
+            public int SquareOpen { get; set; }
+            public int SquareClose { get; set; }
+            public bool EndsInBalancedState { get; set; }
+            public bool HasComplexStringSyntax { get; set; }
         }
 
         private static bool IsPatchAlreadyApplied(
@@ -768,16 +1182,14 @@ namespace DeepSeek_v4_for_VisualStudio.Services.EditTools
 
         /// <summary>
         /// 检查 @@ 标记文本是否出现在匹配位置附近。
-        /// 用于验证上下文匹配结果是否与标记一致，防止在错误位置匹配。
-        /// 搜索窗口与上下文长度成正比（最少 10 行，最多 50 行），避免长上下文时窗口不足。
+        /// 位置锚点仍为主约束；该辅助用于 healing 和诊断定位。
         /// </summary>
         internal static bool IsMarkerNearPosition(
             string[] fileLines, List<string> contextMarkers,
             int matchedLine, int contextLength, int searchWindow = -1)
         {
-            if (contextMarkers == null || contextMarkers.Count == 0) return true; // 无标记 → 不校验
+            if (contextMarkers == null || contextMarkers.Count == 0) return true;
 
-            // 自适应窗口：与上下文长度成正比，最少 10 行，最多 50 行
             if (searchWindow < 0)
                 searchWindow = Math.Max(10, Math.Min(50, contextLength + 5));
 
@@ -1468,6 +1880,9 @@ namespace DeepSeek_v4_for_VisualStudio.Services.EditTools
             const int maxRetries = 2;
             EditApplyResult? lastResult = null;
             var healingPatch = patch;
+            string?[] expectedAnchors = patch.Hunks
+                .Select(h => h.ExpectedAnchor)
+                .ToArray();
 
             for (int attempt = 0; attempt < maxRetries; attempt++)
             {
@@ -1497,6 +1912,7 @@ namespace DeepSeek_v4_for_VisualStudio.Services.EditTools
                         {
                             Logger.Info($"[Validate] Healing 成功 (attempt {attempt + 1})，重试应用");
                             healingPatch = healingResponse.CorrectedPatch;
+                            CopyExpectedAnchors(healingPatch, expectedAnchors);
                             continue;
                         }
                     }
@@ -1552,6 +1968,7 @@ namespace DeepSeek_v4_for_VisualStudio.Services.EditTools
                         if (healingResponse?.Success == true && healingResponse.CorrectedPatch != null)
                         {
                             healingPatch = healingResponse.CorrectedPatch;
+                            CopyExpectedAnchors(healingPatch, expectedAnchors);
                             continue;
                         }
                         else
@@ -1570,6 +1987,14 @@ namespace DeepSeek_v4_for_VisualStudio.Services.EditTools
                 Success = false,
                 ErrorMessage = "达到最大重试次数",
             };
+        }
+
+        private static void CopyExpectedAnchors(
+            PatchOperation patch,
+            IReadOnlyList<string?> expectedAnchors)
+        {
+            for (int i = 0; i < patch.Hunks.Count && i < expectedAnchors.Count; i++)
+                patch.Hunks[i].ExpectedAnchor = expectedAnchors[i];
         }
 
         #endregion

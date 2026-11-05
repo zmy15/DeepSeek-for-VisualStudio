@@ -150,20 +150,6 @@ namespace DeepSeek_v4_for_VisualStudio.Services.Agents
                     userMessage, discoveryContext, alignmentSummary, context);
                 result.Plan = plan;
 
-                // ═══════════════════════════════════════════════════════════
-                // 缓存策略：将探索阶段已发现的文件列表传递给 EditAgent
-                // 避免 EditAgent 重新扫描整个解决方案（以后会被 RAG 替代）
-                // ═══════════════════════════════════════════════════════════
-                if (plan != null && ExploreAgent != null && !string.IsNullOrEmpty(context.SolutionPath))
-                {
-                    var cachedFiles = ExploreAgent.GetCachedDiscoveredFiles(context.SolutionPath!);
-                    if (cachedFiles != null && cachedFiles.Count > 0)
-                    {
-                        plan.DiscoveredFiles = cachedFiles;
-                        AddLog("INFO", LocalizationService.Instance.Format("agent.log.planCachedFiles", cachedFiles.Count));
-                    }
-                }
-
                 if (plan != null && plan.Steps.Count > 0)
                 {
                     plan.Source = PlanSource.PlanAgent;  // 标记为由 PlanAgent 产出，UI 层据此创建任务面板
@@ -264,26 +250,11 @@ namespace DeepSeek_v4_for_VisualStudio.Services.Agents
         {
             var L = LocalizationService.Instance;
 
-            // ── 缓存检查：如 ExploreAgent 已有结构缓存，注入摘要跳过重复扫描 ──
-            var extraSystemMessages = new List<ChatApiMessage>();
-            string? structureCache = null;
-            if (!string.IsNullOrEmpty(context.SolutionPath) && _exploreAgent != null)
-            {
-                var cachedFiles = _exploreAgent.GetCachedDiscoveredFiles(context.SolutionPath!);
-                if (cachedFiles != null && cachedFiles.Count > 0)
-                {
-                    structureCache = BuildStructureContextFromCache(cachedFiles);
-                    extraSystemMessages.Add(new ChatApiMessage { Role = "system", Content = structureCache });
-                    AddLog("INFO", string.Format(L["agent.log.explorePhase1Cached"], cachedFiles.Count));
-                }
-            }
-
             // ── 构建消息列表（含对话历史，保持前缀缓存稳定）──
-            string discoveryPrompt = BuildUnifiedDiscoveryPrompt(userMessage, context, structureCache);
+            string discoveryPrompt = BuildUnifiedDiscoveryPrompt(userMessage, context);
             var messages = BuildContextAwareMessages(
                 L["agent.plan.discoverySystemPrompt"],
-                discoveryPrompt,
-                extraSystemMessages);
+                discoveryPrompt);
 
             AddLog("INFO", L["agent.log.explorePhase1"]);
 
@@ -316,7 +287,7 @@ namespace DeepSeek_v4_for_VisualStudio.Services.Agents
         /// 如需探索，通过 runSubagent 工具委托 ExploreAgent，所有探索结果作为 tool 消息保留在对话历史中。
         /// </summary>
         private static string BuildUnifiedDiscoveryPrompt(
-            string userMessage, AgentContext context, string? structureCache)
+            string userMessage, AgentContext context)
         {
             var L = LocalizationService.Instance;
             var sb = new StringBuilder();
@@ -335,23 +306,11 @@ namespace DeepSeek_v4_for_VisualStudio.Services.Agents
                 sb.AppendLine();
             }
 
-            // ── 项目结构缓存或探索指引 ──
-            if (!string.IsNullOrEmpty(structureCache))
-            {
-                sb.AppendLine(L["agent.plan.discoveryStructureCached"]);
-                sb.AppendLine(structureCache);
-                sb.AppendLine();
-                sb.AppendLine(L["agent.plan.discoverySkipRootScan"]);
-            }
-            else
-            {
-                sb.AppendLine(L["agent.plan.discoveryFirstExplore"]);
-            }
+            sb.AppendLine(L["agent.plan.discoveryFirstExplore"]);
 
             // ── 上下文充足判定 ──
             // 注：不再统计 Handoff 前序探索结果数量来硬跳过，是否跳过交由 AI 自行判断。
-            bool hasSufficientContext = !string.IsNullOrEmpty(context.FileContext)
-                || !string.IsNullOrEmpty(structureCache);
+            bool hasSufficientContext = !string.IsNullOrEmpty(context.FileContext);
             if (hasSufficientContext)
             {
                 sb.AppendLine();
@@ -437,85 +396,6 @@ namespace DeepSeek_v4_for_VisualStudio.Services.Agents
             }
 
             return !message.Content!.TrimStart().StartsWith("Error:", StringComparison.OrdinalIgnoreCase);
-        }
-
-        /// <summary>
-        /// 从缓存的文件列表构建项目结构摘要（替代 Phase 1 的 ExploreAgent API 调用）。
-        /// 提取目录层级和前几级文件，生成与 Phase 1 输出格式兼容的结构上下文。
-        /// </summary>
-        private static string BuildStructureContextFromCache(List<string> cachedFiles)
-        {
-            if (cachedFiles == null || cachedFiles.Count == 0)
-                return string.Empty;
-
-            var sb = new StringBuilder();
-
-            // 提取唯一目录
-            var dirs = new SortedSet<string>(StringComparer.OrdinalIgnoreCase);
-            var rootFiles = new List<string>();
-            string? commonRoot = null;
-
-            foreach (var file in cachedFiles)
-            {
-                try
-                {
-                    string dir = System.IO.Path.GetDirectoryName(file) ?? "";
-                    if (!string.IsNullOrEmpty(dir))
-                    {
-                        dirs.Add(dir);
-
-                        // 找公共根目录
-                        if (commonRoot == null)
-                            commonRoot = dir;
-                        else
-                        {
-                            // 逐步缩短公共根
-                            while (commonRoot.Length > 0 && !dir.StartsWith(commonRoot, StringComparison.OrdinalIgnoreCase))
-                                commonRoot = System.IO.Path.GetDirectoryName(commonRoot) ?? "";
-                        }
-                    }
-                }
-                catch { }
-            }
-
-            // 按层级分组展示目录树
-            sb.AppendLine(LocalizationService.Instance["plan.discovery.structureTitle"]);
-            sb.AppendLine();
-
-            // 列出顶级目录
-            var topDirs = new SortedSet<string>(StringComparer.OrdinalIgnoreCase);
-            foreach (var dir in dirs)
-            {
-                string relative = dir;
-                if (!string.IsNullOrEmpty(commonRoot) && dir.StartsWith(commonRoot, StringComparison.OrdinalIgnoreCase))
-                {
-                    relative = dir.Substring(commonRoot!.Length).TrimStart(System.IO.Path.DirectorySeparatorChar, System.IO.Path.AltDirectorySeparatorChar);
-                }
-                if (string.IsNullOrEmpty(relative)) continue;
-
-                string[] parts = relative.Split(new[] { System.IO.Path.DirectorySeparatorChar, System.IO.Path.AltDirectorySeparatorChar }, StringSplitOptions.RemoveEmptyEntries);
-                if (parts.Length > 0)
-                    topDirs.Add(parts[0]);
-            }
-
-            foreach (var d in topDirs)
-            {
-                // 统计该顶级目录下的文件数
-                int count = 0;
-                string prefix = !string.IsNullOrEmpty(commonRoot)
-                    ? System.IO.Path.Combine(commonRoot, d)
-                    : d;
-                foreach (var file in cachedFiles)
-                {
-                    if (file.StartsWith(prefix, StringComparison.OrdinalIgnoreCase))
-                        count++;
-                }
-                sb.AppendLine(string.Format(LocalizationService.Instance["plan.discovery.structureDirLine"], d, count));
-            }
-
-            sb.AppendLine();
-            sb.AppendLine(string.Format(LocalizationService.Instance["plan.discovery.structureTotal"], cachedFiles.Count, dirs.Count));
-            return sb.ToString();
         }
 
         #endregion

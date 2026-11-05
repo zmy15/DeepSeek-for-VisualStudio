@@ -149,7 +149,7 @@ public class BaseAgentHandoffEditStepsTests
 
         plan.Intent.Should().Be(AgentIntent.CodeChange);
         plan.Title.Should().Be(LocalizationService.Instance["plan.lightweightTitle"]);
-        plan.Source.Should().Be(PlanSource.None);
+        plan.Source.Should().Be(PlanSource.EditAgent);
         plan.IsCompleted.Should().BeFalse();
         plan.IsCancelled.Should().BeFalse();
         plan.PlanFilePath.Should().BeNull();
@@ -186,7 +186,7 @@ public class BaseAgentHandoffEditStepsTests
         plan.Should().NotBeNull();
         var injected = plan!;
         injected.Intent.Should().Be(AgentIntent.CodeChange);
-        injected.Source.Should().Be(PlanSource.None);
+        injected.Source.Should().Be(PlanSource.EditAgent);
         injected.PlanFilePath.Should().BeNull();
         injected.Steps.Should().HaveCount(2);
         injected.Steps.Select(s => s.Index).Should().Equal(1, 2);
@@ -329,7 +329,7 @@ public class BaseAgentHandoffEditStepsTests
         replaced.Should().NotBeNull();
         var current = replaced!;
         current.Should().NotBeSameAs(completedPlan);
-        current.Source.Should().Be(PlanSource.None);
+        current.Source.Should().Be(PlanSource.EditAgent);
         current.Steps.Should().ContainSingle().Which.Title.Should().Be("轻量步骤");
     }
 

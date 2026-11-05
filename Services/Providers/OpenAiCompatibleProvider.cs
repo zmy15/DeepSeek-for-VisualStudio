@@ -937,16 +937,17 @@ namespace DeepSeek_v4_for_VisualStudio.Services.Providers
 
             Logger.Info(diag.ToString());
 
-            // ── HTTP 层重试（指数退避：1s, 2s, 4s；最多 3 次额外重试）──
+            // ── 统一 HTTP 重试策略（指数退避，次数来自设置）──
             HttpResponseMessage? response = null;
             int sendAttempt = 0;
-            const int maxSendAttempts = 4;
+            int maxSendAttempts = ApiRetryPolicy.GetMaxAttempts();
 
             // 图片加载类 400 的降级重试：只允许剥离一次，避免无限循环。
             bool imageBlocksStripped = false;
 
             while (sendAttempt < maxSendAttempts)
             {
+                response = null;
                 string requestContext =
                     $"provider={ProviderName}, model={request.Model}, endpoint={BuildRequestUri(ChatEndpoint)}, " +
                     $"messages={request.Messages.Count}, tools={normalizedTools?.Count ?? 0}, " +
@@ -967,10 +968,16 @@ namespace DeepSeek_v4_for_VisualStudio.Services.Providers
                         cancellationToken);
                     if (!response.IsSuccessStatusCode)
                     {
-                        string preparedDetails = await BuildHttpErrorDetailsAsync(response, requestContext);
-                        var statusException = new HttpRequestException(
-                            $"HTTP {(int)response.StatusCode} {response.ReasonPhrase}", null);
-                        statusException.Data[HttpErrorDetailsDataKey] = preparedDetails;
+                        string responseBody = await ReadResponseBodySafelyAsync(response);
+                        string preparedDetails = BuildHttpErrorDetails(response, requestContext, responseBody);
+                        ApiRetryDecision retryDecision =
+                            ApiRetryPolicy.Evaluate((int)response.StatusCode, responseBody);
+                        var statusException = ApiRequestFailure.Create(
+                            $"HTTP {(int)response.StatusCode} {response.ReasonPhrase}",
+                            (int)response.StatusCode,
+                            retryDecision.ErrorCode,
+                            retryDecision.IsRetryable,
+                            preparedDetails);
                         throw statusException;
                     }
 
@@ -980,90 +987,97 @@ namespace DeepSeek_v4_for_VisualStudio.Services.Providers
 
                     break; // success
                 }
+                catch (HttpRequestException ex) when (!ShouldRetry(ex, (int)(response?.StatusCode ?? 0)))
+                {
+                    bool hasFailureInfo = ApiRequestFailure.TryGet(ex, out ApiRequestFailureInfo failureInfo);
+                    int statusCode = hasFailureInfo
+                        ? failureInfo.StatusCode
+                        : (int)(response?.StatusCode ?? 0);
+                    string details = GetErrorDetails(ex, response, requestContext);
+
+                    // ── 图片加载类 400 的兜底降级 ──
+                    // 服务端取图失败（代理不可达 / 图床限制 / 源站防盗链）会以
+                    // "An exception occurred while loading IMAGE data at index N" 返回 400，
+                    // 且 400 不重试 → 一张配图直接打断整轮对话。
+                    // 此处剥离全部 image_url 内容块后重试一次（纯文本仍可作答），
+                    // 保证对话不中断；不影响任何非图片类 400（原样抛出）。
+                    if (statusCode == (int)HttpStatusCode.BadRequest &&
+                        !imageBlocksStripped &&
+                        IsImageLoadingError(details) &&
+                        TryStripImageBlocks(request.Messages, out int strippedCount))
+                    {
+                        imageBlocksStripped = true;
+                        response?.Dispose();
+                        response = null;
+
+                        // 剥离后请求体变化，需重新序列化并重算字节数（前缀缓存诊断用）。
+                        string strippedRequestJson = SerializeRequest(request);
+                        requestBodyBytes = Encoding.UTF8.GetBytes(strippedRequestJson);
+                        ApiDebugDumpService.WriteRequest(dumpScope, strippedRequestJson);
+                        Logger.Warn(
+                            $"[API] 检测到服务端图片加载失败（HTTP {statusCode}），" +
+                            $"已剥离 {strippedCount} 张图片后重试一次（不中断本轮对话）。\n{details}");
+
+                        // 不递增 sendAttempt：这是同一次逻辑尝试的降级重发。
+                        continue;
+                    }
+
+                    Logger.Error($"[API] HTTP {statusCode} 属于不可重试错误，放弃重试。\n{details}");
+                    response?.Dispose();
+                    response = null;
+                    ApiDebugDumpService.AppendResponseLine(
+                        dumpScope,
+                        $"===== HTTP {statusCode} (no retry) =====\n{details}");
+                    FlushDumpSummary($"http-error-{statusCode}");
+                    throw ApiRequestFailure.Create(
+                        $"{ProviderName} API 请求失败 (HTTP {statusCode})，该错误不可重试。\n{details}",
+                        statusCode,
+                        hasFailureInfo ? failureInfo.ErrorCode : null,
+                        isRetryable: false,
+                        details,
+                        ex);
+                }
                 catch (HttpRequestException ex) when (sendAttempt < maxSendAttempts - 1)
                 {
                     int statusCode = (int)(response?.StatusCode ?? 0);
-
-                    // 4xx 客户端错误（除 429 限流外）不应重试——请求本身有问题，重试不会改变结果
-                    if (statusCode >= 400 && statusCode < 500 && statusCode != 429)
-                    {
-                        string details =
-                            ex.Data[HttpErrorDetailsDataKey] as string
-                            ?? (response != null
-                                ? await BuildHttpErrorDetailsAsync(response, requestContext)
-                                : $"请求: {requestContext}\n异常: {ex.GetType().Name}: {ex.Message}");
-
-                        // ── 图片加载类 400 的兜底降级 ──
-                        // 服务端取图失败（代理不可达 / 图床限制 / 源站防盗链）会以
-                        // "An exception occurred while loading IMAGE data at index N" 返回 400，
-                        // 且 400 不重试 → 一张配图直接打断整轮对话。
-                        // 此处剥离全部 image_url 内容块后重试一次（纯文本仍可作答），
-                        // 保证对话不中断；不影响任何非图片类 400（原样抛出）。
-                        if (!imageBlocksStripped
-                            && IsImageLoadingError(details)
-                            && TryStripImageBlocks(request.Messages, out int strippedCount))
-                        {
-                            imageBlocksStripped = true;
-                            response?.Dispose();
-                            response = null;
-
-                            // 剥离后请求体变化，需重新序列化并重算字节数（前缀缓存诊断用）。
-                            string strippedRequestJson = SerializeRequest(request);
-                            requestBodyBytes = Encoding.UTF8.GetBytes(strippedRequestJson);
-                            ApiDebugDumpService.WriteRequest(dumpScope, strippedRequestJson);
-                            Logger.Warn(
-                                $"[API] 检测到服务端图片加载失败（HTTP {statusCode}），" +
-                                $"已剥离 {strippedCount} 张图片后重试一次（不中断本轮对话）。\n{details}");
-
-                            // 不递增 sendAttempt：这是同一次逻辑尝试的降级重发。
-                            continue;
-                        }
-
-                        Logger.Error($"[API] HTTP {statusCode} 是客户端错误，放弃重试。\n{details}");
-                        response?.Dispose();
-                        ApiDebugDumpService.AppendResponseLine(dumpScope, $"===== HTTP {statusCode} (no retry) =====\n{details}");
-                        FlushDumpSummary($"http-error-{statusCode}");
-                        throw new HttpRequestException(
-                            $"{ProviderName} API 返回 HTTP {statusCode}。\n{details}", ex);
-                    }
-
                     sendAttempt++;
-                    string retryDetails =
-                        ex.Data[HttpErrorDetailsDataKey] as string
-                        ?? (response != null
-                            ? await BuildHttpErrorDetailsAsync(response, requestContext, maxBodyChars: 500)
-                            : $"请求: {requestContext}\n异常: {ex.GetType().Name}: {ex.Message}");
+                    string retryDetails = GetErrorDetails(ex, response, requestContext);
                     response?.Dispose();
-                    double backoff = Math.Pow(2, sendAttempt - 1);
+                    response = null;
+                    TimeSpan backoff = ApiRetryPolicy.GetBackoffDelay(sendAttempt);
                     Logger.Warn(
-                        $"[API] HTTP {statusCode} 请求失败 (尝试 {sendAttempt + 1}/{maxSendAttempts})，{backoff}s 后重试…\n" +
+                        $"[API] HTTP {statusCode} 请求失败 (尝试 {sendAttempt + 1}/{maxSendAttempts})，{backoff.TotalSeconds:0}s 后重试…\n" +
                         retryDetails);
-                    // ── 真正等待退避（与超时分支一致）；此前只打日志不等待，4 次请求零间隔连发 ──
-                    await Task.Delay(TimeSpan.FromSeconds(backoff), cancellationToken);
+                    await Task.Delay(backoff, cancellationToken);
                 }
                 catch (TaskCanceledException) when (!cancellationToken.IsCancellationRequested && sendAttempt < maxSendAttempts - 1)
                 {
                     // 超时（非用户取消）
                     sendAttempt++;
                     response?.Dispose();
-                    double backoff = Math.Pow(2, sendAttempt - 1);
-                    Logger.Warn($"[API] 请求超时 (尝试 {sendAttempt + 1}/{maxSendAttempts})，{backoff}s 后重试…\n请求: {requestContext}");
-                    await Task.Delay(TimeSpan.FromSeconds(backoff), cancellationToken);
+                    TimeSpan backoff = ApiRetryPolicy.GetBackoffDelay(sendAttempt);
+                    Logger.Warn($"[API] 请求超时 (尝试 {sendAttempt + 1}/{maxSendAttempts})，{backoff.TotalSeconds:0}s 后重试…\n请求: {requestContext}");
+                    await Task.Delay(backoff, cancellationToken);
                 }
                 catch (HttpRequestException ex)
                 {
-                    int statusCode = (int)(response?.StatusCode ?? 0);
-                    string details =
-                        ex.Data[HttpErrorDetailsDataKey] as string
-                        ?? (response != null
-                            ? await BuildHttpErrorDetailsAsync(response, requestContext)
-                            : $"请求: {requestContext}\n异常: {ex.GetType().Name}: {ex.Message}");
+                    bool hasFailureInfo = ApiRequestFailure.TryGet(ex, out ApiRequestFailureInfo failureInfo);
+                    int statusCode = hasFailureInfo
+                        ? failureInfo.StatusCode
+                        : (int)(response?.StatusCode ?? 0);
+                    string details = GetErrorDetails(ex, response, requestContext);
                     Logger.Error($"[API] HTTP {statusCode} 请求失败，已停止重试。\n{details}");
                     response?.Dispose();
+                    response = null;
                     ApiDebugDumpService.AppendResponseLine(dumpScope, $"===== HTTP {statusCode} (retries exhausted) =====\n{details}");
                     FlushDumpSummary($"http-failed-{statusCode}");
-                    throw new HttpRequestException(
-                        $"{ProviderName} API 请求失败 (HTTP {statusCode})。\n{details}", ex);
+                    throw ApiRequestFailure.Create(
+                        $"{ProviderName} API 请求失败 (HTTP {statusCode})。\n{details}",
+                        statusCode,
+                        hasFailureInfo ? failureInfo.ErrorCode : null,
+                        isRetryable: true,
+                        details,
+                        ex);
                 }
             }
 
@@ -1588,7 +1602,34 @@ namespace DeepSeek_v4_for_VisualStudio.Services.Providers
 
         private const int MaxErrorBodyChars = 4096;
         private const int MaxResponseHeaderChars = 2048;
-        private const string HttpErrorDetailsDataKey = "DeepSeek.HttpErrorDetails";
+
+        private static bool ShouldRetry(HttpRequestException exception, int statusCode)
+        {
+            if (ApiRequestFailure.TryGet(exception, out ApiRequestFailureInfo failureInfo))
+                return failureInfo.IsRetryable;
+
+            // 状态码 0 表示 SendAsync 在收到 HTTP 响应前失败（DNS/TCP/TLS 等）。
+            return statusCode <= 0 || ApiRetryPolicy.IsRetryableStatusCode(statusCode);
+        }
+
+        private static string GetErrorDetails(
+            HttpRequestException exception,
+            HttpResponseMessage? response,
+            string requestContext)
+        {
+            if (ApiRequestFailure.TryGet(exception, out ApiRequestFailureInfo failureInfo) &&
+                !string.IsNullOrWhiteSpace(failureInfo.ErrorDetails))
+            {
+                return failureInfo.ErrorDetails;
+            }
+
+            return response != null
+                ? BuildHttpErrorDetails(
+                    response,
+                    requestContext,
+                    "<响应体已读取，详情不可用>")
+                : $"请求: {requestContext}\n异常: {exception.GetType().Name}: {exception.Message}";
+        }
 
         /// <summary>
         /// 读取错误响应体；读取失败或为空时返回可诊断的占位文本。
@@ -1638,15 +1679,6 @@ namespace DeepSeek_v4_for_VisualStudio.Services.Providers
             sb.Append("\n响应体: ")
               .Append(string.IsNullOrWhiteSpace(responseBody) ? "<empty>" : responseBody.Trim());
             return sb.ToString();
-        }
-
-        internal static async Task<string> BuildHttpErrorDetailsAsync(
-            HttpResponseMessage response,
-            string? requestContext = null,
-            int maxBodyChars = MaxErrorBodyChars)
-        {
-            string body = await ReadResponseBodySafelyAsync(response, maxBodyChars);
-            return BuildHttpErrorDetails(response, requestContext, body);
         }
 
         private static string FormatResponseHeaders(HttpResponseMessage response)

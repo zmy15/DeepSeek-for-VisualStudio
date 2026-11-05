@@ -196,6 +196,20 @@ public class AskAgentTests
     }
 
     /// <summary>
+    /// 多步骤 Edit 计划必须由 Ask 通过 editSteps 提供，Edit 不再自行拆分。
+    /// </summary>
+    [Fact]
+    public void SystemPrompt_RequiresEditStepsForMultiStepEditHandoff()
+    {
+        string prompt = LocalizationService.Instance["agent.ask.systemPromptFragment"]
+            + LocalizationService.Instance["agent.ask.editStepsInstruction"];
+
+        prompt.Should().Contain("editSteps");
+        prompt.Should().Contain("2-4");
+        prompt.Should().Contain("Edit");
+    }
+
+    /// <summary>
     /// 回归：单纯的构建/测试请求要交给 Build Agent（它同时持有 build_solution 与 run_tests），
     /// 而不是 Edit —— 前者只需一个结果，后者才是改代码的场景。
     /// </summary>
@@ -674,7 +688,8 @@ public class AskAgentTests
         snapshot.Should().HaveCount(5);
         snapshot![snapshot.Count - 1].Role.Should().Be("assistant");
         snapshot[snapshot.Count - 1].Content.Should().Be(result.Content);
-        snapshot[snapshot.Count - 1].ReasoningContent.Should().Be(result.ReasoningContent);
+        snapshot[snapshot.Count - 1].ReasoningContent.Should().BeNull(
+            "AgentResult.ReasoningContent 是跨轮次聚合的 UI 展示值，不能伪造成单条 API 响应");
         snapshot.Should().Contain(m => m.Role == "tool" && m.ToolCallId == "call_1");
         snapshot.Should().NotContain(m => m.Content == "source agent prompt");
     }
@@ -753,6 +768,8 @@ public class AskAgentTests
         snapshot.Should().HaveCount(5);
         snapshot[snapshot.Count - 1].Role.Should().Be("assistant");
         snapshot[snapshot.Count - 1].Content.Should().Be("源 Agent 最终回答");
+        snapshot[snapshot.Count - 1].ReasoningContent.Should().BeNull(
+            "合成 assistant 没有对应的原始 API 响应，不应携带聚合 reasoning_content");
     }
 
     [Fact]
@@ -794,7 +811,8 @@ public class AskAgentTests
         messages.Should().HaveCount(7);
         messages[4].Role.Should().Be("assistant");
         messages[4].Content.Should().Be("源 Agent 最终回答");
-        messages[4].ReasoningContent.Should().Be("完成执行。");
+        messages[4].ReasoningContent.Should().BeNull(
+            "记忆提取复用的是合成历史，不能把展示聚合值冒充原始 reasoning_content");
         messages[5].Role.Should().Be("user");
         messages[5].Content.Should().Be(AiPrompts.MemoryAutoRecordUserPrompt);
         messages[6].Role.Should().Be("system");

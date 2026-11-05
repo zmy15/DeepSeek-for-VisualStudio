@@ -47,7 +47,7 @@
 | §7 Inline Edit（Ctrl+I） | 选区→指令→预览→接受 | ❌ | VSCommandTable.vsct 仅有 2 个开窗按钮；但 InlineDiffSession 基建已就绪（见 §3.4） |
 | §8 Patch 化修改 | 拒绝整文件覆盖 | ✅ | apply_patch/replace/multi_replace 等工具族；结构化 TextChanges 从后向前应用（OpenBufferCommitTarget.cs:139-165） |
 | §9 DocumentVersion 校验 | 应用前版本比对 | ✅ | `PreflightAsync` 快照版本号 + 全文 Ordinal 比对，不一致即拒绝（OpenBufferCommitTarget.cs:37-54） |
-| §10 Runtime 护栏 | 取消/超时/重试/MaxIterations | ✅ | MaxToolCallRounds=200 可配置（DeepSeekOptionsPage.cs:333）；工具 60s 超时（BaseAgent.cs:1621-1670）；断点续传重试 4 次（BaseAgent.cs:847-997）；三类循环检测（同结果签名/连续错误轮/白名单拒绝轮，BaseAgent.cs:1080-1503） |
+| §10 Runtime 护栏 | 取消/超时/重试/MaxIterations | ✅ | MaxToolCallRounds=200 可配置；工具 60s 超时；HTTP 与断点续传共用可配置指数退避重试；三类循环检测（同结果签名/连续错误轮/白名单拒绝轮） |
 | §11 工具统一化 | ITool + ToolRegistry | ✅ | `BuiltInToolBase`：Name/GetDefinition()/ExecuteAsync/GetDisplayText/GetResultSummary（BuiltInToolBase.cs:16-35）；BuiltInToolService 注册表统一管理内置+MCP 工具 |
 | §12 ToolResult 标准化 | {success,output,error,metadata} | 🟡 | 结果为纯字符串 + emoji 约定（如 `❌` 前缀判断，GetErrorsTool.cs:71）；有 ToolResultCompactor 做体积压缩，但无类型化 metadata |
 | §13 Build→Diagnostics→Fix 闭环 | 编译修复循环 | ✅ | BuildAgent 工具集含 build_solution/get_errors/全套编辑工具（BuildAgent.cs:37-65），最多修复 3 次（新错误不计入）；PlanBuildOutcomeReconciler 负责结果核对 |
@@ -137,7 +137,7 @@ JS _streamBuf + requestAnimationFrame 批量应用         ← ChatHtmlService.J
 
 ### 3.6 Runtime 护栏 —— 达成，两处小档位空缺
 
-已具备：轮次上限（200，可配置）、工具超时（60s）、全程取消令牌 + 停止按钮、流断点续传（4 次重试 + 部分内容回注）、三种循环终止检测。
+已具备：轮次上限（200，可配置）、工具超时（60s）、全程取消令牌 + 停止按钮、流断点续传（可配置重试次数 + 部分内容回注）、三种循环终止检测。
 
 小缺口：
 1. `GetToolTimeout` 的 switch 只有一个 default 臂（BaseAgent.cs:2831-2837）——分档位骨架在，但 build_solution 这类长任务与 list_dir 这类快操作共用 60s；

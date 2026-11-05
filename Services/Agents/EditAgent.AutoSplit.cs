@@ -1,16 +1,12 @@
 using DeepSeek_v4_for_VisualStudio.Models;
 using DeepSeek_v4_for_VisualStudio.Utils;
 using System;
-using System.Collections.Generic;
 using System.Linq;
-using System.Text;
-using System.Threading;
-using System.Threading.Tasks;
 
 namespace DeepSeek_v4_for_VisualStudio.Services.Agents
 {
     /// <summary>
-    /// EditAgent 任务拆分与限制策略（v1.1.10）。
+    /// EditAgent 任务规模分类与大型任务移交策略。
     /// </summary>
     public partial class EditAgent
     {
@@ -18,7 +14,7 @@ namespace DeepSeek_v4_for_VisualStudio.Services.Agents
 
         /// <summary>
         /// 三级任务规模分类：Small / Medium / Large。
-        /// Large 应由 Plan Agent 处理；Medium 由 Edit Agent 自行拆分；Small 单步执行。
+        /// Large 应由 Plan Agent 处理；Medium 的多步骤计划由 Ask 在 editSteps 中提供；Small 单步执行。
         /// </summary>
         public static TaskSize ClassifyTaskSize(string userMessage)
         {
@@ -183,141 +179,5 @@ namespace DeepSeek_v4_for_VisualStudio.Services.Agents
 
         #endregion
 
-        #region Task Auto-Splitting
-
-        /// <summary>
-        /// 让 AI 将中型任务拆分为多个步骤，构建 EditAgent 自拆分计划。
-        /// 不生成 plan.md 文件。
-        /// </summary>
-        private async Task<AgentTaskPlan> CreateAutoSplitPlanAsync(
-            string userMessage, AgentContext context)
-        {
-            var ct = context.CancellationToken;
-
-            // ── 使用轻量级 prompt 让 AI 生成步骤列表 ──
-            string splitPrompt = BuildAutoSplitPrompt(userMessage);
-
-            try
-            {
-                // ──  缓存保护：任务拆分是一次轻量预分析，不应消费 Handoff 传入的
-                //     ForwardedMessages。改用最小上下文直接调用，保留 ForwardedMessages
-                //     给真正的首个执行步骤复用上一次 API 缓存前缀。
-                var messages = new List<ChatApiMessage>
-                {
-                    new ChatApiMessage { Role = "system", Content = AiPrompts.SharedImmutablePrefix },
-                    new ChatApiMessage { Role = "system", Content = Definition.SystemPrompt },
-                    new ChatApiMessage { Role = "user", Content = splitPrompt },
-                };
-                string aiResult = await CallAiWithMessagesAsync(
-                    messages,
-                    ct,
-                    maxTokens: 2048,
-                    responseFormat: "json_object",
-                    toolChoice: "none");
-
-                // ── 解析 AI 返回的步骤 ──
-                var steps = ParseStepsFromAiResponse(aiResult, userMessage);
-
-                if (steps.Count > 1)
-                {
-                    AddLog("INFO", $"AI 将任务拆分为 {steps.Count} 个步骤");
-                    return new AgentTaskPlan
-                    {
-                        Intent = AgentIntent.CodeChange,
-                        Title = ExtractTaskTitle(userMessage),
-                        Steps = steps,
-                        Source = PlanSource.EditAgent,
-                    };
-                }
-
-                // ── AI 拆分失败或只返回 1 步 → 回退到单步 ──
-                AddLog("INFO", "AI 拆分返回 ≤1 步，回退到单步执行");
-                return CreateSingleStepPlan(userMessage);
-            }
-            catch (Exception ex)
-            {
-                Logger.Warn($"[EditAgent] 自动拆分失败: {ex.Message}，回退到单步执行");
-                return CreateSingleStepPlan(userMessage);
-            }
-        }
-
-        /// <summary>
-        /// 构建让 AI 拆分任务的 prompt。
-        /// </summary>
-        private static string BuildAutoSplitPrompt(string userMessage)
-        {
-            // 使用 Replace 而非 string.Format，避免模板中的 JSON 花括号引起 FormatException
-            return AiPrompts.AutoSplitSystemPrompt
-                .Replace("{0}", MaxFilesPerEdit.ToString())
-                .Replace("{1}", MaxLinesPerEdit.ToString())
-                .Replace("{2}", userMessage ?? "");
-        }
-
-        /// <summary>
-        /// 从 AI 响应中解析步骤列表。
-        /// </summary>
-        private static List<AgentStep> ParseStepsFromAiResponse(string aiResult, string userMessage)
-        {
-            var steps = new List<AgentStep>();
-
-            if (string.IsNullOrWhiteSpace(aiResult)) return steps;
-
-            // ── 清理可能的 markdown 包裹 ──
-            string json = aiResult.Trim();
-            if (json.StartsWith("```"))
-            {
-                int start = json.IndexOf('\n');
-                int end = json.LastIndexOf("```");
-                if (start >= 0 && end > start)
-                    json = json.Substring(start + 1, end - start - 1).Trim();
-            }
-
-            try
-            {
-                using var doc = System.Text.Json.JsonDocument.Parse(json);
-                if (doc.RootElement.ValueKind != System.Text.Json.JsonValueKind.Array)
-                    return steps;
-
-                foreach (var item in doc.RootElement.EnumerateArray())
-                {
-                    int index = item.TryGetProperty("index", out var idx) ? idx.GetInt32() : steps.Count + 1;
-                    string title = item.TryGetProperty("title", out var t) ? t.GetString() ?? "" : "";
-                    string desc = item.TryGetProperty("description", out var d) ? d.GetString() ?? "" : "";
-
-                    if (!string.IsNullOrWhiteSpace(title))
-                    {
-                        steps.Add(new AgentStep
-                        {
-                            Index = index,
-                            Title = title.Trim(),
-                            Description = string.IsNullOrWhiteSpace(desc) ? title.Trim() : desc.Trim(),
-                        });
-                    }
-                }
-            }
-            catch
-            {
-                // JSON 解析失败 → 返回空列表，调用方回退到单步
-            }
-
-            return steps;
-        }
-
-        /// <summary>
-        /// 从用户消息中提取任务标题。
-        /// </summary>
-        private static string ExtractTaskTitle(string userMessage)
-        {
-            if (string.IsNullOrWhiteSpace(userMessage))
-                return "代码修改任务";
-
-            // 取第一行或前 80 字符
-            string firstLine = userMessage.Split(new[] { '\r', '\n' }, StringSplitOptions.RemoveEmptyEntries)
-                .FirstOrDefault() ?? userMessage;
-
-            return firstLine;
-        }
-
-        #endregion
     }
 }

@@ -594,7 +594,7 @@ namespace DeepSeek_v4_for_VisualStudio
             // 历史事故（2026-08-24 卡死分析）：无条件自动弹窗使冷启动必然进入
             // UI 线程阻塞链，叠加当时同步运行的全域反射探针 → 启动即卡死。
             // 显式打开后写入标记（见 MarkChatWindowOpened），后续会话恢复弹出行为；
-            // 未使用过的实例则保持安静，由用户主动触发（工具栏 / 菜单 / Ctrl+Shift+D）。
+            // 未使用过的实例则保持安静，由用户主动触发（工具栏 / 菜单 / Ctrl+Alt+Y）。
             _ = JoinableTaskFactory.RunAsync(async () =>
             {
                 try

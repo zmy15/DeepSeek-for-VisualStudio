@@ -544,7 +544,8 @@ window.__answerQuestions=function(requestId){
             var freeText='';
             var textarea=page.querySelector('textarea');
             if(textarea) freeText=textarea.value.trim();
-            answers.push({selectedOptions:selected,freeText:freeText});
+            var skipped=page.getAttribute('data-skipped')==='true';
+            answers.push({selectedOptions:selected,freeText:freeText,skipped:skipped});
         }
     }
     var answersJson=JSON.stringify(answers);
@@ -596,10 +597,33 @@ window.__askQuestionsShowPage=function(card,index){
     var submit=document.getElementById('agent-questions-submit');
     if(submit)submit.style.display=isLast?'inline-block':'none';
 };
-window.__skipQuestions=function(requestId){
+window.__skipCurrentQuestion=function(requestId){
+    var card=document.getElementById('agent-questions');
+    if(!card)return;
+    var pages=card.querySelectorAll('.aq-page');
+    if(!pages.length)return;
+    var current=parseInt(card.getAttribute('data-index')||'0',10);
+    if(isNaN(current))current=0;
+    if(current<0)current=0;
+    if(current>pages.length-1)current=pages.length-1;
+
+    var page=pages[current];
+    page.setAttribute('data-skipped','true');
+    var inputs=page.querySelectorAll('input[type=radio],input[type=checkbox]');
+    for(var i=0;i<inputs.length;i++)inputs[i].checked=false;
+    var textarea=page.querySelector('textarea');
+    if(textarea)textarea.value='';
+
+    if(current<pages.length-1){
+        window.__askQuestionsShowPage(card,current+1);
+        return;
+    }
+    window.__answerQuestions(requestId);
+};
+window.__closeQuestions=function(requestId){
     var el=document.getElementById('agent-questions');
     if(el) el.remove();
-    window.__sendToHost({type:'answerQuestions',requestId:requestId,answers:'{}'});
+    window.__sendToHost({type:'answerQuestions',requestId:requestId,answers:'[]'});
 };
 window.__executeHandoff=function(targetAgent,label){
     window.__sendToHost({type:'executeHandoff',targetAgent:targetAgent,label:label});

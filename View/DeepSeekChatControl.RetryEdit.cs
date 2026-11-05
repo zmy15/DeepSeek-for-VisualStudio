@@ -115,13 +115,22 @@ namespace DeepSeek_v4_for_VisualStudio.View
 
         /// <summary>
         /// 执行 Agent Handoff（从 Plan → Edit）。
-        /// 由 WebView 中的" 开始实现"按钮触发。
+        /// 由计划面板中的"执行当前计划"按钮触发。
         /// </summary>
         /// <param name="targetAgent">目标 Agent 类型字符串（如 "Edit"）</param>
         /// <param name="label">按钮标签（用于日志）</param>
         private async Task ExecuteAgentHandoffAsync(string targetAgent, string label)
         {
             if (_activeAgent == null || _agentFactory == null) return;
+
+            // ── 并发守卫 ──
+            // 历史上解决方案重载会把 UI 重建成"任务未执行"的样子，并重新注入"执行当前计划"按钮；
+            // 此时后台任务其实还在跑，再点一次就会对同一批文件并发启动第二个 Agent。
+            if (IsRunInProgress())
+            {
+                Logger.Warn($"[AgentHandoff] 已有任务在执行，忽略重复的 Handoff 触发 (target={targetAgent})");
+                return;
+            }
 
             // ── 单轮 Cache 统计快照：本次 Handoff 执行开始时的累计值 ──
             _apiService?.TakeCacheSnapshot();
@@ -166,6 +175,14 @@ namespace DeepSeek_v4_for_VisualStudio.View
             CancellationTokenSource? handoffCts = null;
             try
             {
+                // ── 立即消费持久化的 Handoff ──
+                // 必须在任务开始时清掉消息上的 HandoffJson：否则任务执行期间一旦 VS 重载解决方案
+                // 或重建窗口，恢复逻辑会从磁盘把"执行当前计划"按钮重新注入，用户再点一次就是并发第二个任务。
+                ClearPersistedHandoffJson();
+
+                // ── 记录"本轮执行中"标记（崩溃/强杀后可从磁盘识别未收尾任务）──
+                BeginActiveRunMarker();
+
                 handoffCts = CreateNewStreamingCts();
                 StartConversationElapsedTimer();
 
@@ -177,7 +194,8 @@ namespace DeepSeek_v4_for_VisualStudio.View
                     try
                     {
                         await ChatWebView.CoreWebView2.ExecuteScriptAsync(
-                            $"var btns=document.querySelectorAll('.handoff-btn');btns.forEach(function(b){{b.disabled=true;b.textContent='{LocalizationService.Instance["chat.html.executing"]}';b.style.opacity='0.6';}});");
+                            ChatHtmlService.BuildSetHandoffButtonsExecutingJs(
+                                LocalizationService.Instance["chat.html.executing"]));
                     }
                     catch { }
                 }
@@ -211,10 +229,11 @@ namespace DeepSeek_v4_for_VisualStudio.View
                 lock (_lock)
                 {
                     _messages.Add(thinkingMsg);
-                    _agentStreamingMsgIndex = _messages.Count - 1;
                 }
+                // 锚定到消息对象本身：消息列表若被整体替换（加载会话/解决方案重载），
+                // 下标会失效，锚点可让后续写回安全失败而不是改错消息。
+                SetAgentStreamingTarget(_messages.Count - 1);
                 AddMessagesHtml("assistant", thinkingMsg.Content);
-                _currentStreamingMsgIndex = _agentStreamingMsgIndex;
                 UpdateBrowser();
 
                 // 冷启动路径没有经过 SendMessageCoreAsync，必须在这里恢复固定
@@ -383,8 +402,8 @@ namespace DeepSeek_v4_for_VisualStudio.View
                         pendingChainBack = nextHandoff;
                     Logger.Info($"[AgentHandoff] AutoSend 链式跟进: → {nextHandoff.TargetAgent} ({nextHandoff.Label})");
 
-                    // ── 保存当前推理内容，防止链式 Handoff 覆盖 ──
-                    // 不裁剪：该值会并回 agentResult 并最终持久化/回传。
+                    // ── 保存当前展示用推理内容，防止链式 Handoff 覆盖 ──
+                    // 该值只供 UI 思考面板使用；API 历史由 BaseAgent 按响应逐条维护。
                     string chainPreReasoning = agentResult.ReasoningContent ?? string.Empty;
 
                     var chainPrepWatch = System.Diagnostics.Stopwatch.StartNew();
@@ -441,13 +460,12 @@ namespace DeepSeek_v4_for_VisualStudio.View
                         }
                     }
 
-                    // ── 合并链式 Handoff 前后的推理内容 ──
+                    // ── 合并链式 Handoff 前后的展示用推理内容 ──
                     if (!string.IsNullOrEmpty(chainPreReasoning))
                     {
                         agentResult.ReasoningContent = string.IsNullOrEmpty(agentResult.ReasoningContent)
                             ? chainPreReasoning
                             : chainPreReasoning + "\n\n" + agentResult.ReasoningContent;
-                        // 不裁剪：合并结果会随 AgentResult 持久化并回传给 API。
                     }
                 }
 
@@ -456,6 +474,12 @@ namespace DeepSeek_v4_for_VisualStudio.View
                 {
                     _pendingHandoff = agentResult.Handoff;
                 }
+
+                // ── 收尾前刷新流式气泡锚点 ──
+                // 任务期间消息列表若被整体替换，旧下标会指向别的消息；这里修正为有效值或 -1，
+                // 后续带 bounds 检查的收尾逻辑便不会把结果写到无关消息上。
+                await ThreadHelper.JoinableTaskFactory.SwitchToMainThreadAsync();
+                ResolveAgentStreamingIndex();
 
                 // ── 清除所有消息中的 HandoffJson，避免后续消息误触发 Plan 上下文覆盖 ──
                 // 此前仅清除 _agentStreamingMsgIndex（当前 Edit 响应消息），但 HandoffJson
@@ -505,18 +529,19 @@ namespace DeepSeek_v4_for_VisualStudio.View
                         try
                         {
                             bool anyStepExecuted = plan.Steps.Any(s => s.Status != AgentStepStatus.Pending);
-                            if (anyStepExecuted)
+                            if (plan.Source != PlanSource.None)
                             {
-                                // 步骤已执行 → 更新面板为完成/进度状态
-                                string completeJs = ChatHtmlService.BuildAgentTaskPanelCompleteJs(plan);
-                                await ChatWebView.CoreWebView2.ExecuteScriptAsync(completeJs);
-                            }
-                            else if (plan.Source != PlanSource.None)
-                            {
-                                // 新创建的计划（PlanAgent 产出）→ 创建任务面板
+                                lock (_lock) { _createdPlanIds.Add(plan.PlanId); }
+
+                                // 始终幂等创建/更新，确保 Edit 自动拆分计划也能生成面板。
                                 string createJs = ChatHtmlService.BuildAgentTaskPanelCreateJs(plan);
                                 await ChatWebView.CoreWebView2.ExecuteScriptAsync(createJs);
-                                lock (_lock) { _createdPlanIds.Add(plan.PlanId); }
+
+                                if (anyStepExecuted || plan.IsCompleted || plan.IsCancelled)
+                                {
+                                    string completeJs = ChatHtmlService.BuildAgentTaskPanelCompleteJs(plan);
+                                    await ChatWebView.CoreWebView2.ExecuteScriptAsync(completeJs);
+                                }
                             }
                         }
                         catch { }
@@ -624,7 +649,7 @@ namespace DeepSeek_v4_for_VisualStudio.View
                     if (ChatWebView.CoreWebView2 != null)
                     {
                         await ChatWebView.CoreWebView2.ExecuteScriptAsync(
-                            "var btns=document.querySelectorAll('.handoff-btn');btns.forEach(function(b){if(b.parentNode)b.parentNode.removeChild(b);});");
+                            ChatHtmlService.BuildRemoveHandoffButtonsJs());
                     }
                 }
                 catch { }
@@ -632,6 +657,11 @@ namespace DeepSeek_v4_for_VisualStudio.View
                 if (handoffCts != null)
                     DisposeStreamingCts(handoffCts);
                 StopConversationElapsedTimer();
+
+                // ── 收尾执行中标记（取消/异常同样要清，否则下次加载会误报"中断"）──
+                CompleteActiveRunMarker();
+                await ApplyPendingSolutionChangeIfAnyAsync();
+
                 if (!TryStartQueuedAppend())
                     UpdateButtonsState();
             }
@@ -1164,7 +1194,10 @@ namespace DeepSeek_v4_for_VisualStudio.View
 
                 // ── 同步消息列表并重建上下文 ──
                 RebuildFromTree();
-                RebuildContextFromTree();
+                // 编辑是一条全新的替代分支：只能继承编辑点之前的树路径，
+                // 不能再从旧 ApiHistory 补回被编辑回合或其分支的 tool/system 记录。
+                RebuildContextFromTree(includeApiHistory: false);
+                SynchronizeActiveSessionApiHistory();
 
                 // ── 恢复系统级上下文（Clear() 会清空 system prompt / memory / skill）──
                 await RestoreSystemContextAsync();
@@ -1188,7 +1221,7 @@ namespace DeepSeek_v4_for_VisualStudio.View
                 }
 
                 if (newUserMsg != null)
-                    await ResendUserMessageAsync(newUserMsgIndex, newUserMsg, editCts);
+                    await ResendUserMessageAsync(newUserMsgIndex, newUserMsg, editCts, isEditResend: true);
             }
             catch (Exception ex)
             {
@@ -1237,7 +1270,11 @@ namespace DeepSeek_v4_for_VisualStudio.View
         /// 注意：此方法仅在 ApiHistory 为空或 RestoreFullContext 失败时作为回退使用；
         /// 正常情况下优先使用 RestoreFullContext（完整数据源）。
         /// </summary>
-        private void RebuildContextFromTree()
+        /// <param name="includeApiHistory">
+        /// 是否允许从旧的 ApiHistory 补充 tool/system/tool_calls。编辑消息时必须为 false，
+        /// 否则被编辑分支的历史会重新进入上下文。
+        /// </param>
+        private void RebuildContextFromTree(bool includeApiHistory = true)
         {
             if (_tree == null) return;
 
@@ -1267,13 +1304,17 @@ namespace DeepSeek_v4_for_VisualStudio.View
                     }
                     else if (msg.Role == "assistant")
                     {
-                        // 树节点的 ChatMessage 不含 ToolCalls，此处仅恢复 content + reasoning
-                        _contextManager.AddAssistantMessage(content, msg.ReasoningContent);
+                        // 树节点保存的 ReasoningContent 是 UI 聚合值，不是某次 API
+                        // 响应的 reasoning_content。正常恢复走 ApiHistory；这里仅作回退，
+                        // 不能把展示聚合值重新注入 API 历史。
+                        _contextManager.AddAssistantMessage(content);
                     }
                 }
 
                 // ── 从 ApiHistory 补充 tool / system / 含tool_calls的assistant 消息 ──
-                if (_activeSession?.ApiHistory != null && _activeSession.ApiHistory.Count > 0)
+                if (includeApiHistory
+                    && _activeSession?.ApiHistory != null
+                    && _activeSession.ApiHistory.Count > 0)
                 {
                     foreach (var apiMsg in _activeSession.ApiHistory)
                     {
@@ -1295,9 +1336,25 @@ namespace DeepSeek_v4_for_VisualStudio.View
                     }
                 }
 
-                Logger.Info($"[Tree→Context] 已从 {path.Count} 个节点重建上下文"
-                    + (_activeSession?.ApiHistory?.Count > 0 ? $" (+ {_activeSession.ApiHistory.Count} 条 ApiHistory 补充)" : ""));
+                string historyStatus = !includeApiHistory
+                    ? "（编辑分支：未使用旧 ApiHistory）"
+                    : _activeSession?.ApiHistory?.Count > 0
+                        ? $" (+ {_activeSession.ApiHistory.Count} 条 ApiHistory 补充)"
+                        : "（旧 ApiHistory 为空）";
+                Logger.Info($"[Tree→Context] 已从 {path.Count} 个节点重建上下文{historyStatus}");
             }
+        }
+
+        /// <summary>
+        /// 将当前上下文同步回活跃会话，立即截断已经离开活跃分支的旧 ApiHistory。
+        /// 用于编辑/分支切换后，避免下一次从 ApiHistory 恢复时把旧分支重新带回来。
+        /// </summary>
+        private void SynchronizeActiveSessionApiHistory()
+        {
+            if (_activeSession == null)
+                return;
+
+            _activeSession.ApiHistory = _contextManager.GetFullContext();
         }
 
         /// <summary>
@@ -1306,7 +1363,8 @@ namespace DeepSeek_v4_for_VisualStudio.View
         private async Task ResendUserMessageAsync(
             int userMsgIndex,
             ChatMessage userMsg,
-            CancellationTokenSource? existingCts = null)
+            CancellationTokenSource? existingCts = null,
+            bool isEditResend = false)
         {
             if (_options == null || string.IsNullOrEmpty(_options.ApiKey))
             {
@@ -1344,7 +1402,12 @@ namespace DeepSeek_v4_for_VisualStudio.View
                 StatusLabel.Text = LocalizationService.Instance["status.thinking"];
 
                 string userContent = userMsg.Content ?? string.Empty;
-                string enrichedContent = BuildRetryEnrichedContent(userMsg, userContent);
+                // 编辑后的消息只以当前文本作为本轮问题。普通重试才额外拼接历史摘要，
+                // 避免旧问题、旧回答或半截回复再次进入当前 user 消息。
+                string enrichedContent = BuildResendPromptContent(
+                    userContent,
+                    isEditResend,
+                    GetConversationContextForRetry);
 
                 if (_activeAgent != null && _agentFactory != null && !string.IsNullOrEmpty(userContent) && !userContent.StartsWith("/"))
                 {
@@ -1374,12 +1437,15 @@ namespace DeepSeek_v4_for_VisualStudio.View
                     if (userMsg.AttachedFiles.Count > 0)
                         fileContext = FileParserService.FormatParseResultsForContext(userMsg.AttachedFiles);
 
-                    string conversationContext = GetConversationContextForRetry();
-                    if (!string.IsNullOrEmpty(conversationContext))
+                    if (!isEditResend)
                     {
-                        fileContext = string.IsNullOrEmpty(fileContext)
-                            ? conversationContext
-                            : conversationContext + "\n\n" + fileContext;
+                        string conversationContext = GetConversationContextForRetry();
+                        if (!string.IsNullOrEmpty(conversationContext))
+                        {
+                            fileContext = string.IsNullOrEmpty(fileContext)
+                                ? conversationContext
+                                : conversationContext + "\n\n" + fileContext;
+                        }
                     }
 
                     TryReuseRetryPlaceholder(out assistantMsg, out newAssistantIdx);

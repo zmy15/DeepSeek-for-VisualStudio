@@ -386,7 +386,7 @@ pre.mermaid-block{overflow:visible;max-height:none;background:transparent;border
 pre.mermaid-block .mermaid-error{display:none}
 pre.mermaid-block svg[id^='mermaid-error']{display:none}
 ul,ol{padding-left:22px;margin:6px 0}li{margin:2px 0}blockquote{border-left:3px solid #4fc1ff;padding:6px 12px;margin:8px 0;background:#2a2a2a;color:#aaa}
-.table-scroll{width:100%;max-width:100%;margin:8px 0;overflow-x:auto;overflow-y:hidden}.table-scroll table{width:max-content;min-width:100%;margin:0}th,td{border:1px solid #444;padding:6px 10px;text-align:left;vertical-align:top;overflow-wrap:anywhere;word-break:break-word}th{background:#333;color:#e0e0e0;font-weight:600}hr{border:none;border-top:1px solid #444;margin:12px 0}
+.table-scroll{width:100%;max-width:100%;margin:8px 0;overflow-x:auto;overflow-y:hidden}.table-scroll table{width:100%;max-width:100%;table-layout:auto;border-collapse:collapse;margin:0}th,td{border:1px solid #444;padding:6px 10px;text-align:left;vertical-align:top;white-space:normal;overflow-wrap:anywhere;word-break:break-word}th code,td code{white-space:normal;overflow-wrap:anywhere;word-break:break-word}th{background:#333;color:#e0e0e0;font-weight:600}hr{border:none;border-top:1px solid #444;margin:12px 0}
 .code-lang{position:absolute;top:6px;left:14px;color:#9cdcfe;font-size:10px;font-family:'Segoe UI',sans-serif;text-transform:uppercase}
 .copy-btn{position:absolute;top:4px;right:8px;background:#3c3c3c;color:#ccc;border:1px solid #555;border-radius:4px;padding:2px 10px;font-size:11px;cursor:pointer;font-family:'Segoe UI',sans-serif;z-index:1;transition:all .15s}.copy-btn:hover{background:#505050;color:#fff}
 .msg-wrapper{display:flex;gap:12px;margin-bottom:24px;padding:0 4px}.msg-wrapper.user{justify-content:flex-end;align-items:center;gap:6px}
@@ -455,6 +455,7 @@ ul,ol{padding-left:22px;margin:6px 0}li{margin:2px 0}blockquote{border-left:3px 
 .task-close.finished{background:#3C1A1A;color:#E07878;border-color:#6A3A3A}
 .task-close.finished:hover{background:#c0392b;color:#fff;border-color:#c0392b}
 .agent-task-panel-body{padding:6px 10px;max-height:24vh;overflow-y:auto}
+.agent-task-panel-actions{padding:8px 10px;border-top:1px solid #2a3a4a}
 .terminal-approval-card{margin:12px 0;border:1px solid #5a4a2a;border-radius:10px;background:#1e1a12;overflow:hidden;box-shadow:0 2px 12px rgba(0,0,0,.3)}
 .terminal-approval-card-header{display:flex;align-items:center;gap:10px;padding:10px 14px;background:#2a2218;border-bottom:1px solid #3a2e1a;font-size:13px;font-weight:600;color:#e0c870}
 .terminal-approval-card-header .icon{font-size:18px}
@@ -500,7 +501,7 @@ pre.mermaid-block{overflow:visible;max-height:none;background:transparent;border
 pre.mermaid-block .mermaid-error{display:none}
 pre.mermaid-block svg[id^='mermaid-error']{display:none}
 ul,ol{padding-left:22px;margin:6px 0}li{margin:2px 0}blockquote{border-left:3px solid #0078d4;padding:6px 12px;margin:8px 0;background:#f6f8fa;color:#656d76}
-.table-scroll{width:100%;max-width:100%;margin:8px 0;overflow-x:auto;overflow-y:hidden}.table-scroll table{width:max-content;min-width:100%;margin:0}th,td{border:1px solid #d0d7de;padding:6px 10px;text-align:left;vertical-align:top;overflow-wrap:anywhere;word-break:break-word}th{background:#f6f8fa;color:#1e1e1e;font-weight:600}hr{border:none;border-top:1px solid #d0d7de;margin:12px 0}
+.table-scroll{width:100%;max-width:100%;margin:8px 0;overflow-x:auto;overflow-y:hidden}.table-scroll table{width:100%;max-width:100%;table-layout:auto;border-collapse:collapse;margin:0}th,td{border:1px solid #d0d7de;padding:6px 10px;text-align:left;vertical-align:top;white-space:normal;overflow-wrap:anywhere;word-break:break-word}th code,td code{white-space:normal;overflow-wrap:anywhere;word-break:break-word}th{background:#f6f8fa;color:#1e1e1e;font-weight:600}hr{border:none;border-top:1px solid #d0d7de;margin:12px 0}
 .code-lang{position:absolute;top:6px;left:14px;color:#0550ae;font-size:10px;font-family:'Segoe UI',sans-serif;text-transform:uppercase}
 .copy-btn{position:absolute;top:4px;right:8px;background:#e8e8e8;color:#555;border:1px solid #ccc;border-radius:4px;padding:2px 10px;font-size:11px;cursor:pointer;font-family:'Segoe UI',sans-serif;z-index:1;transition:all .15s}.copy-btn:hover{background:#d0d0d0;color:#333}
 .msg-wrapper{display:flex;gap:12px;margin-bottom:24px;padding:0 4px}.msg-wrapper.user{justify-content:flex-end;align-items:center;gap:6px}
@@ -569,6 +570,7 @@ ul,ol{padding-left:22px;margin:6px 0}li{margin:2px 0}blockquote{border-left:3px 
 .task-close.finished{background:#f8e0e0;color:#c04040;border-color:#d8a0a0}
 .task-close.finished:hover{background:#c0392b;color:#fff;border-color:#c0392b}
 .agent-task-panel-body{padding:6px 10px;max-height:24vh;overflow-y:auto}
+.agent-task-panel-actions{padding:8px 10px;border-top:1px solid #d0dce8}
 .terminal-approval-card{margin:12px 0;border:1px solid #d8c8a0;border-radius:10px;background:#fffdf5;overflow:hidden;box-shadow:0 2px 12px rgba(0,0,0,.08)}
 .terminal-approval-card-header{display:flex;align-items:center;gap:10px;padding:10px 14px;background:#faf5e8;border-bottom:1px solid #e8dcc0;font-size:13px;font-weight:600;color:#8a7030}
 .terminal-approval-card-header .icon{font-size:18px}

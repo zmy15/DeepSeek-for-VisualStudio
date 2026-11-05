@@ -355,6 +355,19 @@ namespace DeepSeek_v4_for_VisualStudio
             };
 
         [VisualStudioContribution]
+        internal static Setting.Integer ApiMaxRetryCount { get; } =
+            new(
+                "deepseekApiMaxRetryCount",
+                "%DeepSeek.Chat.settings.apiMaxRetryCount.displayName%",
+                GeneralCategory,
+                defaultValue: Settings.DeepSeekOptionsPage.DefaultApiMaxRetryCount)
+            {
+                Description = "%DeepSeek.Chat.settings.apiMaxRetryCount.description%",
+                Minimum = Settings.DeepSeekOptionsPage.MinApiMaxRetryCount,
+                Maximum = Settings.DeepSeekOptionsPage.MaxApiMaxRetryCount,
+            };
+
+        [VisualStudioContribution]
         internal static Setting.Enum Language { get; } =
             new(
                 "deepseekLanguage",

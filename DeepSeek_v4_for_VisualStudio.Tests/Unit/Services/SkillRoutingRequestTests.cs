@@ -42,6 +42,35 @@ public class SkillRoutingRequestTests
         body.Should().NotContain("\"tool_choice\":");
     }
 
+    [Fact]
+    public async Task CallAiWithMessagesAsync_IncludesSkillToolsWithoutForcedRouting()
+    {
+        var sseLines = new[]
+        {
+            "data: {\"id\":\"chatcmpl-tools-1\",\"choices\":[{\"index\":0,\"delta\":{\"content\":\"ok\"}}]}\n",
+            "data: [DONE]\n",
+        };
+
+        var handler = new CapturingHttpMessageHandler(sseLines);
+        var apiService = new DeepSeekApiService(new HttpClient(handler));
+        var agent = new RoutingTestAgent(apiService)
+        {
+            BuiltInTools = new BuiltInToolService(),
+        };
+
+        await agent.CallAiWithMessagesAsync(
+            new List<ChatApiMessage>
+            {
+                new() { Role = "user", Content = "list available skills" },
+            },
+            CancellationToken.None);
+
+        var body = handler.RequestBodies.Should().ContainSingle().Subject;
+        body.Should().Contain("\"load_skill\"");
+        body.Should().Contain("\"list_skills\"");
+        body.Should().Contain("\"read_skill_resource\"");
+    }
+
     private sealed class RoutingTestAgent : BaseAgent
     {
         public RoutingTestAgent(DeepSeekApiService apiService) : base(apiService, AgentType.Ask)
