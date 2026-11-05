@@ -740,21 +740,10 @@ namespace DeepSeek_v4_for_VisualStudio.View
             ChatWebViewHost.Unloaded += ChatWebViewHost_Unloaded;
             ChatWebViewHost.IsVisibleChanged += ChatWebViewHost_IsVisibleChanged;
 
-            // ── 粘贴命令绑定：作为后备路径，支持剪贴板图片直接粘贴为附件 ──
-            // 主路径在 PreviewKeyDown 中通过隧道事件拦截 Ctrl+V，确保优先于 TextBox 内部处理。
-            CommandBindings.Add(new CommandBinding(ApplicationCommands.Paste,
-                (s, e) =>
-                {
-                    Logger.Info("CommandBinding.Paste Executed 触发");
-                    ExecutePasteImage(e);
-                },
-                (s, e) =>
-                {
-                    bool hasImage = CanPasteImage();
-                    e.CanExecute = hasImage;
-                    e.Handled = hasImage; // 仅在有图像时拦截，文本粘贴交给 TextBox 默认行为
-                    Logger.Info($"CommandBinding.Paste CanExecute: hasImage={hasImage}, CanExecute={e.CanExecute}, Handled={e.Handled}");
-                }));
+            // 不要在 UserControl 级注册 ApplicationCommands.Paste。
+            // WebView2 内的 textarea/input 需要接收浏览器原生 Ctrl+V；宿主级 Paste
+            // 命令在剪贴板无图片时会把 CanExecute 置为 false，从而吞掉文本粘贴。
+            // WPF 输入框的图片粘贴由 InputTextBox_PreviewKeyDown 单独处理。
         }
 
         /// <summary>

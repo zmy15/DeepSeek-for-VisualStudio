@@ -181,7 +181,7 @@ namespace DeepSeek_v4_for_VisualStudio.View
         {
             try
             {
-                // 仅处理纯文本粘贴；图片粘贴由 PreviewKeyDown / CommandBinding 路径处理
+                // 仅处理纯文本粘贴；图片粘贴由 InputTextBox_PreviewKeyDown 处理
                 string? text = null;
                 if (e.SourceDataObject.GetDataPresent(DataFormats.UnicodeText, true))
                 {

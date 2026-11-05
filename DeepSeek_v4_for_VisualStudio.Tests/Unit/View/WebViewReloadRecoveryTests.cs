@@ -1,5 +1,6 @@
 using System.Reflection;
 using System.Threading;
+using System.Windows.Input;
 using DeepSeek_v4_for_VisualStudio.View;
 
 namespace DeepSeek_v4_for_VisualStudio.Tests.Unit.View;
@@ -24,6 +25,19 @@ namespace DeepSeek_v4_for_VisualStudio.Tests.Unit.View;
 /// </summary>
 public class WebViewReloadRecoveryTests
 {
+    [Fact]
+    public void Constructor_DoesNotRegisterHostPasteCommand()
+    {
+        RunOnStaThread(control =>
+        {
+            control.CommandBindings
+                .OfType<CommandBinding>()
+                .Should().NotContain(
+                    binding => binding.Command == ApplicationCommands.Paste,
+                    "宿主级 Paste 命令会把 WebView2 textarea 的原生文本粘贴吞掉");
+        });
+    }
+
     /// <summary>
     /// 在专用 STA 线程上构造控件、执行测试体，然后必定释放控件。
     /// <para>
