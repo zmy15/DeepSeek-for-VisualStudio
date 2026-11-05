@@ -148,7 +148,7 @@ OpenAI 兼容端点，自动识别各家的推理参数方言；通过 PaddleOCR
    `DeepSeek_v4_for_VisualStudio-v<版本号>.vsix`。
 2. **关闭 Visual Studio。**
 3. 双击 `.vsix`，按 VSIX Installer 提示完成安装。
-4. 启动 Visual Studio，按 <kbd>Ctrl</kbd>+<kbd>Shift</kbd>+<kbd>D</kbd> 打开聊天窗口。
+4. 启动 Visual Studio，按 <kbd>Ctrl</kbd>+<kbd>Alt</kbd>+<kbd>Y</kbd> 打开聊天窗口。
 
 > [!TIP]
 > 若环境不适合捆绑 PaddleOCR/OpenCV 原生库，可选用 **No-Local-OCR** 版本，除本地 OCR 外功能完全一致。
@@ -167,7 +167,7 @@ OpenAI 兼容端点，自动识别各家的推理参数方言；通过 PaddleOCR
 
    填好后用 `04. 测试连接` 验证当前生效的端点、模型与密钥。
    两种密钥都保存在 **Visual Studio 凭据存储**中，不会以明文写入设置存储。
-2. **打开聊天窗口。** 按 <kbd>Ctrl</kbd>+<kbd>Shift</kbd>+<kbd>D</kbd>，或使用
+2. **打开聊天窗口。** 按 <kbd>Ctrl</kbd>+<kbd>Alt</kbd>+<kbd>Y</kbd>，或使用
    `视图 → 其他窗口 → DeepSeek Chat`，也可点击工具栏按钮。
 3. **选择模型。** 在聊天窗口底部的下拉框中选择官方模型或自定义端点模型（后者带 **（自定义端点）** 后缀）。
 4. **开始提问。** 例如：
@@ -392,7 +392,7 @@ Ask Agent 也可以在多选题不足以决策时，弹出结构化提问卡片�
 
 | 快捷键 | 作用域 | 动作 |
 |---|---|---|
-| <kbd>Ctrl</kbd>+<kbd>Shift</kbd>+<kbd>D</kbd> | 全局 | 打开 / 聚焦 DeepSeek Chat 窗口 |
+| <kbd>Ctrl</kbd>+<kbd>Alt</kbd>+<kbd>Y</kbd> | 全局 | 打开 / 聚焦 DeepSeek Chat 窗口 |
 | <kbd>Ctrl</kbd>+<kbd>I</kbd> | 文本编辑器 | 内联 AI 编辑 |
 | <kbd>Tab</kbd> / <kbd>Esc</kbd> | 文本编辑器（有建议时） | 接受 / 取消幽灵文本补全 |
 | <kbd>Enter</kbd> / <kbd>Esc</kbd> | 内联编辑条 | 应用 / 取消修改 |

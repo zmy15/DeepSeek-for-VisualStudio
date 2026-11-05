@@ -156,7 +156,7 @@ a custom OpenAI-compatible endpoint can be configured instead.
    [Releases](https://github.com/zmy15/DeepSeek-for-VisualStudio/releases).
 2. **Close Visual Studio.**
 3. Double-click the `.vsix` and follow the VSIX Installer prompts.
-4. Launch Visual Studio and press <kbd>Ctrl</kbd>+<kbd>Shift</kbd>+<kbd>D</kbd> to open the chat window.
+4. Launch Visual Studio and press <kbd>Ctrl</kbd>+<kbd>Alt</kbd>+<kbd>Y</kbd> to open the chat window.
 
 > [!TIP]
 > A **No-Local-OCR** variant is published for environments where the bundled PaddleOCR/OpenCV native libraries
@@ -179,7 +179,7 @@ a custom OpenAI-compatible endpoint can be configured instead.
 
    Use `04. Test Connection` to verify whichever endpoint, model, and key are currently active.
    Both keys are stored in **Visual Studio Credential Storage**, not in plain text in the settings store.
-2. **Open the chat window.** Press <kbd>Ctrl</kbd>+<kbd>Shift</kbd>+<kbd>D</kbd>, or use
+2. **Open the chat window.** Press <kbd>Ctrl</kbd>+<kbd>Alt</kbd>+<kbd>Y</kbd>, or use
    `View → Other Windows → DeepSeek Chat`, or the toolbar button.
 3. **Pick a model** from the dropdown at the bottom of the chat window — official models, or custom
    endpoint models suffixed with **(Custom)**.
@@ -420,7 +420,7 @@ sub-agent watchdog timeout, and so on).
 
 | Shortcut | Scope | Action |
 |---|---|---|
-| <kbd>Ctrl</kbd>+<kbd>Shift</kbd>+<kbd>D</kbd> | Global | Open / focus the DeepSeek Chat window |
+| <kbd>Ctrl</kbd>+<kbd>Alt</kbd>+<kbd>Y</kbd> | Global | Open / focus the DeepSeek Chat window |
 | <kbd>Ctrl</kbd>+<kbd>I</kbd> | Text editor | Inline AI Edit |
 | <kbd>Tab</kbd> / <kbd>Esc</kbd> | Text editor (with suggestion) | Accept / dismiss ghost-text completion |
 | <kbd>Enter</kbd> / <kbd>Esc</kbd> | Inline edit bar | Apply / cancel the edit |
