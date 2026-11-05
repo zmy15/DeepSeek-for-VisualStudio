@@ -52,7 +52,10 @@ public class ChatHtmlServiceTests
 
         html.Should().Contain(".table-scroll{");
         html.Should().Contain("overflow-x:auto");
+        html.Should().Contain(".table-scroll table{width:100%");
+        html.Should().Contain("white-space:normal");
         html.Should().Contain("overflow-wrap:anywhere");
+        html.Should().NotContain("width:max-content");
     }
 
     [Fact]
