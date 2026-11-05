@@ -688,7 +688,8 @@ public class AskAgentTests
         snapshot.Should().HaveCount(5);
         snapshot![snapshot.Count - 1].Role.Should().Be("assistant");
         snapshot[snapshot.Count - 1].Content.Should().Be(result.Content);
-        snapshot[snapshot.Count - 1].ReasoningContent.Should().Be(result.ReasoningContent);
+        snapshot[snapshot.Count - 1].ReasoningContent.Should().BeNull(
+            "AgentResult.ReasoningContent 是跨轮次聚合的 UI 展示值，不能伪造成单条 API 响应");
         snapshot.Should().Contain(m => m.Role == "tool" && m.ToolCallId == "call_1");
         snapshot.Should().NotContain(m => m.Content == "source agent prompt");
     }
@@ -767,6 +768,8 @@ public class AskAgentTests
         snapshot.Should().HaveCount(5);
         snapshot[snapshot.Count - 1].Role.Should().Be("assistant");
         snapshot[snapshot.Count - 1].Content.Should().Be("源 Agent 最终回答");
+        snapshot[snapshot.Count - 1].ReasoningContent.Should().BeNull(
+            "合成 assistant 没有对应的原始 API 响应，不应携带聚合 reasoning_content");
     }
 
     [Fact]
@@ -808,7 +811,8 @@ public class AskAgentTests
         messages.Should().HaveCount(7);
         messages[4].Role.Should().Be("assistant");
         messages[4].Content.Should().Be("源 Agent 最终回答");
-        messages[4].ReasoningContent.Should().Be("完成执行。");
+        messages[4].ReasoningContent.Should().BeNull(
+            "记忆提取复用的是合成历史，不能把展示聚合值冒充原始 reasoning_content");
         messages[5].Role.Should().Be("user");
         messages[5].Content.Should().Be(AiPrompts.MemoryAutoRecordUserPrompt);
         messages[6].Role.Should().Be("system");

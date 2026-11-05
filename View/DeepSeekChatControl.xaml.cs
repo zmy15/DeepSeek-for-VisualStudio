@@ -560,8 +560,8 @@ namespace DeepSeek_v4_for_VisualStudio.View
                 var msgs = _tree.GetActiveMessages();
                 // 注意：GetActiveMessages 返回的是树节点的**活引用**。
                 // 这里绝不能就地改写 msg.ReasoningContent——该字段会被 ConversationTree
-                // 持久化并在后续请求中回传给 API；官方要求携带 tools 时必须完整回传，
-                // 就地裁剪会永久破坏历史（且此前的 ClampStored 还会注入截断标记文本）。
+                // 持久化供 UI 回看。当前轮次仍完整回传，历史轮次不回传；
+                // 就地裁剪会永久破坏回看内容（且此前的 ClampStored 还会注入截断标记）。
                 _messages.AddRange(msgs);
             }
         }

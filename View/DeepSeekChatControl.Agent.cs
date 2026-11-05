@@ -1510,8 +1510,7 @@ namespace DeepSeek_v4_for_VisualStudio.View
             string footerHtml, string? extraFooterHtml = null)
         {
             // 不裁剪：reasoning 最终会写入消息对象（_messages[idx] 是 ConversationTree 的活引用），
-            // 进而被持久化并在后续请求中回传给 API。官方要求携带 tools 时必须完整回传
-            // reasoning_content，任何裁剪（尤其是注入截断标记）都会破坏历史。
+            // 并持久化供 UI 回看。当前轮次的完整思考仍会原样回传，历史轮次不回传。
 
             // ── 更新消息状态为最终完成态（下标无效时跳过更新，与旧分支行为一致）──
             string timelineContent;
@@ -2124,14 +2123,17 @@ namespace DeepSeek_v4_for_VisualStudio.View
                     }
 
                     // ── 添加到上下文管理器（供后续 API 调用使用）──
+                    // Agent 工具循环已经按每次 API 响应把各自的 reasoning_content
+                    // 写入 ContextManager。这里只补 UI 气泡正文；气泡上的 ReasoningContent
+                    // 是跨工具轮次/Handoff 聚合后的展示值，不能再写回 API 历史。
                     string content = agentResponseMsg.Content ?? string.Empty;
                     string reasoning = agentResponseMsg.ReasoningContent;
                     if (!string.IsNullOrWhiteSpace(content) || !string.IsNullOrWhiteSpace(reasoning))
                     {
                         _contextManager.AddAssistantMessage(
-                            string.IsNullOrWhiteSpace(content) ? null : content,
-                            string.IsNullOrWhiteSpace(reasoning) ? null : reasoning);
-                        Logger.Info($"[Agent→Context] Agent 响应已添加到上下文 (contentLen={content.Length}, reasoningLen={reasoning?.Length ?? 0})");
+                            string.IsNullOrWhiteSpace(content) ? null : content);
+                        Logger.Info($"[Agent→Context] Agent 响应已添加到上下文 " +
+                            $"(contentLen={content.Length}, displayReasoningChars={reasoning?.Length ?? 0}, apiReasoningWritten=false)");
                     }
                 }
 

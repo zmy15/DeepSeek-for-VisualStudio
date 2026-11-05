@@ -37,7 +37,7 @@ namespace DeepSeek_v4_for_VisualStudio.Services.Agents
         private CancellationTokenSource? _agentCts;
         private ExploreAgent? _exploreAgent;
 
-        // ── 累积累推理/思考内容（跨步骤收集，供 UI 渲染思考面板）──
+        // ── 累积展示用推理/思考内容（跨步骤收集，仅供 UI 思考面板）──
         private string? _accumulatedReasoning;
 
         // ── 用户原始消息（用于检测跳过构建的意图）──
@@ -235,7 +235,7 @@ namespace DeepSeek_v4_for_VisualStudio.Services.Agents
             bool cancelled = plan.IsCancelled || context.CancellationToken.IsCancellationRequested;
             result.Handoff = cancelled ? null : ResolveHandoff(plan);
 
-            // ── 传递累积累的推理内容供 UI 渲染思考面板 ──
+            // ── 传递累积的展示用推理内容；API 历史已在工具循环中逐条落库 ──
             if (!string.IsNullOrEmpty(_accumulatedReasoning))
                 result.ReasoningContent = _accumulatedReasoning;
 

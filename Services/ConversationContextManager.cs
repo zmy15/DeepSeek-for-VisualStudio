@@ -14,9 +14,10 @@ namespace DeepSeek_v4_for_VisualStudio.Services
     /// 
     /// 核心职责：
     /// 1. 单一数据源：所有 API 调用所需的对话历史由此类统一管理
-    /// 2. reasoning_content 回传规则（严格遵守 DeepSeek 思考模式协议）：
-    ///    - 无工具调用的 assistant 消息 → reasoning_content 不需要回传（API 会忽略）
-    ///    - 有工具调用的 assistant 消息 → reasoning_content 必须完整回传（否则 400 错误）
+    /// 2. reasoning_content 回传规则（节省 token）：
+    ///    - 仅当前真实用户轮次内的 assistant 消息回传 reasoning_content
+    ///    - 历史轮次保留本地思考内容用于回看，但不再写入 API 请求
+    ///    - 当前轮次内的工具调用链仍完整回传，保证同一轮思考可继续
     /// 3. Token 预算估算与自动压缩（不再直接截断/删除旧消息）
     /// 4. 轮次（Turn）边界追踪
     /// 5. RAG 上下文注入点
@@ -645,9 +646,8 @@ namespace DeepSeek_v4_for_VisualStudio.Services
         /// <param name="toolCalls">工具调用列表（可为 null）</param>
         public void AddAssistantMessage(string? content, string? reasoningContent = null, List<ToolCall>? toolCalls = null)
         {
-            // 不裁剪：官方要求携带 tools 的请求必须完整回传 reasoning_content，
-            // 落库/落内存时截断会直接违反该要求（超长时还可能诱发 400）。
-            // 仅做超限告警，便于观察实际体量。
+            // 不裁剪：当前轮次仍需原样回传 reasoning_content；历史轮次虽不再发送，
+            // 但仍保留完整内容供 UI 回看。仅做超限告警，便于观察实际体量。
             ReasoningTextPolicy.WarnIfOversized(reasoningContent);
 
             // ──  前缀缓存优化：写时合并连续 assistant 消息 ──
@@ -1389,6 +1389,7 @@ namespace DeepSeek_v4_for_VisualStudio.Services
 
             // ── [2..] 对话历史 ──
             int entryLimit = entryLimitOverride ?? _cacheSnapshotEntryIndex ?? _entries.Count;
+            int currentTurn = CurrentTurnIndex;
             for (int i = startEntryIdx; i < _entries.Count && i < entryLimit; i++)
             {
                 var entry = _entries[i];
@@ -1413,10 +1414,10 @@ namespace DeepSeek_v4_for_VisualStudio.Services
 
                 if (entry.Role == "assistant")
                 {
-                    // 官方要求（思考模式 + tools）：携带 tools 的请求，后续所有请求必须**完整回传**
-                    // reasoning_content——即使该轮未实际进行工具调用。未正确回传 API 会返回 400。
-                    // 因此这里不做任何长度压缩，原样回放 entry.ReasoningContent（该值为 null 时不写字段）。
-                    apiMsg.ReasoningContent = entry.ReasoningContent;
+                    // 只为当前真实用户轮次回传思考，历史轮次不再携带 reasoning_content。
+                    // 当前轮次内仍按每条 assistant 原始值回传，不能聚合成一段。
+                    if (currentTurn > 0 && entry.TurnIndex == currentTurn)
+                        apiMsg.ReasoningContent = entry.ReasoningContent;
                 }
 
                 if (entry.Role == "assistant" && entry.ToolCalls != null && entry.ToolCalls.Count > 0)

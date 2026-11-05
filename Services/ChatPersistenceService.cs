@@ -340,9 +340,8 @@ namespace DeepSeek_v4_for_VisualStudio.Services
 
         /// <summary>
         /// （已移除）历史版本曾在此按 <c>ReasoningTextPolicy</c> 的旧上限裁剪已落盘的
-        /// <c>reasoning_content</c>。该行为会破坏官方要求的「完整回传」：
-        /// 携带 tools 的请求在后续所有请求中必须完整回传 reasoning_content，否则 API 返回 400。
-        /// 因此加载时不再对已持久化的思考内容做任何裁剪。
+        /// <c>reasoning_content</c>。当前轮次仍需原样回传，历史轮次则用于本地回看；
+        /// 两者都不应因持久化加载而被裁剪。
         /// </summary>
         #endregion
     }

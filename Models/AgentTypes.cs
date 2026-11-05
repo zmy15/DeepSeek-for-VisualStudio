@@ -339,7 +339,10 @@ namespace DeepSeek_v4_for_VisualStudio.Models
         /// <summary>生成的消息内容（Markdown 格式）</summary>
         public string? Content { get; set; }
 
-        /// <summary>推理/思考内容（DeepSeek reasoning_content），用于渲染思考面板</summary>
+        /// <summary>
+        /// 跨工具轮次/Handoff 聚合后的推理内容，仅用于渲染思考面板。
+        /// 它不是某一次 API 响应的原始 reasoning_content，禁止写入 API 历史。
+        /// </summary>
         public string? ReasoningContent { get; set; }
 
         /// <summary>文件变更列表（Edit Agent 产出）</summary>

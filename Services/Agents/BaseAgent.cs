@@ -681,7 +681,9 @@ namespace DeepSeek_v4_for_VisualStudio.Services.Agents
             {
                 Role = "assistant",
                 Content = completedResult.Content,
-                ReasoningContent = completedResult.ReasoningContent,
+                // completedResult.ReasoningContent 是跨 API 子轮次聚合后的 UI 展示值，
+                // 不是某一次 assistant 响应自己的 reasoning_content。写入 API 历史
+                // 会破坏官方要求的「逐条、原样回传」语义，因此合成消息不携带该字段。
             });
             return true;
         }

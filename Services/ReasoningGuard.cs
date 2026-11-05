@@ -254,11 +254,10 @@ namespace DeepSeek_v4_for_VisualStudio.Services
     /// Centralized bounds for reasoning text that is retained by the compression path.
     /// </summary>
     /// <remarks>
-    /// 重要：<b>回传给 API 的 reasoning_content 绝不可截断</b>。
-    /// 官方文档（思考模式 / 工具调用）规定：携带 <c>tools</c> 的请求，后续所有请求必须
-    /// <b>完整回传</b> <c>reasoning_content</c>——即使该轮未实际进行工具调用；未正确回传会返回 400。
-    /// 因此存储与回传路径一律原样保留，<see cref="Clamp"/> 只服务于压缩摘要/重试这类
-    /// 本地用途，其插入的截断标记也绝不能出现在回传内容中。
+    /// 重要：<b>当前轮次回传给 API 的 reasoning_content 绝不可截断</b>。
+    /// 历史轮次不再进入 API 请求，但仍完整保留供 UI 回看。
+    /// <see cref="Clamp"/> 只服务于压缩摘要/重试这类本地用途，
+    /// 其插入的截断标记也绝不能出现在回传内容中。
     /// </remarks>
     public static class ReasoningTextPolicy
     {
@@ -275,7 +274,7 @@ namespace DeepSeek_v4_for_VisualStudio.Services
             if (!string.IsNullOrEmpty(text) && text.Length > OversizedWarnThreshold)
             {
                 Logger.Warn($"[Reasoning] reasoning_content 长度 {text.Length} 超过告警阈值 " +
-                    $"{OversizedWarnThreshold}；为保证 API 完整回传不做裁剪。");
+                    $"{OversizedWarnThreshold}；保留完整内容，历史轮次不回传。");
             }
         }
 

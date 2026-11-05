@@ -402,8 +402,8 @@ namespace DeepSeek_v4_for_VisualStudio.View
                         pendingChainBack = nextHandoff;
                     Logger.Info($"[AgentHandoff] AutoSend 链式跟进: → {nextHandoff.TargetAgent} ({nextHandoff.Label})");
 
-                    // ── 保存当前推理内容，防止链式 Handoff 覆盖 ──
-                    // 不裁剪：该值会并回 agentResult 并最终持久化/回传。
+                    // ── 保存当前展示用推理内容，防止链式 Handoff 覆盖 ──
+                    // 该值只供 UI 思考面板使用；API 历史由 BaseAgent 按响应逐条维护。
                     string chainPreReasoning = agentResult.ReasoningContent ?? string.Empty;
 
                     var chainPrepWatch = System.Diagnostics.Stopwatch.StartNew();
@@ -460,13 +460,12 @@ namespace DeepSeek_v4_for_VisualStudio.View
                         }
                     }
 
-                    // ── 合并链式 Handoff 前后的推理内容 ──
+                    // ── 合并链式 Handoff 前后的展示用推理内容 ──
                     if (!string.IsNullOrEmpty(chainPreReasoning))
                     {
                         agentResult.ReasoningContent = string.IsNullOrEmpty(agentResult.ReasoningContent)
                             ? chainPreReasoning
                             : chainPreReasoning + "\n\n" + agentResult.ReasoningContent;
-                        // 不裁剪：合并结果会随 AgentResult 持久化并回传给 API。
                     }
                 }
 
@@ -1305,8 +1304,10 @@ namespace DeepSeek_v4_for_VisualStudio.View
                     }
                     else if (msg.Role == "assistant")
                     {
-                        // 树节点的 ChatMessage 不含 ToolCalls，此处仅恢复 content + reasoning
-                        _contextManager.AddAssistantMessage(content, msg.ReasoningContent);
+                        // 树节点保存的 ReasoningContent 是 UI 聚合值，不是某次 API
+                        // 响应的 reasoning_content。正常恢复走 ApiHistory；这里仅作回退，
+                        // 不能把展示聚合值重新注入 API 历史。
+                        _contextManager.AddAssistantMessage(content);
                     }
                 }
 
