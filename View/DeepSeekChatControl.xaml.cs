@@ -573,8 +573,9 @@ namespace DeepSeek_v4_for_VisualStudio.View
         private void RebuildFromTree()
         {
             SyncMessagesFromTree();
-            _messagesHtml.Clear();
-            _lastRenderedMessagesLength = 0;
+            // 树同步后必须立即重建完整 HTML。只清空 _messagesHtml 会让后续
+            // Agent 流式气泡成为页面中唯一内容，导致用户提问和其他历史气泡丢失。
+            RebuildMessagesHtml();
             _browserInitialized = false;
         }
 
