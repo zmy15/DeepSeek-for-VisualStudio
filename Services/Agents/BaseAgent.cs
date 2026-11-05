@@ -1444,13 +1444,29 @@ namespace DeepSeek_v4_for_VisualStudio.Services.Agents
                 // ── 流式调用 AI（带断点续传重试）──
                 bool streamSuccess = false;
                 int streamAttempt = 0;
-                const int maxStreamAttempts = 4; // 1 initial + 3 retries
+                int maxStreamAttempts = ApiRetryPolicy.GetMaxAttempts();
+                int maxStreamRetries = maxStreamAttempts - 1;
                 const int maxReasoningLoopRetries = 1;
                 int reasoningLoopRetryCount = 0;
                 bool reasoningLoopRetryPending = false;
                 string savedPartialContent = "";
                 string savedPartialReasoning = "";
                 var reasoningGuard = new ReasoningLoopGuard();
+
+                async Task PrepareAndWaitForStreamRetryAsync(
+                    Func<TimeSpan, string> createLogMessage)
+                {
+                    streamAttempt++;
+                    savedPartialContent = contentBuilder.ToString();
+                    savedPartialReasoning = reasoningBuilder.ToString();
+                    TimeSpan backoff = ApiRetryPolicy.GetBackoffDelay(streamAttempt);
+                    Logger.Warn(createLogMessage(backoff));
+                    metrics?.RecordStreamRetry();
+                    contentBuilder.Clear();
+                    reasoningBuilder.Clear();
+                    toolCallAccumulator.Clear();
+                    await Task.Delay(backoff, ct);
+                }
 
                 while (!streamSuccess && streamAttempt < maxStreamAttempts)
                 {
@@ -1531,39 +1547,18 @@ namespace DeepSeek_v4_for_VisualStudio.Services.Agents
                             VisionImageFetchService.CleanupBatch(token);
                         visionBatchTokens.Clear();
                     }
-                    catch (HttpRequestException ex) when (streamAttempt < maxStreamAttempts - 1)
+                    catch (HttpRequestException ex) when (
+                        !ApiRequestFailure.IsProviderHandled(ex) &&
+                        streamAttempt < maxStreamAttempts - 1)
                     {
-                        string msg = ex.Message;
-                        // 所有 4xx 客户端错误不重试（除 429 限流外）——请求本身有问题
-                        if (msg.Contains("400") || msg.Contains("401") || msg.Contains("402") ||
-                            msg.Contains("403") || msg.Contains("404") || msg.Contains("405") ||
-                            msg.Contains("409") || msg.Contains("422"))
-                            throw;
-
-                        streamAttempt++;
-                        savedPartialContent = contentBuilder.ToString();
-                        savedPartialReasoning = reasoningBuilder.ToString();
-                        double backoffSec = Math.Pow(2, streamAttempt);
-                        Logger.Warn($"[Agent:{Definition.Name}] 流中断 (尝试 {streamAttempt}/{maxStreamAttempts})，已收到 {savedPartialContent.Length} 字符，{backoffSec}s 后恢复…");
-                        metrics?.RecordStreamRetry();
-                        contentBuilder.Clear();
-                        reasoningBuilder.Clear();
-                        toolCallAccumulator.Clear();
-                        await Task.Delay(TimeSpan.FromSeconds(backoffSec), ct);
+                        await PrepareAndWaitForStreamRetryAsync(backoff =>
+                            $"[Agent:{Definition.Name}] 流中断 (尝试 {streamAttempt}/{maxStreamRetries})，已收到 {savedPartialContent.Length} 字符，{backoff.TotalSeconds:0}s 后恢复…");
                     }
                     catch (TaskCanceledException) when (!ct.IsCancellationRequested && streamAttempt < maxStreamAttempts - 1)
                     {
                         // 超时（非用户取消）
-                        streamAttempt++;
-                        savedPartialContent = contentBuilder.ToString();
-                        savedPartialReasoning = reasoningBuilder.ToString();
-                        double backoffSec = Math.Pow(2, streamAttempt);
-                        Logger.Warn($"[Agent:{Definition.Name}] 流超时 (尝试 {streamAttempt}/{maxStreamAttempts})，{backoffSec}s 后恢复…");
-                        metrics?.RecordStreamRetry();
-                        contentBuilder.Clear();
-                        reasoningBuilder.Clear();
-                        toolCallAccumulator.Clear();
-                        await Task.Delay(TimeSpan.FromSeconds(backoffSec), ct);
+                        await PrepareAndWaitForStreamRetryAsync(backoff =>
+                            $"[Agent:{Definition.Name}] 流超时 (尝试 {streamAttempt}/{maxStreamRetries})，{backoff.TotalSeconds:0}s 后恢复…");
                     }
                     catch (ObjectDisposedException) when (ct.IsCancellationRequested)
                     {
@@ -1576,16 +1571,8 @@ namespace DeepSeek_v4_for_VisualStudio.Services.Agents
                     catch (ObjectDisposedException) when (!ct.IsCancellationRequested && streamAttempt < maxStreamAttempts - 1)
                     {
                         // SSE 读取超时（v1.1.10）：120s 无数据 → 流被 Dispose → ReadLineAsync 抛 ObjectDisposedException
-                        streamAttempt++;
-                        savedPartialContent = contentBuilder.ToString();
-                        savedPartialReasoning = reasoningBuilder.ToString();
-                        double backoffSec = Math.Pow(2, streamAttempt);
-                        Logger.Warn($"[Agent:{Definition.Name}] SSE 流读取超时 (尝试 {streamAttempt}/{maxStreamAttempts})，已收到 {savedPartialContent.Length} 字符，{backoffSec}s 后恢复…");
-                        metrics?.RecordStreamRetry();
-                        contentBuilder.Clear();
-                        reasoningBuilder.Clear();
-                        toolCallAccumulator.Clear();
-                        await Task.Delay(TimeSpan.FromSeconds(backoffSec), ct);
+                        await PrepareAndWaitForStreamRetryAsync(backoff =>
+                            $"[Agent:{Definition.Name}] SSE 流读取超时 (尝试 {streamAttempt}/{maxStreamRetries})，已收到 {savedPartialContent.Length} 字符，{backoff.TotalSeconds:0}s 后恢复…");
                     }
                     catch (IOException) when (ct.IsCancellationRequested)
                     {
@@ -1598,15 +1585,8 @@ namespace DeepSeek_v4_for_VisualStudio.Services.Agents
                     catch (IOException) when (!ct.IsCancellationRequested && streamAttempt < maxStreamAttempts - 1)
                     {
                         // 网络错误导致的 IO 异常（非用户取消），尝试重试
-                        streamAttempt++;
-                        savedPartialContent = contentBuilder.ToString();
-                        savedPartialReasoning = reasoningBuilder.ToString();
-                        double backoffSec = Math.Pow(2, streamAttempt);
-                        Logger.Warn($"[Agent:{Definition.Name}] 流网络错误 (尝试 {streamAttempt}/{maxStreamAttempts})，已收到 {savedPartialContent.Length} 字符，{backoffSec}s 后恢复…");
-                        contentBuilder.Clear();
-                        reasoningBuilder.Clear();
-                        toolCallAccumulator.Clear();
-                        await Task.Delay(TimeSpan.FromSeconds(backoffSec), ct);
+                        await PrepareAndWaitForStreamRetryAsync(backoff =>
+                            $"[Agent:{Definition.Name}] 流网络错误 (尝试 {streamAttempt}/{maxStreamRetries})，已收到 {savedPartialContent.Length} 字符，{backoff.TotalSeconds:0}s 后恢复…");
                     }
                     catch (ReasoningLoopDetectedException ex) when (reasoningLoopRetryCount < maxReasoningLoopRetries)
                     {
@@ -1642,24 +1622,6 @@ namespace DeepSeek_v4_for_VisualStudio.Services.Agents
                         if (contentBuilder.Length == 0)
                             contentBuilder.Append(LocalizationService.Instance["agent.cancelledNotice"]);
                         streamSuccess = true;
-                    }
-                }
-
-                if (!streamSuccess)
-                {
-                    // 所有重试均失败，返回部分内容让用户可通过重试按钮继续
-                    Logger.Error($"[Agent:{Definition.Name}] 流式调用在 {maxStreamAttempts} 次尝试后全部失败");
-                    if (savedPartialContent.Length > 0 || contentBuilder.Length > 0)
-                    {
-                        string partial = contentBuilder.Length > 0 ? contentBuilder.ToString() : savedPartialContent;
-                        contentBuilder.Clear();
-                        contentBuilder.Append(partial);
-                        contentBuilder.Append(LocalizationService.Instance.Format("agent.streamRetryExhausted", maxStreamAttempts));
-                    }
-                    else
-                    {
-                        throw new InvalidOperationException(
-                            $"[Agent:{Definition.Name}] 流式调用在 {maxStreamAttempts} 次尝试后仍失败且无部分内容");
                     }
                 }
 
