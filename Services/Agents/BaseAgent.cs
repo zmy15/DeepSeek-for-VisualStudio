@@ -23,8 +23,8 @@ namespace DeepSeek_v4_for_VisualStudio.Services.Agents
     /// </summary>
     public abstract class BaseAgent : IDisposable
     {
-        /// <summary>Ask Agent 直接探索工具的最大累计调用次数。</summary>
-        internal const int AskDirectExplorationCallLimit = 5;
+        /// <summary>Ask Agent 直接探索达到该次数后，追加一次非强制建议。</summary>
+        internal const int AskDirectExplorationHintThreshold = 8;
 
         protected readonly DeepSeekApiService _apiService;
         protected readonly List<AgentLogEntry> _logs = new();
@@ -1769,10 +1769,9 @@ namespace DeepSeek_v4_for_VisualStudio.Services.Agents
                         }
                     }
 
-                    // ── Ask Agent 直接探索预算：前 AskDirectExplorationCallLimit 次正常执行；
-                    //    第 limit+1 次不执行并回一条"考虑探索深度/改用 runSubagent"的提示，
-                    //    该提示每次工具循环只发一次，之后不再拦截（预算只是提醒，不是硬上限）。──
-                    HashSet<int>? blockedDirectExplorationIndices = null;
+                    // ── Ask Agent 直接探索提示：所有调用始终正常执行；
+                    //    达到阈值后，仅在本次真实工具结果末尾追加一次效率建议。──
+                    HashSet<int>? directExplorationHintIndices = null;
                     bool canDelegateAskExploration = Definition.Type == AgentType.Ask
                         && ExploreAgent != null
                         && effectiveWhitelist?.Contains("runSubagent", StringComparer.OrdinalIgnoreCase) == true;
@@ -1783,25 +1782,20 @@ namespace DeepSeek_v4_for_VisualStudio.Services.Agents
                             if (!IsDirectExplorationTool(toolCalls[idx].Function.Name))
                                 continue;
 
-                            if (askDirectExplorationCallCount < AskDirectExplorationCallLimit)
+                            askDirectExplorationCallCount++;
+                            if (!askDirectExplorationNoticeSent
+                                && askDirectExplorationCallCount > AskDirectExplorationHintThreshold)
                             {
-                                // 预算内的调用正常执行并计数。
-                                askDirectExplorationCallCount++;
-                            }
-                            else if (!askDirectExplorationNoticeSent)
-                            {
-                                // 首次超出预算：本次不执行，回一条"考虑探索深度"的提示。
                                 askDirectExplorationNoticeSent = true;
-                                (blockedDirectExplorationIndices ??= new HashSet<int>()).Add(idx);
+                                (directExplorationHintIndices ??= new HashSet<int>()).Add(idx);
                             }
-                            // 否则：提示已发过，直接放行（不再拦截）。预算只是提醒，不是硬性上限。
                         }
 
-                        if (blockedDirectExplorationIndices?.Count > 0)
+                        if (directExplorationHintIndices?.Count > 0)
                         {
-                            Logger.Warn(
-                                $"[Agent:{Definition.Name}] 直接探索已达 {askDirectExplorationCallCount} 次，"
-                                + "已提示考虑探索深度并要求改用 runSubagent；本次调用未执行");
+                            Logger.Info(
+                                $"[Agent:{Definition.Name}] 直接探索已执行 {askDirectExplorationCallCount} 次，"
+                                + "将在工具结果后追加一次非强制 Explore 建议");
                         }
                     }
 
@@ -1876,14 +1870,6 @@ namespace DeepSeek_v4_for_VisualStudio.Services.Agents
                                 LocalizationService.Instance["agent.ask.answerAlreadyReceived"]);
                         }
 
-                        if (blockedDirectExplorationIndices?.Contains(idx) == true)
-                        {
-                            return Task.FromResult(LocalizationService.Instance.Format(
-                                "tool.ask.explorationLimitReached",
-                                askDirectExplorationCallCount,
-                                AskDirectExplorationCallLimit));
-                        }
-
                         // ── 视觉模型：OCR 工具禁用（仍随工具集发送，保持前缀稳定）──
                         if (ShouldBlockOcrToolExecution(
                                 tc.Function.Name,
@@ -1941,6 +1927,18 @@ namespace DeepSeek_v4_for_VisualStudio.Services.Agents
                         foreach (int dupIdx in mapping.Value) // 重复调用的索引列表
                         {
                             toolResults[dupIdx] = dedupedResults[dedupedIndices.IndexOf(sourceIdx)];
+                        }
+                    }
+
+                    if (directExplorationHintIndices?.Count > 0)
+                    {
+                        string explorationHint = LocalizationService.Instance["tool.ask.explorationHint"];
+                        foreach (int hintIdx in directExplorationHintIndices)
+                        {
+                            string actualResult = toolResults[hintIdx] ?? string.Empty;
+                            toolResults[hintIdx] = string.IsNullOrWhiteSpace(actualResult)
+                                ? explorationHint
+                                : actualResult.TrimEnd() + "\n\n" + explorationHint;
                         }
                     }
 

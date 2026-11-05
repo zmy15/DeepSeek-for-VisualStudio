@@ -114,119 +114,26 @@ public class BaseAgentWhitelistRecoveryTests
     }
 
     [Fact]
-    public async Task AskAgent_DirectExplorationBudget_BlocksCallBeyondLimitAndRequiresExplore()
+    public async Task AskAgent_DirectExploration_AppendsHintAfterActualResult_WithoutBlocking()
     {
-        // 预算内的调用次数与上限必须一致，避免测试与 AskDirectExplorationCallLimit 脱节。
-        const int limit = BaseAgent.AskDirectExplorationCallLimit;
+        const int threshold = BaseAgent.AskDirectExplorationHintThreshold;
+        int totalReads = threshold + 2;
 
-        // read_file 必须成功，否则连续 5 轮错误会先触发"连续错误"终止保护，测不到探索预算。
-        string root = Path.Combine(Path.GetTempPath(), "ask-exploration-budget-" + Guid.NewGuid().ToString("N"));
-        Directory.CreateDirectory(root);
-        // 多准备一个文件用于"超预算"的那次读取。
-        string[] files = Enumerable.Range(0, limit + 1)
-            .Select(i => ((char)('a' + i)) + ".txt")
-            .ToArray();
-        foreach (string file in files)
-            // 内容必须各不相同：连续近似相同的读取会先触发"无进展"保护而测不到探索预算。
-            File.WriteAllText(Path.Combine(root, file),
-                "content of " + file + "\n" + new string('x', 40 + file[0]));
-
-        try
-        {
-            // 前 limit 轮直探落在预算内，第 limit+1 轮被拦截并提示委派 Explore。
-            // read_file 不会把相对路径拼到 workspaceRoot，故这里传绝对路径。
-            var handler = new SequenceHttpMessageHandler(
-                files.Select((f, i) => ToolCallSse("read_file",
-                        "{\"filePath\":\"" + Path.Combine(root, f).Replace("\\", "\\\\") + "\"}",
-                        "call_read_" + i))
-                    .Concat(new[]
-                    {
-                        // 被拦截后模型改用 runSubagent；子代理复用父级 _apiService，
-                        // 会消耗同一个脚本队列，故紧接一条子代理自身的回复。
-                        ToolCallSse("runSubagent", "{\"agentName\":\"Explore\",\"prompt\":\"调查多个文件\"}", "call_sub"),
-                        ContentSse("explore subagent findings"),
-                        ContentSse("delegated"),
-                    })
-                    .ToArray());
-            var agent = CreateAgent(handler);
-            // ExploreAgent 非空是探索预算生效的前提之一（见 BaseAgent.canDelegateAskExploration）。
-            // 这里注入一个空队列的实例即可：子代理实体由 BaseAgent 用父级 _apiService 重新构造。
-            agent.ExploreAgent = new ExploreAgent(new DeepSeekApiService(
-                new HttpClient(new SequenceHttpMessageHandler(Array.Empty<string>()))));
-
-            var result = await agent.RunLoopAsync(
-                new List<ChatApiMessage> { new() { Role = "user", Content = "调查多个文件" } },
-                new List<string> { "read_file", "runSubagent" },
-                CancellationToken.None,
-                root);
-
-            // 请求体是 JSON，中文会被转义成 \uXXXX，必须先解码才能匹配文案。
-            string expectedLimitMessage = string.Format(
-                LocalizationService.Instance["tool.ask.explorationLimitReached"], limit, limit);
-            int blockedRound = handler.RequestBodies.FindIndex(b =>
-                System.Text.RegularExpressions.Regex.Unescape(b).Contains(expectedLimitMessage));
-            blockedRound.Should().BeGreaterThan(0, "超出预算的直接探索必须被拦截，并把提示回传给模型"
-                + "（实际请求数 " + handler.RequestBodies.Count + "）");
-
-            string blockedBody = System.Text.RegularExpressions.Regex.Unescape(handler.RequestBodies[blockedRound]);
-
-            // 预算内的 limit 次 read_file 都真实执行成功（不许被误拦）。
-            foreach (string f in files.Take(limit))
-                blockedBody.Should().Contain("content of " + f);
-
-            // 超预算那次的文件从未被读取过，说明它确实没执行。
-            blockedBody.Should().NotContain("content of " + files[limit]);
-
-            // 提示只发一次：它会留在对话历史里，但"新增"应恰好发生在一轮请求中。
-            // 注意 Explore 子代理复用同一 handler，它自己的请求不含该提示，
-            // 会让计数回落；因此只跟踪"至今见过的最多次数"是否被突破过。
-            var bodies = handler.RequestBodies
-                .Select(System.Text.RegularExpressions.Regex.Unescape).ToList();
-            CountNoticeAdditions(bodies, expectedLimitMessage).Should()
-                .Be(1, "该提示在单次 Ask 工具循环内只应新增一次"
-                    + " | counts=" + string.Join(",", bodies.Select(b => CountOccurrences(b, expectedLimitMessage))));
-
-            // 提示要求委派 Explore，模型据此调用 runSubagent。
-            blockedBody.Should().Contain("runSubagent");
-
-            // 委派成功：子代理结果进入历史，主循环正常收尾。
-            string finalBody = System.Text.RegularExpressions.Regex.Unescape(
-                handler.RequestBodies[handler.RequestBodies.Count - 1]);
-            finalBody.Should().Contain("explore subagent findings");
-            result.Should().Contain("delegated");
-        }
-        finally
-        {
-            try { Directory.Delete(root, true); } catch { /* 清理失败不影响断言 */ }
-        }
-    }
-
-    /// <summary>
-    /// 预算只是提醒而非硬上限：第 limit+1 次被拦并提示一次后，
-    /// 后续直接探索调用应重新放行（不再拦截、不再重复提示）。
-    /// </summary>
-    [Fact]
-    public async Task AskAgent_DirectExplorationBudget_AllowsCallsAfterSingleNotice()
-    {
-        const int limit = BaseAgent.AskDirectExplorationCallLimit;
-        // 前 limit 次放行 + 1 次被拦 + 之后 2 次重新放行。
-        int totalReads = limit + 3;
-
-        string root = Path.Combine(Path.GetTempPath(), "ask-exploration-notice-" + Guid.NewGuid().ToString("N"));
+        string root = Path.Combine(Path.GetTempPath(), "ask-exploration-hint-" + Guid.NewGuid().ToString("N"));
         Directory.CreateDirectory(root);
         string[] files = Enumerable.Range(0, totalReads)
             .Select(i => "file" + i + ".txt")
             .ToArray();
         foreach (string file in files)
             File.WriteAllText(Path.Combine(root, file),
-                "content of " + file + "\n" + new string('y', 40 + file.Length));
+                "content of " + file + "\n" + new string('x', 40 + file.Length));
 
         try
         {
             var handler = new SequenceHttpMessageHandler(
                 files.Select((f, i) => ToolCallSse("read_file",
                         "{\"filePath\":\"" + Path.Combine(root, f).Replace("\\", "\\\\") + "\"}",
-                        "call_r" + i))
+                        "call_hint_" + i))
                     .Concat(new[] { ContentSse("done exploring") })
                     .ToArray());
             var agent = CreateAgent(handler);
@@ -239,22 +146,75 @@ public class BaseAgentWhitelistRecoveryTests
                 CancellationToken.None,
                 root);
 
-            string expectedNotice = string.Format(
-                LocalizationService.Instance["tool.ask.explorationLimitReached"], limit, limit);
+            string expectedHint = LocalizationService.Instance["tool.ask.explorationHint"];
+            expectedHint.Should().NotContain(threshold.ToString(),
+                "提示文案不应暴露具体次数或上限");
+
             var bodies = handler.RequestBodies
                 .Select(System.Text.RegularExpressions.Regex.Unescape).ToList();
+            int hintBodyIndex = bodies.FindIndex(b => b.Contains(expectedHint, StringComparison.Ordinal));
+            hintBodyIndex.Should().BeGreaterThan(0);
 
-            // 提示只新增一次（之后残留在历史中属于正常）。
-            CountNoticeAdditions(bodies, expectedNotice).Should()
-                .Be(1, "该提示在单次 Ask 工具循环内只应新增一次");
+            string hintBody = bodies[hintBodyIndex];
+            hintBody.Should().Contain("content of " + files[threshold],
+                "触发提示的这次探索仍必须真实执行并返回工具结果");
+            hintBody.Should().Contain(expectedHint);
 
-            // 第 limit+1 个文件确实没被读取。
-            bodies[limit + 1].Should().NotContain("content of " + files[limit]);
+            CountNoticeAdditions(bodies, expectedHint).Should()
+                .Be(1, "该提示在单次 Ask 工具循环内只应追加一次");
 
-            // 提示之后的两次直探重新放行，内容出现在历史里。
-            string last = bodies[bodies.Count - 1];
-            last.Should().Contain("content of " + files[limit + 1]);
-            last.Should().Contain("content of " + files[limit + 2]);
+            // 提示不会拦截后续直探：第 threshold+2 次读取仍真实执行。
+            bodies[bodies.Count - 1].Should().Contain("content of " + files[threshold + 1]);
+            result.Should().Contain("done exploring");
+        }
+        finally
+        {
+            try { Directory.Delete(root, true); } catch { /* 清理失败不影响断言 */ }
+        }
+    }
+
+    /// <summary>
+    /// 阈值以内只执行探索，不追加任何提示或拦截。
+    /// </summary>
+    [Fact]
+    public async Task AskAgent_DirectExploration_FirstThresholdCallsDoNotShowHint()
+    {
+        const int threshold = BaseAgent.AskDirectExplorationHintThreshold;
+
+        string root = Path.Combine(Path.GetTempPath(), "ask-exploration-no-hint-" + Guid.NewGuid().ToString("N"));
+        Directory.CreateDirectory(root);
+        string[] files = Enumerable.Range(0, threshold)
+            .Select(i => "file" + i + ".txt")
+            .ToArray();
+        foreach (string file in files)
+            File.WriteAllText(Path.Combine(root, file),
+                "content of " + file + "\n" + new string('y', 40 + file.Length));
+
+        try
+        {
+            var handler = new SequenceHttpMessageHandler(
+                files.Select((f, i) => ToolCallSse("read_file",
+                        "{\"filePath\":\"" + Path.Combine(root, f).Replace("\\", "\\\\") + "\"}",
+                        "call_no_hint_" + i))
+                    .Concat(new[] { ContentSse("done exploring") })
+                    .ToArray());
+            var agent = CreateAgent(handler);
+            agent.ExploreAgent = new ExploreAgent(new DeepSeekApiService(
+                new HttpClient(new SequenceHttpMessageHandler(Array.Empty<string>()))));
+
+            var result = await agent.RunLoopAsync(
+                new List<ChatApiMessage> { new() { Role = "user", Content = "调查多个文件" } },
+                new List<string> { "read_file", "runSubagent" },
+                CancellationToken.None,
+                root);
+
+            string expectedHint = LocalizationService.Instance["tool.ask.explorationHint"];
+            var bodies = handler.RequestBodies
+                .Select(System.Text.RegularExpressions.Regex.Unescape).ToList();
+            bodies.Should().NotContain(b => b.Contains(expectedHint, StringComparison.Ordinal));
+
+            foreach (string file in files)
+                bodies[bodies.Count - 1].Should().Contain("content of " + file);
 
             result.Should().Contain("done exploring");
         }

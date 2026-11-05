@@ -125,6 +125,95 @@ public class GrepSearchToolTests
         }
     }
 
+    [Fact]
+    public async Task ExecuteAsync_BraceExpandedIncludePattern_SearchesMultipleExtensions()
+    {
+        var workspace = CreateTempWorkspace();
+        try
+        {
+            Directory.CreateDirectory(Path.Combine(workspace, "nested"));
+            File.WriteAllText(Path.Combine(workspace, "a.cs"), "BaseUrl in C#");
+            File.WriteAllText(Path.Combine(workspace, "nested", "b.csproj"), "<BaseUrl />");
+            File.WriteAllText(Path.Combine(workspace, "nested", "c.txt"), "BaseUrl in text");
+
+            var tool = new GrepSearchTool();
+            var args = CreateArgs(new Dictionary<string, object?>
+            {
+                ["query"] = "BaseUrl",
+                ["isRegexp"] = false,
+                ["includePattern"] = "**/*.{cs,csproj}",
+            });
+
+            var result = await tool.ExecuteAsync(args, workspace);
+
+            result.Should().Contain("a.cs");
+            result.Should().Contain("b.csproj");
+            result.Should().NotContain("c.txt");
+        }
+        finally
+        {
+            Directory.Delete(workspace, recursive: true);
+        }
+    }
+
+    [Fact]
+    public async Task ExecuteAsync_MaxResults_IsExplicitlyMarkedAsTruncated()
+    {
+        var workspace = CreateTempWorkspace();
+        try
+        {
+            for (int i = 0; i < 5; i++)
+                File.WriteAllText(Path.Combine(workspace, $"file{i}.cs"), "TOKEN value " + i);
+
+            var tool = new GrepSearchTool();
+            var args = CreateArgs(new Dictionary<string, object?>
+            {
+                ["query"] = "TOKEN",
+                ["isRegexp"] = false,
+                ["maxResults"] = 3,
+            });
+
+            var result = await tool.ExecuteAsync(args, workspace);
+
+            result.Should().Contain(">3", "header must make truncation visible");
+            result.Should().Contain("maxResults=3");
+            result.Split('\n')
+                .Count(line => line.TrimStart().StartsWith("- `", StringComparison.Ordinal))
+                .Should().Be(3);
+        }
+        finally
+        {
+            Directory.Delete(workspace, recursive: true);
+        }
+    }
+
+    [Fact]
+    public async Task ExecuteAsync_InvalidBracePattern_ReturnsExplicitError()
+    {
+        var workspace = CreateTempWorkspace();
+        try
+        {
+            File.WriteAllText(Path.Combine(workspace, "a.cs"), "TOKEN");
+
+            var tool = new GrepSearchTool();
+            var args = CreateArgs(new Dictionary<string, object?>
+            {
+                ["query"] = "TOKEN",
+                ["isRegexp"] = false,
+                ["includePattern"] = "**/*.{cs",
+            });
+
+            var result = await tool.ExecuteAsync(args, workspace);
+
+            result.Should().StartWith("Error:");
+            result.Should().Contain("includePattern");
+        }
+        finally
+        {
+            Directory.Delete(workspace, recursive: true);
+        }
+    }
+
     private static string CreateTempWorkspace()
     {
         string path = Path.Combine(Path.GetTempPath(), $"grep-scope-{Guid.NewGuid():N}");

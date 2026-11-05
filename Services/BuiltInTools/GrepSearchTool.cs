@@ -83,7 +83,7 @@ namespace DeepSeek_v4_for_VisualStudio.Services.BuiltInTools
             bool isRegexp = GetBoolArg(args, "isRegexp");
             string? includePattern = GetStringArg(args, "includePattern");
             string? scopePath = GetStringArg(args, "path");
-            int maxResults = GetIntArg(args, "maxResults", 30);
+            int maxResults = Math.Max(1, GetIntArg(args, "maxResults", 30));
 
             string searchRoot = workspaceRoot ?? Directory.GetCurrentDirectory();
             if (!Directory.Exists(searchRoot))
@@ -136,8 +136,18 @@ namespace DeepSeek_v4_for_VisualStudio.Services.BuiltInTools
                 if (string.IsNullOrEmpty(cleanGlob))
                     cleanGlob = "*.*";
 
+                var filePatterns = ExpandBraceGlob(cleanGlob);
+                if (filePatterns.Count == 0
+                    || filePatterns.Any(p => p.IndexOfAny(new[] { '{', '}' }) >= 0))
+                {
+                    return Task.FromResult(LocalizationService.Instance.Format(
+                        "tool.grepSearch.invalidIncludePattern",
+                        includePattern ?? cleanGlob,
+                        string.Empty));
+                }
+
                 const int maxFilesToSearch = 5000;
-                IEnumerable<string> filesToSearch;
+                IReadOnlyList<string> filesToSearch;
                 if (scopedFile != null)
                 {
                     filesToSearch = new[] { scopedFile };
@@ -146,16 +156,30 @@ namespace DeepSeek_v4_for_VisualStudio.Services.BuiltInTools
                 {
                     try
                     {
-                        filesToSearch = Directory.EnumerateFiles(searchDir, cleanGlob, searchOption)
-                            .Where(f => !IsExcludedDirectory(Path.GetDirectoryName(f) ?? ""))
-                            .Take(maxFilesToSearch);
+                        var matchedFiles = new List<string>();
+                        var seenFiles = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
+                        foreach (string pattern in filePatterns)
+                        {
+                            foreach (string file in Directory.EnumerateFiles(searchDir, pattern, searchOption))
+                            {
+                                if (IsExcludedDirectory(Path.GetDirectoryName(file) ?? ""))
+                                    continue;
+                                if (seenFiles.Add(file))
+                                    matchedFiles.Add(file);
+                                if (matchedFiles.Count >= maxFilesToSearch)
+                                    break;
+                            }
+                            if (matchedFiles.Count >= maxFilesToSearch)
+                                break;
+                        }
+                        filesToSearch = matchedFiles;
                     }
-                    catch
+                    catch (Exception ex)
                     {
-                        // 保持调用方指定的搜索范围，失败时不得静默回退到工作区根目录。
-                        filesToSearch = Directory.EnumerateFiles(searchDir, "*.*", SearchOption.AllDirectories)
-                            .Where(f => !IsExcludedDirectory(Path.GetDirectoryName(f) ?? ""))
-                            .Take(maxFilesToSearch);
+                        return Task.FromResult(LocalizationService.Instance.Format(
+                            "tool.grepSearch.invalidIncludePattern",
+                            includePattern ?? cleanGlob,
+                            ex.Message));
                     }
                 }
 
@@ -168,14 +192,14 @@ namespace DeepSeek_v4_for_VisualStudio.Services.BuiltInTools
 
                 foreach (var file in filesToSearch)
                 {
-                    if (results.Count >= maxResults) break;
+                    if (results.Count > maxResults) break;
 
                     try
                     {
                         var lines = FileEncodingHelper.ReadAllLines(file);
                         for (int i = 0; i < lines.Length; i++)
                         {
-                            if (results.Count >= maxResults) break;
+                            if (results.Count > maxResults) break;
 
                             bool match;
                             if (isRegexp && regex != null)
@@ -189,20 +213,35 @@ namespace DeepSeek_v4_for_VisualStudio.Services.BuiltInTools
                                 if (file.StartsWith(searchRoot, StringComparison.OrdinalIgnoreCase))
                                     relativePath = file.Substring(searchRoot.Length).TrimStart('\\', '/');
                                 results.Add($"{relativePath}:{i + 1}: {lines[i].Trim()}");
+                                if (results.Count > maxResults)
+                                    break;
                             }
                         }
                     }
                     catch { /* 跳过无法读取的文件 */ }
                 }
 
+                bool truncated = results.Count > maxResults;
+                if (truncated)
+                    results.RemoveRange(maxResults, results.Count - maxResults);
+
                 var sb = new StringBuilder();
-                sb.AppendLine(LocalizationService.Instance.Format("tool.grepSearch.resultHeader", query, results.Count));
+                string resultCount = truncated ? $">{maxResults}" : results.Count.ToString();
+                sb.AppendLine(LocalizationService.Instance.Format("tool.grepSearch.resultHeader", query, resultCount));
                 sb.AppendLine();
                 if (results.Count == 0)
                     sb.AppendLine(LocalizationService.Instance["tool.grepSearch.noMatches"]);
                 else
+                {
                     foreach (var r in results)
                         sb.AppendLine($"- `{r}`");
+                    if (truncated)
+                    {
+                        sb.AppendLine();
+                        sb.AppendLine(LocalizationService.Instance.Format(
+                            "tool.grepSearch.truncatedNotice", maxResults));
+                    }
+                }
 
                 return Task.FromResult(sb.ToString().TrimEnd());
             }
@@ -223,6 +262,62 @@ namespace DeepSeek_v4_for_VisualStudio.Services.BuiltInTools
                 || normalizedPath.StartsWith(
                     normalizedDirectory + Path.DirectorySeparatorChar,
                     StringComparison.OrdinalIgnoreCase);
+        }
+
+        /// <summary>
+        /// 展开 common glob 中的花括号候选，例如 **/*.{cs,csproj}。
+        /// 支持多层组合；不合法或未闭合的花括号由调用方明确报错。
+        /// </summary>
+        internal static IReadOnlyList<string> ExpandBraceGlob(string pattern)
+        {
+            if (string.IsNullOrEmpty(pattern))
+                return new[] { pattern ?? string.Empty };
+
+            var current = new List<string> { pattern };
+            for (int depth = 0; depth < 8; depth++)
+            {
+                var next = new List<string>();
+                bool expanded = false;
+
+                foreach (string candidate in current)
+                {
+                    Match match = Regex.Match(candidate, @"\{([^{}]*)\}");
+                    if (!match.Success)
+                    {
+                        next.Add(candidate);
+                        continue;
+                    }
+
+                    string[] choices = match.Groups[1].Value
+                        .Split(new[] { ',' }, StringSplitOptions.RemoveEmptyEntries)
+                        .Select(c => c.Trim())
+                        .Where(c => c.Length > 0)
+                        .Distinct(StringComparer.OrdinalIgnoreCase)
+                        .ToArray();
+                    if (choices.Length == 0)
+                    {
+                        next.Add(candidate);
+                        continue;
+                    }
+
+                    expanded = true;
+                    foreach (string choice in choices)
+                    {
+                        next.Add(
+                            candidate.Substring(0, match.Index)
+                            + choice
+                            + candidate.Substring(match.Index + match.Length));
+                    }
+                }
+
+                current = next;
+                if (!expanded)
+                    break;
+            }
+
+            return current
+                .Distinct(StringComparer.OrdinalIgnoreCase)
+                .ToList();
         }
 
         /// <summary>
