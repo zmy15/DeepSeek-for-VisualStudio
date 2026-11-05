@@ -99,9 +99,9 @@ namespace DeepSeek_v4_for_VisualStudio.View
                 };
             }
 
-            // ── 原路由为 Ask 且置信度不高时，检查是否在讨论计划 ──
-            if (originalRouting.TargetAgent == AgentType.Ask
-                && (originalRouting.Confidence == "medium" || originalRouting.Confidence == "low"))
+            // ── 原路由为 Ask 时，检查后续输入是否仍在讨论计划 ──
+            // 默认路由始终是 Ask/high；如果这里继续要求低置信度，整段启发式实际上永远不会命中。
+            if (originalRouting.TargetAgent == AgentType.Ask)
             {
                 var planDiscussionKeywords = new[]
                 {
@@ -112,7 +112,7 @@ namespace DeepSeek_v4_for_VisualStudio.View
                 if (planDiscussionKeywords.Any(k =>
                     userText.Contains(k, StringComparison.OrdinalIgnoreCase)))
                 {
-                    Logger.Info($"[PlanContext] Ask 路由低置信度 + 计划关键词，改为 Plan Agent: \"{userText.Truncate(50)}\"");
+                    Logger.Info($"[PlanContext] Ask 路由 + 计划关键词，改为 Plan Agent: \"{userText.Truncate(50)}\"");
                     return new AgentRoutingResult
                     {
                         TargetAgent = AgentType.Plan,
@@ -161,27 +161,66 @@ namespace DeepSeek_v4_for_VisualStudio.View
         /// <summary>
         /// 判断用户输入是否为"修改计划"意图。
         /// </summary>
-        private static bool IsPlanModificationIntent(string userText)
+        internal static bool IsPlanModificationIntent(string userText)
         {
-            var modifyKeywords = new[]
-            {
-                "修改计划", "调整方案", "改一下计划", "重新规划",
-                "换个方案", "不满意", "修改第", "调整第",
-                "改第", "步骤.*改", "方案.*调整",
-                "改成", "换成", "前面.*改",
-            };
+            if (string.IsNullOrWhiteSpace(userText))
+                return false;
 
-            return modifyKeywords.Any(k =>
+            string text = userText.Trim();
+            var explanationQuestionKeywords = new[]
             {
-                if (k.Contains(".*"))
-                {
-                    // 简单模式匹配：检查两个部分是否都存在
-                    var parts = k.Split(new[] { ".*" }, StringSplitOptions.None);
-                    return parts.All(p =>
-                        userText.IndexOf(p, StringComparison.OrdinalIgnoreCase) >= 0);
-                }
-                return userText.IndexOf(k, StringComparison.OrdinalIgnoreCase) >= 0;
-            });
+                "为什么", "为何", "什么意思", "怎么理解", "解释一下",
+                "why", "what does", "explain",
+            };
+            if (ContainsAny(text, explanationQuestionKeywords))
+                return false;
+
+            var planContextKeywords = new[]
+            {
+                "计划", "方案", "步骤", "流程", "plan", "step", "workflow",
+            };
+            bool hasPlanContext = ContainsAny(text, planContextKeywords);
+            bool hasStepReference =
+                (text.Contains("第", StringComparison.Ordinal) &&
+                 text.Contains("步", StringComparison.Ordinal)) ||
+                text.Contains("一步", StringComparison.OrdinalIgnoreCase) ||
+                text.Contains("step", StringComparison.OrdinalIgnoreCase);
+
+            // 覆盖“添加/删除/调整/排序”等计划修改动作。此前只识别少数固定短语，
+            // 导致“再添加一步”这类明确请求漏到 Ask，再经 request_handoff 转回 Plan。
+            var modificationKeywords = new[]
+            {
+                "修改", "调整", "改成", "改为", "换成", "替换",
+                "优化", "完善", "细化", "精简", "展开", "重做", "重新规划", "更新",
+                "添加", "增加", "新增", "加入", "插入", "补充", "加一", "再加", "补一",
+                "删除", "删掉", "去掉", "移除", "减少",
+                "合并", "拆分", "拆成", "拆开", "对调", "交换", "挪", "移到", "放到",
+                "放在", "插到", "重排", "排序", "顺序", "提前", "延后", "少了", "缺少", "漏了",
+                "不满意", "不合适", "不对", "不太对", "不行", "不太行", "不可行",
+                "有问题", "复杂", "太长", "太多", "不够",
+                "add", "insert", "remove", "delete", "merge", "split", "move",
+                "reorder", "replace", "change", "adjust", "revise", "update",
+                "refine", "improve",
+            };
+            if (!ContainsAny(text, modificationKeywords))
+                return false;
+
+            var standaloneModificationPhrases = new[]
+            {
+                "添加一步", "增加一步", "加一步", "补一步", "补充一步",
+                "再加一步", "再添加一步",
+                "请添加", "请增加", "请删除", "请去掉", "请调整", "请修改",
+                "帮我添加", "帮我增加", "帮我删除", "帮我调整", "帮我修改",
+                "please add", "please remove", "please adjust", "please revise",
+                "add a step", "add one step",
+            };
+            if (ContainsAny(text, standaloneModificationPhrases))
+                return true;
+
+            if (hasPlanContext || hasStepReference)
+                return true;
+
+            return !LooksLikeQuestion(text);
         }
 
         /// <summary>
@@ -190,15 +229,7 @@ namespace DeepSeek_v4_for_VisualStudio.View
         /// </summary>
         private static bool IsQuestionAboutPlan(string userText)
         {
-            // 疑问句式（排除 URL 中的 ?，仅匹配中文问号或句末/空格后的英文问号）
-            var questionPatterns = new[]
-            {
-                "是什么", "为什么", "怎么做", "如何", "怎么样",
-                "可行吗", "可以吗", "对吗", "好不好",
-                "什么意思", "能否", "是否", "能不能",
-                "what", "why", "how", "explain",
-                "？",  // 中文问号不会出现在 URL 中
-            };
+            bool hasQuestion = LooksLikeQuestion(userText);
 
             // 计划相关上下文词（结合疑问才算计划提问）
             var planContextWords = new[]
@@ -207,6 +238,27 @@ namespace DeepSeek_v4_for_VisualStudio.View
                 "这个", "这样", "那种",
             };
             // 注意: "plan" 从上下文词中移除，避免匹配 @plan 显式路由前缀
+
+            bool hasPlanContext = planContextWords.Any(p =>
+                userText.IndexOf(p, StringComparison.OrdinalIgnoreCase) >= 0);
+
+            return hasQuestion && hasPlanContext;
+        }
+
+        /// <summary>
+        /// 判断文本是否包含疑问句式。
+        /// </summary>
+        private static bool LooksLikeQuestion(string userText)
+        {
+            // 排除 URL 中的 ?，仅匹配中文问号或句末/空格后的英文问号
+            var questionPatterns = new[]
+            {
+                "是什么", "为什么", "怎么做", "如何", "怎么样",
+                "可行吗", "可以吗", "对吗", "好不好",
+                "什么意思", "能否", "是否", "能不能",
+                "what", "why", "how", "explain",
+                "？",  // 中文问号不会出现在 URL 中
+            };
 
             bool hasQuestion = questionPatterns.Any(p =>
                 userText.IndexOf(p, StringComparison.OrdinalIgnoreCase) >= 0);
@@ -224,10 +276,14 @@ namespace DeepSeek_v4_for_VisualStudio.View
                 }
             }
 
-            bool hasPlanContext = planContextWords.Any(p =>
-                userText.IndexOf(p, StringComparison.OrdinalIgnoreCase) >= 0);
+            return hasQuestion;
+        }
 
-            return hasQuestion && hasPlanContext;
+        /// <summary>判断文本是否包含任一关键词（忽略大小写）。</summary>
+        private static bool ContainsAny(string text, IEnumerable<string> keywords)
+        {
+            return keywords.Any(keyword =>
+                text.IndexOf(keyword, StringComparison.OrdinalIgnoreCase) >= 0);
         }
 
         /// <summary>
