@@ -1670,6 +1670,7 @@ return "<!DOCTYPE html><html lang='" + htmlLang + "'><head><meta charset='UTF-8'
         /// 构建向用户提问的 UI（VisualStudio_askQuestions 工具）。
         /// 多个问题合并为一个卡片，并按「一页一题」分页显示：用箭头在题目间切换，
         /// 提交按钮只在最后一题出现（回答在提交时统一收集）。
+        /// 左上角关闭按钮放弃整组提问；页脚「跳过本题」只跳过当前问题。
         /// </summary>
         public static string BuildAskQuestionsJs(AgentQuestionRequest request)
         {
@@ -1726,18 +1727,25 @@ return "<!DOCTYPE html><html lang='" + htmlLang + "'><head><meta charset='UTF-8'
                 pagesHtml.Append("</div>");
             }
 
-            // ── 页头：标题 + 进度（第 N / M 题；单题时不需要）──
+            // ── 页头：关闭 + 标题 + 进度（第 N / M 题；单题时不需要）──
             string progressTemplate = L["chat.html.questionProgress"];
+            string closeQuestionsLabel = EscapeHtmlAttribute(L["chat.html.closeQuestions"]);
             string headerHtml =
-                "<div style='display:flex;align-items:center;justify-content:space-between;margin-bottom:8px'>" +
+                "<div style='display:flex;align-items:center;gap:8px;margin-bottom:8px'>" +
+                $"<button id='agent-questions-close' type='button' onclick=\"window.__closeQuestions('{safeRequestId}')\" " +
+                $"title='{closeQuestionsLabel}' aria-label='{closeQuestionsLabel}' " +
+                $"style='width:22px;height:22px;padding:0;display:inline-flex;align-items:center;justify-content:center;" +
+                $"background:{p.SecondaryBtnBg};color:{p.SecondaryBtnText};border:1px solid {p.SecondaryBtnBorder};" +
+                $"border-radius:4px;cursor:pointer;font-size:14px;line-height:1'>&times;</button>" +
                 $"<div style='color:{p.Accent};font-size:12px;font-weight:600'>{EscapeHtml(L["chat.html.questionsTitle"])}</div>" +
+                "<div style='flex:1'></div>" +
                 (hasMultipleQuestions
                     ? $"<div id='agent-questions-progress' data-template='{EscapeHtmlAttribute(progressTemplate)}' style='color:{p.MutedText};font-size:11px'>" +
                       $"{EscapeHtml(LocalizationService.Instance.Format("chat.html.questionProgress", 1, totalQuestions))}</div>"
                     : "") +
                 "</div>";
 
-            // ── 页脚：上一题 / 下一题（切换箭头）+ 提交（仅最后一题）+ 跳过 ──
+            // ── 页脚：上一题 / 下一题（切换箭头）+ 跳过本题 + 提交（仅最后一题）──
             string navHtml = hasMultipleQuestions
                 ? "<button id='agent-questions-prev' type='button' " +
                   $"onclick=\"window.__askQuestionsNav('{safeRequestId}',-1)\" " +
@@ -1760,7 +1768,7 @@ return "<!DOCTYPE html><html lang='" + htmlLang + "'><head><meta charset='UTF-8'
                 $"<button id='agent-questions-submit' type='button' onclick=\"window.__answerQuestions('{safeRequestId}')\" " +
                 $"style='{submitStyle}background:{p.PrimaryBtnBg};color:{p.PrimaryBtnText};border:none;border-radius:4px;padding:6px 20px;cursor:pointer;font-size:12px;font-weight:600'>" +
                 $"{EscapeHtml(L["chat.html.submitAnswer"])}</button>" +
-                $"<button type='button' onclick=\"window.__skipQuestions('{safeRequestId}')\" " +
+                $"<button id='agent-questions-skip' type='button' onclick=\"window.__skipCurrentQuestion('{safeRequestId}')\" " +
                 $"style='background:{p.SecondaryBtnBg};color:{p.SecondaryBtnText};border:1px solid {p.SecondaryBtnBorder};border-radius:4px;padding:6px 16px;cursor:pointer;font-size:12px'>" +
                 $"{EscapeHtml(L["chat.html.skip"])}</button>" +
                 "</div>";
@@ -1777,6 +1785,14 @@ return "<!DOCTYPE html><html lang='" + htmlLang + "'><head><meta charset='UTF-8'
         div.id='agent-questions';
         div.style.cssText='border:1px solid {p.CardBorder};border-radius:8px;background:{p.CardBg};padding:12px;margin:8px 0;animation:fadeIn .3s';
         div.innerHTML={escapedInnerHtml};
+        div.addEventListener('input',function(e){{
+            var page=e.target&&e.target.closest?e.target.closest('.aq-page'):null;
+            if(page)page.removeAttribute('data-skipped');
+        }});
+        div.addEventListener('change',function(e){{
+            var page=e.target&&e.target.closest?e.target.closest('.aq-page'):null;
+            if(page)page.removeAttribute('data-skipped');
+        }});
 
         var container=document.getElementById('chat-container');
         if(!container){{window.__sendToHost({{type:'diagnostic',msg:'questions:chat-container not found'}});return;}}

@@ -556,6 +556,10 @@ public class ChatHtmlServiceTests
         js.Should().Contain("id='agent-questions-submit'");
         js.Should().Contain("display:none;background:#0e639c");
         js.Should().Contain("window.__askQuestionsShowPage(div,0)");
+        js.Should().Contain("id='agent-questions-close'");
+        js.Should().Contain("window.__closeQuestions('q-1')");
+        js.Should().Contain("id='agent-questions-skip'");
+        js.Should().Contain("window.__skipCurrentQuestion('q-1')");
     }
 
     [Fact]
@@ -660,6 +664,12 @@ public class ChatHtmlServiceTests
         html.Should().Contain("window.__askQuestionsNav=function");
         html.Should().Contain("window.__askQuestionsShowPage=function");
         html.Should().Contain("window.__answerQuestions=function");
+        html.Should().Contain("window.__skipCurrentQuestion=function");
+        html.Should().Contain("window.__closeQuestions=function");
+        html.Should().Contain("skipped:skipped");
+        html.Should().Contain("page.setAttribute('data-skipped','true')");
+        html.Should().Contain("if(current<pages.length-1)");
+        html.Should().Contain("answers:'[]'");
 
         // 提交时按分页顺序统一收集答案（未显示的页也要计入，避免答案与题目错位）
         html.Should().Contain("card.querySelectorAll('.aq-page')");
