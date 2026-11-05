@@ -43,4 +43,30 @@ public class ChatHtmlServiceHandoffButtonTests
 
         js.Should().Contain("panel.setAttribute('data-plan-source',\"EditAgent\")");
     }
+
+    /// <summary>
+    /// 输入“开始”时，计划面板按钮也必须切换为执行中状态。
+    /// </summary>
+    [Fact]
+    public void BuildSetHandoffButtonsExecutingJs_DisablesButtonsAndUpdatesLabel()
+    {
+        string js = ChatHtmlService.BuildSetHandoffButtonsExecutingJs("执行中...");
+
+        js.Should().Contain("querySelectorAll('.handoff-btn')");
+        js.Should().Contain("disabled=true");
+        js.Should().Contain("textContent=\"执行中...\"");
+    }
+
+    /// <summary>
+    /// 任务结束后应移除按钮及空的操作区，避免面板残留“执行中...”状态。
+    /// </summary>
+    [Fact]
+    public void BuildRemoveHandoffButtonsJs_RemovesButtonsAndEmptyActionArea()
+    {
+        string js = ChatHtmlService.BuildRemoveHandoffButtonsJs();
+
+        js.Should().Contain("querySelectorAll('.handoff-btn')");
+        js.Should().Contain("querySelectorAll('.agent-task-panel-actions')");
+        js.Should().Contain("actions[j].parentNode.removeChild(actions[j])");
+    }
 }

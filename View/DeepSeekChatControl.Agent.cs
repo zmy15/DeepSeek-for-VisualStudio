@@ -750,6 +750,8 @@ namespace DeepSeek_v4_for_VisualStudio.View
             if (_activeAgent == null || _agentFactory == null) return;
             string? workflowSessionId = _activeSession?.Id;
             bool parallelMemoryExtractionStarted = false;
+            bool executingPlanFromText = routing?.TargetAgent == AgentType.Edit
+                && _pendingHandoff?.TargetAgent == AgentType.Edit;
 
             // ── 单轮 Cache 统计快照：本次问答开始时的累计值 ──
             _apiService?.TakeCacheSnapshot();
@@ -779,6 +781,14 @@ namespace DeepSeek_v4_for_VisualStudio.View
                 if (routing == null || (!routing.IsExplicit && routing.TargetAgent == AgentType.Ask))
                 {
                     ResetActiveAgentToAsk();
+                }
+
+                if (executingPlanFromText && ChatWebView.CoreWebView2 != null)
+                {
+                    // 输入“开始”不走按钮点击路径，这里主动同步按钮视觉状态并防止重复触发。
+                    string executingJs = ChatHtmlService.BuildSetHandoffButtonsExecutingJs(
+                        LocalizationService.Instance["chat.html.executing"]);
+                    await ChatWebView.CoreWebView2.ExecuteScriptAsync(executingJs);
                 }
 
                 StatusLabel.Text = LocalizationService.Instance["agent.status.analyzing"];
@@ -1357,6 +1367,16 @@ namespace DeepSeek_v4_for_VisualStudio.View
             }
             finally
             {
+                if (executingPlanFromText && ChatWebView.CoreWebView2 != null)
+                {
+                    try
+                    {
+                        await ChatWebView.CoreWebView2.ExecuteScriptAsync(
+                            ChatHtmlService.BuildRemoveHandoffButtonsJs());
+                    }
+                    catch { }
+                }
+
                 StopConversationElapsedTimer();
                 _activePlan = null;
                 if (telemetry != null)

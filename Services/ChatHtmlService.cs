@@ -440,6 +440,38 @@ namespace DeepSeek_v4_for_VisualStudio.Services
         }
 
         /// <summary>
+        /// 构建将所有 Handoff 按钮切换为执行中状态的 JavaScript。
+        /// 输入“开始”与点击按钮必须共用同一视觉状态。
+        /// </summary>
+        public static string BuildSetHandoffButtonsExecutingJs(string label)
+        {
+            return $@"(function(){{
+    var btns=document.querySelectorAll('.handoff-btn');
+    for(var i=0;i<btns.length;i++){{
+        btns[i].disabled=true;
+        btns[i].textContent={EscapeJsString(label)};
+        btns[i].style.opacity='0.6';
+    }}
+}})();";
+        }
+
+        /// <summary>构建移除所有 Handoff 按钮的 JavaScript。</summary>
+        public static string BuildRemoveHandoffButtonsJs()
+        {
+            return @"(function(){
+    var btns=document.querySelectorAll('.handoff-btn');
+    for(var i=0;i<btns.length;i++){
+        if(btns[i].parentNode)btns[i].parentNode.removeChild(btns[i]);
+    }
+    var actions=document.querySelectorAll('.agent-task-panel-actions');
+    for(var j=0;j<actions.length;j++){
+        if(actions[j].querySelectorAll('.handoff-btn').length===0 && actions[j].parentNode)
+            actions[j].parentNode.removeChild(actions[j]);
+    }
+})();";
+        }
+
+        /// <summary>
         /// 构建 Cache 命中率统计卡片 HTML。
         /// 用于注入到 AI 回复底部，展示本轮请求的 Prompt Cache 命中情况。
         /// </summary>
