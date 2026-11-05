@@ -13,7 +13,7 @@ namespace DeepSeek_v4_for_VisualStudio.Settings
 {
     /// <summary>
     /// "自定义模型名称"的取模型列表编辑器（参考 CC Switch 的供应商模型抓取）。
-    /// 属性网格中显示 "..." 按钮，弹出对话框：端点 + 密钥 → GET /models → 双击选择。
+    /// 属性网格中显示 "..." 按钮，弹出对话框：端点 + 密钥 → GET /models → 勾选一个或多个模型。
     /// </summary>
     public class ModelPickerEditor : UITypeEditor
     {
@@ -219,18 +219,20 @@ namespace DeepSeek_v4_for_VisualStudio.Settings
         }
     }
 
-    /// <summary>模型抓取对话框：GET /models + 列表选择。</summary>
+    /// <summary>模型抓取对话框：GET /models + 可勾选多个模型的列表。</summary>
     internal sealed class ModelPickerDialog : Form
     {
         private readonly TextBox _baseUrlBox;
         private readonly TextBox _apiKeyBox;
-        private readonly ListBox _modelList;
+        private readonly CheckedListBox _modelList;
         private readonly Button _fetchButton;
         private readonly Label _statusLabel;
 
-        public string? SelectedModel => _modelList.SelectedItem as string;
+        public string? SelectedModel => _modelList.CheckedItems.Count > 0
+            ? _modelList.CheckedItems[0] as string
+            : null;
         public IReadOnlyList<string> SelectedModels
-            => _modelList.SelectedItems.Cast<string>()
+            => _modelList.CheckedItems.Cast<string>()
                 .Where(model => !string.IsNullOrWhiteSpace(model))
                 .Select(model => model.Trim())
                 .Where(model => model.Length > 0)
@@ -295,20 +297,33 @@ namespace DeepSeek_v4_for_VisualStudio.Settings
                 Location = new Point(12, 148),
                 AutoSize = true,
             };
-            _modelList = new ListBox
+            _modelList = new CheckedListBox
             {
                 Location = new Point(12, 168),
                 Size = new Size(436, 130),
-                SelectionMode = SelectionMode.MultiExtended,
+                CheckOnClick = true,
             };
-            _modelList.DoubleClick += (_, _) => DialogResult = DialogResult.OK;
 
             var okButton = new Button
             {
                 Text = l["settings.modelPicker.ok"],
-                DialogResult = DialogResult.OK,
                 Location = new Point(273, 326),
                 Size = new Size(84, 26),
+            };
+            okButton.Click += (_, _) =>
+            {
+                if (_modelList.CheckedItems.Count == 0)
+                {
+                    MessageBox.Show(
+                        this,
+                        l["settings.modelPicker.selectRequired"],
+                        Text,
+                        MessageBoxButtons.OK,
+                        MessageBoxIcon.Information);
+                    return;
+                }
+
+                DialogResult = DialogResult.OK;
             };
             var cancelButton = new Button
             {
