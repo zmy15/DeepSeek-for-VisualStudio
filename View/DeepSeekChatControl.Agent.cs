@@ -199,13 +199,24 @@ namespace DeepSeek_v4_for_VisualStudio.View
         }
 
         /// <summary>
-        /// 构建重试/编辑时的富上下文内容。
+        /// 构建重试/编辑重发时实际发送的 user 内容。
+        /// 编辑重发必须保持纯文本，不得再拼接任何历史摘要。
         /// </summary>
-        private string BuildRetryEnrichedContent(ChatMessage userMsg, string currentContent)
+        /// <param name="currentContent">用户当前修改后的问题。</param>
+        /// <param name="isEditResend">是否为编辑后重发。</param>
+        /// <param name="conversationContextProvider">仅在普通重试时读取历史摘要。</param>
+        /// <returns>最终发送的 user 文本。</returns>
+        internal static string BuildResendPromptContent(
+            string currentContent,
+            bool isEditResend,
+            Func<string> conversationContextProvider)
         {
+            if (isEditResend)
+                return currentContent;
+
             var sb = new StringBuilder();
 
-            string conversationCtx = GetConversationContextForRetry();
+            string conversationCtx = conversationContextProvider();
             if (!string.IsNullOrEmpty(conversationCtx))
             {
                 sb.AppendLine("【对话历史】");

@@ -1195,7 +1195,10 @@ namespace DeepSeek_v4_for_VisualStudio.View
 
                 // ── 同步消息列表并重建上下文 ──
                 RebuildFromTree();
-                RebuildContextFromTree();
+                // 编辑是一条全新的替代分支：只能继承编辑点之前的树路径，
+                // 不能再从旧 ApiHistory 补回被编辑回合或其分支的 tool/system 记录。
+                RebuildContextFromTree(includeApiHistory: false);
+                SynchronizeActiveSessionApiHistory();
 
                 // ── 恢复系统级上下文（Clear() 会清空 system prompt / memory / skill）──
                 await RestoreSystemContextAsync();
@@ -1219,7 +1222,7 @@ namespace DeepSeek_v4_for_VisualStudio.View
                 }
 
                 if (newUserMsg != null)
-                    await ResendUserMessageAsync(newUserMsgIndex, newUserMsg, editCts);
+                    await ResendUserMessageAsync(newUserMsgIndex, newUserMsg, editCts, isEditResend: true);
             }
             catch (Exception ex)
             {
@@ -1268,7 +1271,11 @@ namespace DeepSeek_v4_for_VisualStudio.View
         /// 注意：此方法仅在 ApiHistory 为空或 RestoreFullContext 失败时作为回退使用；
         /// 正常情况下优先使用 RestoreFullContext（完整数据源）。
         /// </summary>
-        private void RebuildContextFromTree()
+        /// <param name="includeApiHistory">
+        /// 是否允许从旧的 ApiHistory 补充 tool/system/tool_calls。编辑消息时必须为 false，
+        /// 否则被编辑分支的历史会重新进入上下文。
+        /// </param>
+        private void RebuildContextFromTree(bool includeApiHistory = true)
         {
             if (_tree == null) return;
 
@@ -1304,7 +1311,9 @@ namespace DeepSeek_v4_for_VisualStudio.View
                 }
 
                 // ── 从 ApiHistory 补充 tool / system / 含tool_calls的assistant 消息 ──
-                if (_activeSession?.ApiHistory != null && _activeSession.ApiHistory.Count > 0)
+                if (includeApiHistory
+                    && _activeSession?.ApiHistory != null
+                    && _activeSession.ApiHistory.Count > 0)
                 {
                     foreach (var apiMsg in _activeSession.ApiHistory)
                     {
@@ -1326,9 +1335,25 @@ namespace DeepSeek_v4_for_VisualStudio.View
                     }
                 }
 
-                Logger.Info($"[Tree→Context] 已从 {path.Count} 个节点重建上下文"
-                    + (_activeSession?.ApiHistory?.Count > 0 ? $" (+ {_activeSession.ApiHistory.Count} 条 ApiHistory 补充)" : ""));
+                string historyStatus = !includeApiHistory
+                    ? "（编辑分支：未使用旧 ApiHistory）"
+                    : _activeSession?.ApiHistory?.Count > 0
+                        ? $" (+ {_activeSession.ApiHistory.Count} 条 ApiHistory 补充)"
+                        : "（旧 ApiHistory 为空）";
+                Logger.Info($"[Tree→Context] 已从 {path.Count} 个节点重建上下文{historyStatus}");
             }
+        }
+
+        /// <summary>
+        /// 将当前上下文同步回活跃会话，立即截断已经离开活跃分支的旧 ApiHistory。
+        /// 用于编辑/分支切换后，避免下一次从 ApiHistory 恢复时把旧分支重新带回来。
+        /// </summary>
+        private void SynchronizeActiveSessionApiHistory()
+        {
+            if (_activeSession == null)
+                return;
+
+            _activeSession.ApiHistory = _contextManager.GetFullContext();
         }
 
         /// <summary>
@@ -1337,7 +1362,8 @@ namespace DeepSeek_v4_for_VisualStudio.View
         private async Task ResendUserMessageAsync(
             int userMsgIndex,
             ChatMessage userMsg,
-            CancellationTokenSource? existingCts = null)
+            CancellationTokenSource? existingCts = null,
+            bool isEditResend = false)
         {
             if (_options == null || string.IsNullOrEmpty(_options.ApiKey))
             {
@@ -1375,7 +1401,12 @@ namespace DeepSeek_v4_for_VisualStudio.View
                 StatusLabel.Text = LocalizationService.Instance["status.thinking"];
 
                 string userContent = userMsg.Content ?? string.Empty;
-                string enrichedContent = BuildRetryEnrichedContent(userMsg, userContent);
+                // 编辑后的消息只以当前文本作为本轮问题。普通重试才额外拼接历史摘要，
+                // 避免旧问题、旧回答或半截回复再次进入当前 user 消息。
+                string enrichedContent = BuildResendPromptContent(
+                    userContent,
+                    isEditResend,
+                    GetConversationContextForRetry);
 
                 if (_activeAgent != null && _agentFactory != null && !string.IsNullOrEmpty(userContent) && !userContent.StartsWith("/"))
                 {
@@ -1405,12 +1436,15 @@ namespace DeepSeek_v4_for_VisualStudio.View
                     if (userMsg.AttachedFiles.Count > 0)
                         fileContext = FileParserService.FormatParseResultsForContext(userMsg.AttachedFiles);
 
-                    string conversationContext = GetConversationContextForRetry();
-                    if (!string.IsNullOrEmpty(conversationContext))
+                    if (!isEditResend)
                     {
-                        fileContext = string.IsNullOrEmpty(fileContext)
-                            ? conversationContext
-                            : conversationContext + "\n\n" + fileContext;
+                        string conversationContext = GetConversationContextForRetry();
+                        if (!string.IsNullOrEmpty(conversationContext))
+                        {
+                            fileContext = string.IsNullOrEmpty(fileContext)
+                                ? conversationContext
+                                : conversationContext + "\n\n" + fileContext;
+                        }
                     }
 
                     TryReuseRetryPlaceholder(out assistantMsg, out newAssistantIdx);
