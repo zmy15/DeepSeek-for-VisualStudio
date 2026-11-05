@@ -250,6 +250,90 @@ public class ReplaceStringInFileToolTests
     }
 
     [Fact]
+    public async Task MultiReplaceStringInFile_PrevalidatesAllLineRangesBeforeWriting()
+    {
+        string tempPath = Path.Combine(
+            Path.GetTempPath(), $"multi-replace-preflight-{Guid.NewGuid():N}.txt");
+        string original = "first\nsecond\n";
+        File.WriteAllText(tempPath, original, Encoding.UTF8);
+
+        try
+        {
+            var args = ParseArgs(JsonSerializer.Serialize(new
+            {
+                replacements = new object[]
+                {
+                    new
+                    {
+                        filePath = tempPath,
+                        oldString = "first",
+                        newString = "changed",
+                    },
+                    new
+                    {
+                        filePath = tempPath,
+                        oldString = "second",
+                        newString = "changed second",
+                        lineRange = "999-1000",
+                    },
+                },
+            }));
+
+            string result = await new MultiReplaceStringInFileTool().ExecuteAsync(args, workspaceRoot: null);
+
+            result.Should().StartWith("Error: ");
+            File.ReadAllText(tempPath).Should().Be(original);
+        }
+        finally
+        {
+            if (File.Exists(tempPath))
+                File.Delete(tempPath);
+        }
+    }
+
+    [Fact]
+    public async Task MultiReplaceStringInFile_PrevalidatesSharedLineRange()
+    {
+        string tempPath = Path.Combine(
+            Path.GetTempPath(), $"multi-replace-shared-range-{Guid.NewGuid():N}.txt");
+        string original = "first\nsecond\n";
+        File.WriteAllText(tempPath, original, Encoding.UTF8);
+
+        try
+        {
+            var args = ParseArgs(JsonSerializer.Serialize(new
+            {
+                lineRange = "999-1000",
+                replacements = new[]
+                {
+                    new
+                    {
+                        filePath = tempPath,
+                        oldString = "first",
+                        newString = "changed",
+                    },
+                    new
+                    {
+                        filePath = tempPath,
+                        oldString = "second",
+                        newString = "changed second",
+                    },
+                },
+            }));
+
+            string result = await new MultiReplaceStringInFileTool().ExecuteAsync(args, workspaceRoot: null);
+
+            result.Should().StartWith("Error: ");
+            File.ReadAllText(tempPath).Should().Be(original);
+        }
+        finally
+        {
+            if (File.Exists(tempPath))
+                File.Delete(tempPath);
+        }
+    }
+
+    [Fact]
     public async Task MultiReplaceStringInFile_ContentAnchorsAreNotRequired()
     {
         string tempPath = Path.Combine(

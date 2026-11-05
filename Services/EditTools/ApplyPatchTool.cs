@@ -482,25 +482,17 @@ namespace DeepSeek_v4_for_VisualStudio.Services.EditTools
                 // ── 处理空上下文（全部为 + 行，无实际上下文）──
                 if (contextLines.Length == 0)
                 {
-                    // expected 锚点为主；@@ 标记仅用于在锚点范围内细化插入行。
-                    int insertAfterLine = expectedAnchorLine;
-                    if (patch.Hunks[ci].ContextMarkers.Count > 0)
+                    if (patch.Hunks[ci].IsEof)
                     {
-                        int markerMatch = EditStringMatcher.MatchContextViaMarkers(
-                            fileLines,
-                            patch.Hunks[ci].ContextMarkers,
-                            Math.Max(0, expectedAnchorLine - ExpectedAnchorScopeRadius));
-                        if (markerMatch >= 0
-                            && Math.Abs(markerMatch - expectedAnchorLine)
-                                <= ExpectedAnchorScopeRadius)
-                        {
-                            insertAfterLine = markerMatch;
-                        }
+                        chunk.OrigIndex += fileLines.Length;
+                        searchStartLine = fileLines.Length;
+                        continue;
                     }
 
-                    chunk.OrigIndex += insertAfterLine + 1;
-                    searchStartLine = insertAfterLine + 1;
-                    continue;
+                    result.Success = false;
+                    result.ErrorMessage = LocalizationService.Instance[
+                        "tool.edit.applyPatch.pureInsertionNeedsContext"];
+                    return result;
                 }
 
                 int matchedLine = FindUniqueExactContextMatchNearAnchor(

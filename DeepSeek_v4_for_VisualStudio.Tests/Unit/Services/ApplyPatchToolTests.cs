@@ -622,6 +622,53 @@ public class ApplyPatchToolTests
     }
 
     [Fact]
+    public void ApplySinglePatch_PureInsertionWithoutContextFails()
+    {
+        string tempPath = Path.Combine(
+            Path.GetTempPath(), $"apply-patch-pure-insert-{Guid.NewGuid():N}.cs");
+        string original =
+            "class Sample\n" +
+            "{\n" +
+            "    private static int Build() => 0;\n" +
+            "}\n";
+        File.WriteAllText(tempPath, original);
+
+        try
+        {
+            var patch = new PatchOperation
+            {
+                Action = PatchFileAction.Update,
+                FilePath = tempPath,
+                Hunks =
+                {
+                    new PatchHunk
+                    {
+                        ExpectedAnchor = "private static int Build()",
+                        ContextMarkers = { "private static int Build()" },
+                        Lines =
+                        {
+                            new PatchLine { Type = '+', Text = "    // inserted without context" },
+                        },
+                    },
+                },
+            };
+
+            var result = ApplyPatchTool.ApplySinglePatch(patch, tempPath, original);
+
+            result.Success.Should().BeFalse();
+            (result.ErrorMessage!.Contains("上下文")
+                || result.ErrorMessage.Contains("context", StringComparison.OrdinalIgnoreCase))
+                .Should().BeTrue();
+            File.ReadAllText(tempPath).Should().Be(original);
+        }
+        finally
+        {
+            if (File.Exists(tempPath))
+                File.Delete(tempPath);
+        }
+    }
+
+    [Fact]
     public void ApplySinglePatch_AlreadyApplied_IsSuccessfulNoOp()
     {
         string tempPath = Path.Combine(

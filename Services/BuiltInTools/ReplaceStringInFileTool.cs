@@ -84,12 +84,14 @@ namespace DeepSeek_v4_for_VisualStudio.Services.BuiltInTools
 
         internal async Task<string> ApplyReplacementAsync(
             Dictionary<string, JsonElement> args,
-            string? workspaceRoot)
+            string? workspaceRoot,
+            string? lineRangeOverride = null)
         {
             string filePath = GetStringArg(args, "filePath");
             string oldString = GetStringArg(args, "oldString");
             string newString = GetStringArg(args, "newString");
-            string lineRange = GetStringArg(args, "lineRange");
+            string lineRange = lineRangeOverride
+                ?? GetStringArg(args, "lineRange");
 
             if (string.IsNullOrEmpty(filePath))
                 return LocalizationService.Instance["tool.replaceString.missingFilePath"];
