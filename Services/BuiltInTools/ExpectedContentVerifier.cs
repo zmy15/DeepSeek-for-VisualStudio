@@ -6,26 +6,34 @@ using System.Text.RegularExpressions;
 namespace DeepSeek_v4_for_VisualStudio.Services.BuiltInTools
 {
     /// <summary>
-    /// 编辑工具的预期结果校验器。预期内容使用带行号格式，例如：
-    /// 1|using System;
-    /// 2|
-    /// 3|class Example { }
-    /// 格式严格为“行号|原始行内容”，竖线后不添加分隔空格。
-    /// 因此 Markdown 表格行写成 4|| column |，空行写成 5|。
+    /// expected 文本解析与结果校验器。
+    /// apply_patch 使用 @唯一位置锚点；兼容场景也支持
+    /// +InitializeComponent、-OldMethod 以及带行号格式。
     /// </summary>
     internal static class ExpectedContentVerifier
     {
         internal const string DeletedMarker = "(deleted)";
+        private const char ContainsMarker = '*';
 
         internal static bool IsDeletedExpectation(string expectedText)
             => string.Equals(expectedText?.Trim(), DeletedMarker,
                 StringComparison.OrdinalIgnoreCase);
 
-        internal static (bool Success, List<string> Lines, string Error)
-            ParseLineNumberedContent(string expectedText)
+        internal static string? ValidateExpected(string expectedText)
         {
-            var parsed = ParseLineNumberedFragment(expectedText, requireStartAtOne: true);
-            return (parsed.Success, parsed.Lines, parsed.Error);
+            if (IsDeletedExpectation(expectedText))
+                return null;
+
+            if (IsContentAnchorFormat(expectedText))
+            {
+                return TryParseContentAnchors(
+                    expectedText, out _, out string error)
+                    ? null
+                    : error;
+            }
+
+            var parsed = ParseLineNumberedFragment(expectedText);
+            return parsed.Success ? null : parsed.Error;
         }
 
         /// <summary>
@@ -87,7 +95,15 @@ namespace DeepSeek_v4_for_VisualStudio.Services.BuiltInTools
                             startLine + lines.Count));
                 }
 
-                lines.Add(match.Groups[2].Value);
+                string expectedLine = match.Groups[2].Value;
+                if (expectedLine.Length == 1 && expectedLine[0] == ContainsMarker)
+                {
+                    return (false, 0, lines,
+                        LocalizationService.Instance.Format(
+                            "tool.editVerify.expectedFormat", i + 1, rawLine));
+                }
+
+                lines.Add(expectedLine);
             }
 
             if (lines.Count == 0)
@@ -106,19 +122,6 @@ namespace DeepSeek_v4_for_VisualStudio.Services.BuiltInTools
                 (line, index) => $"{index + 1}|{line}"));
         }
 
-        internal static string VerifyExpectedContent(
-            string expectedText,
-            string? actualContent,
-            string filePath,
-            bool expectDeleted = false)
-        {
-            var parsed = ParseLineNumberedFragment(expectedText, requireStartAtOne: true);
-            if (!parsed.Success) return parsed.Error;
-
-            return VerifyParsedLines(
-                parsed.Lines, 1, actualContent, filePath, expectDeleted, requireFullContent: true);
-        }
-
         /// <summary>
         /// 校验 expected 中声明的连续行片段，不要求 expected 覆盖整个文件。
         /// </summary>
@@ -126,16 +129,172 @@ namespace DeepSeek_v4_for_VisualStudio.Services.BuiltInTools
             string expectedText,
             string? actualContent,
             string filePath,
-            bool expectDeleted = false,
             bool requireFullContent = false)
         {
+            if (IsContentAnchorFormat(expectedText))
+            {
+                if (!TryParseContentAnchors(
+                    expectedText, out var anchors, out string anchorError))
+                    return anchorError;
+
+                return VerifyContentAnchors(anchors, actualContent, filePath);
+            }
+
             var parsed = ParseLineNumberedFragment(
                 expectedText, requireStartAtOne: requireFullContent);
             if (!parsed.Success) return parsed.Error;
 
             return VerifyParsedLines(
                 parsed.Lines, parsed.StartLine, actualContent, filePath,
-                expectDeleted, requireFullContent);
+                requireFullContent);
+        }
+
+        internal static bool IsLocationAnchorFormat(string expectedText)
+        {
+            string normalized = (expectedText ?? string.Empty)
+                .Replace("\r\n", "\n")
+                .Replace('\r', '\n');
+
+            foreach (string rawLine in normalized.Split('\n'))
+            {
+                if (string.IsNullOrWhiteSpace(rawLine))
+                    continue;
+
+                return rawLine[0] == '@';
+            }
+
+            return false;
+        }
+
+        internal static (bool Success, List<string> Anchors, string Error)
+            ParseLocationAnchors(string expectedText)
+        {
+            return TryParseLocationAnchors(
+                expectedText, out List<string> anchors, out string error)
+                ? (true, anchors, string.Empty)
+                : (false, anchors, error);
+        }
+
+        private static bool TryParseLocationAnchors(
+            string expectedText,
+            out List<string> anchors,
+            out string error)
+        {
+            anchors = new List<string>();
+            error = string.Empty;
+            string normalized = (expectedText ?? string.Empty)
+                .Replace("\r\n", "\n")
+                .Replace('\r', '\n');
+            string[] rawLines = normalized.Split('\n');
+
+            for (int i = 0; i < rawLines.Length; i++)
+            {
+                string rawLine = rawLines[i];
+                if (string.IsNullOrWhiteSpace(rawLine))
+                    continue;
+
+                if (rawLine[0] != '@' || rawLine.Length == 1
+                    || string.IsNullOrWhiteSpace(rawLine.Substring(1)))
+                {
+                    error = LocalizationService.Instance.Format(
+                        "tool.editVerify.locationAnchorFormat", i + 1, rawLine);
+                    return false;
+                }
+
+                anchors.Add(rawLine.Substring(1).Trim());
+            }
+
+            if (anchors.Count == 0)
+            {
+                error = LocalizationService.Instance["tool.editVerify.missingExpected"];
+                return false;
+            }
+
+            return true;
+        }
+
+        private static bool IsContentAnchorFormat(string expectedText)
+        {
+            string normalized = (expectedText ?? string.Empty)
+                .Replace("\r\n", "\n")
+                .Replace('\r', '\n');
+
+            foreach (string rawLine in normalized.Split('\n'))
+            {
+                if (string.IsNullOrWhiteSpace(rawLine))
+                    continue;
+
+                return rawLine[0] == '+' || rawLine[0] == '-';
+            }
+
+            return false;
+        }
+
+        private static bool TryParseContentAnchors(
+            string expectedText,
+            out List<(char Kind, string Text)> anchors,
+            out string error)
+        {
+            anchors = new List<(char Kind, string Text)>();
+            error = string.Empty;
+            string normalized = (expectedText ?? string.Empty)
+                .Replace("\r\n", "\n")
+                .Replace('\r', '\n');
+            string[] rawLines = normalized.Split('\n');
+
+            for (int i = 0; i < rawLines.Length; i++)
+            {
+                string rawLine = rawLines[i];
+                if (string.IsNullOrWhiteSpace(rawLine))
+                    continue;
+
+                char kind = rawLine[0];
+                if ((kind != '+' && kind != '-') || rawLine.Length == 1)
+                {
+                    error = LocalizationService.Instance.Format(
+                        "tool.editVerify.expectedFormat", i + 1, rawLine);
+                    return false;
+                }
+
+                anchors.Add((kind, rawLine.Substring(1)));
+            }
+
+            if (anchors.Count == 0)
+            {
+                error = LocalizationService.Instance["tool.editVerify.missingExpected"];
+                return false;
+            }
+
+            return true;
+        }
+
+        private static string VerifyContentAnchors(
+            List<(char Kind, string Text)> anchors,
+            string? actualContent,
+            string filePath)
+        {
+            if (actualContent == null)
+            {
+                return LocalizationService.Instance.Format(
+                    "tool.editVerify.anchorFileMissing", filePath);
+            }
+
+            foreach (var (kind, text) in anchors)
+            {
+                bool present = actualContent.IndexOf(text, StringComparison.Ordinal) >= 0;
+                if (kind == '+' && !present)
+                {
+                    return LocalizationService.Instance.Format(
+                        "tool.editVerify.anchorMissing", text, filePath);
+                }
+                if (kind == '-' && present)
+                {
+                    return LocalizationService.Instance.Format(
+                        "tool.editVerify.anchorPresent", text, filePath);
+                }
+            }
+
+            return LocalizationService.Instance["tool.editVerify.verified"];
         }
 
         private static string VerifyParsedLines(
@@ -143,24 +302,9 @@ namespace DeepSeek_v4_for_VisualStudio.Services.BuiltInTools
             int startLine,
             string? actualContent,
             string filePath,
-            bool expectDeleted,
             bool requireFullContent)
         {
             string[] actualLines = SplitContentIntoLines(actualContent);
-
-            if (expectDeleted)
-            {
-                if (actualContent == null)
-                    return LocalizationService.Instance["tool.editVerify.verified"];
-
-                return BuildVerificationFailure(
-                    filePath,
-                    1,
-                    DeletedMarker,
-                    actualLines.Length > 0 ? actualLines[0] : "(empty)",
-                    actualLines,
-                    actualContent);
-            }
 
             int startIndex = startLine - 1;
             int maxLines = requireFullContent
@@ -178,7 +322,7 @@ namespace DeepSeek_v4_for_VisualStudio.Services.BuiltInTools
                     ? actualLines[actualIndex]
                     : "<missing>";
 
-                if (!string.Equals(expectedLine, actualLine, StringComparison.Ordinal))
+                if (!ExpectedLineMatches(expectedLine, actualLine))
                 {
                     return BuildVerificationFailure(
                         filePath,
@@ -191,6 +335,17 @@ namespace DeepSeek_v4_for_VisualStudio.Services.BuiltInTools
             }
 
             return LocalizationService.Instance["tool.editVerify.verified"];
+        }
+
+        private static bool ExpectedLineMatches(string expectedLine, string actualLine)
+        {
+            if (expectedLine.Length > 1 && expectedLine[0] == ContainsMarker)
+            {
+                return actualLine.IndexOf(
+                    expectedLine.Substring(1), StringComparison.Ordinal) >= 0;
+            }
+
+            return string.Equals(expectedLine, actualLine, StringComparison.Ordinal);
         }
 
         internal static string BuildCurrentStateMessage(string? actualContent)

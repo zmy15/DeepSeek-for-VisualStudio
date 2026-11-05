@@ -49,9 +49,13 @@ namespace DeepSeek_v4_for_VisualStudio.Services.BuiltInTools
                             filePath = new { type = "string", description = LocalizationService.Instance["tool.replaceString.param.filePath"] },
                             oldString = new { type = "string", description = LocalizationService.Instance["tool.replaceString.param.oldString"] },
                             newString = new { type = "string", description = LocalizationService.Instance["tool.replaceString.param.newString"] },
-                            expected = new { type = "string", description = LocalizationService.Instance["tool.editVerify.expectedDescription"] }
+                            lineRange = new
+                            {
+                                type = "string",
+                                description = LocalizationService.Instance["tool.replaceString.param.lineRange"]
+                            }
                         },
-                        required = new[] { "filePath", "oldString", "newString", "expected" }
+                        required = new[] { "filePath", "oldString", "newString" }
                     }
                 }
             };
@@ -75,27 +79,17 @@ namespace DeepSeek_v4_for_VisualStudio.Services.BuiltInTools
 
         public override async Task<string> ExecuteAsync(Dictionary<string, JsonElement> args, string? workspaceRoot)
         {
-            string expectedText = GetStringArg(args, "expected");
-            if (string.IsNullOrEmpty(expectedText))
-                return LocalizationService.Instance["tool.editVerify.missingExpected"];
-
-            var expectedParse = ExpectedContentVerifier.ParseLineNumberedFragment(expectedText);
-            if (!expectedParse.Success)
-                return expectedParse.Error;
-
-            return await ApplyReplacementAsync(
-                args, workspaceRoot, expectedText, verifyAfterWrite: true);
+            return await ApplyReplacementAsync(args, workspaceRoot);
         }
 
         internal async Task<string> ApplyReplacementAsync(
             Dictionary<string, JsonElement> args,
-            string? workspaceRoot,
-            string? expectedText,
-            bool verifyAfterWrite)
+            string? workspaceRoot)
         {
             string filePath = GetStringArg(args, "filePath");
             string oldString = GetStringArg(args, "oldString");
             string newString = GetStringArg(args, "newString");
+            string lineRange = GetStringArg(args, "lineRange");
 
             if (string.IsNullOrEmpty(filePath))
                 return LocalizationService.Instance["tool.replaceString.missingFilePath"];
@@ -121,16 +115,27 @@ namespace DeepSeek_v4_for_VisualStudio.Services.BuiltInTools
                 string normalizedOld = oldString.Replace("\r\n", "\n").Replace("\r", "\n");
                 string normalizedNew = newString.Replace("\r\n", "\n").Replace("\r", "\n");
 
-                int index = normalizedContent.IndexOf(normalizedOld, StringComparison.Ordinal);
-                if (index < 0)
+                var rangeResult = ResolveSearchRange(normalizedContent, lineRange);
+                if (!rangeResult.Success)
+                    return rangeResult.Error!;
+
+                var occurrence = FindOccurrencesInRange(
+                    normalizedContent,
+                    normalizedOld,
+                    rangeResult.StartOffset,
+                    rangeResult.EndOffset);
+                if (occurrence.FirstIndex < 0)
                     return LocalizationService.Instance.Format("tool.replaceString.textNotFound", Path.GetFileName(filePath)) +
                         "\n" + await BuildCurrentStateSnapshotAsync(filePath);
 
-                int secondIndex = normalizedContent.IndexOf(normalizedOld, index + 1, StringComparison.Ordinal);
-                if (secondIndex >= 0)
-                    return LocalizationService.Instance.Format("tool.replaceString.multipleMatches", index, secondIndex) +
+                if (occurrence.SecondIndex >= 0)
+                    return LocalizationService.Instance.Format(
+                        "tool.replaceString.multipleMatches",
+                        occurrence.FirstIndex,
+                        occurrence.SecondIndex) +
                         "\n" + await BuildCurrentStateSnapshotAsync(filePath);
 
+                int index = occurrence.FirstIndex;
                 string newContent = normalizedContent.Substring(0, index)
                     + normalizedNew
                     + normalizedContent.Substring(index + normalizedOld.Length);
@@ -142,10 +147,8 @@ namespace DeepSeek_v4_for_VisualStudio.Services.BuiltInTools
                 if (Workspace != null)
                 {
                     Workspace.WriteFile(filePath, newContent);
-                    if (!verifyAfterWrite)
-                        return LocalizationService.Instance.Format("tool.replaceString.replaced", Path.GetFileName(filePath));
-
-                    return await VerifyWrittenContentAsync(expectedText!, filePath);
+                    return LocalizationService.Instance.Format(
+                        "tool.replaceString.replaced", Path.GetFileName(filePath));
                 }
 
                 // ── 写入前备份 ──
@@ -168,10 +171,8 @@ namespace DeepSeek_v4_for_VisualStudio.Services.BuiltInTools
                 // ── 写入成功 → 清理备份 ──
                 BackupService.CleanupBackup(backupPath);
 
-                if (!verifyAfterWrite)
-                    return LocalizationService.Instance.Format("tool.replaceString.replaced", Path.GetFileName(filePath));
-
-                return await VerifyWrittenContentAsync(expectedText!, filePath);
+                return LocalizationService.Instance.Format(
+                    "tool.replaceString.replaced", Path.GetFileName(filePath));
             }
             catch (Exception ex)
             {
@@ -196,6 +197,100 @@ namespace DeepSeek_v4_for_VisualStudio.Services.BuiltInTools
             return File.Exists(filePath)
                 ? await Task.Run(() => FileEncodingHelper.ReadAllText(filePath))
                 : null;
+        }
+
+        internal static (bool Success, int StartOffset, int EndOffset, string? Error)
+            ResolveSearchRange(string content, string lineRange)
+        {
+            if (string.IsNullOrWhiteSpace(lineRange))
+                return (true, 0, content.Length, null);
+
+            string[] parts = lineRange.Split('-');
+            if (parts.Length > 2)
+            {
+                return (false, 0, 0,
+                    LocalizationService.Instance.Format(
+                        "tool.replaceString.invalidLineRange", lineRange));
+            }
+
+            if (!int.TryParse(parts[0].Trim(), out int startLine))
+            {
+                return (false, 0, 0,
+                    LocalizationService.Instance.Format(
+                        "tool.replaceString.invalidLineRange", lineRange));
+            }
+
+            int endLine = startLine;
+            if (parts.Length == 2
+                && !int.TryParse(parts[1].Trim(), out endLine))
+            {
+                return (false, 0, 0,
+                    LocalizationService.Instance.Format(
+                        "tool.replaceString.invalidLineRange", lineRange));
+            }
+            if (startLine < 1 || endLine < startLine)
+            {
+                return (false, 0, 0,
+                    LocalizationService.Instance.Format(
+                        "tool.replaceString.invalidLineRange", lineRange));
+            }
+
+            string[] lines = content.Split('\n');
+            if (startLine > lines.Length || endLine > lines.Length)
+            {
+                return (false, 0, 0,
+                    LocalizationService.Instance.Format(
+                        "tool.replaceString.lineRangeOutOfBounds",
+                        lineRange,
+                        lines.Length));
+            }
+
+            int startOffset = 0;
+            for (int i = 0; i < startLine - 1; i++)
+                startOffset += lines[i].Length + 1;
+
+            int endOffset = startOffset;
+            for (int i = startLine - 1; i < endLine; i++)
+            {
+                endOffset += lines[i].Length;
+                if (i < endLine - 1)
+                    endOffset++;
+            }
+
+            return (true, startOffset, endOffset, null);
+        }
+
+        internal static (int FirstIndex, int SecondIndex) FindOccurrencesInRange(
+            string content,
+            string searchText,
+            int startOffset,
+            int endOffset)
+        {
+            int firstIndex = -1;
+            int secondIndex = -1;
+            int searchStart = startOffset;
+
+            while (searchStart <= endOffset - searchText.Length)
+            {
+                int index = content.IndexOf(
+                    searchText, searchStart, StringComparison.Ordinal);
+                if (index < 0 || index + searchText.Length > endOffset)
+                    break;
+
+                if (firstIndex < 0)
+                {
+                    firstIndex = index;
+                }
+                else
+                {
+                    secondIndex = index;
+                    break;
+                }
+
+                searchStart = index + 1;
+            }
+
+            return (firstIndex, secondIndex);
         }
 
         internal async Task<string> BuildCurrentStateSnapshotAsync(string filePath)
@@ -237,13 +332,5 @@ namespace DeepSeek_v4_for_VisualStudio.Services.BuiltInTools
             BackupService.CleanupBackup(backupPath);
         }
 
-        private async Task<string> VerifyWrittenContentAsync(
-            string expectedText,
-            string filePath)
-        {
-            string? actualContent = await ReadCurrentContentAsync(filePath);
-            return ExpectedContentVerifier.VerifyExpectedFragment(
-                expectedText, actualContent, filePath);
-        }
     }
 }

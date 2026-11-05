@@ -8,7 +8,139 @@ namespace DeepSeek_v4_for_VisualStudio.Tests.Unit.Services;
 public class ReplaceStringInFileToolTests
 {
     [Fact]
-    public async Task ReplaceStringInFile_AllowsExpectedFragmentStartingAfterLineOne()
+    public void ReplaceTools_DoNotRequireExpectedInSchema()
+    {
+        var replaceParameters = JsonSerializer.SerializeToElement(
+            new ReplaceStringInFileTool().GetDefinition().Function.Parameters);
+        var multiParameters = JsonSerializer.SerializeToElement(
+            new MultiReplaceStringInFileTool().GetDefinition().Function.Parameters);
+
+        replaceParameters.GetProperty("required")
+            .EnumerateArray().Select(item => item.GetString())
+            .Should().NotContain("expected");
+        multiParameters.GetProperty("required")
+            .EnumerateArray().Select(item => item.GetString())
+            .Should().NotContain("expected");
+    }
+
+    [Fact]
+    public async Task ReplaceStringInFile_PerformsUniqueReplacement()
+    {
+        string tempPath = Path.Combine(
+            Path.GetTempPath(), $"replace-string-content-anchor-{Guid.NewGuid():N}.cs");
+        File.WriteAllText(tempPath, "class Sample\n{\n    oldCall();\n}\n", Encoding.UTF8);
+
+        try
+        {
+            var args = ParseArgs(JsonSerializer.Serialize(new
+            {
+                filePath = tempPath,
+                oldString = "oldCall();",
+                newString = "newCall();",
+            }));
+
+            string result = await new ReplaceStringInFileTool().ExecuteAsync(args, workspaceRoot: null);
+
+            result.Should().NotStartWith("Error: ");
+            File.ReadAllText(tempPath).Should().Contain("newCall();").And.NotContain("oldCall();");
+        }
+        finally
+        {
+            if (File.Exists(tempPath))
+                File.Delete(tempPath);
+        }
+    }
+
+    [Fact]
+    public async Task ReplaceStringInFile_LineRangeRestrictsUniquenessCheck()
+    {
+        string tempPath = Path.Combine(
+            Path.GetTempPath(), $"replace-string-range-{Guid.NewGuid():N}.txt");
+        File.WriteAllText(tempPath, "old\nmiddle\nold\n", Encoding.UTF8);
+
+        try
+        {
+            var args = ParseArgs(JsonSerializer.Serialize(new
+            {
+                filePath = tempPath,
+                oldString = "old",
+                newString = "new",
+                lineRange = "1-1",
+            }));
+
+            string result = await new ReplaceStringInFileTool().ExecuteAsync(args, workspaceRoot: null);
+
+            result.Should().NotStartWith("Error: ");
+            File.ReadAllText(tempPath).Should().Be("new\nmiddle\nold\n");
+        }
+        finally
+        {
+            if (File.Exists(tempPath))
+                File.Delete(tempPath);
+        }
+    }
+
+    [Fact]
+    public async Task ReplaceStringInFile_LineRangeNoMatchDoesNotWrite()
+    {
+        string tempPath = Path.Combine(
+            Path.GetTempPath(), $"replace-string-range-miss-{Guid.NewGuid():N}.txt");
+        string original = "old\nmiddle\nlast\n";
+        File.WriteAllText(tempPath, original, Encoding.UTF8);
+
+        try
+        {
+            var args = ParseArgs(JsonSerializer.Serialize(new
+            {
+                filePath = tempPath,
+                oldString = "old",
+                newString = "new",
+                lineRange = "2-3",
+            }));
+
+            string result = await new ReplaceStringInFileTool().ExecuteAsync(args, workspaceRoot: null);
+
+            result.Should().StartWith("Error: ");
+            File.ReadAllText(tempPath).Should().Be(original);
+        }
+        finally
+        {
+            if (File.Exists(tempPath))
+                File.Delete(tempPath);
+        }
+    }
+
+    [Fact]
+    public async Task ReplaceStringInFile_RejectsInvalidLineRange()
+    {
+        string tempPath = Path.Combine(
+            Path.GetTempPath(), $"replace-string-range-invalid-{Guid.NewGuid():N}.txt");
+        File.WriteAllText(tempPath, "old\n", Encoding.UTF8);
+
+        try
+        {
+            var args = ParseArgs(JsonSerializer.Serialize(new
+            {
+                filePath = tempPath,
+                oldString = "old",
+                newString = "new",
+                lineRange = "3-1",
+            }));
+
+            string result = await new ReplaceStringInFileTool().ExecuteAsync(args, workspaceRoot: null);
+
+            result.Should().StartWith("Error: ");
+            File.ReadAllText(tempPath).Should().Be("old\n");
+        }
+        finally
+        {
+            if (File.Exists(tempPath))
+                File.Delete(tempPath);
+        }
+    }
+
+    [Fact]
+    public async Task ReplaceStringInFile_ReplacesTextAfterLineOne()
     {
         string tempPath = Path.Combine(
             Path.GetTempPath(), $"replace-string-fragment-{Guid.NewGuid():N}.md");
@@ -21,7 +153,6 @@ public class ReplaceStringInFileToolTests
                 filePath = tempPath,
                 oldString = "old title",
                 newString = "new title",
-                expected = "2|new title",
             }));
 
             string result = await new ReplaceStringInFileTool().ExecuteAsync(args, workspaceRoot: null);
@@ -37,7 +168,7 @@ public class ReplaceStringInFileToolTests
     }
 
     [Fact]
-    public async Task MultiReplaceStringInFile_AllowsExpectedFragmentStartingAfterLineOne()
+    public async Task MultiReplaceStringInFile_ReplacesMultipleStrings()
     {
         string tempPath = Path.Combine(
             Path.GetTempPath(), $"multi-replace-fragment-{Guid.NewGuid():N}.md");
@@ -62,7 +193,6 @@ public class ReplaceStringInFileToolTests
                         newString = "new body",
                     },
                 },
-                expected = "2|new title\n3|new body",
             }));
 
             string result = await new MultiReplaceStringInFileTool().ExecuteAsync(args, workspaceRoot: null);
@@ -78,26 +208,39 @@ public class ReplaceStringInFileToolTests
     }
 
     [Fact]
-    public async Task ReplaceStringInFile_ExpectedKeepsRawMarkdownBarsAndEmptyLine()
+    public async Task MultiReplaceStringInFile_UsesPerReplacementLineRanges()
     {
         string tempPath = Path.Combine(
-            Path.GetTempPath(), $"replace-string-raw-lines-{Guid.NewGuid():N}.md");
-        File.WriteAllText(tempPath, "line 1\n| a | b |\n\nline 4\n", Encoding.UTF8);
+            Path.GetTempPath(), $"multi-replace-range-{Guid.NewGuid():N}.txt");
+        File.WriteAllText(tempPath, "old\nmiddle\nold\n", Encoding.UTF8);
 
         try
         {
             var args = ParseArgs(JsonSerializer.Serialize(new
             {
-                filePath = tempPath,
-                oldString = "| a | b |",
-                newString = "| a | c |",
-                expected = "2|| a | c |\n3|",
+                replacements = new[]
+                {
+                    new
+                    {
+                        filePath = tempPath,
+                        oldString = "old",
+                        newString = "first",
+                        lineRange = "1-1",
+                    },
+                    new
+                    {
+                        filePath = tempPath,
+                        oldString = "old",
+                        newString = "third",
+                        lineRange = "3-3",
+                    },
+                },
             }));
 
-            string result = await new ReplaceStringInFileTool().ExecuteAsync(args, workspaceRoot: null);
+            string result = await new MultiReplaceStringInFileTool().ExecuteAsync(args, workspaceRoot: null);
 
             result.Should().NotStartWith("Error: ");
-            File.ReadAllText(tempPath).Should().Contain("| a | c |");
+            File.ReadAllText(tempPath).Should().Be("first\nmiddle\nthird\n");
         }
         finally
         {
@@ -107,10 +250,10 @@ public class ReplaceStringInFileToolTests
     }
 
     [Fact]
-    public async Task MultiReplaceStringInFile_ExpectedFragmentMayCoverOnlyOneChangedRegion()
+    public async Task MultiReplaceStringInFile_ContentAnchorsAreNotRequired()
     {
         string tempPath = Path.Combine(
-            Path.GetTempPath(), $"multi-replace-fragment-subset-{Guid.NewGuid():N}.md");
+            Path.GetTempPath(), $"multi-replace-content-anchor-{Guid.NewGuid():N}.cs");
         File.WriteAllText(tempPath, "old title\nmiddle\nold body\n", Encoding.UTF8);
 
         try
@@ -132,13 +275,42 @@ public class ReplaceStringInFileToolTests
                         newString = "new body",
                     },
                 },
-                expected = "3|new body",
             }));
 
             string result = await new MultiReplaceStringInFileTool().ExecuteAsync(args, workspaceRoot: null);
 
             result.Should().NotStartWith("Error: ");
-            File.ReadAllText(tempPath).Should().Contain("new title").And.Contain("new body");
+            File.ReadAllText(tempPath).Should()
+                .Contain("new title").And.Contain("new body")
+                .And.NotContain("old title").And.NotContain("old body");
+        }
+        finally
+        {
+            if (File.Exists(tempPath))
+                File.Delete(tempPath);
+        }
+    }
+
+    [Fact]
+    public async Task ReplaceStringInFile_PreservesRawMarkdownBars()
+    {
+        string tempPath = Path.Combine(
+            Path.GetTempPath(), $"replace-string-raw-lines-{Guid.NewGuid():N}.md");
+        File.WriteAllText(tempPath, "line 1\n| a | b |\n\nline 4\n", Encoding.UTF8);
+
+        try
+        {
+            var args = ParseArgs(JsonSerializer.Serialize(new
+            {
+                filePath = tempPath,
+                oldString = "| a | b |",
+                newString = "| a | c |",
+            }));
+
+            string result = await new ReplaceStringInFileTool().ExecuteAsync(args, workspaceRoot: null);
+
+            result.Should().NotStartWith("Error: ");
+            File.ReadAllText(tempPath).Should().Contain("| a | c |");
         }
         finally
         {
@@ -163,7 +335,6 @@ public class ReplaceStringInFileToolTests
                     new { filePath = tempPath, oldString = "first", newString = "new first" },
                     new { filePath = tempPath, oldString = "missing", newString = "x" },
                 },
-                expected = "2|second",
             }));
 
             string result = await new MultiReplaceStringInFileTool().ExecuteAsync(args, workspaceRoot: null);
@@ -197,7 +368,6 @@ public class ReplaceStringInFileToolTests
                     new { filePath = temp1, oldString = "one", newString = "new one" },
                     new { filePath = temp2, oldString = "two", newString = "new two" },
                 },
-                expected = "1|new one",
             }));
 
             string result = await new MultiReplaceStringInFileTool().ExecuteAsync(args, workspaceRoot: null);
@@ -231,7 +401,6 @@ public class ReplaceStringInFileToolTests
                     new { filePath = tempPath, oldString = "first", newString = "new first" },
                     new { filePath = tempPath, oldString = "missing", newString = "x" },
                 },
-                expected = "2|second",
             }));
 
             string result = await tool.ExecuteAsync(args, workspaceRoot: null);

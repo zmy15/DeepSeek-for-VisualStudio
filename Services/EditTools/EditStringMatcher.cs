@@ -9,10 +9,8 @@ using System.Text.RegularExpressions;
 namespace DeepSeek_v4_for_VisualStudio.Services.EditTools
 {
     /// <summary>
-    /// 编辑字符串匹配器 — 从 EditPatchService 提取的 5 级匹配算法。
-    /// 支持单文本匹配和行数组上下文匹配两种模式。
-    /// 
-    /// 参考: vscode-copilot-chat applyPatch/parser.ts (find_context_core, fuzzy matching)
+    /// 编辑字符串匹配器 — 单文本降级匹配和行数组上下文匹配。
+    /// apply_patch 使用 expected 位置锚点，同时保留上下文匹配与 @@/EOF 定位辅助。
     /// </summary>
     public static class EditStringMatcher
     {
@@ -204,49 +202,34 @@ namespace DeepSeek_v4_for_VisualStudio.Services.EditTools
             int maxStart = fileLines.Length - contextLines.Length;
             if (maxStart < 0) return -1;
 
-            // Pass 1: 精确匹配（Unicode NFC 标准化后）
             var canonFile = fileLines.Select(NormalizeUnicode).ToArray();
             var canonCtx = contextLines.Select(NormalizeUnicode).ToArray();
             int match = FindLineSequence(canonFile, canonCtx, startLine);
             if (match >= 0) { level = MatchLevel.Exact; return match; }
 
-            // Pass 2: 忽略尾部空白
             var trimEndFile = canonFile.Select(l => l.TrimEnd()).ToArray();
             var trimEndCtx = canonCtx.Select(l => l.TrimEnd()).ToArray();
             match = FindLineSequence(trimEndFile, trimEndCtx, startLine);
             if (match >= 0) { level = MatchLevel.WhitespaceFlexible; return match; }
 
-            // Pass 3: 标准化显式 \t → 制表符
             var tabFile = trimEndFile.Select(ReplaceExplicitTabs).ToArray();
             var tabCtx = trimEndCtx.Select(ReplaceExplicitTabs).ToArray();
             match = FindLineSequence(tabFile, tabCtx, startLine);
             if (match >= 0) { level = MatchLevel.Fuzzy; return match; }
 
-            // Pass 3.5: 标准化显式 \n → 换行符（仅单行上下文，参考 parser.ts Pass 4）
             if (contextLines.Length == 1)
             {
                 var nlFile = tabFile.Select(ReplaceExplicitNewlines).ToArray();
                 var nlCtx = tabCtx.Select(ReplaceExplicitNewlines).ToArray();
-                // expandFile: 如果 ctx 被 \n 拆成多行，扩展匹配窗口
-                if (nlCtx.Length != contextLines.Length)
-                {
-                    match = FindLineSequence(nlFile, nlCtx, startLine);
-                    if (match >= 0) { level = MatchLevel.Fuzzy; return match; }
-                }
-                else
-                {
-                    match = FindLineSequence(nlFile, nlCtx, startLine);
-                    if (match >= 0) { level = MatchLevel.Fuzzy; return match; }
-                }
+                match = FindLineSequence(nlFile, nlCtx, startLine);
+                if (match >= 0) { level = MatchLevel.Fuzzy; return match; }
             }
 
-            // Pass 4: 忽略所有周围空白
             var trimAllFile = tabFile.Select(l => l.Trim()).ToArray();
             var trimAllCtx = tabCtx.Select(l => l.Trim()).ToArray();
             match = FindLineSequence(trimAllFile, trimAllCtx, startLine);
             if (match >= 0) { level = MatchLevel.Fuzzy; return match; }
 
-            // Pass 5: 编辑距离模糊匹配
             match = FuzzyLineMatch(trimAllFile, trimAllCtx, startLine);
             if (match >= 0) { level = MatchLevel.Levenshtein; return match; }
 
@@ -275,18 +258,13 @@ namespace DeepSeek_v4_for_VisualStudio.Services.EditTools
             return -1;
         }
 
-        /// <summary>
-        /// 编辑距离模糊行匹配：累计各行编辑距离不超过阈值。
-        /// 额外要求至少一半的上下文行精确匹配（距离 0），防止在结构不同但总编辑距离
-        /// 相近的代码块中产生误匹配（如重复的 getter/setter 模式）。
-        /// </summary>
         private static int FuzzyLineMatch(string[] fileLines, string[] contextLines, int startLine)
         {
             int maxDistance = (int)Math.Floor(contextLines.Length * EditDistanceAllowancePerLine);
             if (maxDistance <= 0) return -1;
 
             int maxStart = fileLines.Length - contextLines.Length;
-            int minExactMatches = Math.Max(1, contextLines.Length / 2); // 至少一半行精确匹配
+            int minExactMatches = Math.Max(1, contextLines.Length / 2);
 
             for (int i = Math.Max(0, startLine); i <= maxStart; i++)
             {
@@ -309,9 +287,6 @@ namespace DeepSeek_v4_for_VisualStudio.Services.EditTools
 
         #region @@ 标记定位
 
-        /// <summary>
-        /// 通过 @@ 标记文本在文件中定位。
-        /// </summary>
         public static int MatchContextViaMarkers(
             string[] fileLines, List<string> contextMarkers, int startLine)
         {
@@ -326,7 +301,6 @@ namespace DeepSeek_v4_for_VisualStudio.Services.EditTools
                     if (NormalizeUnicode(fileLines[i]).Contains(normalized))
                         return i;
                 }
-                // 忽略大小写再试
                 for (int i = Math.Max(0, startLine); i < fileLines.Length; i++)
                 {
                     if (NormalizeUnicode(fileLines[i]).Contains(normalized, StringComparison.OrdinalIgnoreCase))
@@ -459,7 +433,6 @@ namespace DeepSeek_v4_for_VisualStudio.Services.EditTools
 
         /// <summary>
         /// 将显式的 "\n" 字符串替换为实际换行符（同时处理 \t）。
-        /// 参考: parser.ts replace_explicit_nl
         /// </summary>
         public static string ReplaceExplicitNewlines(string s)
         {
@@ -647,106 +620,5 @@ namespace DeepSeek_v4_for_VisualStudio.Services.EditTools
 
         #endregion
 
-        #region 结构完整性校验
-
-        /// <summary>
-        /// 对修改区域的代码进行快速结构校验。
-        /// 检查括号配对、基本语法标记等，返回问题列表。
-        /// </summary>
-        /// <param name="content">修改后文件完整内容</param>
-        /// <param name="editStartLine">编辑起始行（0-based）</param>
-        /// <param name="editEndLine">编辑结束行（0-based）</param>
-        /// <param name="originalLines">原始文件行数组（用于对比基线）</param>
-        /// <returns>问题描述列表，为空表示通过</returns>
-        /// <remarks>
-        /// v1.1.11: 改为全文件括号净变化检查。
-        /// 旧版在 ±20 行窗口内做 bracket stack 配对，但代码块（函数/类/命名空间）
-        /// 常跨越数百行，窗口内配对检查会产生大量误报（如函数体的 { 和文件尾的 }）。
-        /// 新版对比编辑前后全文件的括号总数：编辑区域外的内容未修改，括号数量不变，
-        /// 因此全文件括号总数的净变化即编辑操作引入的变化量，Δ≠0 说明编辑破坏了平衡。
-        /// </remarks>
-        public static List<string> ValidateStructureIntegrity(
-            string content, int editStartLine, int editEndLine, string[] originalLines)
-        {
-            var errors = new List<string>();
-            var lines = content.Split(new[] { "\r\n", "\n" }, StringSplitOptions.None);
-
-            // ── 全文件括号净变化检查 ──
-            // 编辑区域前后的代码未经修改，括号数量应与原始一致。
-            // 全文件括号总数的净变化即为编辑操作引入的变化量。
-            // 一次性遍历，统计所有括号类型。
-            int origCurlyOpen = 0, origCurlyClose = 0;
-            int origParenOpen = 0, origParenClose = 0;
-            int origSquareOpen = 0, origSquareClose = 0;
-
-            foreach (var line in originalLines)
-            {
-                foreach (char ch in line)
-                {
-                    switch (ch)
-                    {
-                        case '{': origCurlyOpen++; break;
-                        case '}': origCurlyClose++; break;
-                        case '(': origParenOpen++; break;
-                        case ')': origParenClose++; break;
-                        case '[': origSquareOpen++; break;
-                        case ']': origSquareClose++; break;
-                    }
-                }
-            }
-
-            int modCurlyOpen = 0, modCurlyClose = 0;
-            int modParenOpen = 0, modParenClose = 0;
-            int modSquareOpen = 0, modSquareClose = 0;
-
-            foreach (var line in lines)
-            {
-                foreach (char ch in line)
-                {
-                    switch (ch)
-                    {
-                        case '{': modCurlyOpen++; break;
-                        case '}': modCurlyClose++; break;
-                        case '(': modParenOpen++; break;
-                        case ')': modParenClose++; break;
-                        case '[': modSquareOpen++; break;
-                        case ']': modSquareClose++; break;
-                    }
-                }
-            }
-
-            // ── 花括号：结构性最强，净变化必须为 0 ──
-            int curlyOpenDelta = modCurlyOpen - origCurlyOpen;
-            int curlyCloseDelta = modCurlyClose - origCurlyClose;
-            if (curlyOpenDelta != curlyCloseDelta)
-            {
-                errors.Add($"花括号净变化不平衡: +{curlyOpenDelta} '{{', +{curlyCloseDelta} '}}' (净差={curlyOpenDelta - curlyCloseDelta})");
-            }
-            else if (Math.Abs(curlyOpenDelta) > 10)
-            {
-                // 平衡但变化较大（如新增整个函数），给出提示
-                errors.Add($"花括号变化量较大 ({{ {curlyOpenDelta:+0;-0}, }} {curlyCloseDelta:+0;-0})，请人工确认结构完整性");
-            }
-
-            // ── 圆括号：可能出现在字符串/注释中，作为软告警 ──
-            int parenOpenDelta = modParenOpen - origParenOpen;
-            int parenCloseDelta = modParenClose - origParenClose;
-            if (parenOpenDelta != parenCloseDelta && Math.Abs(parenOpenDelta - parenCloseDelta) > 2)
-            {
-                errors.Add($"圆括号净变化不平衡: +{parenOpenDelta} '(', +{parenCloseDelta} ')'（可能是误报，请人工确认）");
-            }
-
-            // ── 方括号：同样作为软告警 ──
-            int squareOpenDelta = modSquareOpen - origSquareOpen;
-            int squareCloseDelta = modSquareClose - origSquareClose;
-            if (squareOpenDelta != squareCloseDelta && Math.Abs(squareOpenDelta - squareCloseDelta) > 2)
-            {
-                errors.Add($"方括号净变化不平衡: +{squareOpenDelta} '[', +{squareCloseDelta} ']'（可能是误报，请人工确认）");
-            }
-
-            return errors;
-        }
-
-        #endregion
     }
 }

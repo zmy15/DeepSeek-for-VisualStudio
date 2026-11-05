@@ -50,19 +50,19 @@ namespace DeepSeek_v4_for_VisualStudio.Services.BuiltInTools
                                     {
                                         filePath = new { type = "string", description = LocalizationService.Instance["tool.multiReplace.param.filePath"] },
                                         oldString = new { type = "string", description = LocalizationService.Instance["tool.multiReplace.param.oldString"] },
-                                        newString = new { type = "string", description = LocalizationService.Instance["tool.multiReplace.param.newString"] }
+                                        newString = new { type = "string", description = LocalizationService.Instance["tool.multiReplace.param.newString"] },
+                                        lineRange = new
+                                        {
+                                            type = "string",
+                                            description = LocalizationService.Instance["tool.replaceString.param.lineRange"]
+                                        }
                                     },
                                     required = new[] { "filePath", "oldString", "newString" }
                                 },
                                 description = LocalizationService.Instance["tool.multiReplace.param.replacements"]
-                            },
-                            expected = new
-                            {
-                                type = "string",
-                                description = LocalizationService.Instance["tool.editVerify.expectedDescription"]
                             }
                         },
-                        required = new[] { "replacements", "expected" }
+                        required = new[] { "replacements" }
                     }
                 }
             };
@@ -90,14 +90,6 @@ namespace DeepSeek_v4_for_VisualStudio.Services.BuiltInTools
 
         public override async Task<string> ExecuteAsync(Dictionary<string, JsonElement> args, string? workspaceRoot)
         {
-            string expectedText = GetStringArg(args, "expected");
-            if (string.IsNullOrEmpty(expectedText))
-                return LocalizationService.Instance["tool.editVerify.missingExpected"];
-
-            var expectedParse = ExpectedContentVerifier.ParseLineNumberedFragment(expectedText);
-            if (!expectedParse.Success)
-                return expectedParse.Error;
-
             if (!args.TryGetValue("replacements", out var element) ||
                 element.ValueKind != JsonValueKind.Array)
                 return LocalizationService.Instance["tool.multiReplace.missingReplacements"];
@@ -154,7 +146,7 @@ namespace DeepSeek_v4_for_VisualStudio.Services.BuiltInTools
             foreach (var (filePath, singleArgs) in pending)
             {
                 string result = await _singleReplacer.ApplyReplacementAsync(
-                    singleArgs, workspaceRoot, expectedText: null, verifyAfterWrite: false);
+                    singleArgs, workspaceRoot);
                 results.Add($"{Path.GetFileName(filePath)}: {result}");
                 if (result.StartsWith("Error: ") || result.StartsWith("Timeout: ")) failCount++;
                 else successCount++;
@@ -182,10 +174,7 @@ namespace DeepSeek_v4_for_VisualStudio.Services.BuiltInTools
                 return detail;
             }
 
-            string? actualContent = await _singleReplacer.ReadCurrentContentAsync(targetFile!);
-            string verification = ExpectedContentVerifier.VerifyExpectedFragment(
-                expectedText, actualContent, targetFile!);
-            return detail + "\n" + verification;
+            return detail;
         }
     }
 }
