@@ -949,13 +949,6 @@ namespace DeepSeek_v4_for_VisualStudio.Services
                 ? "<span class='streaming-cursor' id='cursor-" + idx + "'></span>"
                 : "";
 
-            // 只在尚未收到正文/思考时显示省略号；页面重建后已有内容时不再留下“仍为空”的视觉信号。
-            bool hasStreamingOutput = !string.IsNullOrWhiteSpace(displayContent)
-                || !string.IsNullOrWhiteSpace(msg.ReasoningContent);
-            string streamingDots = isStreaming && !hasStreamingOutput
-                ? $" <span id='streaming-dots-{idx}' class='streaming-dots' style='color:{Palette.Accent};font-size:10px'>&#8226; &#8226; &#8226;</span>"
-                : "";
-
             string retryBtnHtml = !isStreaming && !msg.IsHtml
                 ? $"<button id='retry-btn-{idx}' class='msg-action-btn retry-btn' onclick='window.__retryMessage({idx})' title='{L["chat.html.retryButtonTitle"]}'>{EscapeHtml(L["chat.html.retryButton"])}</button>"
                 : "";
@@ -970,7 +963,7 @@ namespace DeepSeek_v4_for_VisualStudio.Services
             sb.Append($"<div id='msg-{idx}' class='msg-wrapper ai'>");
             sb.Append("<div class='msg-avatar ai'>D</div>");
             sb.Append("<div class='msg-bubble ai'>");
-            sb.Append($"<div class='msg-role-label ai'>DeepSeek{streamingDots}</div>");
+            sb.Append("<div class='msg-role-label ai'>DeepSeek</div>");
             sb.Append(reasoningHtml);
             // ── 内嵌原始 Markdown 内容（`data-raw-content`），供复制按钮读取 ──
             string encodedRawContent = System.Net.WebUtility.HtmlEncode(displayContent);
@@ -1803,9 +1796,9 @@ return "<!DOCTYPE html><html lang='" + htmlLang + "'><head><meta charset='UTF-8'
         window.__insertBeforeTaskPanel(div);
         // 初始化分页状态：进度文本 / 箭头可见性 / 提交按钮仅在最后一题显示
         window.__askQuestionsShowPage(div,0);
-        // 已进入等待用户回答阶段，隐藏重建静态页面时留下的流式省略号/光标。
-        var streamIndicators=document.querySelectorAll('.streaming-dots,.streaming-cursor');
-        for(var si=0;si<streamIndicators.length;si++)streamIndicators[si].style.display='none';
+        // 已进入等待用户回答阶段，隐藏重建静态页面时留下的流式光标。
+        var streamCursors=document.querySelectorAll('.streaming-cursor');
+        for(var si=0;si<streamCursors.length;si++)streamCursors[si].style.display='none';
         window.__scrollToBottom('smooth');
         window.__sendToHost({{type:'diagnostic',msg:'questions:injected OK'}});
     }}catch(e){{

@@ -27,6 +27,24 @@ public class ChatHtmlServiceTests
     }
 
     [Fact]
+    public void BuildAssistantMessageHtml_Streaming_DoesNotRenderHeaderDots()
+    {
+        string html = ChatHtmlService.BuildAssistantMessageHtml(
+            new ChatMessage
+            {
+                Role = "assistant",
+                IsStreaming = true,
+                Content = string.Empty,
+            },
+            index: 0);
+
+        html.Should().Contain(">DeepSeek</div>");
+        html.Should().Contain("streaming-cursor");
+        html.Should().NotContain("&#8226;");
+        html.Should().NotContain("streaming-dots");
+    }
+
+    [Fact]
     public void RenderMarkdownToHtml_SoftLineBreak_RendersLineBreak()
     {
         var result = ChatHtmlService.RenderMarkdownToHtml("first line\nsecond line");
@@ -585,7 +603,7 @@ public class ChatHtmlServiceTests
     }
 
     [Fact]
-    public void BuildAskQuestionsJs_HidesStaleStreamingIndicators()
+    public void BuildAskQuestionsJs_HidesStaleStreamingCursor()
     {
         var request = new AgentQuestionRequest
         {
@@ -602,7 +620,7 @@ public class ChatHtmlServiceTests
 
         string js = ChatHtmlService.BuildAskQuestionsJs(request);
 
-        js.Should().Contain(".streaming-dots,.streaming-cursor");
+        js.Should().Contain(".streaming-cursor");
         js.Should().Contain("style.display='none'");
     }
 
