@@ -608,6 +608,8 @@ namespace DeepSeek_v4_for_VisualStudio.View
         // ── 已创建的计划 ID 集合（防止重复创建计划消息）──
         private readonly HashSet<string> _createdPlanIds = new();
         private readonly HashSet<string> _presentedQuestionRequests = new();
+        private readonly Dictionary<string, AgentQuestionRequest> _pendingQuestionRequests = new(StringComparer.Ordinal);
+        private readonly HashSet<string> _questionCardRenderInFlight = new(StringComparer.Ordinal);
 
         // ── 审批 UI 串行队列：同一时刻只显示一个审批卡片，处理完再显示下一个 ──
         private readonly ApprovalRequestQueue _approvalQueue = new();

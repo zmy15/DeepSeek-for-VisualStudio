@@ -285,6 +285,43 @@ public class WebViewReloadRecoveryTests
         });
     }
 
+    [Fact]
+    public void PendingQuestion_ShouldSurviveForPageReadyReplayUntilAnswered()
+    {
+        RunOnStaThread(control =>
+        {
+            var request = new AgentQuestionRequest
+            {
+                Questions = new List<AgentQuestion>
+                {
+                    new()
+                    {
+                        Header = "确认",
+                        Question = "继续吗？",
+                        Options = new List<QuestionOption>
+                        {
+                            new() { Label = "是" },
+                            new() { Label = "否" },
+                        },
+                    },
+                },
+                ResponseTcs = new TaskCompletionSource<string>(),
+            };
+
+            control.TrackPendingQuestionForPresentation(request).Should().BeTrue();
+            control.TrackPendingQuestionForPresentation(request).Should().BeFalse(
+                "重复事件不得重绘卡片并覆盖用户已选择的答案");
+
+            control.GetLatestPendingQuestionForReplay().Should().BeSameAs(request,
+                "WebView 重建后仍应能找到待回答的提问并重放卡片");
+
+            control.CompletePendingQuestionForPresentation(request.RequestId);
+
+            control.GetLatestPendingQuestionForReplay().Should().BeNull(
+                "用户提交、关闭或取消后不得再次重放卡片");
+        });
+    }
+
     // ── 合成链路失效（真正的空白窗口成因）──────────────────────────────
 
     [Fact]
