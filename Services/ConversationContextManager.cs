@@ -14,10 +14,10 @@ namespace DeepSeek_v4_for_VisualStudio.Services
     /// 
     /// 核心职责：
     /// 1. 单一数据源：所有 API 调用所需的对话历史由此类统一管理
-    /// 2. reasoning_content 回传规则（节省 token）：
-    ///    - 仅当前真实用户轮次内的 assistant 消息回传 reasoning_content
-    ///    - 历史轮次保留本地思考内容用于回看，但不再写入 API 请求
-    ///    - 当前轮次内的工具调用链仍完整回传，保证同一轮思考可继续
+    /// 2. reasoning_content 回传规则（严格遵守 DeepSeek 思考模式协议）：
+    ///    - 所有历史 assistant 消息均逐条原样回传 reasoning_content
+    ///    - 不做截断、压缩或跨工具轮次聚合
+    ///    - 缺失该字段会让 DeepSeek 思考模式在停止、编辑重发等场景返回 HTTP 400
     /// 3. Token 预算估算与自动压缩（不再直接截断/删除旧消息）
     /// 4. 轮次（Turn）边界追踪
     /// 5. RAG 上下文注入点
@@ -646,8 +646,8 @@ namespace DeepSeek_v4_for_VisualStudio.Services
         /// <param name="toolCalls">工具调用列表（可为 null）</param>
         public void AddAssistantMessage(string? content, string? reasoningContent = null, List<ToolCall>? toolCalls = null)
         {
-            // 不裁剪：当前轮次仍需原样回传 reasoning_content；历史轮次虽不再发送，
-            // 但仍保留完整内容供 UI 回看。仅做超限告警，便于观察实际体量。
+            // 不裁剪：官方要求思考模式下后续请求继续回传历史 reasoning_content。
+            // 落库/落内存时截断会违反该要求，仅做超限告警，便于观察实际体量。
             ReasoningTextPolicy.WarnIfOversized(reasoningContent);
 
             // ──  前缀缓存优化：写时合并连续 assistant 消息 ──
@@ -1389,7 +1389,6 @@ namespace DeepSeek_v4_for_VisualStudio.Services
 
             // ── [2..] 对话历史 ──
             int entryLimit = entryLimitOverride ?? _cacheSnapshotEntryIndex ?? _entries.Count;
-            int currentTurn = CurrentTurnIndex;
             for (int i = startEntryIdx; i < _entries.Count && i < entryLimit; i++)
             {
                 var entry = _entries[i];
@@ -1414,10 +1413,9 @@ namespace DeepSeek_v4_for_VisualStudio.Services
 
                 if (entry.Role == "assistant")
                 {
-                    // 只为当前真实用户轮次回传思考，历史轮次不再携带 reasoning_content。
-                    // 当前轮次内仍按每条 assistant 原始值回传，不能聚合成一段。
-                    if (currentTurn > 0 && entry.TurnIndex == currentTurn)
-                        apiMsg.ReasoningContent = entry.ReasoningContent;
+                    // DeepSeek 思考模式要求每个后续请求都继续回传历史 reasoning_content。
+                    // 必须逐条原样回放，不能截断、聚合或按轮次丢弃，否则会返回 HTTP 400。
+                    apiMsg.ReasoningContent = entry.ReasoningContent;
                 }
 
                 if (entry.Role == "assistant" && entry.ToolCalls != null && entry.ToolCalls.Count > 0)

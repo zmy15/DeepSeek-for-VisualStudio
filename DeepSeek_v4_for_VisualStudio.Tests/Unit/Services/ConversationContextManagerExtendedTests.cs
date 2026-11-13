@@ -233,8 +233,7 @@ public class ConversationContextManagerExtendedTests
         var messages = _manager.BuildApiMessages();
 
         var assistantMsg = messages.First(m => m.Role == "assistant");
-        // 当前轮次内，即使本轮 assistant 未实际调用工具，其 reasoning_content
-        // 也随当前轮一起回传；进入下一用户轮次后才停止回传。
+        // 思考模式下，无论是否调用工具，assistant 的 reasoning_content 都要回传。
         assistantMsg.ReasoningContent.Should().Be("This is my reasoning...");
     }
 

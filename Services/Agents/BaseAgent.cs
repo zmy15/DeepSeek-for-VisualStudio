@@ -1122,6 +1122,123 @@ namespace DeepSeek_v4_for_VisualStudio.Services.Agents
             return toolInsertPos;
         }
 
+        /// <summary>一轮工具调用中观察到的验证结果。</summary>
+        [Flags]
+        internal enum VerificationRoundStatus
+        {
+            None = 0,
+            TestsPassed = 1,
+            TestsFailed = 2,
+            BuildPassed = 4,
+            BuildFailed = 8,
+        }
+
+        /// <summary>
+        /// 汇总一轮工具调用中的测试/构建结果。
+        /// 只有实际执行了测试且 failed=0 才算 TestsPassed。
+        /// </summary>
+        internal static VerificationRoundStatus ClassifyVerificationRound(
+            IReadOnlyList<ToolCall> toolCalls,
+            IReadOnlyList<string?> toolResults)
+        {
+            var status = VerificationRoundStatus.None;
+            bool sawBuildCall = false;
+            bool allBuildsPassed = true;
+
+            int count = Math.Min(toolCalls?.Count ?? 0, toolResults?.Count ?? 0);
+            for (int i = 0; i < count; i++)
+            {
+                string toolName = NormalizeToolName(toolCalls[i].Function?.Name);
+                string? result = toolResults[i];
+
+                if (string.Equals(toolName, "run_tests", StringComparison.OrdinalIgnoreCase))
+                {
+                    if (RunTestsTool.IsTestRunSuccess(result))
+                        status |= VerificationRoundStatus.TestsPassed;
+                    else if (RunTestsTool.IsTestRunFailure(result))
+                        status |= VerificationRoundStatus.TestsFailed;
+                }
+                else if (string.Equals(toolName, "build_solution", StringComparison.OrdinalIgnoreCase))
+                {
+                    sawBuildCall = true;
+                    if (!BuildSolutionTool.IsSuccessResult(result))
+                        allBuildsPassed = false;
+                }
+            }
+
+            if (sawBuildCall)
+            {
+                status |= allBuildsPassed
+                    ? VerificationRoundStatus.BuildPassed
+                    : VerificationRoundStatus.BuildFailed;
+            }
+
+            return status;
+        }
+
+        /// <summary>
+        /// 根据上一轮未解决的测试失败与本轮验证结果，决定是否立即终止工具循环。
+        /// 测试通过优先于构建；明确失败的测试不能被后续编译成功覆盖。
+        /// </summary>
+        internal static (bool ShouldTerminate, bool HasUnresolvedTestFailure, VerificationRoundStatus PreferredStatus)
+            DecideVerificationLoopTermination(
+                VerificationRoundStatus currentRound,
+                bool hasUnresolvedTestFailure)
+        {
+            bool roundHasTestFailure =
+                (currentRound & VerificationRoundStatus.TestsFailed) != 0;
+            bool roundHasTestSuccess =
+                (currentRound & VerificationRoundStatus.TestsPassed) != 0;
+
+            if (roundHasTestFailure)
+                hasUnresolvedTestFailure = true;
+            else if (roundHasTestSuccess)
+                hasUnresolvedTestFailure = false;
+
+            bool buildFailed =
+                (currentRound & VerificationRoundStatus.BuildFailed) != 0;
+
+            if (roundHasTestSuccess && !roundHasTestFailure && !buildFailed)
+            {
+                return (true, hasUnresolvedTestFailure, VerificationRoundStatus.TestsPassed);
+            }
+
+            bool buildPassed =
+                (currentRound & VerificationRoundStatus.BuildPassed) != 0
+                && !buildFailed
+                && !hasUnresolvedTestFailure
+                && !roundHasTestFailure;
+
+            return buildPassed
+                ? (true, hasUnresolvedTestFailure, VerificationRoundStatus.BuildPassed)
+                : (false, hasUnresolvedTestFailure, VerificationRoundStatus.None);
+        }
+
+        /// <summary>
+        /// 找到与验证结论对应的工具结果索引，用于把完整结果作为本轮最终正文。
+        /// </summary>
+        private static int FindVerificationResultIndex(
+            IReadOnlyList<ToolCall> toolCalls,
+            VerificationRoundStatus preferredStatus)
+        {
+            string expectedTool = preferredStatus == VerificationRoundStatus.TestsPassed
+                ? "run_tests"
+                : "build_solution";
+
+            for (int i = 0; i < toolCalls.Count; i++)
+            {
+                if (string.Equals(
+                    NormalizeToolName(toolCalls[i].Function?.Name),
+                    expectedTool,
+                    StringComparison.OrdinalIgnoreCase))
+                {
+                    return i;
+                }
+            }
+
+            return -1;
+        }
+
         /// <summary>
         /// 带工具调用的 AI 对话循环（支持多轮工具调用）。
         /// 
@@ -1191,6 +1308,7 @@ namespace DeepSeek_v4_for_VisualStudio.Services.Agents
             int consecutiveErrorRounds = 0;
             int askQuestionsCallCount = 0;
             int askDirectExplorationCallCount = 0;
+            bool hasUnresolvedTestFailure = false;
             // 本次工具循环内"考虑探索深度"提示只发一次，避免反复刷屏。
             bool askDirectExplorationNoticeSent = false;
             bool noToolsReminderAppended = false;
@@ -2071,24 +2189,29 @@ namespace DeepSeek_v4_for_VisualStudio.Services.Agents
                     // ── 工具结果写回后立即检查：同一用户请求内超限也触发压缩。──
                     TryCompressToolLoopContext(ref messages, ref toolInsertPos);
 
-                    // ── Build/Edit 验证：构建工具已经等待完整构建结果。明确成功后立即结束，
-                    //    不再进入下一轮让模型调用 get_errors 重复确认。──
+                    // ── Build/Edit 验证：测试或构建已经等待完整结果。明确成功后立即结束，
+                    //    不再进入下一轮让模型调用 get_errors 或重复验证。──
                     if ((Definition.Type == AgentType.Build || Definition.Type == AgentType.Edit)
                         && PendingHandoffRequest == null)
                     {
-                        var buildResultIndices = toolCalls
-                            .Select((tc, index) => new { ToolCall = tc, Index = index })
-                            .Where(item => item.ToolCall.Function.Name == "build_solution")
-                            .Select(item => item.Index)
-                            .ToList();
+                        var verificationStatus = ClassifyVerificationRound(toolCalls, toolResults);
+                        var verificationDecision = DecideVerificationLoopTermination(
+                            verificationStatus,
+                            hasUnresolvedTestFailure);
+                        hasUnresolvedTestFailure = verificationDecision.HasUnresolvedTestFailure;
 
-                        if (buildResultIndices.Count > 0
-                            && buildResultIndices.All(index => BuildSolutionTool.IsSuccessResult(toolResults[index])))
+                        if (verificationDecision.ShouldTerminate)
                         {
-                            int resultIndex = buildResultIndices[0];
-                            contentBuilder.Clear();
-                            contentBuilder.Append(toolResults[resultIndex]);
-                            // 成功构建会直接结束工具循环，之后不会再有 API 请求更新
+                            int resultIndex = FindVerificationResultIndex(
+                                toolCalls,
+                                verificationDecision.PreferredStatus);
+                            if (resultIndex >= 0)
+                            {
+                                contentBuilder.Clear();
+                                contentBuilder.Append(toolResults[resultIndex]);
+                            }
+
+                            // 成功验证会直接结束工具循环，之后不会再有 API 请求更新
                             // _apiService.LastSentMessages。如果后续程序化 Handoff 仍从最近
                             // 请求快照取上下文，就会丢失本次 build_solution 的 tool result。
                             // 因此显式保存当前完整消息列表，确保 Handoff 能看到最终构建结果。
@@ -2096,8 +2219,13 @@ namespace DeepSeek_v4_for_VisualStudio.Services.Agents
                             {
                                 Context.ForwardedMessages = CloneApiMessages(messages);
                             }
-                            Logger.Info($"[Agent:{Definition.Name}] build_solution 已成功完成，终止工具循环并返回结果。");
-                            metrics?.MarkTerminated("build_success");
+                            string terminationReason =
+                                verificationDecision.PreferredStatus == VerificationRoundStatus.TestsPassed
+                                    ? "test_success"
+                                    : "build_success";
+                            Logger.Info(
+                                $"[Agent:{Definition.Name}] {terminationReason} 已明确完成，终止工具循环并返回结果。");
+                            metrics?.MarkTerminated(terminationReason);
                             break;
                         }
                     }

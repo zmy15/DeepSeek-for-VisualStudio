@@ -397,6 +397,13 @@ namespace DeepSeek_v4_for_VisualStudio.Services.Providers
             }
         }
 
+        /// <summary>
+        /// 当前请求是否要求所有历史 assistant 消息都携带 reasoning_content。
+        /// 默认关闭；仅由需要严格回传思考内容的 Provider（如 DeepSeek 思考模式）覆写。
+        /// </summary>
+        protected virtual bool RequiresReasoningContentForAllAssistants(DeepSeekChatRequest request)
+            => false;
+
         /// <summary>运行时更新 API Key（P1：选项页保存后即时生效，无需重启）。</summary>
         public void UpdateApiKey(string apiKey)
         {
@@ -526,6 +533,7 @@ namespace DeepSeek_v4_for_VisualStudio.Services.Providers
             int mergedCount = 0;
             var mergedPositions = new List<string>(); // 记录合并位置用于诊断
             int msgIndex = 0;
+            bool requiresReasoningReplay = RequiresReasoningContentForAllAssistants(request);
             foreach (var msg in request.Messages)
             {
                 // ── 规则 1：tool 消息必须有 tool_call_id ──
@@ -553,8 +561,13 @@ namespace DeepSeek_v4_for_VisualStudio.Services.Providers
                 // 且泛型阶段式修改不应改到调用方 ConversationContextManager 的对象）。
                 var clone = CloneMessage(msg);
 
-                // ── 规则 3：assistant 消息有 tool_calls 但缺少 reasoning_content → 补全 ──
-                if (clone.Role == "assistant" && clone.ToolCalls != null && clone.ToolCalls.Count > 0 && clone.ReasoningContent == null)
+                // ── 规则 3：严格思考模式下 assistant 缺少 reasoning_content → 补全 ──
+                // 工具调用消息在任何 Provider 下都必须携带该字段；其余 assistant 仅在
+                // DeepSeek 思考模式等严格协议下补空，兼容旧会话/异常中断留下的不完整历史。
+                if (clone.Role == "assistant"
+                    && clone.ReasoningContent == null
+                    && ((clone.ToolCalls != null && clone.ToolCalls.Count > 0)
+                        || requiresReasoningReplay))
                 {
                     clone.ReasoningContent = string.Empty;
                 }

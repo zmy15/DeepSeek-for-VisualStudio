@@ -186,6 +186,47 @@ public class WebViewReloadRecoveryTests
         max.Should().BeLessThanOrEqualTo(10, "重试上限过大等于没有防护");
     }
 
+    [Fact]
+    public void NavigateToStringLimit_ShouldMatchWebView2Contract()
+    {
+        var field = typeof(DeepSeekChatControl).GetField(
+            "WebViewNavigateToStringMaxBytes",
+            BindingFlags.NonPublic | BindingFlags.Static);
+        field.Should().NotBeNull("WebViewNavigateToStringMaxBytes 常量应存在");
+
+        int maxBytes = (int)field!.GetRawConstantValue()!;
+        maxBytes.Should().Be(2 * 1024 * 1024,
+            "CoreWebView2.NavigateToString 的官方上限是 2 MB");
+    }
+
+    [Fact]
+    public void BuildNavigableInitialPageHtml_ReducesWindowToFitLimit()
+    {
+        RunOnStaThread(control =>
+        {
+            var messages = GetField<List<ChatMessage>>(control, "_messages");
+            messages.Clear();
+            for (int i = 0; i < 4; i++)
+            {
+                messages.Add(new ChatMessage
+                {
+                    Role = "user",
+                    Content = $"MESSAGE_{i}_" + new string('x', 80_000),
+                });
+            }
+
+            string emptyPage = ChatHtmlService.BuildInitialPageFromMessagesHtml(string.Empty);
+            int maxBytes = System.Text.Encoding.UTF8.GetByteCount(emptyPage) + 120_000;
+
+            string html = control.BuildNavigableInitialPageHtml(maxBytes);
+
+            System.Text.Encoding.UTF8.GetByteCount(html).Should().BeLessOrEqualTo(maxBytes);
+            html.Should().Contain("MESSAGE_3_", "至少必须保留最新消息可见");
+            GetField<int>(control, "_renderWindowStart").Should().BeGreaterThan(
+                0, "超限时应缩小窗口并保留加载更早消息的入口");
+        });
+    }
+
     // ── 卸载/重载路径的渲染状态复位契约 ──────────────────────────────
 
     [Fact]
@@ -241,6 +282,121 @@ public class WebViewReloadRecoveryTests
             // 标记被消费：同一次卸载-加载往返只触发一次恢复，
             // 避免 VS 布局抖动时反复重建控件
             GetField<bool>(control, "_webViewReloadNeedsRestore").Should().BeFalse();
+        });
+    }
+
+    [Fact]
+    public void PendingQuestion_ShouldSurviveForPageReadyReplayUntilAnswered()
+    {
+        RunOnStaThread(control =>
+        {
+            var request = new AgentQuestionRequest
+            {
+                Questions = new List<AgentQuestion>
+                {
+                    new()
+                    {
+                        Header = "确认",
+                        Question = "继续吗？",
+                        Options = new List<QuestionOption>
+                        {
+                            new() { Label = "是" },
+                            new() { Label = "否" },
+                        },
+                    },
+                },
+                ResponseTcs = new TaskCompletionSource<string>(),
+            };
+
+            control.TrackPendingQuestionForPresentation(request).Should().BeTrue();
+            control.TrackPendingQuestionForPresentation(request).Should().BeFalse(
+                "重复事件不得重绘卡片并覆盖用户已选择的答案");
+
+            control.GetLatestPendingQuestionForReplay().Should().BeSameAs(request,
+                "WebView 重建后仍应能找到待回答的提问并重放卡片");
+
+            control.CompletePendingQuestionForPresentation(request.RequestId);
+
+            control.GetLatestPendingQuestionForReplay().Should().BeNull(
+                "用户提交、关闭或取消后不得再次重放卡片");
+        });
+    }
+
+    [Fact]
+    public void RebuildSnapshot_ShouldCopyLiveStreamingReasoningAndContent()
+    {
+        RunOnStaThread(control =>
+        {
+            var message = new ChatMessage
+            {
+                Role = "assistant",
+                Content = string.Empty,
+                ReasoningContent = string.Empty,
+                TimelineContent = string.Empty,
+                IsStreaming = true,
+            };
+
+            GetField<List<ChatMessage>>(control, "_messages").Add(message);
+            SetField(control, "_agentStreamingMessage", message);
+            SetField(control, "_agentStreamingMsgIndex", 0);
+            GetField<System.Text.StringBuilder>(control, "_streamingContent").Append("当前正文");
+            GetField<System.Text.StringBuilder>(control, "_streamingReasoning").Append("当前思考过程");
+            GetField<System.Text.StringBuilder>(control, "_agentTimelineContent").Append("工具时间线");
+
+            control.SyncStreamingSnapshotToMessageForRebuild();
+
+            message.Content.Should().Be("当前正文");
+            message.ReasoningContent.Should().Be("当前思考过程");
+            message.TimelineContent.Should().Be("工具时间线");
+        });
+    }
+
+    [Fact]
+    public void PendingApproval_ShouldRemainAvailableForPageReadyReplay()
+    {
+        RunOnStaThread(control =>
+        {
+            var queue = GetField<ApprovalRequestQueue>(control, "_approvalQueue");
+            var request = new AgentPermissionRequest
+            {
+                RequestId = "permission-1",
+                Title = "确认操作",
+                Command = "dotnet build",
+                ResponseTcs = new TaskCompletionSource<bool>(),
+            };
+
+            queue.Enqueue(request).Should().BeTrue();
+            queue.TakeNext().Should().BeSameAs(request);
+
+            control.GetCurrentApprovalForReplay().Should().BeSameAs(request,
+                "WebView 重建后应能找回当前待审批卡片并重放");
+
+            request.ResponseTcs.TrySetResult(true);
+            control.GetCurrentApprovalForReplay().Should().BeNull(
+                "审批已响应后不得再次重放卡片");
+        });
+    }
+
+    [Fact]
+    public void PendingInlineEdit_ShouldRemainAvailableForPageReadyReplay()
+    {
+        RunOnStaThread(control =>
+        {
+            GetField<List<ChatMessage>>(control, "_messages").Add(new ChatMessage
+            {
+                Role = "user",
+                Content = "待编辑内容",
+            });
+            SetField(control, "_pendingEditMsgIndex", 0);
+
+            control.TryGetPendingInlineEditState(out int index, out string content)
+                .Should().BeTrue();
+            index.Should().Be(0);
+            content.Should().Be("待编辑内容");
+
+            SetField(control, "_pendingEditMsgIndex", -1);
+            control.TryGetPendingInlineEditState(out _, out _).Should().BeFalse(
+                "未处于编辑状态时不得重放编辑框");
         });
     }
 

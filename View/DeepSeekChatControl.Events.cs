@@ -2828,6 +2828,8 @@ namespace DeepSeek_v4_for_VisualStudio.View
                     Logger.Info("[Render] WebView2 页面就绪信号收到");
                     // 重建窗口内被丢弃的终态渲染必须补发，否则气泡会停在占位/纯文本状态。
                     TryReplayPendingStreamEnd();
+                    // 任务面板、Handoff、提问和审批均属于动态 DOM，页面重建后统一重放。
+                    _ = ReplayDynamicPanelsAfterPageReadyAsync();
                     return;
                 }
 
@@ -3015,7 +3017,7 @@ namespace DeepSeek_v4_for_VisualStudio.View
                             ? ansProp.GetString() ?? "{}" : "{}";
                         var questionAgent = _agentFactory?.FindAgentWithPendingQuestion(requestId) ?? _activeAgent;
                         questionAgent?.RespondToQuestions(requestId, answers);
-                        lock (_lock) { _presentedQuestionRequests.Remove(requestId); }
+                        CompletePendingQuestionForPresentation(requestId);
 
                         // 移除问题 UI
                         _ = ThreadHelper.JoinableTaskFactory.RunAsync(async () =>

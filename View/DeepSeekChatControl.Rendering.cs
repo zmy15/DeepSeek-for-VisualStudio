@@ -887,10 +887,7 @@ namespace DeepSeek_v4_for_VisualStudio.View
                     return false;
                 }
 
-                string restoredHtml = ChatHtmlService.BuildInitialPageFromMessagesHtml(_messagesHtml.ToString());
-                core!.NavigateToString(restoredHtml);
-                _browserInitialized = true;
-                _lastRenderedMessagesLength = _messagesHtml.Length;
+                NavigateBrowserToInitialPage(core!);
 
                 // 重建成功：清除失效告警去重标记与重建计数，
                 // 使下一次真的失效时能再次告警、并重新获得完整的重试预算。
@@ -972,9 +969,9 @@ namespace DeepSeek_v4_for_VisualStudio.View
                 }
 
                 // ── 全量刷新路径（首次初始化、增量失败回退、或 _lastRenderedMessagesLength 被并发调用重置后）──
-                // 需要重新读取 _messagesHtml 长度，因为并发调用可能已追加新内容
-                string allMessagesNow = _messagesHtml.ToString();
-                string html = ChatHtmlService.BuildInitialPageFromMessagesHtml(allMessagesNow);
+                // WebView2 NavigateToString 上限为 2 MB；统一按字节数缩小窗口，避免整页导航抛
+                // ArgumentException 后聊天区永久空白。
+                string html = BuildNavigableInitialPageHtml();
 
                 // 上面的 await 期间控件可能再次失效，这里重新探测，避免访问已释放的 CoreWebView2
                 if (!TryGetLiveCoreWebView(out var liveCore))
@@ -983,9 +980,7 @@ namespace DeepSeek_v4_for_VisualStudio.View
                     return;
                 }
 
-                liveCore!.NavigateToString(html);
-                _browserInitialized = true;
-                _lastRenderedMessagesLength = allMessagesNow.Length;
+                NavigateBrowserToInitialPage(liveCore!, html);
             }
             catch (Exception ex) when (IsWebViewGoneException(ex))
             {
@@ -1121,10 +1116,13 @@ namespace DeepSeek_v4_for_VisualStudio.View
             }
         }
 
-        /// <summary>
-        /// 根据 _messages 列表重建 _messagesHtml。
         private int _renderWindowStart;
         private const int RenderWindowBatchSize = 40;
+
+        /// <summary>
+        /// WebView2 <c>NavigateToString</c> 的官方上限：2 MB（2 * 1024 * 1024 UTF-8 bytes）。
+        /// </summary>
+        internal const int WebViewNavigateToStringMaxBytes = 2 * 1024 * 1024;
 
         /// <summary>
         /// 根据 _messages 列表重建 _messagesHtml。
@@ -1133,17 +1131,118 @@ namespace DeepSeek_v4_for_VisualStudio.View
         /// </summary>
         private void RebuildMessagesHtml()
         {
-            _messagesHtml.Clear();
-            _renderWindowStart = Math.Max(0, _messages.Count - RenderWindowBatchSize);
-            if (_renderWindowStart > 0)
-                _messagesHtml.Append(ChatHtmlService.BuildLoadEarlierButtonHtml(_renderWindowStart));
-            AppendMessageRange(_messagesHtml, _renderWindowStart, _messages.Count);
-            _lastRenderedMessagesLength = 0;
+            // 流式正文/思考先写入消息对象；否则 WebView 重建只读取旧字段，会丢失当前思考过程。
+            SyncStreamingSnapshotToMessageForRebuild();
+
+            string windowHtml = BuildMessagesWindowHtml(RenderWindowBatchSize, out int windowStart);
+            ApplyMessagesWindow(windowHtml, windowStart);
 
             // 会话切换 / 新建 / 清空 / 重启恢复都会走到这里：
             // 先丢弃上一会话残留的待处理追踪，再刷新文件改动列表（通常为空 → 隐藏）。
             EditorDiffMarkerService.Instance.ClearPendingTracking();
             RefreshChangeSummary();
+        }
+
+        /// <summary>
+        /// 将当前流式缓冲区同步到活动 assistant 消息，供页面重建静态生成 HTML。
+        /// 只更新仍处于流式态的气泡，避免覆盖已经完成的消息。
+        /// </summary>
+        internal void SyncStreamingSnapshotToMessageForRebuild()
+        {
+            lock (_lock)
+            {
+                int index = ResolveAgentStreamingIndex();
+                if (index < 0 || index >= _messages.Count)
+                    return;
+
+                var message = _messages[index];
+                if (!message.IsStreaming)
+                    return;
+
+                if (_streamingContent.Length > 0)
+                    message.Content = _streamingContent.ToString();
+                if (_streamingReasoning.Length > 0)
+                    message.ReasoningContent = _streamingReasoning.ToString();
+                if (_agentTimelineContent.Length > 0)
+                    message.TimelineContent = _agentTimelineContent.ToString();
+            }
+        }
+
+        /// <summary>
+        /// 构建可通过 <c>NavigateToString</c> 首次导航的完整页面。
+        /// 从最近 40 条消息开始按 UTF-8 字节数二分收缩窗口，确保不超过 WebView2 的 2 MB 限制。
+        /// 收缩后仍保留「加载更早的消息」入口，避免因单条超大消息导致聊天区空白。
+        /// </summary>
+        internal string BuildNavigableInitialPageHtml(int maxBytes = WebViewNavigateToStringMaxBytes)
+        {
+            if (maxBytes <= 0)
+                throw new ArgumentOutOfRangeException(nameof(maxBytes));
+
+            // 主题切换/全量刷新也可能绕过 RebuildMessagesHtml，导航前统一同步当前流式快照。
+            SyncStreamingSnapshotToMessageForRebuild();
+
+            int windowSize = Math.Min(RenderWindowBatchSize, _messages.Count);
+            while (true)
+            {
+                string windowHtml = BuildMessagesWindowHtml(windowSize, out int windowStart);
+                string pageHtml = ChatHtmlService.BuildInitialPageFromMessagesHtml(windowHtml);
+                int pageBytes = Encoding.UTF8.GetByteCount(pageHtml);
+
+                if (pageBytes <= maxBytes)
+                {
+                    if (windowSize < RenderWindowBatchSize && _messages.Count > windowSize)
+                    {
+                        Logger.Warn($"[Render] NavigateToString 页面 {pageBytes:N0} bytes，"
+                            + $"为低于 {maxBytes:N0} bytes 限制，渲染窗口缩小为最近 {windowSize} 条消息");
+                    }
+
+                    ApplyMessagesWindow(windowHtml, windowStart);
+                    return pageHtml;
+                }
+
+                if (windowSize == 0)
+                {
+                    throw new InvalidOperationException(
+                        $"WebView2 初始页面 {pageBytes:N0} bytes，超过 NavigateToString 上限 {maxBytes:N0} bytes");
+                }
+
+                int nextWindowSize = windowSize <= 1 ? 0 : Math.Max(1, windowSize / 2);
+                Logger.Warn($"[Render] NavigateToString 页面 {pageBytes:N0} bytes 超过限制 "
+                    + $"{maxBytes:N0} bytes，渲染窗口 {windowSize} → {nextWindowSize} 条");
+                windowSize = nextWindowSize;
+            }
+        }
+
+        /// <summary>
+        /// 统一整页导航入口：构建不超过 WebView2 2 MB 限制的安全页面并同步渲染状态。
+        /// 所有 <c>NavigateToString</c> 必须经由此方法，避免后续新增路径绕过体积保护。
+        /// </summary>
+        private void NavigateBrowserToInitialPage(CoreWebView2 core, string? pageHtml = null)
+        {
+            string html = pageHtml ?? BuildNavigableInitialPageHtml();
+            core.NavigateToString(html);
+            _browserInitialized = true;
+            _lastRenderedMessagesLength = _messagesHtml.Length;
+        }
+
+        private string BuildMessagesWindowHtml(int maxMessages, out int windowStart)
+        {
+            int windowSize = Math.Min(Math.Max(maxMessages, 0), _messages.Count);
+            windowStart = _messages.Count - windowSize;
+
+            var sb = new StringBuilder();
+            if (windowStart > 0)
+                sb.Append(ChatHtmlService.BuildLoadEarlierButtonHtml(windowStart));
+            AppendMessageRange(sb, windowStart, _messages.Count);
+            return sb.ToString();
+        }
+
+        private void ApplyMessagesWindow(string messagesHtml, int windowStart)
+        {
+            _messagesHtml.Clear();
+            _messagesHtml.Append(messagesHtml);
+            _renderWindowStart = windowStart;
+            _lastRenderedMessagesLength = 0;
         }
 
         /// <summary>构建 [from, to) 区间消息 HTML（含分支导航）。</summary>

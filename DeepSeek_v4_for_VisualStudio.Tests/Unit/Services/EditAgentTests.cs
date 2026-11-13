@@ -222,21 +222,84 @@ public class EditAgentTests
 
     #endregion
 
+    #region Build Permission
+
+    [Fact]
+    public void IsBuildAllowedForStep_MiddleStepWithoutVerificationIntent_IsBlocked()
+    {
+        var plan = BuildPlan(
+            (1, "修改 Settings 页", "调整属性定义"),
+            (2, "更新本地化键", "补充字符串"),
+            (3, "同步测试并构建", "更新测试"));
+
+        bool allowed = EditAgent.IsBuildAllowedForStep(
+            plan.Steps[0], plan, out string? reason);
+
+        allowed.Should().BeFalse();
+        reason.Should().BeNull();
+    }
+
+    [Theory]
+    [InlineData("构建验证")]
+    [InlineData("运行单元测试")]
+    [InlineData("Build and verify")]
+    [InlineData("Run the unit tests")]
+    public void IsBuildAllowedForStep_ExplicitVerificationIntent_IsAllowed(string title)
+    {
+        var plan = BuildPlan(
+            (1, title, "执行验证"),
+            (2, "下一步", "继续"));
+
+        bool allowed = EditAgent.IsBuildAllowedForStep(
+            plan.Steps[0], plan, out string? reason);
+
+        allowed.Should().BeTrue();
+        reason.Should().Be(LocalizationService.Instance["agent.step.buildAllowedReasonExplicit"]);
+    }
+
+    [Fact]
+    public void IsBuildAllowedForStep_LastStep_IsAllowed()
+    {
+        var plan = BuildPlan(
+            (1, "修改代码", "调整实现"),
+            (2, "收尾清理", "整理注释"));
+
+        bool allowed = EditAgent.IsBuildAllowedForStep(
+            plan.Steps[1], plan, out string? reason);
+
+        allowed.Should().BeTrue();
+        reason.Should().Be(LocalizationService.Instance["agent.step.buildAllowedReasonLastStep"]);
+    }
+
+    [Theory]
+    [InlineData("latest changes applied", false)]
+    [InlineData("the builder pattern", false)]
+    [InlineData("build", true)]
+    [InlineData("compile", true)]
+    [InlineData("构建解决方案", true)]
+    [InlineData("修改属性", false)]
+    public void ContainsBuildIntent_UsesLanguageAwareMatching(string text, bool expected)
+    {
+        EditAgent.ContainsBuildIntent(text).Should().Be(expected);
+    }
+
+    #endregion
+
     [Theory]
     [InlineData(true, true, true, false, false)]   // 构建成功 → 不移交 Build
     [InlineData(true, true, false, false, true)]   // 构建失败 → 移交 Build
-    [InlineData(true, false, null, false, true)]   // 修改文件但未构建 → 移交 Build
+    [InlineData(true, false, null, false, false)]  // AI 判断无需验证 → 尊重判断，不移交
     [InlineData(false, false, null, false, false)] // 仅 Git/终端，无文件变更 → 不移交 Build
     [InlineData(false, true, false, false, false)] // 无文件变更即使构建失败 → 不移交 Build
     [InlineData(true, false, null, true, false)]   // 用户/设置禁用构建 → 不移交 Build
-    public void ShouldHandoffToBuild_MatchesEditCompletionRules(
+    public void ShouldAutoHandoffToBuildAfterEdit_MatchesCompletionRules(
         bool hasFileChanges,
         bool didAttemptBuild,
         bool? lastBuildSucceeded,
         bool skipAutoBuild,
         bool expected)
     {
-        bool result = EditAgent.ShouldHandoffToBuild(
+        bool result = EditAgent.ShouldAutoHandoffToBuildAfterEdit(
             hasFileChanges,
             didAttemptBuild,
             lastBuildSucceeded,
@@ -246,25 +309,25 @@ public class EditAgentTests
     }
 
     /// <summary>
-    /// 验证优先级：测试通过即可结束，未通过/无测试时才回到构建判定。
+    /// 验证结果优先级：通过不移交，明确失败才移交；未验证是 AI 的决策，不按失败处理。
     /// 参数依次为：尝试测试、测试结果、尝试构建、构建结果、是否移交 Build。
     /// </summary>
     [Theory]
     [InlineData(true, true, false, null, false)]    // 测试通过 → 不必移交（无需构建）
-    [InlineData(true, true, true, false, false)]    // 测试通过覆盖构建失败（构建结果已过期）→ 不移交
+    [InlineData(true, true, true, false, true)]     // 测试通过但构建实际执行并失败 → 仍需移交
     [InlineData(true, false, false, null, true)]    // 测试失败且未构建 → 移交 Build 处理
-    [InlineData(true, false, true, true, false)]    // 测试失败但随后构建成功 → 编译层面已通过，不移交
-    [InlineData(true, null, false, null, true)]     // 工作区没有可运行的测试（无明确结论）→ 回到构建判定，未构建则移交
+    [InlineData(true, false, true, true, true)]     // 测试失败不能被后续编译成功覆盖 → 仍移交
+    [InlineData(true, null, false, null, false)]    // 没有有效测试结论且未构建 → 尊重 AI 判断
     [InlineData(true, null, true, true, false)]     // 无测试但构建成功 → 不移交
-    [InlineData(false, null, false, null, true)]    // 没跑测试也没构建 → 移交
-    public void ShouldHandoffToBuild_PrefersTestsThenFallsBackToBuild(
+    [InlineData(false, null, false, null, false)]   // 没跑测试也没构建 → 不移交
+    public void ShouldAutoHandoffToBuildAfterEdit_OnlyActualVerificationFailureTriggersBuild(
         bool didAttemptTests,
         bool? lastTestsPassed,
         bool didAttemptBuild,
         bool? lastBuildSucceeded,
         bool expected)
     {
-        bool result = EditAgent.ShouldHandoffToBuild(
+        bool result = EditAgent.ShouldAutoHandoffToBuildAfterEdit(
             hasFileChanges: true,
             didAttemptBuild: didAttemptBuild,
             lastBuildSucceeded: lastBuildSucceeded,
@@ -273,6 +336,16 @@ public class EditAgentTests
             lastTestsPassed: lastTestsPassed);
 
         result.Should().Be(expected);
+    }
+
+    [Theory]
+    [InlineData("不要编译", true)]
+    [InlineData("跳过构建", true)]
+    [InlineData("don't build", true)]
+    [InlineData("实现这个功能", false)]
+    public void UserPromptSaysSkipBuild_DetectsExplicitIntent(string prompt, bool expected)
+    {
+        EditAgent.UserPromptSaysSkipBuild(prompt).Should().Be(expected);
     }
 
     [Fact]
@@ -521,165 +594,6 @@ public class EditAgentTests
 
     #endregion
 
-    #region Build Permission — 步骤级构建许可
-
-    /// <summary>中间步骤 + 文本未要求构建 → 不允许构建。</summary>
-    [Fact]
-    public void IsBuildAllowedForStep_MiddleStepWithoutBuildIntent_IsBlocked()
-    {
-        var plan = BuildPlan(
-            (1, "修改 Settings 页", "调整属性定义"),
-            (2, "更新本地化键", "补充字符串"),
-            (3, "同步测试并构建", "更新测试"));   // 最后一步带构建意图
-
-        bool allowed = EditAgent.IsBuildAllowedForStep(plan.Steps[0], plan, out string? reason);
-
-        allowed.Should().BeFalse();
-        reason.Should().BeNull();
-    }
-
-    /// <summary>步骤标题明确要求构建 → 允许，即使不是最后一步。</summary>
-    /// <remarks>
-    /// 判据只看 Title。此前的用例把构建词放在 Description（如 "步骤 2" / "同步测试并构建"），
-    /// 那是改版前的契约；现由
-    /// <see cref="IsBuildAllowedForStep_BuildWordOnlyInDescription_IsBlocked"/> 反向覆盖。
-    /// </remarks>
-    [Theory]
-    [InlineData("同步测试并构建", "执行构建")]
-    [InlineData("构建验证", "运行一次编译")]
-    [InlineData("Build and verify", "compile the solution")]
-    [InlineData("Rebuild project", "run rebuild")]
-    public void IsBuildAllowedForStep_StepTextRequiresBuild_IsAllowed(string title, string description)
-    {
-        var plan = BuildPlan(
-            (1, title, description),
-            (2, "收尾步骤", "无构建要求"));
-
-        bool allowed = EditAgent.IsBuildAllowedForStep(plan.Steps[0], plan, out string? reason);
-
-        allowed.Should().BeTrue();
-        reason.Should().Be(LocalizationService.Instance["agent.step.buildAllowedReasonExplicit"]);
-    }
-
-    /// <summary>最后一步即使未明说构建 → 允许（收敛验证点）。</summary>
-    [Fact]
-    public void IsBuildAllowedForStep_LastStepWithoutBuildIntent_IsAllowed()
-    {
-        var plan = BuildPlan(
-            (1, "修改代码", "调整实现"),
-            (2, "收尾清理", "整理注释"));
-
-        bool allowed = EditAgent.IsBuildAllowedForStep(plan.Steps[1], plan, out string? reason);
-
-        allowed.Should().BeTrue();
-        reason.Should().Be(LocalizationService.Instance["agent.step.buildAllowedReasonLastStep"]);
-    }
-
-    /// <summary>
-    /// 回归：验证意图只看 Title，描述里的约束性说法不得放行。
-    /// 中文关键词按子串匹配、无否定语气识别，若把描述纳入判据，
-    /// 「确保可编译」这类约束会被误当成验证意图，导致白名单不裁剪 run_tests / build_solution。
-    /// </summary>
-    [Theory]
-    [InlineData("抽取纯函数计数器", "确保新文件可编译，避免编译错误")]
-    [InlineData("重构解析器", "改动后代码应能正常编译")]
-    [InlineData("补充断言辅助函数", "本次不构建，仅新增用例")]
-    [InlineData("更新文档", "说明如何编译本仓库")]
-    public void IsBuildAllowedForStep_BuildWordOnlyInDescription_IsBlocked(string title, string description)
-    {
-        var plan = BuildPlan(
-            (1, title, description),
-            (2, "下一步", "继续"));
-
-        bool allowed = EditAgent.IsBuildAllowedForStep(plan.Steps[0], plan, out string? reason);
-
-        allowed.Should().BeFalse(
-            "描述里的构建词是约束性说法，不代表本步骤要求执行构建");
-        reason.Should().BeNull();
-    }
-
-    /// <summary>标题明确要求构建 → 仍放行，即使描述未提构建。</summary>
-    [Theory]
-    [InlineData("单元测试补充与构建验证")]
-    [InlineData("构建解决方案")]
-    [InlineData("编译并修复错误")]
-    [InlineData("Build the solution")]
-    public void IsBuildAllowedForStep_BuildWordInTitle_IsAllowed(string title)
-    {
-        var plan = BuildPlan(
-            (1, title, "无描述"),
-            (2, "下一步", "继续"));
-
-        bool allowed = EditAgent.IsBuildAllowedForStep(plan.Steps[0], plan, out string? reason);
-
-        allowed.Should().BeTrue("标题写明的构建意图应被尊重");
-        reason.Should().Be(LocalizationService.Instance["agent.step.buildAllowedReasonExplicit"]);
-    }
-
-    /// <summary>
-    /// 步骤级许可同时覆盖"测试"：标题写了跑测试/运行单元测试的中间步骤，
-    /// 也应放行 run_tests（与 build_solution 同一开关）。
-    /// </summary>
-    [Theory]
-    [InlineData("运行单元测试")]
-    [InlineData("跑测试验证改动")]
-    [InlineData("测试覆盖率检查")]
-    [InlineData("Run the unit tests")]
-    [InlineData("Verify with tests")]
-    public void IsBuildAllowedForStep_TestIntentInTitle_IsAllowed(string title)
-    {
-        var plan = BuildPlan(
-            (1, title, "无描述"),
-            (2, "下一步", "继续"));
-
-        bool allowed = EditAgent.IsBuildAllowedForStep(plan.Steps[0], plan, out string? reason);
-
-        allowed.Should().BeTrue("标题写明的测试意图与构建意图同级，应放行 run_tests");
-        reason.Should().Be(LocalizationService.Instance["agent.step.buildAllowedReasonExplicit"]);
-    }
-
-    /// <summary>测试意图同样只看标题，描述里的"要保证测试通过"属于约束性说法，不放行。</summary>
-    [Theory]
-    [InlineData("调整断言辅助函数", "确保单元测试通过")]
-    [InlineData("重命名夹具类", "本次不跑测试，仅改名")]
-    public void IsBuildAllowedForStep_TestWordOnlyInDescription_IsBlocked(string title, string description)
-    {
-        var plan = BuildPlan(
-            (1, title, description),
-            (2, "下一步", "继续"));
-
-        bool allowed = EditAgent.IsBuildAllowedForStep(plan.Steps[0], plan, out string? reason);
-
-        allowed.Should().BeFalse("描述里的测试词是约束性说法，不代表本步骤要求执行测试");
-        reason.Should().BeNull();
-    }
-
-    /// <summary>英文关键词按词边界匹配，避免子串误命中（如 "build" 不应命中 "rebuilding" 之外的无关词）。</summary>
-    [Theory]
-    [InlineData("latest changes applied", false)]      // "test" 不在其中，且不应命中 "latest"
-    [InlineData("the builder pattern", false)]         // "builder" 不是 "build" 的独立词
-    [InlineData("building blocks", false)]             // "building" 同样不应命中
-    [InlineData("build", true)]
-    [InlineData("please Build it", true)]
-    [InlineData("compile", true)]
-    [InlineData("rebuild", true)]
-    public void ContainsBuildIntent_EnglishKeywords_RespectWordBoundaries(string text, bool expected)
-    {
-        EditAgent.ContainsBuildIntent(text).Should().Be(expected);
-    }
-
-    /// <summary>中文关键词按子串匹配。</summary>
-    [Theory]
-    [InlineData("构建解决方案", true)]
-    [InlineData("重新编译", true)]
-    [InlineData("构建验证", true)]
-    [InlineData("修改属性", false)]
-    [InlineData("更新文档", false)]
-    public void ContainsBuildIntent_ChineseKeywords_SubstringMatch(string text, bool expected)
-    {
-        EditAgent.ContainsBuildIntent(text).Should().Be(expected);
-    }
-
     /// <summary>
     /// EditAgent 的步骤提示是「当前任务目标」：它通过 BuildContextAwareMessages 追加为新 user，
     /// 既不走 Handoff 分支也不入 _entries，必须由 BuildStepPrompt 自己打标，
@@ -699,24 +613,24 @@ public class EditAgentTests
         prompt.Should().Contain(string.Format(AiPrompts.EditStepPromptPrefix, plan.Title));
     }
 
-    /// <summary>步骤提示词随构建许可给出对应说明。</summary>
+    /// <summary>允许验证的步骤仍由 AI 自行判断是否真的执行验证。</summary>
     [Fact]
-    public void BuildStepPrompt_ReflectsBuildPermission()
+    public void BuildStepPrompt_AllowedStepLeavesDecisionToAi()
     {
         var agent = new EditAgent(_apiService);
-
-        // 中间步骤（无构建意图）→ 提示不允许构建
-        var blockedPlan = BuildPlan(
+        var plan = BuildPlan(
             (1, "修改 Settings 页", "调整属性定义"),
             (2, "收尾清理", "整理注释"));
-        var blocked = InvokeBuildStepPrompt(agent, blockedPlan.Steps[0], blockedPlan);
+
+        string blocked = InvokeBuildStepPrompt(agent, plan.Steps[0], plan);
         blocked.Should().Contain("不允许");
         blocked.Should().Contain("build_solution");
 
-        // 最后一步 → 提示允许验证，且测试优先于构建
-        var allowed = InvokeBuildStepPrompt(agent, blockedPlan.Steps[1], blockedPlan);
-        allowed.Should().Contain("允许验证");
-        allowed.Should().Contain("run_tests");
+        string prompt = InvokeBuildStepPrompt(agent, plan.Steps[1], plan);
+        prompt.Should().Contain("允许验证");
+        prompt.Should().Contain("根据实际变更判断");
+        prompt.Should().Contain("run_tests");
+        prompt.Should().Contain("不要仅因为当前是最后一步");
     }
 
     private static string InvokeBuildStepPrompt(EditAgent agent, AgentStep step, AgentTaskPlan plan)
@@ -741,8 +655,6 @@ public class EditAgentTests
         }
         return plan;
     }
-
-    #endregion
 
     #region ExploreAgent Property
 

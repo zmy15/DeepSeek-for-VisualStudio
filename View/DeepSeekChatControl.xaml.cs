@@ -560,8 +560,8 @@ namespace DeepSeek_v4_for_VisualStudio.View
                 var msgs = _tree.GetActiveMessages();
                 // 注意：GetActiveMessages 返回的是树节点的**活引用**。
                 // 这里绝不能就地改写 msg.ReasoningContent——该字段会被 ConversationTree
-                // 持久化供 UI 回看。当前轮次仍完整回传，历史轮次不回传；
-                // 就地裁剪会永久破坏回看内容（且此前的 ClampStored 还会注入截断标记）。
+                // 持久化并在后续 API 请求中逐条原样回传；就地裁剪会永久破坏思考历史，
+                // 且此前的 ClampStored 还会注入截断标记。
                 _messages.AddRange(msgs);
             }
         }
@@ -608,6 +608,10 @@ namespace DeepSeek_v4_for_VisualStudio.View
         // ── 已创建的计划 ID 集合（防止重复创建计划消息）──
         private readonly HashSet<string> _createdPlanIds = new();
         private readonly HashSet<string> _presentedQuestionRequests = new();
+        private readonly Dictionary<string, AgentQuestionRequest> _pendingQuestionRequests = new(StringComparer.Ordinal);
+        private readonly HashSet<string> _questionCardRenderInFlight = new(StringComparer.Ordinal);
+        private readonly HashSet<string> _approvalCardRenderInFlight = new(StringComparer.Ordinal);
+        private Task? _dynamicPanelsReplayTask;
 
         // ── 审批 UI 串行队列：同一时刻只显示一个审批卡片，处理完再显示下一个 ──
         private readonly ApprovalRequestQueue _approvalQueue = new();

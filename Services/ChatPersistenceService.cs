@@ -340,8 +340,8 @@ namespace DeepSeek_v4_for_VisualStudio.Services
 
         /// <summary>
         /// （已移除）历史版本曾在此按 <c>ReasoningTextPolicy</c> 的旧上限裁剪已落盘的
-        /// <c>reasoning_content</c>。当前轮次仍需原样回传，历史轮次则用于本地回看；
-        /// 两者都不应因持久化加载而被裁剪。
+        /// <c>reasoning_content</c>。该字段在后续请求中仍需逐条原样回传，
+        /// 不应因持久化加载而被裁剪。
         /// </summary>
         #endregion
     }

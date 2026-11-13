@@ -540,18 +540,23 @@ namespace DeepSeek_v4_for_VisualStudio.Services.Agents
             var thinkingBuilder = new StringBuilder();
             var stepToolWhitelist = new List<string>(StepTools);
 
-            // ── 步骤级构建许可：非"要求构建"的中间步骤禁用 build_solution ──
-            // 只裁剪客户端拦截白名单，tools JSON 仍发送完整集（保持 Prefix Cache 稳定）。
-            // 模型若仍调用 build_solution，会收到白名单拒绝消息并据此调整。
-            // run_tests 依赖已构建产物，与 build_solution 绑定同一开关：
-            // 未编译就跑去跑测试只会得到"测试程序集不存在"，没有意义。
-            if (!IsBuildAllowedForStep(step, plan, out string? buildAllowedReason))
+            // ── 保留步骤级验证许可 ──
+            // 仅当用户明确要求跳过，或当前步骤未获验证许可时，临时从白名单移除
+            // run_tests / build_solution。工具定义仍保持全集以稳定 Prefix Cache。
+            bool skipVerificationByUser = UserPromptSaysSkipBuild(_lastUserMessage);
+            if (skipVerificationByUser
+                || !IsBuildAllowedForStep(step, plan, out string? buildAllowedReason))
             {
                 stepToolWhitelist.RemoveAll(t =>
                     string.Equals(t, "build_solution", StringComparison.OrdinalIgnoreCase) ||
                     string.Equals(t, "run_tests", StringComparison.OrdinalIgnoreCase));
-                AddLog("INFO", string.Format(
-                    LocalizationService.Instance["agent.log.editStepBuildBlocked"], step.Index));
+                AddLog("INFO", skipVerificationByUser
+                    ? string.Format(
+                        LocalizationService.Instance["agent.log.editStepBuildSkippedByUser"],
+                        step.Index)
+                    : string.Format(
+                        LocalizationService.Instance["agent.log.editStepBuildBlocked"],
+                        step.Index));
             }
             else
             {
@@ -1661,11 +1666,23 @@ namespace DeepSeek_v4_for_VisualStudio.Services.Agents
                             // 置空以要求回退到构建验证，而不是当成"测试通过"。
                             _lastTestsPassed = null;
                         }
+                        else if (
+                            DeepSeek_v4_for_VisualStudio.Services.BuiltInTools.RunTestsTool
+                                .IsTestRunFailure(toolResult))
+                        {
+                            _lastTestsPassed = false;
+                        }
+                        else if (
+                            DeepSeek_v4_for_VisualStudio.Services.BuiltInTools.RunTestsTool
+                                .IsTestRunSuccess(toolResult))
+                        {
+                            _lastTestsPassed = true;
+                        }
                         else
                         {
-                            _lastTestsPassed =
-                                DeepSeek_v4_for_VisualStudio.Services.BuiltInTools.RunTestsTool
-                                    .IsTestRunFailure(toolResult) ? false : true;
+                            // total=0、无法识别的输出等均不构成有效测试结论，
+                            // 由 AI 根据上下文决定是否继续改用 build_solution。
+                            _lastTestsPassed = null;
                         }
 
                         if (!string.IsNullOrWhiteSpace(toolResult))
@@ -1689,13 +1706,9 @@ namespace DeepSeek_v4_for_VisualStudio.Services.Agents
 
         #region Step Classification & Prompt
 
-        #region Verification Permission — 步骤级验证许可（构建 / 测试）
-
         /// <summary>
-        /// 步骤文本中表示"本步骤需要验证（构建/编译/测试）"的关键词。
-        /// 命中任一关键词即认为该步骤明确要求验证，允许调用 run_tests / build_solution。
-        /// 匹配不区分大小写；中文关键词按子串匹配，英文按词边界匹配以避免
-        /// 例如 "test" 命中 "latest" 这类误判。
+        /// 步骤标题中表示“本步骤需要验证”的中文关键词。
+        /// 命中任一关键词时允许调用 run_tests / build_solution。
         /// </summary>
         private static readonly string[] BuildIntentKeywordsZh = new[]
         {
@@ -1703,6 +1716,10 @@ namespace DeepSeek_v4_for_VisualStudio.Services.Agents
             "测试", "跑测试", "运行测试", "单元测试", "验证",
         };
 
+        /// <summary>
+        /// 步骤标题中表示“本步骤需要验证”的英文关键词。
+        /// 按词边界匹配，避免 test 命中 latest 之类的子串误判。
+        /// </summary>
         private static readonly string[] BuildIntentKeywordsEn = new[]
         {
             "build", "compile", "rebuild", "msbuild", "dotnet build",
@@ -1710,39 +1727,25 @@ namespace DeepSeek_v4_for_VisualStudio.Services.Agents
         };
 
         /// <summary>
-        /// 判断某步骤是否允许验证（run_tests / build_solution）。
-        /// 规则（按用户约定）：仅当
-        ///   ① 当前步骤<strong>标题</strong>明确要求验证（构建/编译/测试关键词命中），或
-        ///   ② 当前步骤是计划的最后一步
-        /// 时允许验证；其余步骤禁用，避免每个中间步骤都触发一次昂贵的构建或整套测试。
+        /// 判断当前步骤是否允许调用验证工具。
+        /// 规则：步骤标题明确要求验证，或当前步骤是计划最后一步。
         /// </summary>
-        /// <remarks>
-        /// 只匹配 <see cref="AgentStep.Title"/>，不再拼接 <see cref="AgentStep.Description"/>。
-        /// 描述里常出现「确保可编译」「避免出错」这类<em>约束性说法</em>，语义上并不要求
-        /// 本步骤执行验证；而中文关键词按子串匹配、无词边界与否定语气识别，一旦纳入描述
-        /// 就会把这类步骤误判为验证意图，令白名单不裁剪 run_tests / build_solution。
-        /// 标题是计划作者对本步骤动作的凝练表达，作为「是否验证」的判据更可预测。
-        /// 注：代价是标题未写验证、描述却明确要求验证时不再放行；此类步骤仍可依赖
-        /// ②「最后一步」兜底，或由计划作者把验证意图写进标题。
-        /// </remarks>
-        /// <param name="step">当前步骤</param>
-        /// <param name="plan">所属计划（用于判定是否为最后一步）</param>
-        /// <param name="reason">命中的允许原因（用于提示词文案），不允许时为 null</param>
+        /// <param name="step">当前步骤。</param>
+        /// <param name="plan">所属计划。</param>
+        /// <param name="reason">允许原因；不允许时为 null。</param>
+        /// <returns>允许验证时返回 true。</returns>
         internal static bool IsBuildAllowedForStep(AgentStep step, AgentTaskPlan plan, out string? reason)
         {
             reason = null;
             if (step == null || plan == null)
                 return false;
 
-            // ① 步骤标题明确要求验证（构建/编译/测试）
             if (ContainsBuildIntent(step.Title))
             {
                 reason = LocalizationService.Instance["agent.step.buildAllowedReasonExplicit"];
                 return true;
             }
 
-            // ② 最后一步：收敛验证点，允许验证（构建/测试）
-            //    注：net472 不支持 System.Index（[^1]），使用传统索引。
             int lastIndex = plan.Steps.Count > 0
                 ? plan.Steps[plan.Steps.Count - 1].Index
                 : step.Index;
@@ -1756,26 +1759,25 @@ namespace DeepSeek_v4_for_VisualStudio.Services.Agents
         }
 
         /// <summary>
-        /// 步骤文本是否表达了验证意图（构建/编译/测试）。中文关键词子串匹配；
-        /// 英文关键词要求词边界，避免 "test" 命中 "latest" 这类误判
-        /// （如 "rebuild" / "ctest" 需单独列出）。
+        /// 判断步骤标题是否表达验证意图。
+        /// 中文按子串匹配；英文按词边界匹配。
         /// </summary>
         internal static bool ContainsBuildIntent(string? text)
         {
             if (string.IsNullOrWhiteSpace(text))
                 return false;
 
-            foreach (string kw in BuildIntentKeywordsZh)
+            foreach (string keyword in BuildIntentKeywordsZh)
             {
-                if (text.Contains(kw, StringComparison.Ordinal))
+                if (text.Contains(keyword, StringComparison.Ordinal))
                     return true;
             }
 
-            foreach (string kw in BuildIntentKeywordsEn)
+            foreach (string keyword in BuildIntentKeywordsEn)
             {
                 if (System.Text.RegularExpressions.Regex.IsMatch(
                         text,
-                        $@"(?<![A-Za-z]){System.Text.RegularExpressions.Regex.Escape(kw)}(?![A-Za-z])",
+                        $@"(?<![A-Za-z]){System.Text.RegularExpressions.Regex.Escape(keyword)}(?![A-Za-z])",
                         System.Text.RegularExpressions.RegexOptions.IgnoreCase))
                 {
                     return true;
@@ -1784,8 +1786,6 @@ namespace DeepSeek_v4_for_VisualStudio.Services.Agents
 
             return false;
         }
-
-        #endregion
 
         private string BuildStepPrompt(AgentStep step, AgentTaskPlan plan,
             AgentContext context)
@@ -1849,11 +1849,16 @@ namespace DeepSeek_v4_for_VisualStudio.Services.Agents
             sb.AppendLine(LocalizationService.Instance["agent.step.reuseHistoryHint"]);
             sb.AppendLine();
 
-            // 第5层：构建许可说明（仅当本步骤允许构建时给出；不允许时由工具白名单拦截）
-            if (IsBuildAllowedForStep(step, plan, out string? buildReason))
+            // 第5层：把是否验证交给模型根据上下文和实际变更自行判断。
+            if (UserPromptSaysSkipBuild(_lastUserMessage))
+            {
+                sb.AppendLine(LocalizationService.Instance["agent.step.buildSkippedByUserHint"]);
+            }
+            else if (IsBuildAllowedForStep(step, plan, out string? buildReason))
             {
                 sb.AppendLine(string.Format(
-                    LocalizationService.Instance["agent.step.buildAllowedHint"], buildReason));
+                    LocalizationService.Instance["agent.step.buildAllowedHint"],
+                    buildReason));
             }
             else
             {
@@ -2153,14 +2158,18 @@ namespace DeepSeek_v4_for_VisualStudio.Services.Agents
         }
 
         /// <summary>
-        /// 判断是否必须把最终验证交给 Build Agent。
+        /// 判断 Edit Agent 结束后是否自动移交 Build Agent。
         ///
-        /// 优先级：测试优先，构建兜底。
-        /// - 有文件变更且本轮测试通过 → 跳过（测试是比"能编译"更强的验证）；
-        /// - 测试失败，或没有可运行的测试 → 由构建验证兜底，构建成功才跳过；
-        /// - 未测试、未构建、构建失败，或验证后又改了文件，都需要 Build Agent 处理。
+        /// 此方法只用于 Edit 收尾的自动 Handoff，不参与初始请求路由；
+        /// 用户在开头要求“修复编译错误”时仍可直接进入 Build Agent。
+        ///
+        /// 是否执行验证由 AI 根据任务自行判断：
+        /// - 没有执行验证：尊重 AI 判断，不移交；
+        /// - 测试或构建明确失败：移交 Build Agent；
+        /// - 测试或构建明确成功：交给 Ask Agent 总结。
+        /// 明确失败的测试不能被后续编译成功覆盖。
         /// </summary>
-        internal static bool ShouldHandoffToBuild(
+        internal static bool ShouldAutoHandoffToBuildAfterEdit(
             bool hasFileChanges,
             bool didAttemptBuild,
             bool? lastBuildSucceeded,
@@ -2171,13 +2180,11 @@ namespace DeepSeek_v4_for_VisualStudio.Services.Agents
             if (skipAutoBuild || !hasFileChanges)
                 return false;
 
-            // ── 测试优先：跑过且通过即可结束验证 ──
-            if (didAttemptTests && lastTestsPassed == true)
-                return false;
-
-            // ── 测试通过之外的路径一律回到构建判定 ──
-            // 包括：测试失败、工作区没有可运行的测试（lastTestsPassed 为 null）。
-            return !didAttemptBuild || lastBuildSucceeded != true;
+            // 只有真实触发且失败的验证才进入 Build 修复。
+            // 未调用验证工具、测试无有效结论但 AI 未选择构建，均不算失败。
+            bool testsFailed = didAttemptTests && lastTestsPassed == false;
+            bool buildFailed = didAttemptBuild && lastBuildSucceeded != true;
+            return testsFailed || buildFailed;
         }
 
         /// <summary>
@@ -2188,7 +2195,7 @@ namespace DeepSeek_v4_for_VisualStudio.Services.Agents
         {
             bool hasFileChanges = plan.ChangedFiles.Count > 0;
             bool skipBuild = ShouldSkipAutoBuild();
-            bool shouldHandoffToBuild = ShouldHandoffToBuild(
+            bool shouldHandoffToBuild = ShouldAutoHandoffToBuildAfterEdit(
                 hasFileChanges,
                 _didAttemptBuild,
                 _lastBuildSucceeded,
@@ -2220,7 +2227,12 @@ namespace DeepSeek_v4_for_VisualStudio.Services.Agents
                 return BuildBuildHandoff();
 
             if (skipBuild && hasFileChanges)
-                AddLog("INFO", LocalizationService.Instance["agent.edit.autoBuildDisabledByUser"]);
+            {
+                AddLog("INFO", LocalizationService.Instance[
+                    UserPromptSaysSkipBuild(_lastUserMessage)
+                        ? "agent.edit.autoBuildDisabledByUser"
+                        : "agent.edit.autoBuildDisabledSkip"]);
+            }
 
             return BuildSummaryHandoff(plan);
         }
@@ -2543,19 +2555,19 @@ namespace DeepSeek_v4_for_VisualStudio.Services.Agents
                 return true;
 
             // 维度2：检查用户提示中的意图
-            return UserPromptSaysSkipBuild();
+            return UserPromptSaysSkipBuild(_lastUserMessage);
         }
 
         /// <summary>
         /// 检查用户原始消息中是否包含跳过构建的意图。
         /// 支持中/英文关键词匹配。
         /// </summary>
-        private bool UserPromptSaysSkipBuild()
+        internal static bool UserPromptSaysSkipBuild(string? userMessage)
         {
-            if (string.IsNullOrWhiteSpace(_lastUserMessage))
+            if (string.IsNullOrWhiteSpace(userMessage))
                 return false;
 
-            string msg = _lastUserMessage;
+            string msg = userMessage;
 
             // ── 中文关键词 ──
             if (msg.Contains("不要编译") || msg.Contains("不要构建")

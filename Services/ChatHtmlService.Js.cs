@@ -596,6 +596,10 @@ window.__askQuestionsShowPage=function(card,index){
     // 提交按钮只在最后一题显示
     var submit=document.getElementById('agent-questions-submit');
     if(submit)submit.style.display=isLast?'inline-block':'none';
+
+    // 等待用户回答期间不存在模型流式输出，清理静态重建留下的光标。
+    var streamCursors=document.querySelectorAll('.streaming-cursor');
+    for(var si=0;si<streamCursors.length;si++)streamCursors[si].style.display='none';
 };
 window.__skipCurrentQuestion=function(requestId){
     var card=document.getElementById('agent-questions');

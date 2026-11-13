@@ -1111,6 +1111,45 @@ namespace DeepSeek_v4_for_VisualStudio.View
         /// </summary>
         private int _pendingEditMsgIndex = -1;
 
+        /// <summary>WebView 重建后重新显示尚未提交的内联编辑区。</summary>
+        private async Task ReplayPendingInlineEditAsync()
+        {
+            if (!TryGetPendingInlineEditState(out int msgIndex, out string originalContent))
+                return;
+
+            if (ChatWebView?.CoreWebView2 == null || !_pageReady)
+                return;
+
+            try
+            {
+                string inlineEditJs = ChatHtmlService.BuildInlineEditJs(msgIndex, originalContent);
+                await ChatWebView.CoreWebView2.ExecuteScriptAsync(inlineEditJs);
+                StatusLabel.Text = LocalizationService.Instance["status.editMessageHint"];
+                Logger.Info($"[WebViewLifecycle] 页面重建后已恢复内联编辑区: msgIdx={msgIndex}");
+            }
+            catch (Exception ex)
+            {
+                Logger.Warn($"[WebViewLifecycle] 恢复内联编辑区失败: {ex.Message}");
+            }
+        }
+
+        internal bool TryGetPendingInlineEditState(out int msgIndex, out string originalContent)
+        {
+            lock (_lock)
+            {
+                msgIndex = _pendingEditMsgIndex;
+                originalContent = string.Empty;
+                if (msgIndex < 0 || msgIndex >= _messages.Count
+                    || !string.Equals(_messages[msgIndex].Role, "user", StringComparison.Ordinal))
+                {
+                    return false;
+                }
+
+                originalContent = _messages[msgIndex].Content ?? string.Empty;
+                return true;
+            }
+        }
+
         /// <summary>
         /// 处理编辑后重新发送：在用户节点处产生分叉（新 User），切换到新分支后重新生成。
         /// </summary>
@@ -1304,10 +1343,13 @@ namespace DeepSeek_v4_for_VisualStudio.View
                     }
                     else if (msg.Role == "assistant")
                     {
-                        // 树节点保存的 ReasoningContent 是 UI 聚合值，不是某次 API
-                        // 响应的 reasoning_content。正常恢复走 ApiHistory；这里仅作回退，
-                        // 不能把展示聚合值重新注入 API 历史。
-                        _contextManager.AddAssistantMessage(content);
+                        // 编辑分支不使用旧 ApiHistory，树节点是唯一的可用来源。
+                        // 思考模式下 DeepSeek 要求历史 assistant 继续携带 reasoning_content；
+                        // 丢掉该字段会让停止后编辑重发直接返回 HTTP 400。
+                        string? reasoning = string.IsNullOrEmpty(msg.ReasoningContent)
+                            ? null
+                            : msg.ReasoningContent;
+                        _contextManager.AddAssistantMessage(content, reasoning);
                     }
                 }
 

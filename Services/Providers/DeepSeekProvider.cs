@@ -206,6 +206,13 @@ namespace DeepSeek_v4_for_VisualStudio.Services.Providers
                 request.StreamOptions = new StreamOptions { IncludeUsage = true };
         }
 
+        protected override bool RequiresReasoningContentForAllAssistants(DeepSeekChatRequest request)
+        {
+            return string.Equals(request.Thinking?.Type, "enabled", StringComparison.OrdinalIgnoreCase)
+                || request.EnableThinking == true
+                || request.ReasoningSplit == true;
+        }
+
         private static void ApplyReasoningOptions(
             DeepSeekChatRequest request,
             ReasoningCapabilityConfig capability,

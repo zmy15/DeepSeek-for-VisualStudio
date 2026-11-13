@@ -27,6 +27,24 @@ public class ChatHtmlServiceTests
     }
 
     [Fact]
+    public void BuildAssistantMessageHtml_Streaming_DoesNotRenderHeaderDots()
+    {
+        string html = ChatHtmlService.BuildAssistantMessageHtml(
+            new ChatMessage
+            {
+                Role = "assistant",
+                IsStreaming = true,
+                Content = string.Empty,
+            },
+            index: 0);
+
+        html.Should().Contain(">DeepSeek</div>");
+        html.Should().Contain("streaming-cursor");
+        html.Should().NotContain("&#8226;");
+        html.Should().NotContain("streaming-dots");
+    }
+
+    [Fact]
     public void RenderMarkdownToHtml_SoftLineBreak_RendersLineBreak()
     {
         var result = ChatHtmlService.RenderMarkdownToHtml("first line\nsecond line");
@@ -582,6 +600,28 @@ public class ChatHtmlServiceTests
         js.Should().NotContain("agent-questions-prev", "单题不需要切题箭头");
         js.Should().NotContain("agent-questions-progress", "单题不需要进度提示");
         js.Should().Contain("display:inline-block;background:#0e639c");
+    }
+
+    [Fact]
+    public void BuildAskQuestionsJs_HidesStaleStreamingCursor()
+    {
+        var request = new AgentQuestionRequest
+        {
+            Questions = new List<AgentQuestion>
+            {
+                new()
+                {
+                    Header = "确认",
+                    Question = "继续吗？",
+                    Options = new List<QuestionOption> { new() { Label = "是" } },
+                },
+            },
+        };
+
+        string js = ChatHtmlService.BuildAskQuestionsJs(request);
+
+        js.Should().Contain(".streaming-cursor");
+        js.Should().Contain("style.display='none'");
     }
 
     [Fact]

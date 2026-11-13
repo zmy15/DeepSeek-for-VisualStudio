@@ -808,6 +808,8 @@ namespace DeepSeek_v4_for_VisualStudio.View
                 {
                     _createdPlanIds.Clear();
                     _presentedQuestionRequests.Clear();
+                    _pendingQuestionRequests.Clear();
+                    _questionCardRenderInFlight.Clear();
                     _pendingLogEntries.Clear();
                     _agentTimelineContent.Clear();
                     _streamingContent.Clear();
@@ -1510,7 +1512,7 @@ namespace DeepSeek_v4_for_VisualStudio.View
             string footerHtml, string? extraFooterHtml = null)
         {
             // 不裁剪：reasoning 最终会写入消息对象（_messages[idx] 是 ConversationTree 的活引用），
-            // 并持久化供 UI 回看。当前轮次的完整思考仍会原样回传，历史轮次不回传。
+            // 并持久化供后续 API 请求逐条原样回传。
 
             // ── 更新消息状态为最终完成态（下标无效时跳过更新，与旧分支行为一致）──
             string timelineContent;
@@ -2505,7 +2507,7 @@ namespace DeepSeek_v4_for_VisualStudio.View
                 }
                 if (_pageReady)
                 {
-                    await RebuildPersistedTaskPanelsAsync();
+                    await ReplayDynamicPanelsAfterPageReadyAsync();
                 }
             }
             catch (Exception ex)
@@ -2874,23 +2876,47 @@ namespace DeepSeek_v4_for_VisualStudio.View
         /// <summary>
         /// 注入单个审批卡片（Toast + 卡片 + 状态栏提示）。
         /// </summary>
-        private async Task InjectApprovalCardAsync(AgentPermissionRequest request)
+        private async Task InjectApprovalCardAsync(
+            AgentPermissionRequest request,
+            bool notifyUser = true)
         {
-            await ThreadHelper.JoinableTaskFactory.SwitchToMainThreadAsync();
-
-            if (ChatWebView.CoreWebView2 == null)
+            lock (_lock)
             {
-                Logger.Warn($"[Agent] CoreWebView2 未就绪，自动拒绝权限请求: {request.Title}");
-                var permAgent = _agentFactory?.FindAgentWithPendingPermission(request.RequestId) ?? _activeAgent;
-                permAgent?.RespondToPermission(request.RequestId, false);
-                AdvanceApprovalQueue(request.RequestId, removeCard: true);
-                return;
+                if (!_approvalCardRenderInFlight.Add(request.RequestId))
+                    return;
             }
 
             try
             {
-                // Toast 在卡片真正显示时才提醒：并发审批时通知不再一次性叠加
-                NotifyUserActionRequired(request.Title, request.Command);
+                await ThreadHelper.JoinableTaskFactory.SwitchToMainThreadAsync();
+
+                // 调试启动/停止期间 WebView 会短暂重建，等待页面就绪后重放，不能直接拒绝。
+                for (int i = 0; i < 150; i++)
+                {
+                    if (_disposed)
+                        return;
+                    if (_pageReady && ChatWebView?.CoreWebView2 != null)
+                        break;
+                    await Task.Delay(100);
+                }
+
+                bool stillCurrent = ReferenceEquals(_approvalQueue.Current, request)
+                    && ApprovalRequestQueue.IsStillPending(request);
+                if (!stillCurrent)
+                    return;
+
+                if (!_pageReady || ChatWebView?.CoreWebView2 == null)
+                {
+                    Logger.Warn($"[Agent] WebView2 页面在等待后仍未就绪，自动拒绝权限请求: {request.Title}");
+                    var timeoutAgent = _agentFactory?.FindAgentWithPendingPermission(request.RequestId) ?? _activeAgent;
+                    timeoutAgent?.RespondToPermission(request.RequestId, false);
+                    AdvanceApprovalQueue(request.RequestId, removeCard: true);
+                    return;
+                }
+
+                // Toast 在卡片真正显示时才提醒：页面重建重放时不重复弹通知。
+                if (notifyUser)
+                    NotifyUserActionRequired(request.Title, request.Command);
 
                 string js;
                 if (request.ActionType == "file_delete")
@@ -2918,6 +2944,10 @@ namespace DeepSeek_v4_for_VisualStudio.View
                 var permAgent = _agentFactory?.FindAgentWithPendingPermission(request.RequestId) ?? _activeAgent;
                 permAgent?.RespondToPermission(request.RequestId, false);
                 AdvanceApprovalQueue(request.RequestId, removeCard: true);
+            }
+            finally
+            {
+                lock (_lock) { _approvalCardRenderInFlight.Remove(request.RequestId); }
             }
         }
 
@@ -3068,78 +3098,215 @@ namespace DeepSeek_v4_for_VisualStudio.View
         /// </summary>
         private void OnAgentQuestionsRequested(AgentQuestionRequest request)
         {
+            if (!TrackPendingQuestionForPresentation(request))
+                return;
+            _ = RenderQuestionCardWhenReadyAsync(request, notifyUser: true);
+        }
+
+        /// <summary>
+        /// 登记待回答的提问，供 WebView 重建后的页面就绪回调重放。
+        /// </summary>
+        internal bool TrackPendingQuestionForPresentation(AgentQuestionRequest request)
+        {
+            if (request == null || request.ResponseTcs?.Task.IsCompleted == true)
+                return false;
+
             lock (_lock)
             {
                 if (!_presentedQuestionRequests.Add(request.RequestId))
+                    return false;
+                _pendingQuestionRequests[request.RequestId] = request;
+                return true;
+            }
+        }
+
+        /// <summary>返回最近一个仍待回答的提问，供 `__pageReady__` 后恢复卡片。</summary>
+        internal AgentQuestionRequest? GetLatestPendingQuestionForReplay()
+        {
+            lock (_lock)
+            {
+                var staleIds = _pendingQuestionRequests
+                    .Where(pair => pair.Value.ResponseTcs?.Task.IsCompleted != false)
+                    .Select(pair => pair.Key)
+                    .ToList();
+                foreach (string staleId in staleIds)
                 {
-                    Logger.Warn($"[Agent] 忽略重复的提问请求: RequestId={request.RequestId}");
-                    return;
+                    _pendingQuestionRequests.Remove(staleId);
+                    _presentedQuestionRequests.Remove(staleId);
                 }
+
+                return _pendingQuestionRequests.Values.LastOrDefault();
+            }
+        }
+
+        /// <summary>用户已提交/关闭提问，或请求已取消时，清理重放登记。</summary>
+        internal void CompletePendingQuestionForPresentation(string requestId)
+        {
+            lock (_lock)
+            {
+                _pendingQuestionRequests.Remove(requestId);
+                _presentedQuestionRequests.Remove(requestId);
+            }
+        }
+
+        /// <summary>
+        /// 等页面就绪后注入提问卡片。WebView 调试重载期间只等待，不再把请求自动跳过。
+        /// </summary>
+        private async Task RenderQuestionCardWhenReadyAsync(
+            AgentQuestionRequest request,
+            bool notifyUser)
+        {
+            lock (_lock)
+            {
+                if (!_questionCardRenderInFlight.Add(request.RequestId))
+                    return;
             }
 
-            _ = ThreadHelper.JoinableTaskFactory.RunAsync(async () =>
+            try
             {
                 await ThreadHelper.JoinableTaskFactory.SwitchToMainThreadAsync();
 
+                // 调试启动/停止会短暂重建 WebView。等待页面就绪后重放，避免向旧 DOM 注入。
+                for (int i = 0; i < 150; i++)
+                {
+                    if (_disposed)
+                        return;
+                    if (_pageReady && ChatWebView?.CoreWebView2 != null)
+                        break;
+                    await Task.Delay(100);
+                }
+
+                bool stillPending;
+                lock (_lock)
+                {
+                    stillPending = _pendingQuestionRequests.ContainsKey(request.RequestId)
+                        && request.ResponseTcs?.Task.IsCompleted != true;
+                }
+                if (!stillPending)
+                    return;
+
+                if (!_pageReady || ChatWebView?.CoreWebView2 == null)
+                {
+                    Logger.Warn($"[Agent] WebView2 页面在等待后仍未就绪，自动跳过问题请求: {request.RequestId}");
+                    CompletePendingQuestionForPresentation(request.RequestId);
+                    var timeoutAgent = _agentFactory?.FindAgentWithPendingQuestion(request.RequestId) ?? _activeAgent;
+                    timeoutAgent?.RespondToQuestions(request.RequestId, "[]");
+                    return;
+                }
+
                 try
                 {
-                    if (ChatWebView.CoreWebView2 == null)
-                    {
-                        Logger.Warn($"[Agent] CoreWebView2 未就绪，无法注入问题 UI (共 {request.Questions.Count} 个问题)，自动跳过");
-                        lock (_lock) { _presentedQuestionRequests.Remove(request.RequestId); }
-                        var questionAgent = _agentFactory?.FindAgentWithPendingQuestion(request.RequestId) ?? _activeAgent;
-                        questionAgent?.RespondToQuestions(request.RequestId, "[]");
-                        return;
-                    }
+                    var questionHeaders = request.Questions.Select(q => q.Header.Truncate(50));
+                    Logger.Info($"[Agent] 准备注入问题 UI: RequestId={request.RequestId}, "
+                        + $"问题数={request.Questions.Count}, 标题=[{string.Join(", ", questionHeaders)}]");
+                }
+                catch { }
 
-                    // ── 诊断：记录问题详情 ──
-                    try
-                    {
-                        var questionHeaders = request.Questions.Select(q => q.Header.Truncate(50));
-                        Logger.Info($"[Agent] 准备注入问题 UI: RequestId={request.RequestId}, 问题数={request.Questions.Count}, 标题=[{string.Join(", ", questionHeaders)}]");
-                        Logger.Info($"[Agent] 问题 JSON 长度: {System.Text.Json.JsonSerializer.Serialize(request.Questions).Length} 字符");
-                    }
-                    catch { }
-
-                    // ── v1.1.10: Toast 通知用户需要回答问题 ──
+                if (notifyUser)
+                {
                     string questionSummary = request.Questions.Count == 1
                         ? request.Questions[0].Header.Truncate(80)
                         : LocalizationService.Instance.Format("notification.questionsNeedAnswer", request.Questions.Count);
                     NotifyUserActionRequired(LocalizationService.Instance["notification.answerNeededTitle"], questionSummary);
-
-                    string js = ChatHtmlService.BuildAskQuestionsJs(request);
-                    StatusLabel.Text = string.Format(LocalizationService.Instance["status.questionsWaiting"],
-                        request.Questions.Count);
-
-                    string result = await ChatWebView.CoreWebView2.ExecuteScriptAsync(js);
-                    Logger.Info($"[Agent] 问题 UI JS 执行完成, 返回: {result?.Truncate(200) ?? "(null)"}");
-
-                    // ── 验证：检查 DOM 中是否真的创建了问题元素 ──
-                    string verifyJs = "document.getElementById('agent-questions') ? 'EXISTS' : 'MISSING';";
-                    string verifyResult = await ChatWebView.CoreWebView2.ExecuteScriptAsync(verifyJs);
-                    if (verifyResult?.Contains("MISSING") == true)
-                    {
-                        Logger.Warn("[Agent]  问题 UI 注入后验证失败: DOM 中未找到 #agent-questions 元素!");
-                        // 检查可能的原因
-                        string containerCheck = await ChatWebView.CoreWebView2.ExecuteScriptAsync(
-                            "var c=document.getElementById('chat-container');" +
-                            "var f=typeof window.__insertBeforeTaskPanel;" +
-                            "JSON.stringify({containerExists:!!c, insertFnType:f});");
-                        Logger.Info($"[Agent] DOM 诊断: {containerCheck}");
-                    }
-                    else
-                    {
-                        Logger.Info($"[Agent]  问题 UI 已成功注入 DOM (verify={verifyResult})");
-                    }
                 }
-                catch (Exception ex)
+
+                string js = ChatHtmlService.BuildAskQuestionsJs(request);
+                StatusLabel.Text = string.Format(LocalizationService.Instance["status.questionsWaiting"],
+                    request.Questions.Count);
+
+                string result = await ChatWebView.CoreWebView2.ExecuteScriptAsync(js);
+                Logger.Info($"[Agent] 问题 UI JS 执行完成, 返回: {result?.Truncate(200) ?? "(null)"}");
+
+                string verifyJs = "document.getElementById('agent-questions') ? 'EXISTS' : 'MISSING';";
+                string verifyResult = await ChatWebView.CoreWebView2.ExecuteScriptAsync(verifyJs);
+                if (verifyResult?.Contains("MISSING") == true)
                 {
-                    Logger.Warn($"[Agent] 问题 UI 注入失败: {ex.Message}\n{ex.StackTrace}");
-                    lock (_lock) { _presentedQuestionRequests.Remove(request.RequestId); }
-                    var questionAgent = _agentFactory?.FindAgentWithPendingQuestion(request.RequestId) ?? _activeAgent;
-                    questionAgent?.RespondToQuestions(request.RequestId, "{}");
+                    Logger.Warn("[Agent] 问题 UI 注入后验证失败: DOM 中未找到 #agent-questions 元素!");
                 }
-            });
+                else
+                {
+                    Logger.Info($"[Agent] 问题 UI 已成功注入 DOM (verify={verifyResult})");
+                }
+            }
+            catch (Exception ex)
+            {
+                Logger.Warn($"[Agent] 问题 UI 注入失败: {ex.Message}\n{ex.StackTrace}");
+                CompletePendingQuestionForPresentation(request.RequestId);
+                var questionAgent = _agentFactory?.FindAgentWithPendingQuestion(request.RequestId) ?? _activeAgent;
+                questionAgent?.RespondToQuestions(request.RequestId, "{}");
+            }
+            finally
+            {
+                lock (_lock) { _questionCardRenderInFlight.Remove(request.RequestId); }
+            }
+        }
+
+        /// <summary>WebView 页面重建完成后重放仍待回答的提问卡片。</summary>
+        private async Task ReplayPendingQuestionCardAsync()
+        {
+            var request = GetLatestPendingQuestionForReplay();
+            if (request != null)
+                await RenderQuestionCardWhenReadyAsync(request, notifyUser: false);
+        }
+
+        /// <summary>页面就绪后统一恢复所有非静态交互面板。</summary>
+        private async Task ReplayDynamicPanelsAfterPageReadyAsync()
+        {
+            Task? inFlight;
+            lock (_lock)
+            {
+                inFlight = _dynamicPanelsReplayTask;
+                if (inFlight == null)
+                {
+                    inFlight = ReplayDynamicPanelsCoreAsync();
+                    _dynamicPanelsReplayTask = inFlight;
+                }
+            }
+
+            try
+            {
+                await inFlight;
+            }
+            finally
+            {
+                lock (_lock)
+                {
+                    if (ReferenceEquals(_dynamicPanelsReplayTask, inFlight))
+                        _dynamicPanelsReplayTask = null;
+                }
+            }
+        }
+
+        private async Task ReplayDynamicPanelsCoreAsync()
+        {
+            if (!_pageReady || ChatWebView?.CoreWebView2 == null)
+                return;
+
+            try
+            {
+                await RebuildPersistedTaskPanelsAsync();
+            }
+            catch (Exception ex)
+            {
+                Logger.Warn($"[Panel] 页面就绪后重建任务面板失败: {ex.Message}");
+            }
+
+            await ReplayPendingQuestionCardAsync();
+
+            var currentApproval = GetCurrentApprovalForReplay();
+            if (currentApproval != null)
+                await InjectApprovalCardAsync(currentApproval, notifyUser: false);
+
+            await ReplayPendingInlineEditAsync();
+        }
+
+        /// <summary>返回仍需页面重放的当前审批项；已响应或已失效时返回 null。</summary>
+        internal AgentPermissionRequest? GetCurrentApprovalForReplay()
+        {
+            var current = _approvalQueue.Current;
+            return current != null && ApprovalRequestQueue.IsStillPending(current)
+                ? current
+                : null;
         }
 
         /// <summary>
