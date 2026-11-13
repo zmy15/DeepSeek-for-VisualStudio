@@ -186,6 +186,47 @@ public class WebViewReloadRecoveryTests
         max.Should().BeLessThanOrEqualTo(10, "重试上限过大等于没有防护");
     }
 
+    [Fact]
+    public void NavigateToStringLimit_ShouldMatchWebView2Contract()
+    {
+        var field = typeof(DeepSeekChatControl).GetField(
+            "WebViewNavigateToStringMaxBytes",
+            BindingFlags.NonPublic | BindingFlags.Static);
+        field.Should().NotBeNull("WebViewNavigateToStringMaxBytes 常量应存在");
+
+        int maxBytes = (int)field!.GetRawConstantValue()!;
+        maxBytes.Should().Be(2 * 1024 * 1024,
+            "CoreWebView2.NavigateToString 的官方上限是 2 MB");
+    }
+
+    [Fact]
+    public void BuildNavigableInitialPageHtml_ReducesWindowToFitLimit()
+    {
+        RunOnStaThread(control =>
+        {
+            var messages = GetField<List<ChatMessage>>(control, "_messages");
+            messages.Clear();
+            for (int i = 0; i < 4; i++)
+            {
+                messages.Add(new ChatMessage
+                {
+                    Role = "user",
+                    Content = $"MESSAGE_{i}_" + new string('x', 80_000),
+                });
+            }
+
+            string emptyPage = ChatHtmlService.BuildInitialPageFromMessagesHtml(string.Empty);
+            int maxBytes = System.Text.Encoding.UTF8.GetByteCount(emptyPage) + 120_000;
+
+            string html = control.BuildNavigableInitialPageHtml(maxBytes);
+
+            System.Text.Encoding.UTF8.GetByteCount(html).Should().BeLessOrEqualTo(maxBytes);
+            html.Should().Contain("MESSAGE_3_", "至少必须保留最新消息可见");
+            GetField<int>(control, "_renderWindowStart").Should().BeGreaterThan(
+                0, "超限时应缩小窗口并保留加载更早消息的入口");
+        });
+    }
+
     // ── 卸载/重载路径的渲染状态复位契约 ──────────────────────────────
 
     [Fact]

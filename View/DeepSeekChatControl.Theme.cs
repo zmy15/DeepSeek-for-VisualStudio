@@ -532,8 +532,7 @@ namespace DeepSeek_v4_for_VisualStudio.View
                 // 如果 WebView2 已就绪且有消息，重载以应用正确 CSS
                 if (ChatWebView?.CoreWebView2 != null && _messages.Count > 0)
                 {
-                    string newHtml = ChatHtmlService.BuildInitialPageFromMessagesHtml(_messagesHtml.ToString());
-                    ChatWebView.CoreWebView2.NavigateToString(newHtml);
+                    NavigateBrowserToInitialPage(ChatWebView.CoreWebView2);
                     Logger.Info("[Theme] ApplyInitialTheme: WebView2 reloaded");
                 }
             }
@@ -561,9 +560,8 @@ namespace DeepSeek_v4_for_VisualStudio.View
                 // 重建时 _createdPlanIds 中残留的旧 ID 会阻止面板重新创建 ──
                 lock (_lock) { _createdPlanIds.Clear(); }
 
-                // 重新生成完整 HTML 页面
-                string newHtml = ChatHtmlService.BuildInitialPageFromMessagesHtml(_messagesHtml.ToString());
-                ChatWebView.CoreWebView2.NavigateToString(newHtml);
+                // 统一安全导航；超出 NavigateToString 限制时自动缩小渲染窗口
+                NavigateBrowserToInitialPage(ChatWebView.CoreWebView2);
                 Logger.Info("[Theme] WebView2 reloaded with new theme");
 
                 // ── 页面刷新后重建持久化任务面板和 Handoff 按钮 ──
@@ -596,10 +594,7 @@ namespace DeepSeek_v4_for_VisualStudio.View
                 // NavigateToString 会清空 DOM；残留的旧面板 ID 会阻止面板重新创建
                 lock (_lock) { _createdPlanIds.Clear(); }
 
-                RebuildMessagesHtml();
-
-                string newHtml = ChatHtmlService.BuildInitialPageFromMessagesHtml(_messagesHtml.ToString());
-                ChatWebView.CoreWebView2.NavigateToString(newHtml);
+                NavigateBrowserToInitialPage(ChatWebView.CoreWebView2);
                 Logger.Info($"[I18n] WebView2 已按语言重建页面: {LocalizationService.Instance.CurrentLanguage}");
 
                 // 页面刷新后重建持久化任务面板与 Handoff 按钮
