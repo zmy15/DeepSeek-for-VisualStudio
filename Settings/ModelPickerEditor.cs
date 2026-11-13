@@ -1,3 +1,4 @@
+using DeepSeek_v4_for_VisualStudio.Models;
 using DeepSeek_v4_for_VisualStudio.Services;
 using DeepSeek_v4_for_VisualStudio.Utils;
 using System;
@@ -28,22 +29,51 @@ namespace DeepSeek_v4_for_VisualStudio.Settings
             if (context?.Instance is not DeepSeekOptionsPage page)
                 return value;
 
+            var targetEndpoint = page.FindCustomEndpointForModel(
+                page.ActiveCustomEndpointId,
+                page.ActiveCustomModel);
             using var dialog = new ModelPickerDialog(
-                page.ApiBaseUrl,
-                ApiKeyProtection.Unprotect(page.CustomApiKey));
+                targetEndpoint?.BaseUrl ?? page.ApiBaseUrl,
+                targetEndpoint?.ApiKey ?? ApiKeyProtection.Unprotect(page.CustomApiKey),
+                readOnlyEndpoint: true);
             if (dialog.ShowDialog() == DialogResult.OK &&
                 dialog.SelectedModels.Count > 0)
             {
-                // 从自定义端点选定模型 → 追加进列表并激活，不覆盖已有模型。
                 var selectedModels = dialog.SelectedModels;
-                var models = page.GetCustomModels()
-                    .Union(selectedModels, StringComparer.OrdinalIgnoreCase)
+                var endpoints = page.GetCustomEndpoints()
+                    .Select(endpoint => endpoint.Clone())
                     .ToList();
-                page.SetCustomModels(models);
-                page.ActiveCustomModel = selectedModels.Last();
+                var endpoint = endpoints.FirstOrDefault(candidate =>
+                    string.Equals(candidate.Id, targetEndpoint?.Id, StringComparison.Ordinal));
+                if (endpoint == null && endpoints.Count == 0 && !string.IsNullOrWhiteSpace(page.ApiBaseUrl))
+                {
+                    endpoint = new CustomEndpointConfig(
+                        "legacy-custom-endpoint",
+                        DeepSeekOptionsPage.InferCustomEndpointName(page.ApiBaseUrl),
+                        page.ApiBaseUrl,
+                        ApiKeyProtection.Unprotect(page.CustomApiKey));
+                    endpoints.Add(endpoint);
+                }
 
-                // 从自定义端点分类选定模型 → 激活自定义来源
-                page.ActiveModelSource = "custom";
+                if (endpoint != null)
+                {
+                    endpoint.Models = endpoint.Models
+                        .Union(selectedModels, StringComparer.OrdinalIgnoreCase)
+                        .ToList();
+                    page.SetCustomEndpoints(endpoints);
+                    page.ActiveCustomEndpointId = endpoint.Id;
+                    page.ActiveCustomModel = selectedModels.Last();
+                    page.ActiveModelSource = "custom";
+                }
+                else
+                {
+                    var models = page.GetCustomModels()
+                        .Union(selectedModels, StringComparer.OrdinalIgnoreCase)
+                        .ToList();
+                    page.SetCustomModels(models);
+                    page.ActiveCustomModel = selectedModels.Last();
+                    page.ActiveModelSource = "custom";
+                }
                 return page.CustomModelName;
             }
 
@@ -239,7 +269,10 @@ namespace DeepSeek_v4_for_VisualStudio.Settings
                 .Distinct(StringComparer.OrdinalIgnoreCase)
                 .ToList();
 
-        public ModelPickerDialog(string baseUrl, string apiKey)
+        public ModelPickerDialog(
+            string baseUrl,
+            string apiKey,
+            bool readOnlyEndpoint = false)
         {
             var l = LocalizationService.Instance;
             Text = l["settings.modelPicker.title"];
@@ -275,6 +308,11 @@ namespace DeepSeek_v4_for_VisualStudio.Settings
                 UseSystemPasswordChar = true,
             };
             _apiKeyBox.Text = apiKey ?? string.Empty;
+            if (readOnlyEndpoint)
+            {
+                _baseUrlBox.ReadOnly = true;
+                _apiKeyBox.ReadOnly = true;
+            }
 
             _fetchButton = new Button
             {

@@ -8,6 +8,7 @@ using System.ComponentModel;
 using System.Drawing.Design;
 using System.Globalization;
 using System.Linq;
+using System.Text.Json;
 
 namespace DeepSeek_v4_for_VisualStudio.Settings
 {
@@ -17,6 +18,12 @@ namespace DeepSeek_v4_for_VisualStudio.Settings
     /// </summary>
     public class DeepSeekOptionsPage : DialogPage
     {
+        private const string LegacyCustomEndpointId = "legacy-custom-endpoint";
+        private static readonly JsonSerializerOptions CustomEndpointJsonOptions = new()
+        {
+            WriteIndented = false,
+        };
+
         internal const int MinInputBoxHeight = 50;
         internal const int MaxInputBoxHeight = 500;
         internal const int DefaultInputBoxHeight = 50;
@@ -120,7 +127,248 @@ namespace DeepSeek_v4_for_VisualStudio.Settings
         }
 
         internal IReadOnlyList<string> GetCustomModels()
-            => ParseCustomModels(CustomModelName);
+        {
+            var models = ParseCustomModels(CustomModelName).ToList();
+            var seen = new HashSet<string>(models, StringComparer.OrdinalIgnoreCase);
+            foreach (var endpoint in GetCustomEndpoints())
+            {
+                foreach (var model in endpoint.Models)
+                {
+                    if (!string.IsNullOrWhiteSpace(model) && seen.Add(model))
+                        models.Add(model);
+                }
+            }
+            return models;
+        }
+
+        /// <summary>
+        /// Reads configured custom endpoints. Legacy single-endpoint settings are exposed as
+        /// one synthetic endpoint until the user saves the multi-endpoint configuration.
+        /// </summary>
+        internal IReadOnlyList<CustomEndpointConfig> GetCustomEndpoints()
+        {
+            var endpoints = ParseCustomEndpoints(CustomEndpointsData)
+                .Select(CloneWithUnprotectedKey)
+                .ToList();
+            if (endpoints.Count > 0)
+            {
+                var normalized = NormalizeCustomEndpoints(endpoints).ToList();
+                if (normalized.Count > 0)
+                {
+                    var first = normalized[0];
+                    string visibleBaseUrl = (ApiBaseUrl ?? string.Empty).Trim();
+                    if (visibleBaseUrl.Length > 0 &&
+                        !string.Equals(first.BaseUrl, visibleBaseUrl, StringComparison.Ordinal))
+                    {
+                        first.BaseUrl = visibleBaseUrl;
+                    }
+
+                    string visibleApiKey = ApiKeyProtection.Unprotect(CustomApiKey);
+                    if (visibleApiKey.Length > 0)
+                        first.ApiKey = visibleApiKey;
+                    return normalized;
+                }
+            }
+
+            string legacyBaseUrl = (ApiBaseUrl ?? string.Empty).Trim();
+            if (legacyBaseUrl.Length == 0)
+                return Array.Empty<CustomEndpointConfig>();
+
+            return new[]
+            {
+                new CustomEndpointConfig(
+                    LegacyCustomEndpointId,
+                    InferCustomEndpointName(legacyBaseUrl),
+                    legacyBaseUrl,
+                    ApiKeyProtection.Unprotect(CustomApiKey),
+                    ParseCustomModels(CustomModelName)),
+            };
+        }
+
+        /// <summary>
+        /// Stores all endpoints and keeps the legacy single-endpoint fields pointed at the
+        /// first endpoint so older callers and credential backup remain usable.
+        /// </summary>
+        internal void SetCustomEndpoints(IEnumerable<CustomEndpointConfig> endpoints)
+        {
+            var normalized = NormalizeCustomEndpoints(endpoints ?? Array.Empty<CustomEndpointConfig>());
+            CustomEndpointsData = FormatCustomEndpoints(normalized);
+
+            var models = normalized
+                .SelectMany(endpoint => endpoint.Models)
+                .Distinct(StringComparer.OrdinalIgnoreCase)
+                .ToList();
+            CustomModelName = string.Join(Environment.NewLine, models);
+
+            var first = normalized.FirstOrDefault();
+            ApiBaseUrl = first?.BaseUrl ?? string.Empty;
+            CustomApiKey = first?.ApiKey ?? string.Empty;
+
+            if (normalized.Count == 0)
+            {
+                ActiveCustomEndpointId = string.Empty;
+                return;
+            }
+
+            if (normalized.All(endpoint =>
+                    !string.Equals(endpoint.Id, ActiveCustomEndpointId, StringComparison.Ordinal)))
+            {
+                ActiveCustomEndpointId = normalized[0].Id;
+            }
+        }
+
+        internal IReadOnlyList<CustomEndpointModelEntry> GetCustomModelEntries()
+        {
+            var endpoints = GetCustomEndpoints();
+            if (endpoints.Count == 0)
+            {
+                return ParseCustomModels(CustomModelName)
+                    .Select(model => new CustomEndpointModelEntry(string.Empty, string.Empty, model))
+                    .ToList();
+            }
+
+            var entries = new List<CustomEndpointModelEntry>();
+            var seen = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
+            foreach (var endpoint in endpoints)
+            {
+                foreach (var model in endpoint.Models)
+                {
+                    string key = endpoint.Id + "\0" + model;
+                    if (seen.Add(key))
+                        entries.Add(new CustomEndpointModelEntry(endpoint.Id, endpoint.Name, model));
+                }
+            }
+            return entries;
+        }
+
+        internal CustomEndpointConfig? FindCustomEndpointForModel(
+            string? endpointId,
+            string? model)
+        {
+            var endpoints = GetCustomEndpoints();
+            string id = (endpointId ?? string.Empty).Trim();
+            string targetModel = (model ?? string.Empty).Trim();
+
+            var endpoint = endpoints.FirstOrDefault(candidate =>
+                string.Equals(candidate.Id, id, StringComparison.Ordinal));
+            if (endpoint != null &&
+                (targetModel.Length == 0 ||
+                 endpoint.Models.Any(candidate =>
+                     string.Equals(candidate, targetModel, StringComparison.OrdinalIgnoreCase))))
+            {
+                return endpoint;
+            }
+
+            if (targetModel.Length > 0)
+            {
+                endpoint = endpoints.FirstOrDefault(candidate =>
+                    candidate.Models.Any(modelName =>
+                        string.Equals(modelName, targetModel, StringComparison.OrdinalIgnoreCase)));
+                if (endpoint != null)
+                    return endpoint;
+            }
+
+            return endpoints.FirstOrDefault();
+        }
+
+        internal static IReadOnlyList<CustomEndpointConfig> ParseCustomEndpoints(string? value)
+        {
+            if (string.IsNullOrWhiteSpace(value))
+                return Array.Empty<CustomEndpointConfig>();
+
+            try
+            {
+                var parsed = JsonSerializer.Deserialize<List<CustomEndpointConfig>>(
+                    value,
+                    CustomEndpointJsonOptions);
+                return parsed != null
+                    ? parsed
+                    : Array.Empty<CustomEndpointConfig>();
+            }
+            catch (JsonException ex)
+            {
+                Logger.Warn($"[Settings] 自定义端点配置解析失败: {ex.Message}");
+                return Array.Empty<CustomEndpointConfig>();
+            }
+        }
+
+        internal static string FormatCustomEndpoints(
+            IEnumerable<CustomEndpointConfig> endpoints)
+        {
+            var protectedEndpoints = NormalizeCustomEndpoints(endpoints)
+                .Select(endpoint => new CustomEndpointConfig(
+                    endpoint.Id,
+                    endpoint.Name,
+                    endpoint.BaseUrl,
+                    ApiKeyProtection.Protect(endpoint.ApiKey),
+                    endpoint.Models))
+                .ToList();
+            return protectedEndpoints.Count == 0
+                ? string.Empty
+                : JsonSerializer.Serialize(protectedEndpoints, CustomEndpointJsonOptions);
+        }
+
+        internal static IReadOnlyList<CustomEndpointConfig> NormalizeCustomEndpoints(
+            IEnumerable<CustomEndpointConfig>? endpoints)
+        {
+            var result = new List<CustomEndpointConfig>();
+            var seenIds = new HashSet<string>(StringComparer.Ordinal);
+            var seenNames = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
+            foreach (var source in endpoints ?? Array.Empty<CustomEndpointConfig>())
+            {
+                if (source == null)
+                    continue;
+
+                string baseUrl = (source.BaseUrl ?? string.Empty).Trim();
+                string name = (source.Name ?? string.Empty).Trim();
+                if (baseUrl.Length == 0)
+                    continue;
+
+                string id = (source.Id ?? string.Empty).Trim();
+                if (id.Length == 0 || !seenIds.Add(id))
+                    id = Guid.NewGuid().ToString("N");
+                seenIds.Add(id);
+
+                if (name.Length == 0)
+                    name = InferCustomEndpointName(baseUrl);
+                string uniqueName = name;
+                for (int suffix = 2; !seenNames.Add(uniqueName); suffix++)
+                    uniqueName = $"{name} ({suffix})";
+                name = uniqueName;
+
+                var models = ParseCustomModels(
+                    string.Join(
+                        Environment.NewLine,
+                        source.Models ?? new List<string>()));
+                result.Add(new CustomEndpointConfig(
+                    id,
+                    name,
+                    baseUrl,
+                    (source.ApiKey ?? string.Empty).Trim(),
+                    models));
+            }
+
+            return result;
+        }
+
+        internal static string InferCustomEndpointName(string? baseUrl)
+        {
+            if (Uri.TryCreate((baseUrl ?? string.Empty).Trim(), UriKind.Absolute, out var uri) &&
+                !string.IsNullOrWhiteSpace(uri.Host))
+            {
+                return uri.Host;
+            }
+
+            return (baseUrl ?? string.Empty).Trim();
+        }
+
+        private static CustomEndpointConfig CloneWithUnprotectedKey(CustomEndpointConfig endpoint)
+            => new(
+                endpoint.Id,
+                endpoint.Name,
+                endpoint.BaseUrl,
+                ApiKeyProtection.Unprotect(endpoint.ApiKey ?? string.Empty),
+                endpoint.Models);
 
         /// <summary>
         /// 解析自定义端点模型的扩展元数据。每行格式：
@@ -250,7 +498,10 @@ namespace DeepSeek_v4_for_VisualStudio.Settings
             {
                 var metadata = ParseCustomModelMetadata(CustomModelMetadata);
                 metadata.TryGetValue(config.Model, out var extra);
-                return FormatCustomModelChoice(config.Model, extra?.DisplayName);
+                return FormatCustomModelChoice(
+                    config.Model,
+                    extra?.DisplayName,
+                    config.EndpointName);
             }
 
             var official = OfficialModelCatalogService.TryGetMetadata(config.Model);
@@ -266,6 +517,17 @@ namespace DeepSeek_v4_for_VisualStudio.Settings
         internal void SetSelectedModelChoice(string? value)
         {
             var choice = value?.Trim() ?? string.Empty;
+            foreach (var customChoice in BuildCustomModelChoiceMap())
+            {
+                if (!string.Equals(customChoice.Key, choice, StringComparison.OrdinalIgnoreCase))
+                    continue;
+
+                ActiveCustomEndpointId = customChoice.Value.EndpointId;
+                ActiveCustomModel = customChoice.Value.Model;
+                ActiveModelSource = "custom";
+                return;
+            }
+
             string customSuffix = GetCustomModelSuffix();
             if (customSuffix.Length > 0 &&
                 choice.EndsWith(customSuffix, StringComparison.OrdinalIgnoreCase))
@@ -281,6 +543,9 @@ namespace DeepSeek_v4_for_VisualStudio.Settings
                         .ToList();
                     SetCustomModels(models);
                     ActiveCustomModel = model;
+                    ActiveCustomEndpointId =
+                        FindCustomEndpointForModel(ActiveCustomEndpointId, model)?.Id
+                        ?? ActiveCustomEndpointId;
                     ActiveModelSource = "custom";
                 }
                 return;
@@ -371,10 +636,14 @@ namespace DeepSeek_v4_for_VisualStudio.Settings
             }
 
             var customMetadata = ParseCustomModelMetadata(CustomModelMetadata);
-            foreach (var model in GetCustomModels())
+            foreach (var entry in GetCustomModelEntries())
             {
+                var model = entry.Model;
                 customMetadata.TryGetValue(model, out var extra);
-                var display = FormatCustomModelChoice(model, extra?.DisplayName);
+                var display = FormatCustomModelChoice(
+                    model,
+                    extra?.DisplayName,
+                    entry.EndpointName);
                 if (seen.Add(display))
                     choices.Add(display);
             }
@@ -396,8 +665,35 @@ namespace DeepSeek_v4_for_VisualStudio.Settings
             return name.Length > 0 ? name : model;
         }
 
-        private static string FormatCustomModelChoice(string model, string? displayName = null)
-            => FormatModelChoice(model, displayName) + GetCustomModelSuffix();
+        private static string FormatCustomModelChoice(
+            string model,
+            string? displayName = null,
+            string? endpointName = null)
+        {
+            string label = FormatModelChoice(model, displayName);
+            string endpoint = (endpointName ?? string.Empty).Trim();
+            return endpoint.Length > 0
+                ? $"{label} · {endpoint}{GetCustomModelSuffix()}"
+                : label + GetCustomModelSuffix();
+        }
+
+        private IReadOnlyDictionary<string, CustomEndpointModelEntry> BuildCustomModelChoiceMap()
+        {
+            var result = new Dictionary<string, CustomEndpointModelEntry>(
+                StringComparer.OrdinalIgnoreCase);
+            var metadata = ParseCustomModelMetadata(CustomModelMetadata);
+            foreach (var entry in GetCustomModelEntries())
+            {
+                metadata.TryGetValue(entry.Model, out var extra);
+                string display = FormatCustomModelChoice(
+                    entry.Model,
+                    extra?.DisplayName,
+                    entry.EndpointName);
+                if (!result.ContainsKey(display))
+                    result[display] = entry;
+            }
+            return result;
+        }
 
         /// <summary>返回当前应请求的自定义模型；激活项失效时回退列表第一项。</summary>
         internal string GetActiveCustomModel()
@@ -753,8 +1049,8 @@ namespace DeepSeek_v4_for_VisualStudio.Settings
         public string ApiKey { get; set; } = string.Empty;
 
         /// <summary>
-        /// 自定义端点 API 密钥，与 DeepSeek 官方密钥分离存储。
-        /// 仅当 ApiBaseUrl 非空时作为运行时密钥使用。
+        /// 首个自定义端点的 API 密钥，与 DeepSeek 官方密钥分离存储。
+        /// 其余端点密钥随 <see cref="CustomEndpointsData"/> 一起以 DPAPI 密文保存。
         /// </summary>
         [LocalizedCategory("settings.category.model")]
         [LocalizedDisplayName("settings.customApiKey.displayName")]
@@ -764,9 +1060,9 @@ namespace DeepSeek_v4_for_VisualStudio.Settings
         public string CustomApiKey { get; set; } = string.Empty;
 
         /// <summary>
-        /// 自定义端点 (Base URL)，OpenAI chat/completions 协议兼容。
-        /// 非空时启用自定义端点模式，与本分类的密钥、模型名称配套使用。
-        /// 留空时使用 DeepSeek 官方服务与官方密钥。
+        /// 首个自定义端点 (Base URL)，OpenAI chat/completions 协议兼容。
+        /// 多端点配置由 <see cref="CustomEndpointsData"/> 保存；该字段保留用于兼容
+        /// 旧版单端点配置和首个端点的凭据备份。
         /// </summary>
         [LocalizedCategory("settings.category.model")]
         [LocalizedDisplayName("settings.apiBaseUrl.displayName")]
@@ -812,10 +1108,9 @@ namespace DeepSeek_v4_for_VisualStudio.Settings
         public string CustomModelMetadata { get; set; } = string.Empty;
 
         /// <summary>
-        /// 统一「模型设置」入口：在一个表格中同时维护自定义模型列表、每个模型的
-        /// 最大上下文 Token 与视觉（多模态）勾选。点击属性网格的 … 打开 <see cref="ModelCatalogDialog"/>。
-        /// 该属性本身不持久化值——后端仍写入 <see cref="CustomModelName"/>、
-        /// <see cref="ModelMaxTokenLimits"/> 与 <see cref="CustomVisionModels"/> 三个字符串。
+        /// 统一「模型设置」入口：在一个表格中维护多个自定义端点、模型列表及各模型元数据。
+        /// 点击属性网格的 … 打开 <see cref="ModelCatalogDialog"/>。该属性本身不持久化值，
+        /// 后端写入 <see cref="CustomEndpointsData"/> 及兼容用的模型字符串。
         /// </summary>
         [LocalizedCategory("settings.category.model")]
         [LocalizedDisplayName("settings.modelCatalog.displayName")]
@@ -833,6 +1128,18 @@ namespace DeepSeek_v4_for_VisualStudio.Settings
         [Browsable(false)]
         [DesignerSerializationVisibility(DesignerSerializationVisibility.Visible)]
         public string ActiveCustomModel { get; set; } = string.Empty;
+
+        /// <summary>当前激活的自定义端点 ID；用于区分不同端点下的同名模型。</summary>
+        [Browsable(false)]
+        [DesignerSerializationVisibility(DesignerSerializationVisibility.Visible)]
+        public string ActiveCustomEndpointId { get; set; } = string.Empty;
+
+        /// <summary>
+        /// 多自定义端点配置（JSON）。API Key 以 DPAPI 密文保存，仅在读取配置时解密。
+        /// </summary>
+        [Browsable(false)]
+        [DesignerSerializationVisibility(DesignerSerializationVisibility.Visible)]
+        public string CustomEndpointsData { get; set; } = string.Empty;
 
         /// <summary>属性网格中的“从自定义端点添加模型”入口；不持久化自身值。</summary>
         [LocalizedCategory("settings.category.model")]
@@ -913,7 +1220,8 @@ namespace DeepSeek_v4_for_VisualStudio.Settings
             // 连接与模型配置视为用户凭据的一部分，恢复默认时保留：
             // ApiKey / CustomApiKey / BaiduApiKey / BingApiKey /
             // ApiBaseUrl / SelectedModel / CustomModelName / ModelMaxTokenLimits / CustomVisionModels /
-            // CustomModelMetadata / ActiveCustomModel / ActiveModelSource。
+            // CustomModelMetadata / ActiveCustomModel / ActiveModelSource /
+            // CustomEndpointsData / ActiveCustomEndpointId。
             SystemPrompt = AiPrompts.DefaultSystemPrompt;
             SystemPromptEn = AiPrompts.DefaultSystemPromptEn;
             IsThinkingEnabled = true;

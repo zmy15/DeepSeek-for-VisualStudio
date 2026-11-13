@@ -34,7 +34,7 @@ namespace DeepSeek_v4_for_VisualStudio.View
 
         private void InitializeApiService()
         {
-            // 官方 / 自定义端点配置分离：按 ApiBaseUrl 是否填写解析生效来源。
+            // 官方 / 自定义端点配置分离：按模型来源与多端点配置解析生效端点。
             // Resolver 内部已做 Unprotect，禁止把 "dpapi1:..." 密文发给 API。
             var config = DeepSeekEndpointResolver.Resolve(_options);
             if (string.IsNullOrEmpty(config.ApiKey))
@@ -1133,6 +1133,8 @@ namespace DeepSeek_v4_for_VisualStudio.View
             string? oldCustomModel = _options?.CustomModelName;
             string? oldActiveCustomModel = _options?.ActiveCustomModel;
             string? oldModelSource = _options?.ActiveModelSource;
+            string? oldCustomEndpointsData = _options?.CustomEndpointsData;
+            string? oldActiveCustomEndpointId = _options?.ActiveCustomEndpointId;
             bool oldThinking = _options?.IsThinkingEnabled ?? true;
             string? oldEffort = _options?.ReasoningEffort;
 
@@ -1148,6 +1150,8 @@ namespace DeepSeek_v4_for_VisualStudio.View
                 !string.Equals(oldCustomModel, _options.CustomModelName, StringComparison.Ordinal) ||
                 !string.Equals(oldActiveCustomModel, _options.ActiveCustomModel, StringComparison.Ordinal) ||
                 !string.Equals(oldModelSource, _options.ActiveModelSource, StringComparison.Ordinal) ||
+                !string.Equals(oldCustomEndpointsData, _options.CustomEndpointsData, StringComparison.Ordinal) ||
+                !string.Equals(oldActiveCustomEndpointId, _options.ActiveCustomEndpointId, StringComparison.Ordinal) ||
                 oldThinking != _options.IsThinkingEnabled ||
                 !string.Equals(oldEffort, _options.ReasoningEffort, StringComparison.Ordinal);
 

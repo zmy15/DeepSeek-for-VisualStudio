@@ -49,22 +49,35 @@ namespace DeepSeek_v4_for_VisualStudio.View
 
             public string Model { get; }
             public EntrySource Source { get; }
+            public string EndpointId { get; }
+            public string EndpointName { get; }
 
             /// <summary>用户在「模型设置」里填写的展示名称；为空时回退到模型名。</summary>
             public string DisplayName { get; }
 
-            private ModelListItem(string model, EntrySource source, string? displayName)
+            private ModelListItem(
+                string model,
+                EntrySource source,
+                string? displayName,
+                string? endpointId = null,
+                string? endpointName = null)
             {
                 Model = model;
                 Source = source;
                 DisplayName = (displayName ?? string.Empty).Trim();
+                EndpointId = (endpointId ?? string.Empty).Trim();
+                EndpointName = (endpointName ?? string.Empty).Trim();
             }
 
             public static ModelListItem Official(string model, string? displayName = null)
                 => new(model, EntrySource.Official, displayName);
 
-            public static ModelListItem Custom(string model, string? displayName = null)
-                => new(model, EntrySource.Custom, displayName);
+            public static ModelListItem Custom(
+                string model,
+                string? displayName = null,
+                string? endpointId = null,
+                string? endpointName = null)
+                => new(model, EntrySource.Custom, displayName, endpointId, endpointName);
 
             /// <summary>
             /// 下拉框显示文本：显示用户在设置里填写的展示名称（官方来自 /models 的 name），
@@ -80,7 +93,9 @@ namespace DeepSeek_v4_for_VisualStudio.View
                     string label = DisplayName.Length > 0 ? DisplayName : Model;
 
                     return Source == EntrySource.Custom
-                        ? label + LocalizationService.Instance["chat.model.customSuffix"]
+                        ? (EndpointName.Length > 0
+                            ? $"{label} · {EndpointName}{LocalizationService.Instance["chat.model.customSuffix"]}"
+                            : label + LocalizationService.Instance["chat.model.customSuffix"])
                         : label;
                 }
             }
@@ -2125,11 +2140,16 @@ namespace DeepSeek_v4_for_VisualStudio.View
             var customMetadata = _options == null
                 ? null
                 : DeepSeekOptionsPage.ParseCustomModelMetadata(_options.CustomModelMetadata);
-            foreach (var custom in _options?.GetCustomModels() ?? Array.Empty<string>())
+            foreach (var custom in _options?.GetCustomModelEntries()
+                ?? Array.Empty<CustomEndpointModelEntry>())
             {
                 DeepSeekOptionsPage.ModelExtraMetadata? extra = null;
-                customMetadata?.TryGetValue(custom, out extra);
-                items.Add(ModelListItem.Custom(custom, extra?.DisplayName));
+                customMetadata?.TryGetValue(custom.Model, out extra);
+                items.Add(ModelListItem.Custom(
+                    custom.Model,
+                    extra?.DisplayName,
+                    custom.EndpointId,
+                    custom.EndpointName));
             }
             return items;
         }
@@ -2152,7 +2172,8 @@ namespace DeepSeek_v4_for_VisualStudio.View
                     foreach (var item in ModelComboBox.Items.OfType<ModelListItem>())
                     {
                         if (item.Source == previous.Source &&
-                            string.Equals(item.Model, previous.Model, StringComparison.OrdinalIgnoreCase))
+                            string.Equals(item.Model, previous.Model, StringComparison.OrdinalIgnoreCase) &&
+                            string.Equals(item.EndpointId, previous.EndpointId, StringComparison.Ordinal))
                         {
                             ModelComboBox.SelectedItem = item;
                             break;
@@ -2172,7 +2193,9 @@ namespace DeepSeek_v4_for_VisualStudio.View
             foreach (var item in ModelComboBox.Items.OfType<ModelListItem>())
             {
                 if (item.Source == expectedSource &&
-                    string.Equals(item.Model, config.Model, StringComparison.OrdinalIgnoreCase))
+                    string.Equals(item.Model, config.Model, StringComparison.OrdinalIgnoreCase) &&
+                    (!config.IsCustom ||
+                     string.Equals(item.EndpointId, config.EndpointId, StringComparison.Ordinal)))
                 {
                     ModelComboBox.SelectedItem = item;
                     break;
