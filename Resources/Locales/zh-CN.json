@@ -238,7 +238,7 @@
 	"settings.modelPicker.select": "选择模型（可勾选多个）",
 	"settings.modelPicker.selectRequired": "请至少选择一个模型。",
 	"settings.modelPicker.title": "获取模型列表",
-	"settings.ocrEngine.description": "选择图像 OCR 引擎:\n  • Windows Built-in — 系统内置，无需配置，准确率一般\n  • PaddleOCR-Sharp — 本地离线识别，中文准确率更高\n  • 通过 MCP 协议使用远程 OCR 服务",
+	"settings.ocrEngine.description": "选择图像 OCR 引擎:\n  • Windows Built-in — 系统内置，无需配置，准确率一般\n  • 通过 MCP 协议使用远程 OCR 服务",
 	"settings.ocrEngine.displayName": "OCR 引擎",
 	"settings.preserveRecentTurns.description": "压缩时保留最近 N 轮完整对话不被压缩。\n默认 3 轮。增大可保留更多即时上下文。",
 	"settings.preserveRecentTurns.displayName": "保留最近轮次",

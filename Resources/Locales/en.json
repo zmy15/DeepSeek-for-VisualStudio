@@ -238,7 +238,7 @@
 	"settings.modelPicker.select": "Select models (check one or more)",
 	"settings.modelPicker.selectRequired": "Select at least one model.",
 	"settings.modelPicker.title": "Fetch Model List",
-	"settings.ocrEngine.description": "Select image OCR engine:\n  • Windows Built-in — System built-in, no configuration needed, moderate accuracy\n  • PaddleOCR-Sharp — Local offline recognition with higher Chinese accuracy\n  • Remote OCR service via MCP protocol",
+	"settings.ocrEngine.description": "Select image OCR engine:\n  • Windows Built-in — System built-in, no configuration needed, moderate accuracy\n  • Remote OCR service via MCP protocol",
 	"settings.ocrEngine.displayName": "OCR Engine",
 	"settings.preserveRecentTurns.description": "During compression, keep the most recent N turns of conversation uncompressed.\nDefault 3 turns. Increase to preserve more immediate context.",
 	"settings.preserveRecentTurns.displayName": "Preserve Recent Turns",
