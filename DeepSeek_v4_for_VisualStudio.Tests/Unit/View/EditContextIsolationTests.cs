@@ -67,6 +67,44 @@ public class EditContextIsolationTests
         });
     }
 
+    [Fact]
+    public void RebuildContextFromTree_EditBranch_PreservesAssistantReasoning()
+    {
+        RunOnStaThread(control =>
+        {
+            var tree = new ConversationTree();
+            tree.AddChildMessage(new ChatMessage
+            {
+                Role = "user",
+                Content = "first request",
+            });
+            tree.AddChildMessage(new ChatMessage
+            {
+                Role = "assistant",
+                Content = "previous answer",
+                ReasoningContent = "reasoning that must be sent back",
+            });
+            tree.AddChildMessage(new ChatMessage
+            {
+                Role = "user",
+                Content = "edited request",
+            });
+
+            SetField(control, "_tree", tree);
+            var method = typeof(DeepSeekChatControl).GetMethod(
+                "RebuildContextFromTree",
+                BindingFlags.Instance | BindingFlags.NonPublic);
+            method.Should().NotBeNull();
+            method!.Invoke(control, new object[] { false });
+
+            var contextManager = GetField<ConversationContextManager>(control, "_contextManager");
+            var assistant = contextManager.BuildApiMessages()
+                .Single(message => message.Role == "assistant");
+
+            assistant.ReasoningContent.Should().Be("reasoning that must be sent back");
+        });
+    }
+
     private static void RunOnStaThread(Action<DeepSeekChatControl> testBody)
     {
         Exception? captured = null;

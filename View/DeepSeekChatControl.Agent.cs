@@ -1510,7 +1510,7 @@ namespace DeepSeek_v4_for_VisualStudio.View
             string footerHtml, string? extraFooterHtml = null)
         {
             // 不裁剪：reasoning 最终会写入消息对象（_messages[idx] 是 ConversationTree 的活引用），
-            // 并持久化供 UI 回看。当前轮次的完整思考仍会原样回传，历史轮次不回传。
+            // 并持久化供后续 API 请求逐条原样回传。
 
             // ── 更新消息状态为最终完成态（下标无效时跳过更新，与旧分支行为一致）──
             string timelineContent;

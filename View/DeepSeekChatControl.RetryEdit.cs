@@ -1304,10 +1304,13 @@ namespace DeepSeek_v4_for_VisualStudio.View
                     }
                     else if (msg.Role == "assistant")
                     {
-                        // 树节点保存的 ReasoningContent 是 UI 聚合值，不是某次 API
-                        // 响应的 reasoning_content。正常恢复走 ApiHistory；这里仅作回退，
-                        // 不能把展示聚合值重新注入 API 历史。
-                        _contextManager.AddAssistantMessage(content);
+                        // 编辑分支不使用旧 ApiHistory，树节点是唯一的可用来源。
+                        // 思考模式下 DeepSeek 要求历史 assistant 继续携带 reasoning_content；
+                        // 丢掉该字段会让停止后编辑重发直接返回 HTTP 400。
+                        string? reasoning = string.IsNullOrEmpty(msg.ReasoningContent)
+                            ? null
+                            : msg.ReasoningContent;
+                        _contextManager.AddAssistantMessage(content, reasoning);
                     }
                 }
 

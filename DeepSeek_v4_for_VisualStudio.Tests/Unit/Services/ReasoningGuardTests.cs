@@ -155,7 +155,7 @@ public class ReasoningGuardTests
     }
 
     [Fact]
-    public void BuildApiMessages_HistoricalToolCallReasoning_IsOmitted()
+    public void BuildApiMessages_HistoricalToolCallReasoning_IsReplayed()
     {
         var manager = new ConversationContextManager();
         manager.AddUserMessage("first");
@@ -185,15 +185,15 @@ public class ReasoningGuardTests
             message.Role == "assistant"
             && message.ToolCalls != null
             && message.ToolCalls.Count > 0);
-        historicalAssistant.ReasoningContent.Should().BeNull(
-            "历史轮次的思考只用于本地回看，不再回传以节省 token");
+        historicalAssistant.ReasoningContent.Should().Be(longReasoning,
+            "思考模式要求历史轮次逐条原样回传 reasoning_content");
     }
 
     /// <summary>
-    /// 当前轮保留思考，进入下一轮后同一 assistant 的 reasoning_content 不再回传。
+    /// 当前轮与进入历史轮后的 reasoning_content 必须逐字节一致。
     /// </summary>
     [Fact]
-    public void BuildApiMessages_OnlyCurrentTurnReasoning_IsReplayed()
+    public void BuildApiMessages_Reasoning_IsReplayedAcrossTurnBoundary()
     {
         var manager = new ConversationContextManager();
         manager.AddUserMessage("first");
@@ -224,8 +224,8 @@ public class ReasoningGuardTests
             .ReasoningContent;
 
         asCurrentTurn.Should().Be(reasoning);
-        asHistoricalTurn.Should().BeNull(
-            "新用户轮次开始后，上一轮思考不再进入 API 请求");
+        asHistoricalTurn.Should().Be(asCurrentTurn,
+            "新用户轮次开始后仍必须原样回传上一轮思考");
     }
 
     [Fact]
@@ -256,6 +256,34 @@ public class ReasoningGuardTests
         assistants.Should().HaveCount(2);
         assistants[0].ReasoningContent.Should().Be("first-round reasoning");
         assistants[1].ReasoningContent.Should().Be("final-round reasoning");
+    }
+
+    [Fact]
+    public void BuildApiMessages_StopThenEditResend_PreservesHistoricalReasoning()
+    {
+        var manager = new ConversationContextManager();
+        manager.AddUserMessage("first request");
+        manager.AddAssistantMessage(
+            "stopped output",
+            "reasoning from the stopped turn",
+            new List<ToolCall>
+            {
+                new()
+                {
+                    Id = "call_stopped",
+                    Type = "function",
+                    Function = new ToolCallFunction { Name = "read_file", Arguments = "{}" }
+                }
+            });
+        manager.AddToolResult("call_stopped", "read_file", "ok");
+
+        // 编辑原指令会开启新的用户轮次，上一条 assistant 立即变成历史消息。
+        manager.AddUserMessage("edited request");
+
+        var historicalAssistant = manager.BuildApiMessages()
+            .Single(message => message.Role == "assistant");
+
+        historicalAssistant.ReasoningContent.Should().Be("reasoning from the stopped turn");
     }
 
     [Fact]
