@@ -585,6 +585,28 @@ public class ChatHtmlServiceTests
     }
 
     [Fact]
+    public void BuildAskQuestionsJs_HidesStaleStreamingIndicators()
+    {
+        var request = new AgentQuestionRequest
+        {
+            Questions = new List<AgentQuestion>
+            {
+                new()
+                {
+                    Header = "确认",
+                    Question = "继续吗？",
+                    Options = new List<QuestionOption> { new() { Label = "是" } },
+                },
+            },
+        };
+
+        string js = ChatHtmlService.BuildAskQuestionsJs(request);
+
+        js.Should().Contain(".streaming-dots,.streaming-cursor");
+        js.Should().Contain("style.display='none'");
+    }
+
+    [Fact]
     public void AgentCards_FollowTheme_NoHardcodedDarkOnlyColors()
     {
         // ── 浅色主题下的提问 / 审批 / 任务面板必须使用浅色配色，而不是深色硬编码 ──

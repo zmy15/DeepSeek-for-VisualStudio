@@ -596,6 +596,10 @@ window.__askQuestionsShowPage=function(card,index){
     // 提交按钮只在最后一题显示
     var submit=document.getElementById('agent-questions-submit');
     if(submit)submit.style.display=isLast?'inline-block':'none';
+
+    // 等待用户回答期间不存在模型流式输出，清理静态重建留下的省略号和光标。
+    var streamIndicators=document.querySelectorAll('.streaming-dots,.streaming-cursor');
+    for(var si=0;si<streamIndicators.length;si++)streamIndicators[si].style.display='none';
 };
 window.__skipCurrentQuestion=function(requestId){
     var card=document.getElementById('agent-questions');
@@ -778,6 +782,8 @@ window._showCopyFeedback=function(msgIndex){
                     // ── 兜底：无论渲染成功与否，先清理流式状态（光标、textNode）──
                     var cursorEl = document.getElementById('cursor-' + msg.i);
                     if (cursorEl) cursorEl.style.display = 'none';
+                    var dotsEl = document.getElementById('streaming-dots-' + msg.i);
+                    if (dotsEl) dotsEl.style.display = 'none';
                     var containerEl = document.getElementById('msg-body-' + msg.i);
                     if (containerEl) {
                         containerEl._textNode = null;
@@ -909,6 +915,7 @@ window._showCopyFeedback=function(msgIndex){
             var reasoningPanel=document.getElementById('reasoning-'+msg.i);
             var reasoningBody=document.getElementById('reasoning-body-'+msg.i);
             var cursor=document.getElementById('cursor-'+msg.i);
+            var streamingDots=document.getElementById('streaming-dots-'+msg.i);
 
             // 更新正文内容
             if(container&&(msg.c!==undefined||msg.cd!==undefined)){
@@ -956,6 +963,15 @@ window._showCopyFeedback=function(msgIndex){
             // 更新光标
             if(cursor&&msg.f!==undefined){
                 cursor.style.display=msg.f?'none':'inline-block';
+            }
+            // 已经有正文/思考增量或已结束时，不再显示“等待首包”的省略号。
+            if(streamingDots&&(
+                msg.f===true
+                ||(msg.c!==undefined&&msg.c.length>0)
+                ||(msg.cd!==undefined&&msg.cd.length>0)
+                ||(msg.r!==undefined&&msg.r.length>0)
+                ||(msg.rd!==undefined&&msg.rd.length>0))){
+                streamingDots.style.display='none';
             }
         }
 

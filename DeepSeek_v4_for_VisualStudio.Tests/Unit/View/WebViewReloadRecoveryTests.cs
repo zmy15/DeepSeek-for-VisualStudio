@@ -322,6 +322,35 @@ public class WebViewReloadRecoveryTests
         });
     }
 
+    [Fact]
+    public void RebuildSnapshot_ShouldCopyLiveStreamingReasoningAndContent()
+    {
+        RunOnStaThread(control =>
+        {
+            var message = new ChatMessage
+            {
+                Role = "assistant",
+                Content = string.Empty,
+                ReasoningContent = string.Empty,
+                TimelineContent = string.Empty,
+                IsStreaming = true,
+            };
+
+            GetField<List<ChatMessage>>(control, "_messages").Add(message);
+            SetField(control, "_agentStreamingMessage", message);
+            SetField(control, "_agentStreamingMsgIndex", 0);
+            GetField<System.Text.StringBuilder>(control, "_streamingContent").Append("当前正文");
+            GetField<System.Text.StringBuilder>(control, "_streamingReasoning").Append("当前思考过程");
+            GetField<System.Text.StringBuilder>(control, "_agentTimelineContent").Append("工具时间线");
+
+            control.SyncStreamingSnapshotToMessageForRebuild();
+
+            message.Content.Should().Be("当前正文");
+            message.ReasoningContent.Should().Be("当前思考过程");
+            message.TimelineContent.Should().Be("工具时间线");
+        });
+    }
+
     // ── 合成链路失效（真正的空白窗口成因）──────────────────────────────
 
     [Fact]

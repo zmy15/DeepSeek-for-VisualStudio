@@ -1131,6 +1131,9 @@ namespace DeepSeek_v4_for_VisualStudio.View
         /// </summary>
         private void RebuildMessagesHtml()
         {
+            // 流式正文/思考先写入消息对象；否则 WebView 重建只读取旧字段，会丢失当前思考过程。
+            SyncStreamingSnapshotToMessageForRebuild();
+
             string windowHtml = BuildMessagesWindowHtml(RenderWindowBatchSize, out int windowStart);
             ApplyMessagesWindow(windowHtml, windowStart);
 
@@ -1138,6 +1141,31 @@ namespace DeepSeek_v4_for_VisualStudio.View
             // 先丢弃上一会话残留的待处理追踪，再刷新文件改动列表（通常为空 → 隐藏）。
             EditorDiffMarkerService.Instance.ClearPendingTracking();
             RefreshChangeSummary();
+        }
+
+        /// <summary>
+        /// 将当前流式缓冲区同步到活动 assistant 消息，供页面重建静态生成 HTML。
+        /// 只更新仍处于流式态的气泡，避免覆盖已经完成的消息。
+        /// </summary>
+        internal void SyncStreamingSnapshotToMessageForRebuild()
+        {
+            lock (_lock)
+            {
+                int index = ResolveAgentStreamingIndex();
+                if (index < 0 || index >= _messages.Count)
+                    return;
+
+                var message = _messages[index];
+                if (!message.IsStreaming)
+                    return;
+
+                if (_streamingContent.Length > 0)
+                    message.Content = _streamingContent.ToString();
+                if (_streamingReasoning.Length > 0)
+                    message.ReasoningContent = _streamingReasoning.ToString();
+                if (_agentTimelineContent.Length > 0)
+                    message.TimelineContent = _agentTimelineContent.ToString();
+            }
         }
 
         /// <summary>
@@ -1149,6 +1177,9 @@ namespace DeepSeek_v4_for_VisualStudio.View
         {
             if (maxBytes <= 0)
                 throw new ArgumentOutOfRangeException(nameof(maxBytes));
+
+            // 主题切换/全量刷新也可能绕过 RebuildMessagesHtml，导航前统一同步当前流式快照。
+            SyncStreamingSnapshotToMessageForRebuild();
 
             int windowSize = Math.Min(RenderWindowBatchSize, _messages.Count);
             while (true)
