@@ -4,7 +4,7 @@
 > 融合对话问答、多 Agent 自主编码、内联代码补全，以及可逐块审阅的差异式编辑。
 
 [![License: MIT](https://img.shields.io/badge/License-MIT-blue.svg)](LICENSE)
-[![VSIX](https://img.shields.io/badge/VSIX-1.3.2-success.svg)](source.extension.vsixmanifest)
+[![VSIX](https://img.shields.io/badge/VSIX-1.3.3-success.svg)](source.extension.vsixmanifest)
 [![Visual Studio](https://img.shields.io/badge/Visual%20Studio-2022%20%7C%202026-5C2D91.svg)](https://visualstudio.microsoft.com/)
 [![.NET Framework](https://img.shields.io/badge/.NET%20Framework-4.7.2-512BD4.svg)](https://dotnet.microsoft.com/)
 [![Stars](https://img.shields.io/github/stars/zmy15/DeepSeek-for-VisualStudio?style=flat&logo=github&label=Stars)](https://github.com/zmy15/DeepSeek-for-VisualStudio/stargazers)
@@ -50,7 +50,7 @@
 
 | | |
 |---|---|
-| **版本** | 1.3.2 |
+| **版本** | 1.3.3 |
 | **目标平台** | Visual Studio 2022 / 2026，`amd64`，`[17.14, )` |
 | **运行时** | .NET Framework 4.7.2，C# 14 |
 | **开源协议** | MIT |
