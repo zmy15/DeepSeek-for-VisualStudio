@@ -2507,7 +2507,7 @@ namespace DeepSeek_v4_for_VisualStudio.View
                 }
                 if (_pageReady)
                 {
-                    await RebuildPersistedTaskPanelsAsync();
+                    await ReplayDynamicPanelsAfterPageReadyAsync();
                 }
             }
             catch (Exception ex)
@@ -2876,23 +2876,47 @@ namespace DeepSeek_v4_for_VisualStudio.View
         /// <summary>
         /// 注入单个审批卡片（Toast + 卡片 + 状态栏提示）。
         /// </summary>
-        private async Task InjectApprovalCardAsync(AgentPermissionRequest request)
+        private async Task InjectApprovalCardAsync(
+            AgentPermissionRequest request,
+            bool notifyUser = true)
         {
-            await ThreadHelper.JoinableTaskFactory.SwitchToMainThreadAsync();
-
-            if (ChatWebView.CoreWebView2 == null)
+            lock (_lock)
             {
-                Logger.Warn($"[Agent] CoreWebView2 未就绪，自动拒绝权限请求: {request.Title}");
-                var permAgent = _agentFactory?.FindAgentWithPendingPermission(request.RequestId) ?? _activeAgent;
-                permAgent?.RespondToPermission(request.RequestId, false);
-                AdvanceApprovalQueue(request.RequestId, removeCard: true);
-                return;
+                if (!_approvalCardRenderInFlight.Add(request.RequestId))
+                    return;
             }
 
             try
             {
-                // Toast 在卡片真正显示时才提醒：并发审批时通知不再一次性叠加
-                NotifyUserActionRequired(request.Title, request.Command);
+                await ThreadHelper.JoinableTaskFactory.SwitchToMainThreadAsync();
+
+                // 调试启动/停止期间 WebView 会短暂重建，等待页面就绪后重放，不能直接拒绝。
+                for (int i = 0; i < 150; i++)
+                {
+                    if (_disposed)
+                        return;
+                    if (_pageReady && ChatWebView?.CoreWebView2 != null)
+                        break;
+                    await Task.Delay(100);
+                }
+
+                bool stillCurrent = ReferenceEquals(_approvalQueue.Current, request)
+                    && ApprovalRequestQueue.IsStillPending(request);
+                if (!stillCurrent)
+                    return;
+
+                if (!_pageReady || ChatWebView?.CoreWebView2 == null)
+                {
+                    Logger.Warn($"[Agent] WebView2 页面在等待后仍未就绪，自动拒绝权限请求: {request.Title}");
+                    var timeoutAgent = _agentFactory?.FindAgentWithPendingPermission(request.RequestId) ?? _activeAgent;
+                    timeoutAgent?.RespondToPermission(request.RequestId, false);
+                    AdvanceApprovalQueue(request.RequestId, removeCard: true);
+                    return;
+                }
+
+                // Toast 在卡片真正显示时才提醒：页面重建重放时不重复弹通知。
+                if (notifyUser)
+                    NotifyUserActionRequired(request.Title, request.Command);
 
                 string js;
                 if (request.ActionType == "file_delete")
@@ -2920,6 +2944,10 @@ namespace DeepSeek_v4_for_VisualStudio.View
                 var permAgent = _agentFactory?.FindAgentWithPendingPermission(request.RequestId) ?? _activeAgent;
                 permAgent?.RespondToPermission(request.RequestId, false);
                 AdvanceApprovalQueue(request.RequestId, removeCard: true);
+            }
+            finally
+            {
+                lock (_lock) { _approvalCardRenderInFlight.Remove(request.RequestId); }
             }
         }
 
@@ -3219,6 +3247,66 @@ namespace DeepSeek_v4_for_VisualStudio.View
             var request = GetLatestPendingQuestionForReplay();
             if (request != null)
                 await RenderQuestionCardWhenReadyAsync(request, notifyUser: false);
+        }
+
+        /// <summary>页面就绪后统一恢复所有非静态交互面板。</summary>
+        private async Task ReplayDynamicPanelsAfterPageReadyAsync()
+        {
+            Task? inFlight;
+            lock (_lock)
+            {
+                inFlight = _dynamicPanelsReplayTask;
+                if (inFlight == null)
+                {
+                    inFlight = ReplayDynamicPanelsCoreAsync();
+                    _dynamicPanelsReplayTask = inFlight;
+                }
+            }
+
+            try
+            {
+                await inFlight;
+            }
+            finally
+            {
+                lock (_lock)
+                {
+                    if (ReferenceEquals(_dynamicPanelsReplayTask, inFlight))
+                        _dynamicPanelsReplayTask = null;
+                }
+            }
+        }
+
+        private async Task ReplayDynamicPanelsCoreAsync()
+        {
+            if (!_pageReady || ChatWebView?.CoreWebView2 == null)
+                return;
+
+            try
+            {
+                await RebuildPersistedTaskPanelsAsync();
+            }
+            catch (Exception ex)
+            {
+                Logger.Warn($"[Panel] 页面就绪后重建任务面板失败: {ex.Message}");
+            }
+
+            await ReplayPendingQuestionCardAsync();
+
+            var currentApproval = GetCurrentApprovalForReplay();
+            if (currentApproval != null)
+                await InjectApprovalCardAsync(currentApproval, notifyUser: false);
+
+            await ReplayPendingInlineEditAsync();
+        }
+
+        /// <summary>返回仍需页面重放的当前审批项；已响应或已失效时返回 null。</summary>
+        internal AgentPermissionRequest? GetCurrentApprovalForReplay()
+        {
+            var current = _approvalQueue.Current;
+            return current != null && ApprovalRequestQueue.IsStillPending(current)
+                ? current
+                : null;
         }
 
         /// <summary>

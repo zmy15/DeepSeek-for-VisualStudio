@@ -351,6 +351,55 @@ public class WebViewReloadRecoveryTests
         });
     }
 
+    [Fact]
+    public void PendingApproval_ShouldRemainAvailableForPageReadyReplay()
+    {
+        RunOnStaThread(control =>
+        {
+            var queue = GetField<ApprovalRequestQueue>(control, "_approvalQueue");
+            var request = new AgentPermissionRequest
+            {
+                RequestId = "permission-1",
+                Title = "确认操作",
+                Command = "dotnet build",
+                ResponseTcs = new TaskCompletionSource<bool>(),
+            };
+
+            queue.Enqueue(request).Should().BeTrue();
+            queue.TakeNext().Should().BeSameAs(request);
+
+            control.GetCurrentApprovalForReplay().Should().BeSameAs(request,
+                "WebView 重建后应能找回当前待审批卡片并重放");
+
+            request.ResponseTcs.TrySetResult(true);
+            control.GetCurrentApprovalForReplay().Should().BeNull(
+                "审批已响应后不得再次重放卡片");
+        });
+    }
+
+    [Fact]
+    public void PendingInlineEdit_ShouldRemainAvailableForPageReadyReplay()
+    {
+        RunOnStaThread(control =>
+        {
+            GetField<List<ChatMessage>>(control, "_messages").Add(new ChatMessage
+            {
+                Role = "user",
+                Content = "待编辑内容",
+            });
+            SetField(control, "_pendingEditMsgIndex", 0);
+
+            control.TryGetPendingInlineEditState(out int index, out string content)
+                .Should().BeTrue();
+            index.Should().Be(0);
+            content.Should().Be("待编辑内容");
+
+            SetField(control, "_pendingEditMsgIndex", -1);
+            control.TryGetPendingInlineEditState(out _, out _).Should().BeFalse(
+                "未处于编辑状态时不得重放编辑框");
+        });
+    }
+
     // ── 合成链路失效（真正的空白窗口成因）──────────────────────────────
 
     [Fact]

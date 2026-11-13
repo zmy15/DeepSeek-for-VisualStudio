@@ -2828,8 +2828,8 @@ namespace DeepSeek_v4_for_VisualStudio.View
                     Logger.Info("[Render] WebView2 页面就绪信号收到");
                     // 重建窗口内被丢弃的终态渲染必须补发，否则气泡会停在占位/纯文本状态。
                     TryReplayPendingStreamEnd();
-                    // 提问卡片属于动态 DOM，不在初始 HTML 中；页面重建后必须重新注入。
-                    _ = ReplayPendingQuestionCardAsync();
+                    // 任务面板、Handoff、提问和审批均属于动态 DOM，页面重建后统一重放。
+                    _ = ReplayDynamicPanelsAfterPageReadyAsync();
                     return;
                 }
 
