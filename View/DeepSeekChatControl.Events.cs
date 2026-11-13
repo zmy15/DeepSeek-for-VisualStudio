@@ -1990,13 +1990,19 @@ namespace DeepSeek_v4_for_VisualStudio.View
                     bool isCustomEntry = item.Source == ModelListItem.EntrySource.Custom;
                     var targetSource = isCustomEntry ? "custom" : "official";
                     var currentModel = isCustomEntry ? _options.ActiveCustomModel : _options.SelectedModel;
+                    var currentEndpointId = _options.ActiveCustomEndpointId;
 
                     bool sourceChanged = !string.Equals(_options.ActiveModelSource, targetSource, StringComparison.Ordinal);
                     bool modelChanged = !string.Equals(currentModel, item.Model, StringComparison.Ordinal);
-                    if (sourceChanged || modelChanged)
+                    bool endpointChanged = isCustomEntry &&
+                        !string.Equals(currentEndpointId, item.EndpointId, StringComparison.Ordinal);
+                    if (sourceChanged || modelChanged || endpointChanged)
                     {
                         if (isCustomEntry)
+                        {
                             _options.ActiveCustomModel = item.Model;
+                            _options.ActiveCustomEndpointId = item.EndpointId;
+                        }
                         else
                             _options.SelectedModel = item.Model;
                         _options.ActiveModelSource = targetSource;

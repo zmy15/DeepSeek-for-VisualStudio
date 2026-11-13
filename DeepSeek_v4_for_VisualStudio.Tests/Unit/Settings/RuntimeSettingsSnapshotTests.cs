@@ -51,6 +51,24 @@ public class RuntimeSettingsSnapshotTests
     }
 
     [Fact]
+    public void CustomEndpointChange_RefreshesEndpointAndModelControls()
+    {
+        var previous = CreateSnapshot();
+        var current = previous with
+        {
+            CustomEndpointsData = "[{\"id\":\"endpoint-b\"}]",
+            ActiveCustomEndpointId = "endpoint-b",
+        };
+
+        var changes = RuntimeSettingsChangeSet.Between(previous, current);
+
+        changes.EndpointChanged.Should().BeTrue();
+        changes.ModelControlsChanged.Should().BeTrue();
+        changes.OfficialApiKeyChanged.Should().BeFalse();
+        changes.ContextChanged.Should().BeFalse();
+    }
+
+    [Fact]
     public void ContextBudgetChange_RefreshesContextOnly()
     {
         var previous = CreateSnapshot();

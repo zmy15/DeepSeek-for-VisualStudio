@@ -1,3 +1,4 @@
+using DeepSeek_v4_for_VisualStudio.Models;
 using DeepSeek_v4_for_VisualStudio.Services;
 using System.Net.Http;
 using System.Text;
@@ -147,6 +148,35 @@ public class DeepSeekEndpointResolverTests
 
         config.IsCustom.Should().BeTrue();
         config.Model.Should().Be("glm-5.3-flash");
+    }
+
+    [Fact]
+    public void Resolve_MultipleCustomEndpoints_UsesSelectedEndpoint()
+    {
+        var config = DeepSeekEndpointResolver.Resolve(
+            apiBaseUrl: null,
+            officialApiKey: "sk-official",
+            customApiKey: "ignored",
+            selectedModel: "deepseek-v4-flash",
+            customModels: "shared-model",
+            activeCustomModel: "shared-model",
+            activeModelSource: "custom",
+            customEndpoints: new[]
+            {
+                new CustomEndpointConfig(
+                    "endpoint-a", "Provider A", "https://a.example.com/v1", "sk-a",
+                    new[] { "shared-model" }),
+                new CustomEndpointConfig(
+                    "endpoint-b", "Provider B", "https://b.example.com/v1", "sk-b",
+                    new[] { "shared-model" }),
+            },
+            activeCustomEndpointId: "endpoint-b");
+
+        config.IsCustom.Should().BeTrue();
+        config.EndpointId.Should().Be("endpoint-b");
+        config.BaseUrl.Should().Be("https://b.example.com/v1");
+        config.ApiKey.Should().Be("sk-b");
+        config.Model.Should().Be("shared-model");
     }
 
     [Fact]

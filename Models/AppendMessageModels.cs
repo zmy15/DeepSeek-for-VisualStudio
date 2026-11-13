@@ -34,7 +34,7 @@ namespace DeepSeek_v4_for_VisualStudio.Models
 
         public long Sequence { get; internal set; }
 
-        public string Text { get; }
+        public string Text { get; internal set; }
 
         public string Model { get; }
 
@@ -93,6 +93,41 @@ namespace DeepSeek_v4_for_VisualStudio.Models
                 item.Mode = item.Mode == AppendMessageMode.Queue
                     ? AppendMessageMode.Guidance
                     : AppendMessageMode.Queue;
+                return true;
+            }
+        }
+
+        /// <summary>
+        /// 更新一条尚未派发消息的文本。已派发或已移除的消息返回 false。
+        /// </summary>
+        public bool TryUpdateText(string id, string text)
+        {
+            if (string.IsNullOrWhiteSpace(text))
+                return false;
+
+            lock (_sync)
+            {
+                var item = FindPending(id);
+                if (item == null)
+                    return false;
+
+                item.Text = text.Trim();
+                return true;
+            }
+        }
+
+        /// <summary>
+        /// 撤销一条尚未派发的消息。已派发或已移除的消息返回 false。
+        /// </summary>
+        public bool TryRemove(string id)
+        {
+            lock (_sync)
+            {
+                var item = FindPending(id);
+                if (item == null)
+                    return false;
+
+                _items.Remove(item);
                 return true;
             }
         }
@@ -167,6 +202,13 @@ namespace DeepSeek_v4_for_VisualStudio.Models
                     && candidate.State == AppendMessageState.Pending)
                 .OrderBy(candidate => candidate.Sequence)
                 .FirstOrDefault();
+        }
+
+        private PendingAppendMessage? FindPending(string id)
+        {
+            return _items.FirstOrDefault(candidate =>
+                candidate.State == AppendMessageState.Pending
+                && string.Equals(candidate.Id, id, StringComparison.Ordinal));
         }
     }
 }

@@ -30,7 +30,9 @@ namespace DeepSeek_v4_for_VisualStudio.Settings
         string AppendMessageMode,
         int InputBoxHeight,
         int BottomAreaScalePercent,
-        int WebView2ZoomPercent)
+        int WebView2ZoomPercent,
+        string CustomEndpointsData = "",
+        string ActiveCustomEndpointId = "")
     {
         public static RuntimeSettingsSnapshot Capture(DeepSeekOptionsPage options)
         {
@@ -62,7 +64,9 @@ namespace DeepSeek_v4_for_VisualStudio.Settings
                 options.AppendMessageMode.ToString(),
                 options.InputBoxHeight,
                 options.BottomAreaScalePercent,
-                options.WebView2ZoomPercent);
+                options.WebView2ZoomPercent,
+                options.CustomEndpointsData ?? string.Empty,
+                options.ActiveCustomEndpointId ?? string.Empty);
         }
 
         public override string ToString() => "RuntimeSettingsSnapshot { redacted }";
@@ -115,7 +119,9 @@ namespace DeepSeek_v4_for_VisualStudio.Settings
                 Changed(previous.CustomVisionModels, current.CustomVisionModels) ||
                 Changed(previous.CustomModelMetadata, current.CustomModelMetadata) ||
                 Changed(previous.ActiveCustomModel, current.ActiveCustomModel) ||
-                Changed(previous.ActiveModelSource, current.ActiveModelSource);
+                Changed(previous.CustomEndpointsData, current.CustomEndpointsData) ||
+                Changed(previous.ActiveModelSource, current.ActiveModelSource) ||
+                Changed(previous.ActiveCustomEndpointId, current.ActiveCustomEndpointId);
             bool contextChanged =
                 previous.TokenBudgetPercent != current.TokenBudgetPercent ||
                 Changed(previous.ModelMaxTokenLimits, current.ModelMaxTokenLimits);
@@ -125,6 +131,7 @@ namespace DeepSeek_v4_for_VisualStudio.Settings
                     Changed(previous.ApiKey, current.ApiKey) ||
                     Changed(previous.CustomApiKey, current.CustomApiKey) ||
                     Changed(previous.ApiBaseUrl, current.ApiBaseUrl) ||
+                    Changed(previous.CustomEndpointsData, current.CustomEndpointsData) ||
                     modelControlsChanged,
                 OfficialApiKeyChanged: Changed(previous.ApiKey, current.ApiKey),
                 ModelControlsChanged: modelControlsChanged,

@@ -1,3 +1,4 @@
+using DeepSeek_v4_for_VisualStudio.Models;
 using DeepSeek_v4_for_VisualStudio.Services;
 using DeepSeek_v4_for_VisualStudio.Utils;
 using System;
@@ -31,19 +32,18 @@ namespace DeepSeek_v4_for_VisualStudio.Settings
         bool FromMetadata = false,
         string DisplayName = "",
         int MaxOutputTokens = 0,
-        IReadOnlyList<string>? EffortLevels = null);
+        IReadOnlyList<string>? EffortLevels = null,
+        string EndpointId = "",
+        string EndpointName = "");
 
     /// <summary>
-    /// 选项页三个底层字符串与统一表格行集合之间的双向映射。
-    /// 拆解旧的「自定义模型列表 / 模型最大 Token / 视觉模型」三项配置为表格行，
-    /// 或在确定后按 <b>完全相同的旧格式</b>回写字符串，
-    /// 从而让 <see cref="DeepSeekEndpointResolver"/>、<see cref="RuntimeSettingsSnapshot"/>、
-    /// <see cref="ModelTokenLimitService"/> 等运行时消费链无需任何改动。
+    /// 端点集合、模型列表和模型元数据与统一表格行集合之间的双向映射。
+    /// 表格确认后同时回写多端点 JSON 与兼容用的旧版模型字符串。
     /// </summary>
     internal static class ModelCatalogMapping
     {
         /// <summary>
-        /// 从选项页读取三个底层字符串，组装为表格行集合。
+        /// 从选项页读取端点与模型配置，组装为表格行集合。
         /// 行顺序：官方模型 → 自定义模型 → 已配置 Token 的模型 → 已勾选的视觉模型 → 当前选中项，去重保序。
         /// </summary>
         /// <param name="page">当前的 DeepSeek 选项页实例。</param>
@@ -54,25 +54,38 @@ namespace DeepSeek_v4_for_VisualStudio.Settings
                 throw new ArgumentNullException(nameof(page));
 
             var officialModels = OfficialModelCatalogService.GetModels();
-            var customModels = page.GetCustomModels();
+            var endpoints = page.GetCustomEndpoints();
+            var customEntries = page.GetCustomModelEntries();
             var limits = ModelTokenLimitService.ParseLimits(page.ModelMaxTokenLimits);
             var vision = new HashSet<string>(page.GetVisionModels(), StringComparer.OrdinalIgnoreCase);
             var extra = DeepSeekOptionsPage.ParseCustomModelMetadata(page.CustomModelMetadata);
 
             var rows = new List<ModelCatalogRow>();
             var seen = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
+            var defaultEndpoint = endpoints.FirstOrDefault();
 
             // 局部函数：统一做非空校验、去重并填充该行的 Token/视觉初始值。
             // 官方模型以接口元数据为权威值；接口未给出时回退用户配置。
-            void Add(string? model)
+            void Add(
+                string? model,
+                string? endpointId = null,
+                string? endpointName = null,
+                bool treatAsCustom = false)
             {
                 if (string.IsNullOrWhiteSpace(model))
                     return;
                 string name = model.Trim();
-                if (name.Length == 0 || !seen.Add(name))
+                string id = (endpointId ?? string.Empty).Trim();
+                string sourceName = (endpointName ?? string.Empty).Trim();
+                string key = treatAsCustom || id.Length > 0
+                    ? id + "\0" + name
+                    : "official\0" + name;
+                if (name.Length == 0 || !seen.Add(key))
                     return;
 
-                var metadata = OfficialModelCatalogService.TryGetMetadata(name);
+                var metadata = treatAsCustom || id.Length > 0
+                    ? null
+                    : OfficialModelCatalogService.TryGetMetadata(name);
                 if (metadata != null)
                 {
                     int officialTokens = metadata.ContextWindow ?? 0;
@@ -90,48 +103,103 @@ namespace DeepSeek_v4_for_VisualStudio.Settings
                     name, maxTokens, vision.Contains(name),
                     DisplayName: customExtra?.DisplayName ?? string.Empty,
                     MaxOutputTokens: customExtra?.MaxOutputTokens ?? 0,
-                    EffortLevels: customExtra?.EffortLevels ?? Array.Empty<string>()));
+                    EffortLevels: customExtra?.EffortLevels ?? Array.Empty<string>(),
+                    EndpointId: id,
+                    EndpointName: sourceName));
             }
 
             foreach (string model in officialModels)
                 Add(model);
-            foreach (string model in customModels)
-                Add(model);
+            foreach (var entry in customEntries)
+                Add(entry.Model, entry.EndpointId, entry.EndpointName, treatAsCustom: true);
             foreach (string model in limits.Keys)
-                Add(model);
+            {
+                Add(
+                    model,
+                    defaultEndpoint?.Id,
+                    defaultEndpoint?.Name);
+            }
             foreach (string model in vision)
-                Add(model);
+            {
+                Add(
+                    model,
+                    defaultEndpoint?.Id,
+                    defaultEndpoint?.Name);
+            }
             Add(page.SelectedModel);
-            Add(page.ActiveCustomModel);
+            var activeEndpoint = endpoints.FirstOrDefault(endpoint =>
+                string.Equals(
+                    endpoint.Id,
+                    page.ActiveCustomEndpointId,
+                    StringComparison.Ordinal));
+            Add(
+                page.ActiveCustomModel,
+                page.ActiveCustomEndpointId,
+                activeEndpoint?.Name,
+                treatAsCustom: true);
 
             return rows;
         }
 
         /// <summary>
-        /// 把表格行集合回写为三个底层字符串，格式与改造前保持一致，确保向后兼容。
+        /// 把表格行集合回写为端点集合与兼容用的模型字符串。
         /// </summary>
         /// <param name="page">当前的 DeepSeek 选项页实例。</param>
         /// <param name="rows">用户在表格中编辑并确认的行集合。</param>
-        public static void ApplyRows(DeepSeekOptionsPage page, IReadOnlyList<ModelCatalogRow> rows)
+        public static void ApplyRows(
+            DeepSeekOptionsPage page,
+            IReadOnlyList<ModelCatalogRow> rows,
+            IReadOnlyList<CustomEndpointConfig>? endpoints = null)
         {
             if (page == null)
                 throw new ArgumentNullException(nameof(page));
             if (rows == null)
                 throw new ArgumentNullException(nameof(rows));
 
-            var officialSet = new HashSet<string>(
-                OfficialModelCatalogService.GetModels(), StringComparer.OrdinalIgnoreCase);
-            // 记录原有自定义条目，避免把用户此前手填、恰与官方同名的模型误删。
-            var originalCustom = new HashSet<string>(
-                page.GetCustomModels(), StringComparer.OrdinalIgnoreCase);
+            var configuredEndpoints = DeepSeekOptionsPage.NormalizeCustomEndpoints(
+                endpoints ?? page.GetCustomEndpoints()).ToList();
+            var endpointMap = configuredEndpoints.ToDictionary(
+                endpoint => endpoint.Id,
+                StringComparer.Ordinal);
+            var modelsByEndpoint = configuredEndpoints.ToDictionary(
+                endpoint => endpoint.Id,
+                _ => new List<string>(),
+                StringComparer.Ordinal);
 
-            // ① 自定义模型列表：官方模型由 OfficialModelCatalogService 动态提供，
-            //    若一并写入 CustomModelName，会让聊天窗口下拉出现带自定义后缀的重复项。
-            var customModels = rows
-                .Where(row => !officialSet.Contains(row.Model) || originalCustom.Contains(row.Model))
-                .Select(row => row.Model)
-                .ToList();
-            page.SetCustomModels(customModels);
+            // ① 自定义模型列表：官方模型由 OfficialModelCatalogService 动态提供。
+            //    用户若显式保留同名自定义模型，则按端点继续保存。
+            foreach (var row in rows.Where(row => !row.IsOfficial))
+            {
+                var endpoint = row.EndpointId.Length > 0 &&
+                    endpointMap.TryGetValue(row.EndpointId, out var matched)
+                        ? matched
+                        : configuredEndpoints.FirstOrDefault();
+                if (endpoint != null && modelsByEndpoint.TryGetValue(endpoint.Id, out var models))
+                    models.Add(row.Model);
+            }
+
+            if (configuredEndpoints.Count > 0)
+            {
+                var updatedEndpoints = configuredEndpoints
+                    .Select(endpoint => new CustomEndpointConfig(
+                        endpoint.Id,
+                        endpoint.Name,
+                        endpoint.BaseUrl,
+                        endpoint.ApiKey,
+                        modelsByEndpoint[endpoint.Id]))
+                    .ToList();
+                page.SetCustomEndpoints(updatedEndpoints);
+            }
+            else
+            {
+                if (endpoints != null)
+                    page.SetCustomEndpoints(Array.Empty<CustomEndpointConfig>());
+                var customModels = rows
+                    .Where(row => !row.IsOfficial)
+                    .Select(row => row.Model)
+                    .ToList();
+                page.SetCustomModels(customModels);
+            }
 
             // ② 模型最大 Token：只写入用户可编辑（非官方元数据）的行，格式保持 "模型名=token"。
             //    官方模型的上下文窗口由接口提供，落盘会造成过期副本。
@@ -182,11 +250,10 @@ namespace DeepSeek_v4_for_VisualStudio.Settings
             using var dialog = new ModelCatalogDialog(
                 rows,
                 officialModels,
-                page.ApiBaseUrl,
-                ApiKeyProtection.Unprotect(page.CustomApiKey));
+                page.GetCustomEndpoints());
             if (dialog.ShowDialog() == DialogResult.OK && dialog.ResultRows is { } resultRows)
             {
-                ModelCatalogMapping.ApplyRows(page, resultRows);
+                ModelCatalogMapping.ApplyRows(page, resultRows, dialog.ResultEndpoints);
                 return page.CustomModelName;
             }
 
@@ -205,23 +272,21 @@ namespace DeepSeek_v4_for_VisualStudio.Settings
         /// <summary>确定后输出的编辑结果行集合；取消时为 null。</summary>
         public IReadOnlyList<ModelCatalogRow>? ResultRows { get; private set; }
 
+        /// <summary>确定后输出的端点集合。</summary>
+        public IReadOnlyList<CustomEndpointConfig> ResultEndpoints { get; private set; }
+
         /// <summary>
         /// 构造对话框。
         /// </summary>
         /// <param name="rows">从三个底层字符串解析出的初始行集合。</param>
         /// <param name="officialModels">官方模型名列表，用于识别官方条目。</param>
-        /// <param name="baseUrl">自定义端点 Base URL，供「+」按钮的端点获取复用。</param>
-        /// <param name="apiKey">自定义端点密钥（已解密），供端点获取复用。</param>
         public ModelCatalogDialog(
             IReadOnlyList<ModelCatalogRow> rows,
             IReadOnlyList<string> officialModels,
-            string? baseUrl,
-            string? apiKey)
+            IReadOnlyList<CustomEndpointConfig> endpoints)
         {
-            // 保存自定义端点与密钥，供「+ 添加模型 → 从端点获取」复用；
-            // 遗漏赋值会导致下游回退到官方默认地址。
-            _baseUrl = baseUrl;
-            _apiKey = apiKey;
+            _endpoints = DeepSeekOptionsPage.NormalizeCustomEndpoints(endpoints).ToList();
+            ResultEndpoints = _endpoints;
             // 官方模型由远端目录动态提供、删除无处落盘，下次打开必然重现，
             // 故预先构建集合，用于标注来源并拦截对官方行的删除操作。
             _officialSet = new HashSet<string>(officialModels, StringComparer.OrdinalIgnoreCase);
@@ -262,6 +327,14 @@ namespace DeepSeek_v4_for_VisualStudio.Settings
             };
             addButton.Click += OnAddModels;
             toolbar.Controls.Add(addButton);
+            var manageEndpointsButton = new Button
+            {
+                Text = l["settings.customEndpoints.manageButton"],
+                Dock = DockStyle.Left,
+                Width = 150,
+            };
+            manageEndpointsButton.Click += OnManageEndpoints;
+            toolbar.Controls.Add(manageEndpointsButton);
 
             _grid = new DataGridView
             {
@@ -391,7 +464,18 @@ namespace DeepSeek_v4_for_VisualStudio.Settings
                     : string.Empty;
 
                 // 来源由官方模型集合判定：命中即官方（元数据自动填充），否则视为自定义/手动添加。
-                string sourceText = _officialSet.Contains(row.Model) ? officialText : customText;
+                string endpointName = row.EndpointName;
+                if (endpointName.Length == 0 && row.EndpointId.Length > 0)
+                {
+                    endpointName = _endpoints.FirstOrDefault(endpoint =>
+                        string.Equals(endpoint.Id, row.EndpointId, StringComparison.Ordinal))?.Name
+                        ?? string.Empty;
+                }
+                string sourceText = row.IsOfficial
+                    ? officialText
+                    : endpointName.Length > 0
+                        ? string.Format(l["settings.modelCatalog.sourceEndpoint"], endpointName)
+                        : customText;
                 string displayText = row.DisplayName ?? string.Empty;
                 string maxOutputText = row.MaxOutputTokens > 0
                     ? ModelTokenLimitService.FormatTokenCount(row.MaxOutputTokens)
@@ -403,6 +487,7 @@ namespace DeepSeek_v4_for_VisualStudio.Settings
                 int index = _grid.Rows.Add(
                     row.Model, displayText, sourceText, tokenText, maxOutputText,
                     row.IsVision, effortText, string.Empty);
+                _grid.Rows[index].Tag = row.EndpointId;
 
                 // 官方模型的全部元数据由接口声明，整行只读，避免用户改动后与接口不一致。
                 // 自定义模型行保持可编辑，用户可自行填写展示名称/上下文/输出上限/视觉/推理档位。
@@ -425,25 +510,76 @@ namespace DeepSeek_v4_for_VisualStudio.Settings
         private void OnAddModels(object? sender, EventArgs e)
         {
             var l = LocalizationService.Instance;
-            using var dialog = new ModelAddDialog(_baseUrl, _apiKey);
+            using var dialog = new ModelAddDialog(_endpoints);
             if (dialog.ShowDialog(this) != DialogResult.OK)
                 return;
 
+            _endpoints = DeepSeekOptionsPage.NormalizeCustomEndpoints(dialog.ResultEndpoints).ToList();
+            ResultEndpoints = _endpoints;
             var existing = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
             foreach (DataGridViewRow gridRow in _grid.Rows)
             {
                 string name = gridRow.Cells["model"].Value?.ToString()?.Trim() ?? string.Empty;
                 if (name.Length > 0)
-                    existing.Add(name);
+                    existing.Add((gridRow.Tag?.ToString() ?? string.Empty) + "\0" + name);
             }
 
-            foreach (string model in dialog.AddedModels)
+            foreach (var entry in dialog.AddedModels)
             {
-                if (existing.Add(model))
+                string key = entry.EndpointId + "\0" + entry.Model;
+                if (existing.Add(key))
                 {
-                    _grid.Rows.Add(
-                        model, string.Empty, l["settings.modelCatalog.sourceCustom"],
+                    string endpointName = _endpoints.FirstOrDefault(endpoint =>
+                        string.Equals(endpoint.Id, entry.EndpointId, StringComparison.Ordinal))?.Name
+                        ?? entry.EndpointName;
+                    int index = _grid.Rows.Add(
+                        entry.Model,
+                        string.Empty,
+                        endpointName.Length > 0
+                            ? string.Format(l["settings.modelCatalog.sourceEndpoint"], endpointName)
+                            : l["settings.modelCatalog.sourceCustom"],
                         string.Empty, string.Empty, false, string.Empty, string.Empty);
+                    _grid.Rows[index].Tag = entry.EndpointId;
+                }
+            }
+        }
+
+        private void OnManageEndpoints(object? sender, EventArgs e)
+        {
+            using var dialog = new CustomEndpointManagerDialog(_endpoints);
+            if (dialog.ShowDialog(this) != DialogResult.OK)
+                return;
+
+            _endpoints = DeepSeekOptionsPage.NormalizeCustomEndpoints(dialog.ResultEndpoints).ToList();
+            ResultEndpoints = _endpoints;
+            var activeIds = new HashSet<string>(
+                _endpoints.Select(endpoint => endpoint.Id), StringComparer.Ordinal);
+            for (int i = _grid.Rows.Count - 1; i >= 0; i--)
+            {
+                string endpointId = _grid.Rows[i].Tag?.ToString() ?? string.Empty;
+                if (endpointId.Length > 0 && !activeIds.Contains(endpointId))
+                    _grid.Rows.RemoveAt(i);
+            }
+            RefreshEndpointSourceCells();
+        }
+
+        private void RefreshEndpointSourceCells()
+        {
+            var l = LocalizationService.Instance;
+            var endpointNames = _endpoints.ToDictionary(
+                endpoint => endpoint.Id,
+                endpoint => endpoint.Name,
+                StringComparer.Ordinal);
+            foreach (DataGridViewRow row in _grid.Rows)
+            {
+                string endpointId = row.Tag?.ToString() ?? string.Empty;
+                if (endpointId.Length == 0)
+                    continue;
+                if (endpointNames.TryGetValue(endpointId, out string? endpointName))
+                {
+                    row.Cells["source"].Value = string.Format(
+                        l["settings.modelCatalog.sourceEndpoint"],
+                        endpointName);
                 }
             }
         }
@@ -459,7 +595,8 @@ namespace DeepSeek_v4_for_VisualStudio.Settings
             // 官方模型由远端目录动态提供、删除无处落盘，若放行会在下次打开时重现，
             // 故直接拦截并提示，避免用户误以为已删除。
             string model = _grid.Rows[e.RowIndex].Cells["model"].Value?.ToString()?.Trim() ?? string.Empty;
-            if (model.Length > 0 && _officialSet.Contains(model))
+            string endpointId = _grid.Rows[e.RowIndex].Tag?.ToString() ?? string.Empty;
+            if (endpointId.Length == 0 && model.Length > 0 && _officialSet.Contains(model))
             {
                 MessageBox.Show(
                     this,
@@ -479,6 +616,7 @@ namespace DeepSeek_v4_for_VisualStudio.Settings
             if (TryBuildRows(out var rows, out string? error))
             {
                 ResultRows = rows;
+                ResultEndpoints = _endpoints;
                 DialogResult = DialogResult.OK;
                 return;
             }
@@ -513,7 +651,12 @@ namespace DeepSeek_v4_for_VisualStudio.Settings
                 if (model.Length == 0)
                     continue;
 
-                if (!seen.Add(model))
+                string endpointId = gridRow.Tag?.ToString()?.Trim() ?? string.Empty;
+                string endpointName = _endpoints.FirstOrDefault(endpoint =>
+                    string.Equals(endpoint.Id, endpointId, StringComparison.Ordinal))?.Name
+                    ?? string.Empty;
+                string duplicateKey = endpointId + "\0" + model;
+                if (!seen.Add(duplicateKey))
                 {
                     result = rows;
                     errorMessage = string.Format(l["settings.modelCatalog.duplicateModel"], model);
@@ -530,7 +673,7 @@ namespace DeepSeek_v4_for_VisualStudio.Settings
                     return false;
                 }
 
-                bool isOfficial = _officialSet.Contains(model);
+                bool isOfficial = endpointId.Length == 0 && _officialSet.Contains(model);
                 bool fromMetadata = isOfficial && _metadataSet.Contains(model);
                 string displayName =
                     gridRow.Cells["display"].Value?.ToString()?.Trim() ?? string.Empty;
@@ -564,7 +707,7 @@ namespace DeepSeek_v4_for_VisualStudio.Settings
 
                 rows.Add(new ModelCatalogRow(
                     model, maxTokens, isVision, isOfficial, fromMetadata,
-                    displayName, maxOutput, effortLevels));
+                    displayName, maxOutput, effortLevels, endpointId, endpointName));
             }
 
             result = rows;
@@ -597,34 +740,31 @@ namespace DeepSeek_v4_for_VisualStudio.Settings
         /// <summary>带接口元数据的官方模型集合；这些行的 Token/视觉单元格只读。</summary>
         private readonly HashSet<string> _metadataSet;
 
-        private readonly string? _baseUrl;
-        private readonly string? _apiKey;
+        private List<CustomEndpointConfig> _endpoints;
     }
 
     /// <summary>
-    /// 「+ 添加模型」子对话框：支持「从端点获取」与「手动填写」两种方式，返回待追加的模型名集合。
+    /// 「+ 添加模型」子对话框：先选择自定义端点，再从端点获取或手动填写模型。
+    /// 端点管理支持同时维护多个自定义端点。
     /// </summary>
     internal sealed class ModelAddDialog : Form
     {
         private readonly ListBox _pendingList;
+        private readonly ComboBox _endpointCombo;
         private readonly TextBox _manualBox;
-        private readonly List<string> _added = new();
+        private readonly List<CustomEndpointModelEntry> _added = new();
         private readonly HashSet<string> _seen = new(StringComparer.OrdinalIgnoreCase);
-        private readonly string? _baseUrl;
-        private readonly string? _apiKey;
+        private List<CustomEndpointConfig> _endpoints;
 
-        /// <summary>确定后输出待添加的模型名集合；取消时为空集合。</summary>
-        public IReadOnlyList<string> AddedModels => _added;
+        /// <summary>确定后输出待添加的模型及所属端点。</summary>
+        public IReadOnlyList<CustomEndpointModelEntry> AddedModels => _added;
 
-        /// <summary>
-        /// 构造「+ 添加模型」对话框。
-        /// </summary>
-        /// <param name="baseUrl">自定义端点 Base URL，用于「从端点获取」。</param>
-        /// <param name="apiKey">自定义端点密钥（已解密），用于「从端点获取」。</param>
-        public ModelAddDialog(string? baseUrl, string? apiKey)
+        /// <summary>确定后的端点集合，包括本次新增或修改的端点。</summary>
+        public IReadOnlyList<CustomEndpointConfig> ResultEndpoints => _endpoints;
+
+        public ModelAddDialog(IReadOnlyList<CustomEndpointConfig> endpoints)
         {
-            _baseUrl = baseUrl;
-            _apiKey = apiKey;
+            _endpoints = endpoints.Select(endpoint => endpoint.Clone()).ToList();
 
             var l = LocalizationService.Instance;
             Text = l["settings.modelCatalog.addTitle"];
@@ -633,21 +773,40 @@ namespace DeepSeek_v4_for_VisualStudio.Settings
             MinimizeBox = false;
             MaximizeBox = false;
             ShowInTaskbar = false;
-            ClientSize = new Size(460, 388);
+            ClientSize = new Size(560, 470);
             Font = new Font("Segoe UI", 9f);
 
             var descriptionLabel = new Label
             {
                 Text = l["settings.modelCatalog.addDescription"],
                 Location = new Point(12, 12),
-                Size = new Size(436, 34),
+                Size = new Size(536, 36),
             };
 
-            // ── 方式一：从端点获取 ──
+            var endpointLabel = new Label
+            {
+                Text = l["settings.customEndpoints.selectLabel"],
+                Location = new Point(12, 56),
+                AutoSize = true,
+            };
+            _endpointCombo = new ComboBox
+            {
+                Location = new Point(12, 76),
+                Width = 400,
+                DropDownStyle = ComboBoxStyle.DropDownList,
+            };
+            var manageButton = new Button
+            {
+                Text = l["settings.customEndpoints.manageButton"],
+                Location = new Point(420, 74),
+                Size = new Size(128, 26),
+            };
+            manageButton.Click += OnManageEndpoints;
+
             var fetchButton = new Button
             {
                 Text = l["settings.modelCatalog.addFromEndpoint"],
-                Location = new Point(12, 50),
+                Location = new Point(12, 112),
                 Size = new Size(180, 28),
             };
             fetchButton.Click += OnFetchFromEndpoint;
@@ -655,32 +814,32 @@ namespace DeepSeek_v4_for_VisualStudio.Settings
             var manualLabel = new Label
             {
                 Text = l["settings.modelCatalog.addManualLabel"],
-                Location = new Point(12, 90),
+                Location = new Point(12, 152),
                 AutoSize = true,
             };
             _manualBox = new TextBox
             {
-                Location = new Point(12, 112),
-                Width = 436,
+                Location = new Point(12, 172),
+                Width = 400,
             };
             var manualAddButton = new Button
             {
                 Text = l["settings.modelCatalog.addManualButton"],
-                Location = new Point(360, 140),
-                Size = new Size(88, 26),
+                Location = new Point(420, 170),
+                Size = new Size(128, 26),
             };
             manualAddButton.Click += (_, _) => AddManualModels();
 
             var listLabel = new Label
             {
                 Text = l["settings.modelCatalog.addListLabel"],
-                Location = new Point(12, 176),
+                Location = new Point(12, 210),
                 AutoSize = true,
             };
             _pendingList = new ListBox
             {
-                Location = new Point(12, 198),
-                Size = new Size(436, 140),
+                Location = new Point(12, 232),
+                Size = new Size(536, 164),
                 SelectionMode = SelectionMode.None,
             };
 
@@ -688,14 +847,14 @@ namespace DeepSeek_v4_for_VisualStudio.Settings
             {
                 Text = l["settings.modelPicker.ok"],
                 DialogResult = DialogResult.OK,
-                Location = new Point(273, 348),
+                Location = new Point(373, 418),
                 Size = new Size(84, 26),
             };
             var cancelButton = new Button
             {
                 Text = l["settings.modelPicker.cancel"],
                 DialogResult = DialogResult.Cancel,
-                Location = new Point(364, 348),
+                Location = new Point(464, 418),
                 Size = new Size(84, 26),
             };
             AcceptButton = okButton;
@@ -703,43 +862,415 @@ namespace DeepSeek_v4_for_VisualStudio.Settings
 
             Controls.AddRange(new Control[]
             {
-                descriptionLabel, fetchButton, manualLabel, _manualBox,
-                manualAddButton, listLabel, _pendingList, okButton, cancelButton,
+                descriptionLabel, endpointLabel, _endpointCombo, manageButton,
+                fetchButton, manualLabel, _manualBox, manualAddButton,
+                listLabel, _pendingList, okButton, cancelButton,
             });
+
+            RefreshEndpointCombo();
         }
 
-        /// <summary>「从端点获取」：复用现有模型抓取对话框，把选中的模型追加到待添加队列。</summary>
+        private void OnManageEndpoints(object? sender, EventArgs e)
+        {
+            using var dialog = new CustomEndpointManagerDialog(_endpoints);
+            if (dialog.ShowDialog(this) != DialogResult.OK)
+                return;
+
+            _endpoints = DeepSeekOptionsPage.NormalizeCustomEndpoints(dialog.ResultEndpoints).ToList();
+            RebuildAddedModels();
+            RefreshEndpointCombo();
+        }
+
         private void OnFetchFromEndpoint(object? sender, EventArgs e)
         {
-            using var picker = new ModelPickerDialog(_baseUrl ?? string.Empty, _apiKey ?? string.Empty);
-            if (picker.ShowDialog(this) == DialogResult.OK)
-                AddModels(picker.SelectedModels);
+            var endpoint = GetSelectedEndpoint();
+            if (endpoint == null)
+            {
+                ShowEndpointRequired();
+                return;
+            }
+
+            using var picker = new ModelPickerDialog(
+                endpoint.BaseUrl,
+                endpoint.ApiKey,
+                readOnlyEndpoint: true);
+            if (picker.ShowDialog(this) != DialogResult.OK)
+                return;
+
+            AddModels(endpoint, picker.SelectedModels);
         }
 
-        /// <summary>把手动输入框内容按既有分隔符拆分后追加到待添加队列。</summary>
         private void AddManualModels()
         {
+            var endpoint = GetSelectedEndpoint();
+            if (endpoint == null)
+            {
+                ShowEndpointRequired();
+                return;
+            }
+
             var models = DeepSeekOptionsPage.ParseCustomModels(_manualBox.Text);
             if (models.Count == 0)
                 return;
 
-            AddModels(models);
+            AddModels(endpoint, models);
             _manualBox.Clear();
         }
 
-        /// <summary>去重地追加模型名到待添加队列与列表显示。</summary>
-        private void AddModels(IEnumerable<string> models)
+        private void AddModels(
+            CustomEndpointConfig endpoint,
+            IEnumerable<string> models)
         {
             foreach (string raw in models)
             {
                 if (string.IsNullOrWhiteSpace(raw))
                     continue;
                 string model = raw.Trim();
-                if (model.Length == 0 || !_seen.Add(model))
+                string key = endpoint.Id + "\0" + model;
+                if (model.Length == 0 || !_seen.Add(key))
                     continue;
-                _added.Add(model);
-                _pendingList.Items.Add(model);
+
+                var entry = new CustomEndpointModelEntry(endpoint.Id, endpoint.Name, model);
+                _added.Add(entry);
+                _pendingList.Items.Add($"{entry.Model} · {entry.EndpointName}");
             }
+        }
+
+        private void RebuildAddedModels()
+        {
+            var endpointNames = _endpoints.ToDictionary(
+                endpoint => endpoint.Id,
+                endpoint => endpoint.Name,
+                StringComparer.Ordinal);
+            var refreshed = _added
+                .Where(entry => endpointNames.ContainsKey(entry.EndpointId))
+                .Select(entry => new CustomEndpointModelEntry(
+                    entry.EndpointId,
+                    endpointNames[entry.EndpointId],
+                    entry.Model))
+                .ToList();
+
+            _added.Clear();
+            _seen.Clear();
+            _pendingList.Items.Clear();
+            foreach (var entry in refreshed)
+            {
+                string key = entry.EndpointId + "\0" + entry.Model;
+                if (!_seen.Add(key))
+                    continue;
+                _added.Add(entry);
+                _pendingList.Items.Add($"{entry.Model} · {entry.EndpointName}");
+            }
+        }
+
+        private void RefreshEndpointCombo()
+        {
+            string previousId = GetSelectedEndpoint()?.Id ?? string.Empty;
+            _endpointCombo.Items.Clear();
+            foreach (var endpoint in _endpoints)
+                _endpointCombo.Items.Add(new EndpointComboItem(endpoint));
+
+            int selectedIndex = 0;
+            for (int i = 0; i < _endpointCombo.Items.Count; i++)
+            {
+                if (_endpointCombo.Items[i] is EndpointComboItem item &&
+                    string.Equals(item.Endpoint.Id, previousId, StringComparison.Ordinal))
+                {
+                    selectedIndex = i;
+                    break;
+                }
+            }
+
+            if (_endpointCombo.Items.Count > 0)
+                _endpointCombo.SelectedIndex = selectedIndex;
+        }
+
+        private CustomEndpointConfig? GetSelectedEndpoint()
+            => (_endpointCombo.SelectedItem as EndpointComboItem)?.Endpoint;
+
+        private void ShowEndpointRequired()
+        {
+            MessageBox.Show(
+                this,
+                LocalizationService.Instance["settings.customEndpoints.required"],
+                Text,
+                MessageBoxButtons.OK,
+                MessageBoxIcon.Information);
+        }
+
+        private sealed class EndpointComboItem
+        {
+            public CustomEndpointConfig Endpoint { get; }
+
+            public EndpointComboItem(CustomEndpointConfig endpoint) => Endpoint = endpoint;
+
+            public override string ToString()
+                => $"{Endpoint.Name} · {Endpoint.BaseUrl}";
+        }
+    }
+
+    /// <summary>
+    /// Configures multiple custom endpoints in one dialog. The dialog keeps API keys masked
+    /// and leaves model selection to <see cref="ModelAddDialog"/>.
+    /// </summary>
+    internal sealed class CustomEndpointManagerDialog : Form
+    {
+        private readonly ListBox _endpointList;
+        private readonly TextBox _nameBox;
+        private readonly TextBox _baseUrlBox;
+        private readonly TextBox _apiKeyBox;
+        private readonly List<CustomEndpointConfig> _endpoints;
+        private bool _updatingFields;
+
+        public IReadOnlyList<CustomEndpointConfig> ResultEndpoints { get; private set; }
+
+        public CustomEndpointManagerDialog(IReadOnlyList<CustomEndpointConfig> endpoints)
+        {
+            _endpoints = endpoints.Select(endpoint => endpoint.Clone()).ToList();
+            ResultEndpoints = _endpoints;
+
+            var l = LocalizationService.Instance;
+            Text = l["settings.customEndpoints.title"];
+            FormBorderStyle = FormBorderStyle.FixedDialog;
+            StartPosition = FormStartPosition.CenterParent;
+            MinimizeBox = false;
+            MaximizeBox = false;
+            ShowInTaskbar = false;
+            ClientSize = new Size(760, 480);
+            Font = new Font("Segoe UI", 9f);
+
+            var descriptionLabel = new Label
+            {
+                Text = l["settings.customEndpoints.description"],
+                Location = new Point(12, 12),
+                Size = new Size(736, 42),
+            };
+
+            _endpointList = new ListBox
+            {
+                Location = new Point(12, 64),
+                Size = new Size(250, 330),
+            };
+            _endpointList.SelectedIndexChanged += (_, _) => LoadSelectedEndpoint();
+
+            var addButton = new Button
+            {
+                Text = l["settings.customEndpoints.add"],
+                Location = new Point(12, 404),
+                Size = new Size(96, 28),
+            };
+            addButton.Click += (_, _) => AddEndpoint();
+            var removeButton = new Button
+            {
+                Text = l["settings.customEndpoints.remove"],
+                Location = new Point(116, 404),
+                Size = new Size(96, 28),
+            };
+            removeButton.Click += (_, _) => RemoveEndpoint();
+
+            var nameLabel = new Label
+            {
+                Text = l["settings.customEndpoints.name"],
+                Location = new Point(284, 64),
+                AutoSize = true,
+            };
+            _nameBox = new TextBox
+            {
+                Location = new Point(284, 84),
+                Width = 464,
+            };
+            _nameBox.TextChanged += (_, _) => UpdateSelectedEndpoint();
+
+            var baseUrlLabel = new Label
+            {
+                Text = l["settings.modelPicker.baseUrl"],
+                Location = new Point(284, 122),
+                AutoSize = true,
+            };
+            _baseUrlBox = new TextBox
+            {
+                Location = new Point(284, 142),
+                Width = 464,
+            };
+            _baseUrlBox.TextChanged += (_, _) => UpdateSelectedEndpoint();
+
+            var apiKeyLabel = new Label
+            {
+                Text = l["settings.modelPicker.apiKey"],
+                Location = new Point(284, 180),
+                AutoSize = true,
+            };
+            _apiKeyBox = new TextBox
+            {
+                Location = new Point(284, 200),
+                Width = 464,
+                UseSystemPasswordChar = true,
+            };
+            _apiKeyBox.TextChanged += (_, _) => UpdateSelectedEndpoint();
+
+            var hintLabel = new Label
+            {
+                Text = l["settings.customEndpoints.modelsHint"],
+                Location = new Point(284, 242),
+                Size = new Size(464, 70),
+                ForeColor = SystemColors.GrayText,
+            };
+
+            var okButton = new Button
+            {
+                Text = l["settings.modelPicker.ok"],
+                Location = new Point(568, 436),
+                Size = new Size(84, 28),
+            };
+            okButton.Click += OnOkClick;
+            var cancelButton = new Button
+            {
+                Text = l["settings.modelPicker.cancel"],
+                DialogResult = DialogResult.Cancel,
+                Location = new Point(664, 436),
+                Size = new Size(84, 28),
+            };
+            AcceptButton = okButton;
+            CancelButton = cancelButton;
+
+            Controls.AddRange(new Control[]
+            {
+                descriptionLabel, _endpointList, addButton, removeButton,
+                nameLabel, _nameBox, baseUrlLabel, _baseUrlBox,
+                apiKeyLabel, _apiKeyBox, hintLabel, okButton, cancelButton,
+            });
+
+            RefreshEndpointList();
+            if (_endpointList.Items.Count > 0)
+                _endpointList.SelectedIndex = 0;
+        }
+
+        private void AddEndpoint()
+        {
+            var endpoint = new CustomEndpointConfig();
+            _endpoints.Add(endpoint);
+            RefreshEndpointList();
+            _endpointList.SelectedIndex = _endpoints.Count - 1;
+            _baseUrlBox.Focus();
+        }
+
+        private void RemoveEndpoint()
+        {
+            int index = _endpointList.SelectedIndex;
+            if (index < 0 || index >= _endpoints.Count)
+                return;
+
+            _endpoints.RemoveAt(index);
+            RefreshEndpointList();
+            if (_endpoints.Count > 0)
+                _endpointList.SelectedIndex = Math.Min(index, _endpoints.Count - 1);
+            else
+                LoadSelectedEndpoint();
+        }
+
+        private void RefreshEndpointList()
+        {
+            int selected = _endpointList.SelectedIndex;
+            _endpointList.Items.Clear();
+            foreach (var endpoint in _endpoints)
+                _endpointList.Items.Add(FormatEndpoint(endpoint));
+            if (selected >= 0 && selected < _endpointList.Items.Count)
+                _endpointList.SelectedIndex = selected;
+        }
+
+        private static string FormatEndpoint(CustomEndpointConfig endpoint)
+        {
+            string name = string.IsNullOrWhiteSpace(endpoint.Name)
+                ? LocalizationService.Instance["settings.customEndpoints.unnamed"]
+                : endpoint.Name;
+            return $"{name} · {endpoint.BaseUrl}";
+        }
+
+        private void UpdateEndpointListItem(int index)
+        {
+            if (index >= 0 && index < _endpointList.Items.Count && index < _endpoints.Count)
+                _endpointList.Items[index] = FormatEndpoint(_endpoints[index]);
+        }
+
+        private void LoadSelectedEndpoint()
+        {
+            if (_updatingFields)
+                return;
+
+            int index = _endpointList.SelectedIndex;
+            _updatingFields = true;
+            try
+            {
+                bool enabled = index >= 0 && index < _endpoints.Count;
+                _nameBox.Enabled = enabled;
+                _baseUrlBox.Enabled = enabled;
+                _apiKeyBox.Enabled = enabled;
+                if (!enabled)
+                {
+                    _nameBox.Clear();
+                    _baseUrlBox.Clear();
+                    _apiKeyBox.Clear();
+                    return;
+                }
+
+                var endpoint = _endpoints[index];
+                _nameBox.Text = endpoint.Name;
+                _baseUrlBox.Text = endpoint.BaseUrl;
+                _apiKeyBox.Text = endpoint.ApiKey;
+            }
+            finally
+            {
+                _updatingFields = false;
+            }
+        }
+
+        private void UpdateSelectedEndpoint()
+        {
+            if (_updatingFields)
+                return;
+
+            int index = _endpointList.SelectedIndex;
+            if (index < 0 || index >= _endpoints.Count)
+                return;
+
+            var endpoint = _endpoints[index];
+            endpoint.Name = _nameBox.Text.Trim();
+            endpoint.BaseUrl = _baseUrlBox.Text.Trim();
+            endpoint.ApiKey = _apiKeyBox.Text.Trim();
+            UpdateEndpointListItem(index);
+        }
+
+        private void OnOkClick(object? sender, EventArgs e)
+        {
+            var l = LocalizationService.Instance;
+            foreach (var endpoint in _endpoints)
+            {
+                if (!Uri.TryCreate(endpoint.BaseUrl, UriKind.Absolute, out var uri) ||
+                    (uri.Scheme != Uri.UriSchemeHttp && uri.Scheme != Uri.UriSchemeHttps))
+                {
+                    MessageBox.Show(
+                        this,
+                        string.Format(l["settings.customEndpoints.invalidUrl"], endpoint.BaseUrl),
+                        Text,
+                        MessageBoxButtons.OK,
+                        MessageBoxIcon.Warning);
+                    return;
+                }
+            }
+
+            ResultEndpoints = DeepSeekOptionsPage.NormalizeCustomEndpoints(_endpoints);
+            if (_endpoints.Count > 0 && ResultEndpoints.Count == 0)
+            {
+                MessageBox.Show(
+                    this,
+                    l["settings.customEndpoints.required"],
+                    Text,
+                    MessageBoxButtons.OK,
+                    MessageBoxIcon.Warning);
+                return;
+            }
+
+            DialogResult = DialogResult.OK;
         }
     }
 }

@@ -819,6 +819,81 @@ namespace DeepSeek_v4_for_VisualStudio.View
                 : L["status.appendMessage.queue"];
         }
 
+        private void BeginEditPendingAppend_Click(object sender, RoutedEventArgs e)
+        {
+            if (sender is not Button { Tag: PendingAppendMessage item })
+                return;
+
+            _editingAppendMessageId = item.Id;
+            _editingAppendMessageDraft = item.Text;
+            RefreshAppendQueuePanel();
+        }
+
+        private void CommitPendingAppendEdit(string id, string text)
+        {
+            bool updated = _pendingAppendMessages.TryUpdateText(id, text);
+            if (string.Equals(_editingAppendMessageId, id, StringComparison.Ordinal))
+            {
+                _editingAppendMessageId = null;
+                _editingAppendMessageDraft = null;
+            }
+
+            RefreshAppendQueuePanel();
+            StatusLabel.Text = updated
+                ? LocalizationService.Instance["status.appendMessage.edited"]
+                : LocalizationService.Instance["status.appendMessage.unavailable"];
+        }
+
+        private void CancelPendingAppendEdit()
+        {
+            _editingAppendMessageId = null;
+            _editingAppendMessageDraft = null;
+            RefreshAppendQueuePanel();
+        }
+
+        private void RemovePendingAppend_Click(object sender, RoutedEventArgs e)
+        {
+            if (sender is not Button { Tag: PendingAppendMessage item })
+                return;
+
+            bool removed = _pendingAppendMessages.TryRemove(item.Id);
+            if (string.Equals(_editingAppendMessageId, item.Id, StringComparison.Ordinal))
+            {
+                _editingAppendMessageId = null;
+                _editingAppendMessageDraft = null;
+            }
+
+            RefreshAppendQueuePanel();
+            StatusLabel.Text = removed
+                ? LocalizationService.Instance["status.appendMessage.removed"]
+                : LocalizationService.Instance["status.appendMessage.unavailable"];
+        }
+
+        private Button CreateAppendQueueIconButton(
+            string glyph,
+            string toolTip,
+            PendingAppendMessage item,
+            RoutedEventHandler clickHandler,
+            System.Windows.Media.Brush? foreground = null)
+        {
+            var button = new Button
+            {
+                Content = glyph,
+                Tag = item,
+                Padding = new Thickness(6, 3, 6, 3),
+                Margin = new Thickness(4, 0, 0, 0),
+                VerticalAlignment = VerticalAlignment.Center,
+                FontSize = 12,
+                FontFamily = TryFindResource("IconFontFamily") as System.Windows.Media.FontFamily,
+                ToolTip = toolTip,
+                Style = TryFindResource("TransparentButton") as Style,
+            };
+            if (foreground != null)
+                button.Foreground = foreground;
+            button.Click += clickHandler;
+            return button;
+        }
+
         private void RefreshAppendQueuePanel()
         {
             if (!Dispatcher.CheckAccess())
@@ -828,11 +903,23 @@ namespace DeepSeek_v4_for_VisualStudio.View
             }
 
             var items = _pendingAppendMessages.Snapshot();
+            if (_editingAppendMessageId != null
+                && items.All(item => !string.Equals(
+                    item.Id,
+                    _editingAppendMessageId,
+                    StringComparison.Ordinal)))
+            {
+                _editingAppendMessageId = null;
+                _editingAppendMessageDraft = null;
+            }
+
             AppendQueueArea.Visibility = items.Count > 0
                 ? Visibility.Visible
                 : Visibility.Collapsed;
             if (items.Count == 0)
             {
+                _editingAppendMessageId = null;
+                _editingAppendMessageDraft = null;
                 AppendQueuePanel.Children.Clear();
                 return;
             }
@@ -864,43 +951,127 @@ namespace DeepSeek_v4_for_VisualStudio.View
                 {
                     VerticalAlignment = VerticalAlignment.Center,
                 };
-                info.Children.Add(new TextBlock
-                {
-                    Text = item.Text.Length > 140
-                        ? item.Text.Substring(0, 140) + "…"
-                        : item.Text,
-                    Foreground = System.Windows.Media.Brushes.WhiteSmoke,
-                    FontSize = 11,
-                    TextTrimming = TextTrimming.CharacterEllipsis,
-                    ToolTip = item.Text,
-                });
-                info.Children.Add(new TextBlock
-                {
-                    Text = string.Format(L["chat.append.meta"], modeText, item.Model),
-                    Foreground = System.Windows.Media.Brushes.LightSteelBlue,
-                    FontSize = 10,
-                    TextTrimming = TextTrimming.CharacterEllipsis,
-                });
 
-                var toggleButton = new Button
+                var actions = new StackPanel
                 {
-                    Content = item.Mode == AppendMessageMode.Guidance
-                        ? L["chat.append.switchToQueue"]
-                        : L["chat.append.switchToGuidance"],
-                    Tag = item,
-                    IsEnabled = true,
-                    Padding = new Thickness(8, 2, 8, 2),
-                    Margin = new Thickness(10, 0, 0, 0),
+                    Orientation = Orientation.Horizontal,
                     VerticalAlignment = VerticalAlignment.Center,
-                    FontSize = 11,
-                    Style = TryFindResource("TransparentButton") as Style,
                 };
-                toggleButton.Click += TogglePendingAppendMode_Click;
+
+                if (string.Equals(_editingAppendMessageId, item.Id, StringComparison.Ordinal))
+                {
+                    var editor = new TextBox
+                    {
+                        Text = _editingAppendMessageDraft ?? item.Text,
+                        Tag = item,
+                        Background = new System.Windows.Media.SolidColorBrush(
+                            System.Windows.Media.Color.FromRgb(0x1E, 0x1E, 0x1E)),
+                        Foreground = System.Windows.Media.Brushes.WhiteSmoke,
+                        CaretBrush = System.Windows.Media.Brushes.WhiteSmoke,
+                        BorderBrush = new System.Windows.Media.SolidColorBrush(
+                            System.Windows.Media.Color.FromRgb(0x3F, 0x5A, 0x78)),
+                        BorderThickness = new Thickness(1),
+                        Padding = new Thickness(6, 3, 6, 3),
+                        FontSize = 11,
+                        AcceptsReturn = true,
+                        TextWrapping = TextWrapping.Wrap,
+                        MinHeight = 44,
+                        MaxHeight = 80,
+                        VerticalScrollBarVisibility = ScrollBarVisibility.Auto,
+                    };
+
+                    info.Children.Add(editor);
+                    info.Children.Add(new TextBlock
+                    {
+                        Text = string.Format(L["chat.append.meta"], modeText, item.Model),
+                        Foreground = System.Windows.Media.Brushes.LightSteelBlue,
+                        FontSize = 10,
+                        Margin = new Thickness(0, 2, 0, 0),
+                        TextTrimming = TextTrimming.CharacterEllipsis,
+                    });
+
+                    var saveButton = CreateAppendQueueIconButton(
+                        "\uE74E",
+                        L["chat.append.saveTip"],
+                        item,
+                        (_, _) => CommitPendingAppendEdit(item.Id, editor.Text));
+                    saveButton.IsEnabled = !string.IsNullOrWhiteSpace(editor.Text);
+                    var cancelButton = CreateAppendQueueIconButton(
+                        "\uE711",
+                        L["chat.append.cancelTip"],
+                        item,
+                        (_, _) => CancelPendingAppendEdit());
+
+                    editor.TextChanged += (_, _) =>
+                    {
+                        if (string.Equals(_editingAppendMessageId, item.Id, StringComparison.Ordinal))
+                            _editingAppendMessageDraft = editor.Text;
+                        saveButton.IsEnabled = !string.IsNullOrWhiteSpace(editor.Text);
+                    };
+                    editor.Loaded += (_, _) =>
+                    {
+                        if (!string.Equals(_editingAppendMessageId, item.Id, StringComparison.Ordinal))
+                            return;
+                        editor.Focus();
+                        editor.SelectAll();
+                    };
+
+                    actions.Children.Add(saveButton);
+                    actions.Children.Add(cancelButton);
+                }
+                else
+                {
+                    info.Children.Add(new TextBlock
+                    {
+                        Text = item.Text.Length > 140
+                            ? item.Text.Substring(0, 140) + "…"
+                            : item.Text,
+                        Foreground = System.Windows.Media.Brushes.WhiteSmoke,
+                        FontSize = 11,
+                        TextTrimming = TextTrimming.CharacterEllipsis,
+                        ToolTip = item.Text,
+                    });
+                    info.Children.Add(new TextBlock
+                    {
+                        Text = string.Format(L["chat.append.meta"], modeText, item.Model),
+                        Foreground = System.Windows.Media.Brushes.LightSteelBlue,
+                        FontSize = 10,
+                        TextTrimming = TextTrimming.CharacterEllipsis,
+                    });
+
+                    var toggleButton = new Button
+                    {
+                        Content = item.Mode == AppendMessageMode.Guidance
+                            ? L["chat.append.switchToQueue"]
+                            : L["chat.append.switchToGuidance"],
+                        Tag = item,
+                        IsEnabled = true,
+                        Padding = new Thickness(8, 2, 8, 2),
+                        Margin = new Thickness(10, 0, 0, 0),
+                        VerticalAlignment = VerticalAlignment.Center,
+                        FontSize = 11,
+                        Style = TryFindResource("TransparentButton") as Style,
+                    };
+                    toggleButton.Click += TogglePendingAppendMode_Click;
+
+                    actions.Children.Add(toggleButton);
+                    actions.Children.Add(CreateAppendQueueIconButton(
+                        "\uE70F",
+                        L["chat.append.editTip"],
+                        item,
+                        BeginEditPendingAppend_Click));
+                    actions.Children.Add(CreateAppendQueueIconButton(
+                        "\uE7A7",
+                        L["chat.append.removeTip"],
+                        item,
+                        RemovePendingAppend_Click,
+                        System.Windows.Media.Brushes.IndianRed));
+                }
 
                 Grid.SetColumn(info, 0);
-                Grid.SetColumn(toggleButton, 1);
+                Grid.SetColumn(actions, 1);
                 row.Children.Add(info);
-                row.Children.Add(toggleButton);
+                row.Children.Add(actions);
                 AppendQueuePanel.Children.Add(row);
             }
         }
