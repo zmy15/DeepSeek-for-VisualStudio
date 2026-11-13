@@ -39,45 +39,55 @@ namespace DeepSeek_v4_for_VisualStudio.Settings
             if (dialog.ShowDialog() == DialogResult.OK &&
                 dialog.SelectedModels.Count > 0)
             {
-                var selectedModels = dialog.SelectedModels;
-                var endpoints = page.GetCustomEndpoints()
-                    .Select(endpoint => endpoint.Clone())
-                    .ToList();
-                var endpoint = endpoints.FirstOrDefault(candidate =>
-                    string.Equals(candidate.Id, targetEndpoint?.Id, StringComparison.Ordinal));
-                if (endpoint == null && endpoints.Count == 0 && !string.IsNullOrWhiteSpace(page.ApiBaseUrl))
-                {
-                    endpoint = new CustomEndpointConfig(
-                        "legacy-custom-endpoint",
-                        DeepSeekOptionsPage.InferCustomEndpointName(page.ApiBaseUrl),
-                        page.ApiBaseUrl,
-                        ApiKeyProtection.Unprotect(page.CustomApiKey));
-                    endpoints.Add(endpoint);
-                }
-
-                if (endpoint != null)
-                {
-                    endpoint.Models = endpoint.Models
-                        .Union(selectedModels, StringComparer.OrdinalIgnoreCase)
-                        .ToList();
-                    page.SetCustomEndpoints(endpoints);
-                    page.ActiveCustomEndpointId = endpoint.Id;
-                    page.ActiveCustomModel = selectedModels.Last();
-                    page.ActiveModelSource = "custom";
-                }
-                else
-                {
-                    var models = page.GetCustomModels()
-                        .Union(selectedModels, StringComparer.OrdinalIgnoreCase)
-                        .ToList();
-                    page.SetCustomModels(models);
-                    page.ActiveCustomModel = selectedModels.Last();
-                    page.ActiveModelSource = "custom";
-                }
+                ApplyModelsToEndpoint(page, targetEndpoint?.Id, dialog.SelectedModels);
                 return page.CustomModelName;
             }
 
             return value;
+        }
+
+        internal static void ApplyModelsToEndpoint(
+            DeepSeekOptionsPage page,
+            string? targetEndpointId,
+            IReadOnlyList<string> selectedModels)
+        {
+            var endpoints = page.GetCustomEndpoints()
+                .Select(endpoint => endpoint.Clone())
+                .ToList();
+            var endpoint = endpoints.FirstOrDefault(candidate =>
+                string.Equals(candidate.Id, targetEndpointId, StringComparison.Ordinal))
+                ?? (endpoints.Count == 1 ? endpoints[0] : null);
+            if (endpoint == null &&
+                endpoints.Count == 0 &&
+                !string.IsNullOrWhiteSpace(page.ApiBaseUrl))
+            {
+                endpoint = new CustomEndpointConfig(
+                    "legacy-custom-endpoint",
+                    DeepSeekOptionsPage.InferCustomEndpointName(page.ApiBaseUrl),
+                    page.ApiBaseUrl,
+                    ApiKeyProtection.Unprotect(page.CustomApiKey));
+                endpoints.Add(endpoint);
+            }
+
+            if (endpoint != null)
+            {
+                endpoint.Models = endpoint.Models
+                    .Union(selectedModels, StringComparer.OrdinalIgnoreCase)
+                    .ToList();
+                page.SetCustomEndpoints(endpoints);
+                page.ActiveCustomEndpointId = endpoint.Id;
+                page.ActiveCustomModel = selectedModels.Last();
+                page.ActiveModelSource = "custom";
+            }
+            else
+            {
+                var models = page.GetCustomModels()
+                    .Union(selectedModels, StringComparer.OrdinalIgnoreCase)
+                    .ToList();
+                page.SetCustomModels(models);
+                page.ActiveCustomModel = selectedModels.Last();
+                page.ActiveModelSource = "custom";
+            }
         }
     }
 
