@@ -1254,6 +1254,18 @@ public class EditAgentTests
                 "仅一条列表项不足以构成结构化交付物");
     }
 
+    [Theory]
+    [InlineData("DONE", true)]
+    [InlineData(" done ", true)]
+    [InlineData("DONE.", false)]
+    [InlineData("已完成 DONE", false)]
+    [InlineData("", false)]
+    [InlineData(null, false)]
+    public void IsExplicitDoneResponse_RequiresExactlyDone(string? response, bool expected)
+    {
+        EditAgent.IsExplicitDoneResponse(response).Should().Be(expected);
+    }
+
     #endregion
 
     // ──────────── Reflection helpers for testing private methods ────────────

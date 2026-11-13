@@ -565,80 +565,127 @@ namespace DeepSeek_v4_for_VisualStudio.Services.Agents
                     step.Index, buildAllowedReason));
             }
 
-            AddLog("INFO", LocalizationService.Instance["agent.log.callingAiToolLoop"]);
-            result = await CallAiWithToolLoopAsync(
-                messages,
-                workspaceRoot,
-                ct,
-                toolWhitelist: stepToolWhitelist,
-                onThinking: (thinking) =>
-                {
-                    thinkingBuilder.Append(thinking);
-                    context.OnThinkingChunk?.Invoke(thinking);
-                },
-                onContent: (content) =>
-                {
-                    context.OnContentChunk?.Invoke(content);
-                },
-                onToolCall: (toolSummary) =>
-                {
-                    AddLog("TOOL", toolSummary);
-                });
-
+            var toolLoopMessages = messages;
             int stepToolLoopStart = Math.Max(
                 0,
                 Context?.ToolHistoryInsertIndex ?? Math.Max(0, messages.Count - 2));
+            bool textOnlyRetryUsed = false;
+            List<ChatApiMessage> stepMessages = new();
+            List<(string FilePath, string ToolName)> toolMadeEdits = new();
+            bool hasToolEdits = false;
 
-            if (thinkingBuilder.Length > 0)
+            async Task<string> RunStepToolLoopAsync(List<ChatApiMessage> loopMessages)
             {
-                if (!string.IsNullOrEmpty(_accumulatedReasoning))
-                    _accumulatedReasoning += "\n\n";
-                _accumulatedReasoning += thinkingBuilder.ToString();
+                AddLog("INFO", LocalizationService.Instance["agent.log.callingAiToolLoop"]);
+                return await CallAiWithToolLoopAsync(
+                    loopMessages,
+                    workspaceRoot,
+                    ct,
+                    toolWhitelist: stepToolWhitelist,
+                    onThinking: (thinking) =>
+                    {
+                        thinkingBuilder.Append(thinking);
+                        context.OnThinkingChunk?.Invoke(thinking);
+                    },
+                    onContent: (content) =>
+                    {
+                        context.OnContentChunk?.Invoke(content);
+                    },
+                    onToolCall: (toolSummary) =>
+                    {
+                        AddLog("TOOL", toolSummary);
+                    });
             }
 
-            step.AiResponse = result;
-            var stepMessages = GetStepToolLoopMessages(messages, stepToolLoopStart);
-            TrackBuildStateFromToolMessages(stepMessages);
-            var toolMadeEdits = ExtractToolMadeEdits(stepMessages);
-            bool hasToolEdits = toolMadeEdits.Count > 0;
+            while (true)
+            {
+                result = await RunStepToolLoopAsync(toolLoopMessages);
+                step.AiResponse = result;
+
+                if (thinkingBuilder.Length > 0)
+                {
+                    if (!string.IsNullOrEmpty(_accumulatedReasoning))
+                        _accumulatedReasoning += "\n\n";
+                    _accumulatedReasoning += thinkingBuilder.ToString();
+                    thinkingBuilder.Clear();
+                }
+
+                stepMessages = GetStepToolLoopMessages(toolLoopMessages, stepToolLoopStart);
+                TrackBuildStateFromToolMessages(stepMessages);
+                toolMadeEdits = ExtractToolMadeEdits(stepMessages);
+                hasToolEdits = toolMadeEdits.Count > 0;
+
+                if (hasToolEdits)
+                    break;
+
+                bool hasToolCalls = stepMessages.Any(m => m.ToolCalls != null && m.ToolCalls.Count > 0);
+                if (hasToolCalls)
+                    break;
+
+                // ── 本步骤一个工具调用都没有：区分四种结局（见 ClassifyNoToolCallStep）──
+                // ① 明确声明"无需修改" → 成功；
+                // ② 目标文件已由前序步骤修改（工作区客观事实）→ 认领为已完成，不再判失败；
+                // ③ 真·空响应（无内容、无工具调用）→ 失败，但走专用诊断文案；
+                // ④ 仅文字说明、未调用任何工具 → 先纠偏重试一次，仍失败才抛错。
+                bool coveredByPreviousSteps = IsStepCoveredByModifiedFiles(
+                    step, plan.ChangedFiles, _planStartedUtc, GetFileWriteTimeUtcSafe,
+                    out string coveredFiles);
+
+                if (textOnlyRetryUsed && IsExplicitDoneResponse(result))
+                {
+                    step.ResultSummary = LocalizationService.Instance["agent.step.completed"];
+                    AddLog("INFO", LocalizationService.Instance.Format(
+                        "agent.log.editDoneConfirmed", step.Index));
+                    return;
+                }
+
+                switch (ClassifyNoToolCallStep(result, coveredByPreviousSteps))
+                {
+                    case StepNoToolCallOutcome.ConfirmedNoChange:
+                        step.ResultSummary = LocalizationService.Instance["agent.log.editNoChangesConfirmed"];
+                        AddLog("INFO", LocalizationService.Instance["agent.log.editNoChange"]);
+                        return;
+
+                    case StepNoToolCallOutcome.SatisfiedByPrevious:
+                        step.ResultSummary = LocalizationService.Instance.Format(
+                            "agent.log.editStepClaimedSummary", coveredFiles);
+                        AddLog("INFO", LocalizationService.Instance.Format(
+                            "agent.log.editStepClaimedNoTool", step.Index, coveredFiles));
+                        return;
+
+                    case StepNoToolCallOutcome.EmptyResponse:
+                        throw new InvalidOperationException(
+                            LocalizationService.Instance["agent.log.editEmptyResponse"]);
+
+                    case StepNoToolCallOutcome.TextOnlyFailure when !textOnlyRetryUsed:
+                        textOnlyRetryUsed = true;
+                        AddLog("INFO", LocalizationService.Instance.Format(
+                            "agent.log.editTextOnlyRetry", step.Index));
+
+                        var retryMessages = CloneApiMessages(toolLoopMessages);
+                        retryMessages.Add(new ChatApiMessage
+                        {
+                            Role = "assistant",
+                            Content = result
+                        });
+                        retryMessages.Add(new ChatApiMessage
+                        {
+                            Role = "system",
+                            Content = LocalizationService.Instance["agent.edit.textOnlyRetryPrompt"]
+                        });
+                        if (Context != null)
+                            Context.ToolHistoryInsertIndex = retryMessages.Count;
+                        toolLoopMessages = retryMessages;
+                        continue;
+
+                    default:
+                        throw new InvalidOperationException(
+                            LocalizationService.Instance["agent.log.editNoEditsProduced"]);
+                }
+            }
 
             if (!hasToolEdits)
             {
-                bool hasToolCalls = stepMessages.Any(m => m.ToolCalls != null && m.ToolCalls.Count > 0);
-                if (!hasToolCalls)
-                {
-                    // ── 本步骤一个工具调用都没有：区分四种结局（见 ClassifyNoToolCallStep）──
-                    // ① 明确声明"无需修改" → 成功；
-                    // ② 目标文件已由前序步骤修改（工作区客观事实）→ 认领为已完成，不再判失败；
-                    // ③ 真·空响应（无内容、无工具调用）→ 失败，但走专用诊断文案；
-                    // ④ 仅文字说明、未调用任何工具 → 失败（原文案，已改为准确表述）。
-                    bool coveredByPreviousSteps = IsStepCoveredByModifiedFiles(
-                        step, plan.ChangedFiles, _planStartedUtc, GetFileWriteTimeUtcSafe,
-                        out string coveredFiles);
-
-                    switch (ClassifyNoToolCallStep(result, coveredByPreviousSteps))
-                    {
-                        case StepNoToolCallOutcome.ConfirmedNoChange:
-                            step.ResultSummary = LocalizationService.Instance["agent.log.editNoChangesConfirmed"];
-                            AddLog("INFO", LocalizationService.Instance["agent.log.editNoChange"]);
-                            return;
-
-                        case StepNoToolCallOutcome.SatisfiedByPrevious:
-                            step.ResultSummary = LocalizationService.Instance.Format(
-                                "agent.log.editStepClaimedSummary", coveredFiles);
-                            AddLog("INFO", LocalizationService.Instance.Format(
-                                "agent.log.editStepClaimedNoTool", step.Index, coveredFiles));
-                            return;
-
-                        case StepNoToolCallOutcome.EmptyResponse:
-                            throw new InvalidOperationException(
-                                LocalizationService.Instance["agent.log.editEmptyResponse"]);
-
-                        default:
-                            throw new InvalidOperationException(
-                                LocalizationService.Instance["agent.log.editNoEditsProduced"]);
-                    }
-                }
 
                 bool hasBuildCall = stepMessages.Any(m =>
                     m.ToolCalls != null &&
@@ -1078,6 +1125,12 @@ namespace DeepSeek_v4_for_VisualStudio.Services.Agents
 
             return StepNoToolCallOutcome.TextOnlyFailure;
         }
+
+        /// <summary>
+        /// 纠偏重试后的显式完成确认。仅接受纯文本 DONE，避免把普通完成说明绕过工具执行约束。
+        /// </summary>
+        internal static bool IsExplicitDoneResponse(string? result)
+            => string.Equals(result?.Trim(), "DONE", StringComparison.OrdinalIgnoreCase);
 
         #endregion
 
