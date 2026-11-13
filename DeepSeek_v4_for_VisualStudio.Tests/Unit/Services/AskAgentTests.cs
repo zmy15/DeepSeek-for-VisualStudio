@@ -232,6 +232,24 @@ public class AskAgentTests
         testLine.Should().NotContain("Edit", "运行测试不应再移交给 Edit Agent");
     }
 
+    /// <summary>
+    /// 初始请求直接要求修复错误时，不受 Edit 收尾自动 Handoff 的限制，仍应进入 Build Agent。
+    /// </summary>
+    [Fact]
+    public void SystemPrompt_RoutesInitialErrorFixRequestsToBuildAgent()
+    {
+        string prompt = LocalizationService.Instance["system.agent.askPromptFragment"];
+
+        var errorFixLine = prompt
+            .Split('\n')
+            .FirstOrDefault(line =>
+                line.Contains("修复报错", StringComparison.Ordinal)
+                || line.Contains("fix errors", StringComparison.OrdinalIgnoreCase));
+
+        errorFixLine.Should().NotBeNull("报错修复请求必须直接路由到 Build Agent");
+        errorFixLine!.Should().Contain("Build");
+    }
+
     #endregion
 
     #region BuildContextualPrompt

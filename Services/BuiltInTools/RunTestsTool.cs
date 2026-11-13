@@ -56,6 +56,35 @@ namespace DeepSeek_v4_for_VisualStudio.Services.BuiltInTools
                 && failed > 0;
         }
 
+        /// <summary>
+        /// 判断一次测试调用是否形成了有效的通过结论。
+        ///
+        /// 必须实际执行了至少一个用例，且没有 Error / Timeout 前缀或失败用例。
+        /// <c>total=0</c> 只表示测试流程结束，不表示代码行为已被验证。
+        /// </summary>
+        internal static bool IsTestRunSuccess(string? toolResult)
+        {
+            if (string.IsNullOrWhiteSpace(toolResult)
+                || toolResult.StartsWith(NoTestProjectMarker, StringComparison.Ordinal)
+                || toolResult.StartsWith(MultipleProjectsMarker, StringComparison.Ordinal)
+                || IsTestRunFailure(toolResult))
+            {
+                return false;
+            }
+
+            var totalMatch = System.Text.RegularExpressions.Regex.Match(
+                toolResult, @"total=(\d+)");
+            var failedMatch = System.Text.RegularExpressions.Regex.Match(
+                toolResult, @"failed=(\d+)");
+
+            return totalMatch.Success
+                && int.TryParse(totalMatch.Groups[1].Value, out int total)
+                && total > 0
+                && failedMatch.Success
+                && int.TryParse(failedMatch.Groups[1].Value, out int failed)
+                && failed == 0;
+        }
+
         public override ToolDefinition GetDefinition()
         {
             return new ToolDefinition
@@ -185,6 +214,11 @@ namespace DeepSeek_v4_for_VisualStudio.Services.BuiltInTools
                 result.Total, result.Passed, result.Failed, result.Skipped,
                 result.Duration.TotalSeconds.ToString("F1")));
 
+            // total=0 常见于过滤器未匹配到用例或测试发现失败。
+            // 明确提示模型这不是一次有效验证，避免 failed=0 被误当成全部通过。
+            if (result.Total == 0)
+                output.AppendLine(L["tool.runTests.noTestsExecuted"]);
+
             if (result.Failed > 0)
             {
                 output.AppendLine();
@@ -236,6 +270,9 @@ namespace DeepSeek_v4_for_VisualStudio.Services.BuiltInTools
                 int.TryParse(match.Groups[3].Value, out int skipped))
             {
                 int total = passed + failed + skipped;
+                if (total == 0)
+                    return L("tool.runTests.noTestsExecuted");
+
                 return failed == 0
                     ? L("tool.runTests.summaryAllPassed")
                     : string.Format(L("tool.runTests.summarySomeFailed"), failed, total);

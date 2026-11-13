@@ -68,6 +68,29 @@ public class RunTestsToolTests
     }
 
     [Fact]
+    public void FormatResult_NoTestsExecuted_IsNotReportedAsPassed()
+    {
+        var result = new TestRunResult { Total = 0, Passed = 0, Failed = 0 };
+
+        string text = RunTestsTool.FormatResult(result);
+
+        text.Should().Contain("total=0");
+        text.Should().Contain("未执行任何测试");
+        RunTestsTool.IsTestRunFailure(text).Should().BeFalse();
+        RunTestsTool.IsTestRunSuccess(text).Should().BeFalse();
+    }
+
+    [Theory]
+    [InlineData("total=4 passed=4 failed=0 skipped=0 elapsed=1.0s", true)]
+    [InlineData("total=0 passed=0 failed=0 skipped=0 elapsed=1.0s", false)]
+    [InlineData("total=4 passed=3 failed=1 skipped=0 elapsed=1.0s", false)]
+    [InlineData("Error: run_tests: runner not found", false)]
+    public void IsTestRunSuccess_RequiresExecutedPassingTests(string result, bool expected)
+    {
+        RunTestsTool.IsTestRunSuccess(result).Should().Be(expected);
+    }
+
+    [Fact]
     public void FormatResult_WithFailures_ListsNamesAndMessages()
     {
         var result = new TestRunResult { Total = 5, Passed = 3, Failed = 2 };
@@ -197,6 +220,14 @@ public class RunTestsToolTests
     public void GetResultSummary_ReflectsPassFailStates(string toolResult, string expectedFragment)
     {
         new RunTestsTool().GetResultSummary(toolResult).Should().Contain(expectedFragment);
+    }
+
+    [Fact]
+    public void GetResultSummary_ZeroTests_ReportsNoTestsExecuted()
+    {
+        new RunTestsTool()
+            .GetResultSummary("total=0 passed=0 failed=0 skipped=0 elapsed=1.0s")
+            .Should().Contain("未执行任何测试");
     }
 
     [Fact]
