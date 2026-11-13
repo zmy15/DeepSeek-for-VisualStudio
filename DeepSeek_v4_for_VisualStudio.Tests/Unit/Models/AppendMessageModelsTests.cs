@@ -35,6 +35,34 @@ public class AppendMessageModelsTests
     }
 
     [Fact]
+    public void TryUpdateText_ChangesOnlySelectedPendingMessage()
+    {
+        var store = new PendingAppendMessageStore();
+        var first = store.Add("first", "model-a", AppendMessageMode.Queue);
+        var second = store.Add("second", "model-a", AppendMessageMode.Queue);
+
+        store.TryUpdateText(first.Id, "  updated first  ").Should().BeTrue();
+        store.TryUpdateText(second.Id, "   ").Should().BeFalse();
+
+        var snapshot = store.Snapshot();
+        snapshot.Single(item => item.Id == first.Id).Text.Should().Be("updated first");
+        snapshot.Single(item => item.Id == second.Id).Text.Should().Be("second");
+    }
+
+    [Fact]
+    public void TryRemove_RemovesOnlySelectedPendingMessage()
+    {
+        var store = new PendingAppendMessageStore();
+        var first = store.Add("first", "model-a", AppendMessageMode.Queue);
+        store.Add("second", "model-a", AppendMessageMode.Queue);
+
+        store.TryRemove(first.Id).Should().BeTrue();
+        store.TryRemove(first.Id).Should().BeFalse();
+
+        store.Snapshot().Should().ContainSingle(item => item.Text == "second");
+    }
+
+    [Fact]
     public void TakeNextQueued_UsesFifoAndLeavesGuidancePending()
     {
         var store = new PendingAppendMessageStore();

@@ -322,6 +322,8 @@ namespace DeepSeek_v4_for_VisualStudio.View
         private readonly List<ChatMessage> _messages = new();
         private readonly ConversationContextManager _contextManager = new();
         private readonly PendingAppendMessageStore _pendingAppendMessages = new();
+        private string? _editingAppendMessageId;
+        private string? _editingAppendMessageDraft;
 
         // ── 树状对话结构 ──
         private ConversationTree? _tree;
