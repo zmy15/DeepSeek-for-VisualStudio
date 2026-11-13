@@ -74,6 +74,54 @@ public class DeepSeekApiServiceTests
     }
 
     [Fact]
+    public async Task ChatStreamAsync_ThinkingEnabled_BackfillsMissingHistoricalReasoning()
+    {
+        var handler = new TestHttpMessageHandler(
+            new[] { "data: [DONE]\n" },
+            HttpStatusCode.OK);
+        var httpClient = new HttpClient(handler);
+        var service = new DeepSeekApiService(httpClient);
+        service.ConfigureThinking(true, "high");
+
+        var messages = new List<ChatApiMessage>
+        {
+            new() { Role = "user", Content = "first" },
+            new() { Role = "assistant", Content = "previous answer" },
+            new() { Role = "user", Content = "continue" },
+        };
+
+        await foreach (var _ in service.ChatStreamAsync(messages)) { }
+
+        handler.LastRequestBody.Should().NotBeNull();
+        handler.LastRequestBody.Should().Contain("\"reasoning_content\":\"\"",
+            "旧会话缺失原始思考时也必须满足 DeepSeek 思考模式协议");
+    }
+
+    [Fact]
+    public async Task ChatStreamAsync_ThinkingDisabled_DoesNotBackfillPlainAssistantReasoning()
+    {
+        var handler = new TestHttpMessageHandler(
+            new[] { "data: [DONE]\n" },
+            HttpStatusCode.OK);
+        var httpClient = new HttpClient(handler);
+        var service = new DeepSeekApiService(httpClient);
+        service.ConfigureThinking(false, "low");
+
+        var messages = new List<ChatApiMessage>
+        {
+            new() { Role = "user", Content = "first" },
+            new() { Role = "assistant", Content = "previous answer" },
+            new() { Role = "user", Content = "continue" },
+        };
+
+        await foreach (var _ in service.ChatStreamAsync(messages)) { }
+
+        handler.LastRequestBody.Should().NotBeNull();
+        handler.LastRequestBody.Should().NotContain("\"reasoning_content\"",
+            "非思考模式不应给普通 assistant 消息注入多余字段");
+    }
+
+    [Fact]
     public async Task ChatStreamAsync_WithToolCall_YieldsToolCallJson()
     {
         var sseLines = new[]
