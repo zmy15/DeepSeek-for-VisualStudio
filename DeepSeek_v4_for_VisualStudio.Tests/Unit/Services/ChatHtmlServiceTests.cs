@@ -32,6 +32,15 @@ public class ChatHtmlServiceTests
         string html = ChatHtmlService.BuildInitialPage(new List<ChatMessage>());
 
         html.Should().Contain("mermaid/11.17.2/mermaid.min.js");
+        html.Should().Contain("window.__saveSvgImage=function");
+        html.Should().Contain("window.__wireSvgDiagramPreviews(");
+        html.Should().Contain("type:'saveDiagramAs'");
+        html.Should().Contain(".svg-save-button{");
+        html.Should().Contain(".svg-diagram-preview:hover .svg-save-button");
+        html.LastIndexOf("window.__wireSvgDiagramPreviews(", StringComparison.Ordinal)
+            .Should().BeGreaterThan(
+                html.IndexOf("window.__wireSvgDiagramPreviews=function", StringComparison.Ordinal),
+                "初始化调用必须位于函数定义之后");
     }
 
     [Theory]
@@ -49,6 +58,9 @@ public class ChatHtmlServiceTests
 
         html.Should().Contain("class='svg-diagram-preview'");
         html.Should().Contain("data:image/svg+xml;base64,");
+        html.Should().Contain("class='svg-save-button'");
+        html.Should().Contain("<button type='button'");
+        html.Should().NotContain("onclick=", "内联事件会被 XSS 过滤器移除，必须由页面脚本绑定");
         html.Should().NotContain($"language-{language}");
     }
 

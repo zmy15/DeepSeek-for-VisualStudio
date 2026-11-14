@@ -545,6 +545,7 @@ namespace DeepSeek_v4_for_VisualStudio.View
         /// <summary>最近一次图表清理日期，保证每天只真正清扫一次（读写由该锁保护）。</summary>
         private static readonly object _diagramCleanupLock = new object();
         private static DateTime _lastDiagramCleanupDate = DateTime.MinValue;
+        private static string? _lastDiagramSaveDirectory;
 
         /// <summary>
         /// 匹配 HTML 空元素（void element）。用于兜底修复页面序列化产物：
@@ -619,6 +620,63 @@ namespace DeepSeek_v4_for_VisualStudio.View
                 StatusLabel.Text = LocalizationService.Instance["status.diagramSaveFailed"];
             }
         }
+
+        /// <summary>
+        /// 通过“另存为”对话框把直接显示的 SVG 保存到用户选择的位置。
+        /// 与 Mermaid 的固定图表目录保存不同，此路径不参与自动过期清理。
+        /// </summary>
+        private void SaveDiagramToFileAs(string svg)
+        {
+            try
+            {
+                if (!IsExportableDiagramSvg(svg))
+                {
+                    Logger.Warn("[Diagram] 忽略不可保存的 SVG 内容");
+                    StatusLabel.Text = LocalizationService.Instance["status.diagramSaveFailed"];
+                    return;
+                }
+
+                string document = NormalizeDiagramSvg(svg);
+                if (!IsWellFormedXml(document))
+                    Logger.Warn("[Diagram] 另存的 SVG 不是合法 XML，已按原文写出");
+
+                var dialog = new Microsoft.Win32.SaveFileDialog
+                {
+                    Title = LocalizationService.Instance["status.diagramSaveDialogTitle"],
+                    Filter = LocalizationService.Instance["status.diagramSaveFilter"],
+                    DefaultExt = ".svg",
+                    AddExtension = true,
+                    OverwritePrompt = true,
+                    FileName = BuildDiagramSaveFileName(DateTime.Now),
+                };
+
+                if (!string.IsNullOrWhiteSpace(_lastDiagramSaveDirectory)
+                    && Directory.Exists(_lastDiagramSaveDirectory))
+                {
+                    dialog.InitialDirectory = _lastDiagramSaveDirectory;
+                }
+
+                if (dialog.ShowDialog() != true)
+                    return;
+
+                File.WriteAllText(
+                    dialog.FileName,
+                    document,
+                    new UTF8Encoding(encoderShouldEmitUTF8Identifier: false));
+
+                _lastDiagramSaveDirectory = Path.GetDirectoryName(dialog.FileName);
+                StatusLabel.Text = LocalizationService.Instance.Format("status.diagramSaved", dialog.FileName);
+                Logger.Info($"[Diagram] SVG 已另存为: {dialog.FileName}");
+            }
+            catch (Exception ex)
+            {
+                Logger.Error($"[Diagram] SVG 另存失败: {ex.Message}", ex);
+                StatusLabel.Text = LocalizationService.Instance["status.diagramSaveFailed"];
+            }
+        }
+
+        internal static string BuildDiagramSaveFileName(DateTime timestamp)
+            => $"diagram_{timestamp:yyyyMMdd_HHmmss}.svg";
 
         /// <summary>
         /// 每天最多执行一次的图表清扫（懒执行）。
@@ -2874,6 +2932,12 @@ namespace DeepSeek_v4_for_VisualStudio.View
                         string svg = obj.TryGetProperty("svg", out var svgProp)
                             ? svgProp.GetString() ?? string.Empty : string.Empty;
                         SaveDiagramToFile(svg);
+                    }
+                    else if (type == "saveDiagramAs")
+                    {
+                        string svg = obj.TryGetProperty("svg", out var svgProp)
+                            ? svgProp.GetString() ?? string.Empty : string.Empty;
+                        SaveDiagramToFileAs(svg);
                     }
                     else if (type == "retryMessage")
                     {

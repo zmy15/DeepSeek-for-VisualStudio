@@ -455,6 +455,9 @@ window.__appendMessageHtml=function(html){
     if (typeof window.__scrollToBottom === 'function') {
         window.__scrollToBottom('smooth');
     }
+    if (typeof window.__wireSvgDiagramPreviews === 'function') {
+        window.__wireSvgDiagramPreviews(container);
+    }
     // 渲染数学公式（KaTeX）
     window.__renderMath(container);
     // 渲染 Mermaid 图表
@@ -490,6 +493,40 @@ window.__sendToHost=function(msg){
 window.__openAttachment=function(path){
     if(!path)return;
     window.__sendToHost({type:'openAttachment',path:path});
+};
+window.__saveSvgImage=function(element){
+    try{
+        var container=element&&element.closest?element.closest('.svg-diagram-preview'):null;
+        var img=container?container.querySelector('img'):null;
+        var src=img?(img.getAttribute('src')||''):'';
+        var comma=src.indexOf(',');
+        if(comma<0)return;
+        var binary=atob(src.substring(comma+1));
+        var bytes=new Uint8Array(binary.length);
+        for(var i=0;i<binary.length;i++)bytes[i]=binary.charCodeAt(i);
+        var svg;
+        if(typeof TextDecoder!=='undefined'){
+            svg=new TextDecoder('utf-8').decode(bytes);
+        }else{
+            var escaped='';
+            for(var j=0;j<bytes.length;j++)escaped+='%'+bytes[j].toString(16).padStart(2,'0');
+            svg=decodeURIComponent(escaped);
+        }
+        window.__sendToHost({type:'saveDiagramAs',svg:svg});
+    }catch(e){
+        try{console.error('[DeepSeek] saveSvgImage:',e);}catch(e2){}
+    }
+};
+window.__wireSvgDiagramPreviews=function(container){
+    if(!container)return;
+    var previews=container.querySelectorAll('.svg-diagram-preview');
+    for(var i=0;i<previews.length;i++){
+        var preview=previews[i];
+        if(preview.getAttribute('data-svg-wired')==='1')continue;
+        var button=preview.querySelector('button.svg-save-button');
+        if(button)button.addEventListener('click',function(){window.__saveSvgImage(this);});
+        preview.setAttribute('data-svg-wired','1');
+    }
 };
 window.__retryMessage=function(msgIndex){
     window.__sendToHost({type:'retryMessage',messageIndex:msgIndex});
@@ -841,6 +878,7 @@ window._showCopyFeedback=function(msgIndex){
                                 window.__renderMath(container);
                                 // 渲染 Mermaid 图表
                                 window.__renderMermaid(container);
+                                window.__wireSvgDiagramPreviews(container);
                             }
                         } catch(renderErr) {
                             // ── innerHTML 渲染失败时的降级：显示带样式的错误提示 ──
@@ -891,7 +929,12 @@ window._showCopyFeedback=function(msgIndex){
                     if (st) st.textContent = '';
                 }else if(msg.type==='prependHtml'){
                     var cc2=document.getElementById('chat-container');
-                    if(cc2){cc2.insertAdjacentHTML('afterbegin',msg.html);}
+                    if(cc2){
+                        cc2.insertAdjacentHTML('afterbegin',msg.html);
+                        if(typeof window.__wireSvgDiagramPreviews==='function'){
+                            window.__wireSvgDiagramPreviews(cc2);
+                        }
+                    }
                     var lb=document.getElementById('load-earlier-wrap');
                     if(lb&&!msg.hasMore){lb.parentNode.removeChild(lb);}
                 }else if(msg.type==='appendHtml'){
