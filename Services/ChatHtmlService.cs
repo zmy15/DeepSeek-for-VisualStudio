@@ -372,6 +372,61 @@ namespace DeepSeek_v4_for_VisualStudio.Services
             return sb.ToString();
         }
 
+        /// <summary>
+        /// 将大段消息 HTML 构造为可经 PostWebMessageAsString 分块发送的 JSON 消息。
+        /// 每块使用独立的 UTF-16 安全边界，避免拆开代理对；JS 侧收齐后再一次性解析 DOM。
+        /// </summary>
+        internal static IEnumerable<string> BuildInitialHtmlChunkMessages(
+            string deliveryId,
+            string html,
+            int maxChunkChars)
+        {
+            if (string.IsNullOrEmpty(deliveryId))
+                throw new ArgumentException("分块投递 ID 不能为空", nameof(deliveryId));
+            if (html == null)
+                throw new ArgumentNullException(nameof(html));
+            if (maxChunkChars <= 0)
+                throw new ArgumentOutOfRangeException(nameof(maxChunkChars));
+
+            if (html.Length == 0)
+            {
+                yield return JsonSerializer.Serialize(new
+                {
+                    type = "htmlChunk",
+                    id = deliveryId,
+                    reset = true,
+                    final = true,
+                    html = string.Empty,
+                });
+                yield break;
+            }
+
+            int offset = 0;
+            bool reset = true;
+            while (offset < html.Length)
+            {
+                int chunkLength = Math.Min(maxChunkChars, html.Length - offset);
+
+                // 不在代理对中间切分，否则 JSON 序列化/反序列化后会变成替换字符。
+                if (chunkLength > 1 && char.IsHighSurrogate(html[offset + chunkLength - 1]))
+                    chunkLength--;
+
+                bool final = offset + chunkLength >= html.Length;
+                string chunk = html.Substring(offset, chunkLength);
+                yield return JsonSerializer.Serialize(new
+                {
+                    type = "htmlChunk",
+                    id = deliveryId,
+                    reset,
+                    final,
+                    html = chunk,
+                });
+
+                offset += chunkLength;
+                reset = false;
+            }
+        }
+
         private static void AppendJsonString(StringBuilder sb, string value)
         {
             sb.Append('"');

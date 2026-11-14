@@ -2832,6 +2832,8 @@ namespace DeepSeek_v4_for_VisualStudio.View
                 {
                     _pageReady = true;
                     Logger.Info("[Render] WebView2 页面就绪信号收到");
+                    // 超过 NavigateToString 限制的消息在页面就绪后分块注入。
+                    DeliverPendingInitialHtml();
                     // 重建窗口内被丢弃的终态渲染必须补发，否则气泡会停在占位/纯文本状态。
                     TryReplayPendingStreamEnd();
                     // 任务面板、Handoff、提问和审批均属于动态 DOM，页面重建后统一重放。

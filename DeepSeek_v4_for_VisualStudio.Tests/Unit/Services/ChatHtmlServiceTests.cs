@@ -483,6 +483,7 @@ public class ChatHtmlServiceTests
 
         html.Should().Contain(windowHtml);
         html.Should().Contain("window.__appendMessageHtml");
+        html.Should().Contain("msg.type==='htmlChunk'");
         html.Should().Contain("__pageReady__");
     }
 

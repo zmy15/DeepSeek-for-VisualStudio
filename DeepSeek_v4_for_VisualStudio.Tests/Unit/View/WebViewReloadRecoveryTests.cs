@@ -200,30 +200,106 @@ public class WebViewReloadRecoveryTests
     }
 
     [Fact]
-    public void BuildNavigableInitialPageHtml_ReducesWindowToFitLimit()
+    public void BuildNavigableInitialPageHtml_DefersMessagesWhenContentStillExceedsLimit()
     {
         RunOnStaThread(control =>
         {
             var messages = GetField<List<ChatMessage>>(control, "_messages");
             messages.Clear();
-            for (int i = 0; i < 4; i++)
+            for (int i = 0; i < 2; i++)
             {
                 messages.Add(new ChatMessage
                 {
                     Role = "user",
-                    Content = $"MESSAGE_{i}_" + new string('x', 80_000),
+                    Content = $"MESSAGE_{i}_" + new string('x', 1_100_000),
                 });
             }
 
             string emptyPage = ChatHtmlService.BuildInitialPageFromMessagesHtml(string.Empty);
-            int maxBytes = System.Text.Encoding.UTF8.GetByteCount(emptyPage) + 120_000;
+            int maxBytes = DeepSeekChatControl.GetNavigateToStringPayloadBytes(emptyPage) + 120_000;
 
             string html = control.BuildNavigableInitialPageHtml(maxBytes);
 
-            System.Text.Encoding.UTF8.GetByteCount(html).Should().BeLessOrEqualTo(maxBytes);
-            html.Should().Contain("MESSAGE_3_", "至少必须保留最新消息可见");
-            GetField<int>(control, "_renderWindowStart").Should().BeGreaterThan(
-                0, "超限时应缩小窗口并保留加载更早消息的入口");
+            DeepSeekChatControl.GetNavigateToStringPayloadBytes(html).Should().BeLessOrEqualTo(maxBytes);
+            html.Should().NotContain("MESSAGE_1_", "超限消息不能在 NavigateToString 中整段发送");
+            GetField<string?>(control, "_pendingInitialHtml").Should().Contain(
+                "MESSAGE_1_", "页面就绪后必须补发最新消息，不能让历史变空白");
+            GetField<int>(control, "_lastRenderedMessagesLength").Should().Be(
+                0, "分块注入完成前不能把消息误标为已渲染");
+        });
+    }
+
+    [Fact]
+    public void BuildInitialHtmlChunkMessages_ShouldPreserveHtmlAndStayBelowNavigationLimit()
+    {
+        string id = Guid.NewGuid().ToString("N");
+        string html = "<div>前缀</div>" + new string('x', 80_000) + "😀<div>后缀</div>";
+
+        var chunks = ChatHtmlService.BuildInitialHtmlChunkMessages(id, html, 16 * 1024).ToList();
+
+        chunks.Should().HaveCountGreaterThan(1);
+        chunks.Should().OnlyContain(json =>
+            DeepSeekChatControl.GetNavigateToStringPayloadBytes(json)
+            < DeepSeekChatControl.WebViewNavigateToStringMaxBytes,
+            "每个 PostWebMessageAsString 分块都必须远低于单次导航上限");
+
+        var parsed = chunks.Select(json =>
+            System.Text.Json.JsonSerializer.Deserialize<System.Text.Json.JsonElement>(json)).ToList();
+        parsed[0].GetProperty("reset").GetBoolean().Should().BeTrue();
+        parsed[parsed.Count - 1].GetProperty("final").GetBoolean().Should().BeTrue();
+        parsed.Should().OnlyContain(e => e.GetProperty("id").GetString() == id);
+
+        string reconstructed = string.Concat(parsed.Select(
+            e => e.GetProperty("html").GetString() ?? string.Empty));
+        reconstructed.Should().Be(html, "代理对不能被分块切开");
+    }
+
+    [Fact]
+    public void GetNavigateToStringPayloadBytes_ShouldUseConservativeUtf16SizeForAscii()
+    {
+        string ascii = new('x', 600_000);
+
+        DeepSeekChatControl.GetNavigateToStringPayloadBytes(ascii)
+            .Should().BeGreaterOrEqualTo(ascii.Length * 2,
+                "LPCWSTR 路径按 UTF-16 计长时，纯 ASCII 也不能只按 UTF-8 估算");
+    }
+
+    [Fact]
+    public void DescribeNavigateToStringPayload_ShouldReportSizesAndInvalidCharactersWithoutLeakingContent()
+    {
+        string html = "SECRET<\0\uD800A\uDC00B\uFFFD中文>";
+
+        string diagnostics = DeepSeekChatControl.DescribeNavigateToStringPayload(html);
+
+        diagnostics.Should().Contain("chars=");
+        diagnostics.Should().Contain("utf8=");
+        diagnostics.Should().Contain("utf16=");
+        diagnostics.Should().Contain("nul=1");
+        diagnostics.Should().Contain("unpairedSurrogate=2");
+        diagnostics.Should().Contain("replacement=1");
+        diagnostics.Should().Contain("nonAscii=");
+        diagnostics.Should().NotContain("SECRET", "诊断日志不能泄露聊天正文");
+    }
+
+    [Fact]
+    public void BuildNavigableInitialPageHtml_ShouldFallbackForSingleOversizedMessage()
+    {
+        RunOnStaThread(control =>
+        {
+            var messages = GetField<List<ChatMessage>>(control, "_messages");
+            messages.Clear();
+            messages.Add(new ChatMessage
+            {
+                Role = "assistant",
+                Content = new string('x', 3 * 1024 * 1024),
+            });
+
+            string html = control.BuildNavigableInitialPageHtml();
+
+            DeepSeekChatControl.GetNavigateToStringPayloadBytes(html).Should().BeLessOrEqualTo(
+                DeepSeekChatControl.WebViewNavigateToStringMaxBytes);
+            GetField<string?>(control, "_pendingInitialHtml").Should().NotBeNullOrEmpty(
+                "单条超大消息必须转入页面就绪后的分块注入路径");
         });
     }
 

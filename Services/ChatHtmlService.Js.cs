@@ -674,6 +674,7 @@ window._showCopyFeedback=function(msgIndex){
 // ═══════════════════════════════════════════════
 (function(){
     var _streamBuf={};          // 消息索引 → 累积内容
+    var _htmlChunks={};         // 大段初始 HTML 的分块投递缓冲区
     var _rafPending=false;      // 是否已有待处理的 rAF
     var _rafTimer=null;         // 兜底定时器（防止 rAF 不触发）
 
@@ -760,6 +761,19 @@ window._showCopyFeedback=function(msgIndex){
                 var msg=typeof e.data==='string'?JSON.parse(e.data):e.data;
                 if(msg.type==='contextDebug'){
                     _renderCtxDebug(msg.d||{});
+                    return;
+                }
+                if(msg.type==='htmlChunk'){
+                    var chunkBuf=_htmlChunks[msg.id];
+                    if(msg.reset||!chunkBuf){
+                        chunkBuf=[];
+                        _htmlChunks[msg.id]=chunkBuf;
+                    }
+                    if(msg.html)chunkBuf.push(msg.html);
+                    if(msg.final){
+                        delete _htmlChunks[msg.id];
+                        window.__appendMessageHtml(chunkBuf.join(''));
+                    }
                     return;
                 }
                 if(msg.type==='stream'){

@@ -560,7 +560,7 @@ namespace DeepSeek_v4_for_VisualStudio.View
                 // 重建时 _createdPlanIds 中残留的旧 ID 会阻止面板重新创建 ──
                 lock (_lock) { _createdPlanIds.Clear(); }
 
-                // 统一安全导航；超出 NavigateToString 限制时自动缩小渲染窗口
+                // 统一安全导航；超出 NavigateToString 限制时改为页面就绪后分块注入消息
                 NavigateBrowserToInitialPage(ChatWebView.CoreWebView2);
                 Logger.Info("[Theme] WebView2 reloaded with new theme");
 
