@@ -36,9 +36,14 @@ public class ChatHtmlServiceTests
         html.Should().Contain("window.__wireSvgDiagramPreviews(");
         html.Should().Contain("window.__openSvgPreview=function");
         html.Should().Contain("window.__closeSvgPreview=function");
+        html.Should().Contain("window.__applySvgPreviewTransform=function");
+        html.Should().Contain("overlay.addEventListener('wheel'");
+        html.Should().Contain("_svgOverlayPointerDown");
         html.Should().Contain("type:'saveDiagramAs'");
         html.Should().Contain(".svg-save-button{");
         html.Should().Contain(".svg-preview-overlay{");
+        html.Should().Contain(".svg-preview-zoom{");
+        html.Should().Contain(".svg-preview-overlay.is-zoomed");
         html.Should().Contain(".svg-diagram-preview:hover .svg-save-button");
         html.LastIndexOf("window.__wireSvgDiagramPreviews(", StringComparison.Ordinal)
             .Should().BeGreaterThan(
