@@ -8,6 +8,7 @@ using System.Linq;
 using System.Text;
 using System.Text.Json;
 using System.Text.RegularExpressions;
+using System.Xml;
 
 namespace DeepSeek_v4_for_VisualStudio.Services
 {
@@ -75,6 +76,82 @@ namespace DeepSeek_v4_for_VisualStudio.Services
         private static readonly Regex MarkdownTableRegex = new(
             @"<table\b[^>]*>.*?</table>",
             RegexOptions.IgnoreCase | RegexOptions.Singleline | RegexOptions.Compiled);
+
+        /// <summary>
+        /// Mermaid 图表的首行关键字也可能直接作为 Markdown fence 语言使用，
+        /// 例如 ```erDiagram / ```architecture-beta。这里统一提升为 Mermaid 代码块。
+        /// </summary>
+        private static readonly HashSet<string> MermaidDiagramFenceLanguages = new(
+            StringComparer.OrdinalIgnoreCase)
+        {
+            "mermaid",
+            "flowchart",
+            "flowchart-elk",
+            "graph",
+            "sequenceDiagram",
+            "classDiagram",
+            "classDiagram-v2",
+            "stateDiagram",
+            "stateDiagram-v2",
+            "erDiagram",
+            "journey",
+            "gantt",
+            "pie",
+            "quadrantChart",
+            "requirementDiagram",
+            "gitGraph",
+            "mindmap",
+            "timeline",
+            "zenuml",
+            "sankey-beta",
+            "xychart-beta",
+            "block-beta",
+            "packet-beta",
+            "architecture-beta",
+            "C4Context",
+            "C4Container",
+            "C4Component",
+            "C4Dynamic",
+            "C4Deployment",
+            "radar-beta",
+            "treemap-beta",
+            "kanban",
+            "wardley-beta",
+            "venn-beta",
+            "ishikawa-beta",
+        };
+
+        private static readonly Regex MermaidDiagramCodeBlockRegex = new(
+            @"<pre>\s*<code\s+class=""language-(?<language>[^""\s]+)""[^>]*>(?<content>.*?)</code>\s*</pre>",
+            RegexOptions.IgnoreCase | RegexOptions.Singleline | RegexOptions.Compiled);
+
+        private static readonly Regex SvgCodeBlockRegex = new(
+            @"<pre>\s*<code\s+class=""language-(?<language>svg|xml|html)""[^>]*>(?<content>.*?)</code>\s*</pre>",
+            RegexOptions.IgnoreCase | RegexOptions.Singleline | RegexOptions.Compiled);
+
+        private static readonly Regex SvgCssUrlRegex = new(
+            @"url\s*\(\s*(?<url>[^)]*)\)",
+            RegexOptions.IgnoreCase | RegexOptions.Compiled);
+
+        private static readonly HashSet<string> UnsafeSvgElementNames = new(
+            StringComparer.OrdinalIgnoreCase)
+        {
+            "script",
+            "foreignObject",
+            "iframe",
+            "object",
+            "embed",
+            "audio",
+            "video",
+            "canvas",
+            "form",
+            "input",
+            "button",
+            "textarea",
+        };
+
+        private const int MaxInlineSvgBytes = 2 * 1024 * 1024;
+        private const string SvgNamespace = "http://www.w3.org/2000/svg";
 
 
         #endregion
@@ -1253,6 +1330,20 @@ namespace DeepSeek_v4_for_VisualStudio.Services
                     m => WrapMermaidCodeBlock(m.Groups[1].Value),
                     RegexOptions.Singleline);
 
+                htmlContent = MermaidDiagramCodeBlockRegex.Replace(
+                    htmlContent,
+                    m => MermaidDiagramFenceLanguages.Contains(m.Groups["language"].Value)
+                        ? WrapMermaidCodeBlock(m.Groups["content"].Value)
+                        : m.Value);
+
+                htmlContent = SvgCodeBlockRegex.Replace(htmlContent, match =>
+                {
+                    string svg = System.Net.WebUtility.HtmlDecode(match.Groups["content"].Value).Trim();
+                    return TryBuildSvgDiagramPreview(svg, out string previewHtml)
+                        ? previewHtml
+                        : match.Value;
+                });
+
                 // ── 移除末尾多余的 <br /> ──
                 if (htmlContent.EndsWith("<br />"))
                     htmlContent = htmlContent.Substring(0, htmlContent.Length - 6);
@@ -1310,6 +1401,162 @@ namespace DeepSeek_v4_for_VisualStudio.Services
             inner = System.Net.WebUtility.HtmlDecode(inner);
             string escaped = System.Net.WebUtility.HtmlEncode(inner);
             return $"<pre><code class=\"language-mermaid\">{escaped}</code></pre>";
+        }
+
+        /// <summary>
+        /// 将完整的 SVG 源码转换为安全的 <c>&lt;img&gt;</c> 预览。
+        /// 只接受单根 &lt;svg&gt; XML；脚本、事件、foreignObject 与外部资源引用会被移除。
+        /// </summary>
+        internal static bool TryBuildSvgDiagramPreview(string? svg, out string html)
+        {
+            html = string.Empty;
+            if (string.IsNullOrWhiteSpace(svg))
+                return false;
+
+            if (Encoding.UTF8.GetByteCount(svg) > MaxInlineSvgBytes)
+                return false;
+
+            try
+            {
+                var settings = new XmlReaderSettings
+                {
+                    DtdProcessing = DtdProcessing.Prohibit,
+                    XmlResolver = null,
+                };
+
+                var document = new XmlDocument { XmlResolver = null };
+                using (var reader = XmlReader.Create(new StringReader(svg), settings))
+                {
+                    document.Load(reader);
+                }
+
+                XmlElement? root = document.DocumentElement;
+                if (root == null
+                    || !string.Equals(root.LocalName, "svg", StringComparison.OrdinalIgnoreCase)
+                    || (!string.IsNullOrEmpty(root.NamespaceURI)
+                        && !string.Equals(root.NamespaceURI, SvgNamespace, StringComparison.Ordinal)))
+                {
+                    return false;
+                }
+
+                if (string.IsNullOrEmpty(root.NamespaceURI))
+                    root.SetAttribute("xmlns", SvgNamespace);
+
+                SanitizeSvgElement(root);
+
+                string sanitized = document.OuterXml;
+                string dataUri = "data:image/svg+xml;base64,"
+                    + Convert.ToBase64String(Encoding.UTF8.GetBytes(sanitized));
+                var palette = Palette;
+                html = "<div class='svg-diagram-preview' "
+                    + $"style='margin:8px 0;padding:12px;background:{palette.CardBg};"
+                    + $"border:1px solid {palette.CardBorder};border-radius:6px;overflow:auto;text-align:center'>"
+                    + $"<img src='{dataUri}' alt='SVG diagram' "
+                    + "style='display:block;max-width:100%;height:auto;min-width:120px;margin:0 auto' />"
+                    + "</div>";
+                return true;
+            }
+            catch (XmlException ex)
+            {
+                Logger.Debug($"[Markdown] SVG 代码块不是合法 XML，保留源码显示: {ex.Message}");
+                return false;
+            }
+            catch (Exception ex)
+            {
+                Logger.Warn($"[Markdown] SVG 代码块安全处理失败，保留源码显示: {ex.Message}");
+                return false;
+            }
+        }
+
+        private static void SanitizeSvgElement(XmlElement element)
+        {
+            var attributes = new List<XmlAttribute>(element.Attributes.Count);
+            foreach (XmlAttribute attribute in element.Attributes)
+                attributes.Add(attribute);
+
+            foreach (XmlAttribute attribute in attributes)
+            {
+                string name = attribute.LocalName;
+                if (name.StartsWith("on", StringComparison.OrdinalIgnoreCase))
+                {
+                    element.RemoveAttributeNode(attribute);
+                    continue;
+                }
+
+                if (string.Equals(name, "href", StringComparison.OrdinalIgnoreCase)
+                    || string.Equals(name, "src", StringComparison.OrdinalIgnoreCase))
+                {
+                    if (!IsSafeSvgResourceReference(attribute.Value))
+                        element.RemoveAttributeNode(attribute);
+                    continue;
+                }
+
+                if (!IsSafeSvgCssValue(attribute.Value))
+                    element.RemoveAttributeNode(attribute);
+            }
+
+            var children = new List<XmlNode>(element.ChildNodes.Count);
+            foreach (XmlNode child in element.ChildNodes)
+                children.Add(child);
+
+            foreach (XmlNode child in children)
+            {
+                if (child is not XmlElement childElement)
+                    continue;
+
+                if (UnsafeSvgElementNames.Contains(childElement.LocalName))
+                {
+                    element.RemoveChild(childElement);
+                    continue;
+                }
+
+                if (string.Equals(childElement.LocalName, "style", StringComparison.OrdinalIgnoreCase))
+                {
+                    if (!IsSafeSvgCssValue(childElement.InnerText))
+                        element.RemoveChild(childElement);
+                    continue;
+                }
+
+                SanitizeSvgElement(childElement);
+            }
+        }
+
+        private static bool IsSafeSvgResourceReference(string? value)
+        {
+            string reference = (value ?? string.Empty).Trim();
+            if (reference.Length == 0 || reference.StartsWith("#", StringComparison.Ordinal))
+                return true;
+
+            return reference.StartsWith("data:image/png;base64,", StringComparison.OrdinalIgnoreCase)
+                || reference.StartsWith("data:image/jpeg;base64,", StringComparison.OrdinalIgnoreCase)
+                || reference.StartsWith("data:image/gif;base64,", StringComparison.OrdinalIgnoreCase)
+                || reference.StartsWith("data:image/webp;base64,", StringComparison.OrdinalIgnoreCase);
+        }
+
+        private static bool IsSafeSvgCssValue(string? value)
+        {
+            string css = value ?? string.Empty;
+            if (css.IndexOf("javascript:", StringComparison.OrdinalIgnoreCase) >= 0
+                || css.IndexOf("vbscript:", StringComparison.OrdinalIgnoreCase) >= 0
+                || css.IndexOf("expression(", StringComparison.OrdinalIgnoreCase) >= 0
+                || css.IndexOf("@import", StringComparison.OrdinalIgnoreCase) >= 0
+                || css.IndexOf("behavior:", StringComparison.OrdinalIgnoreCase) >= 0
+                || css.IndexOf("-moz-binding", StringComparison.OrdinalIgnoreCase) >= 0)
+            {
+                return false;
+            }
+
+            foreach (Match match in SvgCssUrlRegex.Matches(css))
+            {
+                string url = match.Groups["url"].Value.Trim().Trim('\'', '"').Trim();
+                if (url.StartsWith("#", StringComparison.Ordinal))
+                    continue;
+                if (IsSafeSvgResourceReference(url))
+                    continue;
+                return false;
+            }
+
+            return true;
         }
 
         // 可点击导航的文件扩展名（源代码 + 文档/解决方案文件）

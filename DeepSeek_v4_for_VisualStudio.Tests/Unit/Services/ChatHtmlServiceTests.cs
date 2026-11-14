@@ -6,6 +6,88 @@ namespace DeepSeek_v4_for_VisualStudio.Tests.Unit.Services;
 
 public class ChatHtmlServiceTests
 {
+    [Theory]
+    [InlineData("requirementDiagram", "requirementDiagram\nrequirement R-01 {\n id: 1\n}")]
+    [InlineData("sankey-beta", "sankey-beta\nClient,Queue,10")]
+    [InlineData("packet-beta", "packet-beta\n0-15: \"Source Port\"")]
+    [InlineData("architecture-beta", "architecture-beta\ngroup api(cloud)[API]")]
+    [InlineData("C4Context", "C4Context\nPerson(user, \"User\")")]
+    [InlineData("radar-beta", "radar-beta\naxis a[\"Axis\"]")]
+    [InlineData("treemap-beta", "treemap-beta\n\"Root\"")]
+    public void RenderMarkdownToHtml_MermaidDiagramFenceAlias_RendersDiagramBlock(
+        string language,
+        string diagram)
+    {
+        string markdown = "```" + language + "\n" + diagram + "\n```";
+
+        string html = ChatHtmlService.RenderMarkdownToHtml(markdown);
+
+        html.Should().Contain("class=\"language-mermaid\"");
+        html.Should().NotContain($"language-{language}");
+    }
+
+    [Fact]
+    public void BuildInitialPage_UsesMermaidVersionWithNewDiagramSupport()
+    {
+        string html = ChatHtmlService.BuildInitialPage(new List<ChatMessage>());
+
+        html.Should().Contain("mermaid/11.17.2/mermaid.min.js");
+    }
+
+    [Theory]
+    [InlineData("svg")]
+    [InlineData("xml")]
+    [InlineData("html")]
+    public void RenderMarkdownToHtml_CompleteSvgFence_RendersInlineImagePreview(string language)
+    {
+        const string svg = "<svg xmlns=\"http://www.w3.org/2000/svg\" viewBox=\"0 0 120 60\">"
+            + "<rect width=\"120\" height=\"60\" fill=\"#2563eb\" />"
+            + "<text x=\"60\" y=\"35\" fill=\"white\" text-anchor=\"middle\">SVG</text></svg>";
+        string markdown = "```" + language + "\n" + svg + "\n```";
+
+        string html = ChatHtmlService.RenderMarkdownToHtml(markdown);
+
+        html.Should().Contain("class='svg-diagram-preview'");
+        html.Should().Contain("data:image/svg+xml;base64,");
+        html.Should().NotContain($"language-{language}");
+    }
+
+    [Fact]
+    public void TryBuildSvgDiagramPreview_RemovesActiveContentAndExternalReferences()
+    {
+        const string svg = "<svg xmlns=\"http://www.w3.org/2000/svg\" onload=\"alert(1)\">"
+            + "<script>alert(2)</script>"
+            + "<foreignObject><div>unsafe html</div></foreignObject>"
+            + "<image href=\"https://example.com/remote.png\" />"
+            + "<a href=\"javascript:alert(3)\"><text>safe text</text></a>"
+            + "</svg>";
+
+        ChatHtmlService.TryBuildSvgDiagramPreview(svg, out string html).Should().BeTrue();
+
+        var match = System.Text.RegularExpressions.Regex.Match(
+            html, @"base64,(?<data>[^']+)");
+        match.Success.Should().BeTrue();
+        string sanitized = System.Text.Encoding.UTF8.GetString(
+            System.Convert.FromBase64String(match.Groups["data"].Value));
+
+        sanitized.Should().Contain("safe text");
+        sanitized.Should().NotContain("<script");
+        sanitized.Should().NotContain("foreignObject");
+        sanitized.Should().NotContain("onload");
+        sanitized.Should().NotContain("javascript:");
+        sanitized.Should().NotContain("https://example.com");
+    }
+
+    [Fact]
+    public void TryBuildSvgDiagramPreview_MalformedSvg_ReturnsFalse()
+    {
+        ChatHtmlService.TryBuildSvgDiagramPreview(
+            "<svg xmlns=\"http://www.w3.org/2000/svg\"><g></svg>",
+            out string html).Should().BeFalse();
+
+        html.Should().BeEmpty();
+    }
+
     [Fact]
     public void RenderMarkdownToHtml_MarkdownContent_ReturnsHtml()
     {
