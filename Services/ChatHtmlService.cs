@@ -133,6 +133,10 @@ namespace DeepSeek_v4_for_VisualStudio.Services
             @"url\s*\(\s*(?<url>[^)]*)\)",
             RegexOptions.IgnoreCase | RegexOptions.Compiled);
 
+        private static readonly Regex XychartXAxisLineRegex = new(
+            @"^(?<prefix>\s*x-axis\b[^\r\n\[]*)\[(?<labels>[^\]\r\n]*)\]",
+            RegexOptions.IgnoreCase | RegexOptions.Multiline | RegexOptions.Compiled);
+
         private static readonly HashSet<string> UnsafeSvgElementNames = new(
             StringComparer.OrdinalIgnoreCase)
         {
@@ -1399,8 +1403,90 @@ namespace DeepSeek_v4_for_VisualStudio.Services
             int svgIdx = inner.IndexOf("<svg", StringComparison.Ordinal);
             if (svgIdx > 0) inner = inner.Substring(0, svgIdx).Trim();
             inner = System.Net.WebUtility.HtmlDecode(inner);
+            inner = NormalizeXychartAxisSyntax(inner);
             string escaped = System.Net.WebUtility.HtmlEncode(inner);
             return $"<pre><code class=\"language-mermaid\">{escaped}</code></pre>";
+        }
+
+        /// <summary>
+        /// Mermaid xychart-beta 的 x-axis 分类标签必须是带引号的字符串。
+        /// 自动为模型常见的 [周一, 周二, ...] 写法补引号，避免图表回退成源码。
+        /// </summary>
+        internal static string NormalizeXychartAxisSyntax(string source)
+        {
+            if (string.IsNullOrWhiteSpace(source))
+                return source;
+
+            string trimmed = source.TrimStart().TrimStart('\uFEFF');
+            if (!trimmed.StartsWith("xychart-beta", StringComparison.OrdinalIgnoreCase))
+                return source;
+
+            return XychartXAxisLineRegex.Replace(source, match =>
+            {
+                string labels = NormalizeXychartAxisLabels(match.Groups["labels"].Value);
+                return match.Groups["prefix"].Value + "[" + labels + "]";
+            });
+        }
+
+        private static string NormalizeXychartAxisLabels(string labels)
+        {
+            if (string.IsNullOrWhiteSpace(labels))
+                return labels;
+
+            var parts = new List<string>();
+            var current = new StringBuilder();
+            bool inQuotes = false;
+            char quoteChar = '\0';
+
+            for (int i = 0; i < labels.Length; i++)
+            {
+                char c = labels[i];
+                if ((c == '"' || c == '\'') && (i == 0 || labels[i - 1] != '\\'))
+                {
+                    if (!inQuotes)
+                    {
+                        inQuotes = true;
+                        quoteChar = c;
+                    }
+                    else if (c == quoteChar)
+                    {
+                        inQuotes = false;
+                    }
+                }
+
+                if (c == ',' && !inQuotes)
+                {
+                    parts.Add(current.ToString().Trim());
+                    current.Clear();
+                    continue;
+                }
+
+                current.Append(c);
+            }
+
+            parts.Add(current.ToString().Trim());
+
+            var normalized = new StringBuilder(labels.Length + parts.Count * 2);
+            for (int i = 0; i < parts.Count; i++)
+            {
+                if (i > 0) normalized.Append(", ");
+
+                string label = parts[i];
+                if (label.Length >= 2
+                    && ((label[0] == '"' && label[label.Length - 1] == '"')
+                        || (label[0] == '\'' && label[label.Length - 1] == '\'')))
+                {
+                    normalized.Append(label);
+                }
+                else
+                {
+                    normalized.Append('"')
+                        .Append(label.Replace("\\", "\\\\").Replace("\"", "\\\""))
+                        .Append('"');
+                }
+            }
+
+            return normalized.ToString();
         }
 
         /// <summary>

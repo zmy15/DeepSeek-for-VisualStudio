@@ -43,6 +43,32 @@ public class ChatHtmlServiceTests
                 "初始化调用必须位于函数定义之后");
     }
 
+    [Fact]
+    public void NormalizeXychartAxisSyntax_QuotesUnquotedCategoricalLabels()
+    {
+        const string source = "xychart-beta\n"
+            + "  title \"每日提交量与平均判题耗时\"\n"
+            + "  x-axis [周一, 周二, 周三, 周四, 周五, 周六, 周日]\n"
+            + "  y-axis \"提交量（次）\" 0 --> 200\n"
+            + "  bar [88, 132, 156, 121, 178, 96, 64]";
+
+        string normalized = ChatHtmlService.NormalizeXychartAxisSyntax(source);
+
+        normalized.Should().Contain(
+            "x-axis [\"周一\", \"周二\", \"周三\", \"周四\", \"周五\", \"周六\", \"周日\"]");
+        normalized.Should().Contain("bar [88, 132, 156, 121, 178, 96, 64]");
+    }
+
+    [Fact]
+    public void NormalizeXychartAxisSyntax_AlreadyQuotedLabels_RemainUnchanged()
+    {
+        const string source = "xychart-beta\n"
+            + "x-axis [\"A, one\", \"B\", 'C']\n"
+            + "bar [1, 2, 3]";
+
+        ChatHtmlService.NormalizeXychartAxisSyntax(source).Should().Be(source);
+    }
+
     [Theory]
     [InlineData("svg")]
     [InlineData("xml")]
