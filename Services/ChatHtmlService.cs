@@ -1536,10 +1536,13 @@ namespace DeepSeek_v4_for_VisualStudio.Services
                 var palette = Palette;
                 string saveLabel = System.Net.WebUtility.HtmlEncode(L["chat.html.svgSaveButton"]);
                 string saveTip = System.Net.WebUtility.HtmlEncode(L["chat.html.svgSaveButtonTitle"]);
+                string previewTip = System.Net.WebUtility.HtmlEncode(L["chat.html.svgPreviewTitle"]);
+                string closeLabel = System.Net.WebUtility.HtmlEncode(L["chat.html.svgPreviewClose"]);
                 html = "<div class='svg-diagram-preview' "
                     + $"style='margin:8px 0;padding:12px;background:{palette.CardBg};"
                     + $"border:1px solid {palette.CardBorder};border-radius:6px;overflow:auto;text-align:center'>"
-                    + $"<img src='{dataUri}' alt='SVG diagram' "
+                    + $"<img class='svg-preview-target' src='{dataUri}' alt='SVG diagram' "
+                    + $"title='{previewTip}' role='button' tabindex='0' data-preview-close-label='{closeLabel}' "
                     + "style='display:block;max-width:100%;height:auto;min-width:120px;margin:0 auto' />"
                     + $"<button type='button' class='svg-save-button' title='{saveTip}' "
                     + $"style='background:{palette.SecondaryBtnBg};color:{palette.SecondaryBtnText};"

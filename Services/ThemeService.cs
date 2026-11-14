@@ -389,6 +389,14 @@ pre.mermaid-block svg[id^='mermaid-error']{display:none}
 .svg-save-button{position:absolute;top:8px;right:8px;padding:4px 10px;border-radius:4px;font-size:11px;cursor:pointer;z-index:2;opacity:0;pointer-events:none;transform:translateY(-2px);transition:opacity .15s ease,transform .15s ease}
 .svg-diagram-preview:hover .svg-save-button,.svg-save-button:focus-visible{opacity:1;pointer-events:auto;transform:translateY(0)}
 @media (hover:none){.svg-save-button{opacity:1;pointer-events:auto;transform:none}}
+.svg-preview-target{cursor:zoom-in}.svg-preview-target:focus-visible{outline:2px solid #4fc1ff;outline-offset:3px}
+body.svg-preview-open{overflow:hidden}
+.svg-preview-overlay{position:fixed;inset:0;z-index:10000;display:none;align-items:center;justify-content:center;padding:32px;background:rgba(0,0,0,.84)}
+.svg-preview-overlay.is-open{display:flex}
+.svg-preview-image-container{display:flex;align-items:center;justify-content:center;width:100%;height:100%}
+.svg-preview-image-container img{max-width:92vw;max-height:88vh;width:auto;height:auto;object-fit:contain;background:#fff}
+.svg-preview-close{position:fixed;top:16px;right:20px;width:34px;height:34px;border-radius:50%;border:1px solid #666;background:#2b2b2b;color:#fff;font-size:22px;line-height:1;cursor:pointer}
+.svg-preview-close:hover{background:#444}
 ul,ol{padding-left:22px;margin:6px 0}li{margin:2px 0}blockquote{border-left:3px solid #4fc1ff;padding:6px 12px;margin:8px 0;background:#2a2a2a;color:#aaa}
 .table-scroll{width:100%;max-width:100%;margin:8px 0;overflow-x:auto;overflow-y:hidden}.table-scroll table{width:100%;max-width:100%;table-layout:auto;border-collapse:collapse;margin:0}th,td{border:1px solid #444;padding:6px 10px;text-align:left;vertical-align:top;white-space:normal;overflow-wrap:anywhere;word-break:break-word}th code,td code{white-space:normal;overflow-wrap:anywhere;word-break:break-word}th{background:#333;color:#e0e0e0;font-weight:600}hr{border:none;border-top:1px solid #444;margin:12px 0}
 .code-lang{position:absolute;top:6px;left:14px;color:#9cdcfe;font-size:10px;font-family:'Segoe UI',sans-serif;text-transform:uppercase}
@@ -508,6 +516,14 @@ pre.mermaid-block svg[id^='mermaid-error']{display:none}
 .svg-save-button{position:absolute;top:8px;right:8px;padding:4px 10px;border-radius:4px;font-size:11px;cursor:pointer;z-index:2;opacity:0;pointer-events:none;transform:translateY(-2px);transition:opacity .15s ease,transform .15s ease}
 .svg-diagram-preview:hover .svg-save-button,.svg-save-button:focus-visible{opacity:1;pointer-events:auto;transform:translateY(0)}
 @media (hover:none){.svg-save-button{opacity:1;pointer-events:auto;transform:none}}
+.svg-preview-target{cursor:zoom-in}.svg-preview-target:focus-visible{outline:2px solid #0078d4;outline-offset:3px}
+body.svg-preview-open{overflow:hidden}
+.svg-preview-overlay{position:fixed;inset:0;z-index:10000;display:none;align-items:center;justify-content:center;padding:32px;background:rgba(0,0,0,.84)}
+.svg-preview-overlay.is-open{display:flex}
+.svg-preview-image-container{display:flex;align-items:center;justify-content:center;width:100%;height:100%}
+.svg-preview-image-container img{max-width:92vw;max-height:88vh;width:auto;height:auto;object-fit:contain;background:#fff}
+.svg-preview-close{position:fixed;top:16px;right:20px;width:34px;height:34px;border-radius:50%;border:1px solid #666;background:#2b2b2b;color:#fff;font-size:22px;line-height:1;cursor:pointer}
+.svg-preview-close:hover{background:#444}
 ul,ol{padding-left:22px;margin:6px 0}li{margin:2px 0}blockquote{border-left:3px solid #0078d4;padding:6px 12px;margin:8px 0;background:#f6f8fa;color:#656d76}
 .table-scroll{width:100%;max-width:100%;margin:8px 0;overflow-x:auto;overflow-y:hidden}.table-scroll table{width:100%;max-width:100%;table-layout:auto;border-collapse:collapse;margin:0}th,td{border:1px solid #d0d7de;padding:6px 10px;text-align:left;vertical-align:top;white-space:normal;overflow-wrap:anywhere;word-break:break-word}th code,td code{white-space:normal;overflow-wrap:anywhere;word-break:break-word}th{background:#f6f8fa;color:#1e1e1e;font-weight:600}hr{border:none;border-top:1px solid #d0d7de;margin:12px 0}
 .code-lang{position:absolute;top:6px;left:14px;color:#0550ae;font-size:10px;font-family:'Segoe UI',sans-serif;text-transform:uppercase}

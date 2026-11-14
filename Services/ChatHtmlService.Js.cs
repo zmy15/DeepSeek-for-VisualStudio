@@ -517,17 +517,77 @@ window.__saveSvgImage=function(element){
         try{console.error('[DeepSeek] saveSvgImage:',e);}catch(e2){}
     }
 };
+window.__closeSvgPreview=function(){
+    var overlay=document.getElementById('svg-preview-overlay');
+    if(overlay)overlay.classList.remove('is-open');
+    document.body.classList.remove('svg-preview-open');
+};
+window.__openSvgPreview=function(img){
+    try{
+        if(!img)return;
+        var overlay=document.getElementById('svg-preview-overlay');
+        if(!overlay){
+            overlay=document.createElement('div');
+            overlay.id='svg-preview-overlay';
+            overlay.className='svg-preview-overlay';
+            var canvas=document.createElement('div');
+            canvas.className='svg-preview-image-container';
+            var close=document.createElement('button');
+            close.type='button';
+            close.className='svg-preview-close';
+            close.textContent='×';
+            close.addEventListener('click',function(){window.__closeSvgPreview();});
+            overlay.appendChild(canvas);
+            overlay.appendChild(close);
+            overlay.addEventListener('click',function(e){
+                if(e.target===overlay)window.__closeSvgPreview();
+            });
+            document.body.appendChild(overlay);
+        }
+        var imageContainer=overlay.querySelector('.svg-preview-image-container');
+        var closeButton=overlay.querySelector('.svg-preview-close');
+        var closeLabel=img.getAttribute('data-preview-close-label')||'Close';
+        if(closeButton){
+            closeButton.setAttribute('aria-label',closeLabel);
+            closeButton.title=closeLabel;
+        }
+        if(imageContainer){
+            imageContainer.textContent='';
+            var enlarged=document.createElement('img');
+            enlarged.src=img.currentSrc||img.src;
+            enlarged.alt=img.alt||'SVG diagram';
+            imageContainer.appendChild(enlarged);
+        }
+        overlay.classList.add('is-open');
+        document.body.classList.add('svg-preview-open');
+    }catch(e){
+        try{console.error('[DeepSeek] openSvgPreview:',e);}catch(e2){}
+    }
+};
 window.__wireSvgDiagramPreviews=function(container){
     if(!container)return;
     var previews=container.querySelectorAll('.svg-diagram-preview');
     for(var i=0;i<previews.length;i++){
         var preview=previews[i];
         if(preview.getAttribute('data-svg-wired')==='1')continue;
+        var img=preview.querySelector('img.svg-preview-target');
         var button=preview.querySelector('button.svg-save-button');
+        if(img){
+            img.addEventListener('click',function(){window.__openSvgPreview(this);});
+            img.addEventListener('keydown',function(e){
+                if(e.key==='Enter'||e.key===' '){
+                    e.preventDefault();
+                    window.__openSvgPreview(this);
+                }
+            });
+        }
         if(button)button.addEventListener('click',function(){window.__saveSvgImage(this);});
         preview.setAttribute('data-svg-wired','1');
     }
 };
+document.addEventListener('keydown',function(e){
+    if(e.key==='Escape'||e.key==='Esc')window.__closeSvgPreview();
+});
 window.__retryMessage=function(msgIndex){
     window.__sendToHost({type:'retryMessage',messageIndex:msgIndex});
 };

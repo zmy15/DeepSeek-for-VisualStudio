@@ -34,8 +34,11 @@ public class ChatHtmlServiceTests
         html.Should().Contain("mermaid/11.17.2/mermaid.min.js");
         html.Should().Contain("window.__saveSvgImage=function");
         html.Should().Contain("window.__wireSvgDiagramPreviews(");
+        html.Should().Contain("window.__openSvgPreview=function");
+        html.Should().Contain("window.__closeSvgPreview=function");
         html.Should().Contain("type:'saveDiagramAs'");
         html.Should().Contain(".svg-save-button{");
+        html.Should().Contain(".svg-preview-overlay{");
         html.Should().Contain(".svg-diagram-preview:hover .svg-save-button");
         html.LastIndexOf("window.__wireSvgDiagramPreviews(", StringComparison.Ordinal)
             .Should().BeGreaterThan(
@@ -84,6 +87,8 @@ public class ChatHtmlServiceTests
 
         html.Should().Contain("class='svg-diagram-preview'");
         html.Should().Contain("data:image/svg+xml;base64,");
+        html.Should().Contain("class='svg-preview-target'");
+        html.Should().Contain("data-preview-close-label=");
         html.Should().Contain("class='svg-save-button'");
         html.Should().Contain("<button type='button'");
         html.Should().NotContain("onclick=", "内联事件会被 XSS 过滤器移除，必须由页面脚本绑定");

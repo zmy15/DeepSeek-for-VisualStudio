@@ -550,6 +550,8 @@
 	"chat.html.diagramClickTip": "Click to save this diagram and open it",
 	"chat.html.svgSaveButton": "Save SVG",
 	"chat.html.svgSaveButtonTitle": "Save SVG to a custom location",
+	"chat.html.svgPreviewTitle": "Click to preview SVG",
+	"chat.html.svgPreviewClose": "Close SVG preview",
 	"chat.html.editBranchInfo": "Version {0}/{1}",
 	"chat.html.editBranchNext": "Next",
 	"chat.html.editBranchPrev": "Previous",
