@@ -151,6 +151,14 @@ namespace DeepSeek_v4_for_VisualStudio.Services.BuiltInTools
             int reqEndLine = GetIntArg(args, "endLine", int.MaxValue);
             bool cacheable = !RequiresStructuredParsing(filePath);
 
+            // ── PowerPoint 视觉直传：本地导出幻灯片 PNG，交给视觉模型。 ──
+            if (CanUseVisionPresentationPassthrough(filePath))
+            {
+                string? presentationResult = await BuildVisionPresentationResultAsync(filePath);
+                if (!string.IsNullOrWhiteSpace(presentationResult))
+                    return presentationResult;
+            }
+
             // ── 图片视觉直传：视觉模型不再走 OCR，由 BaseAgent 把本地图片附加为 image_url。──
             if (CanUseVisionImagePassthrough(filePath))
                 return BuildVisionImageResult(filePath);
@@ -466,6 +474,35 @@ namespace DeepSeek_v4_for_VisualStudio.Services.BuiltInTools
             {
                 return false;
             }
+        }
+
+        private bool CanUseVisionPresentationPassthrough(string filePath)
+        {
+            return IsVisionModel()
+                && !string.IsNullOrWhiteSpace(filePath)
+                && File.Exists(filePath)
+                && PresentationRenderService.IsPresentationFile(filePath);
+        }
+
+        private static async Task<string?> BuildVisionPresentationResultAsync(string filePath)
+        {
+            var parts = await PresentationRenderService.BuildPresentationVisionPartsAsync(filePath);
+            if (parts is not { Count: > 0 })
+                return null;
+
+            var builder = new StringBuilder();
+            builder.AppendLine(
+                $"<file path=\"{filePath}\" kind=\"powerpoint\" size_bytes=\"{new FileInfo(filePath).Length}\" vision_passthrough=\"true\">");
+            builder.AppendLine(VisionImageBlockStart);
+            foreach (var part in parts)
+            {
+                string? uri = part.ImageUrl?.Url;
+                if (!string.IsNullOrWhiteSpace(uri))
+                    builder.AppendLine(uri);
+            }
+            builder.AppendLine(VisionImageBlockEnd);
+            builder.AppendLine("</file>");
+            return builder.ToString();
         }
 
         /// <summary>构建只含本地路径的轻量结果，BaseAgent 负责将其转换成视觉内容块。</summary>

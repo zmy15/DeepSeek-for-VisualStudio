@@ -115,6 +115,7 @@ namespace DeepSeek_v4_for_VisualStudio.Services
                 || WordExtensions.Contains(ext)
                 || ExcelExtensions.Contains(ext)
                 || PdfExtensions.Contains(ext)
+                || PresentationExtensions.Contains(ext)
                 || ImageExtensions.Contains(ext);
         }
 
@@ -205,11 +206,10 @@ namespace DeepSeek_v4_for_VisualStudio.Services
                 {
                     result.Content = await Task.Run(() => ParsePdfDocument(filePath));
                 }
-                // PowerPoint 没有本地解析器，只能依赖 DeepSeek 官方 OCR
+                // PowerPoint：视觉直传由上层处理；此处执行 OCR 或文本提取兜底
                 else if (result.Content == null && PresentationExtensions.Contains(ext))
                 {
-                    result.Error = LocalizationService.Instance["file.powerPointRequiresOfficialOcr"];
-                    return result;
+                    result.Content = await ParsePresentationFileAsync(filePath);
                 }
                 // 图像文件（OCR）
                 else if (result.Content == null && ImageExtensions.Contains(ext))
@@ -823,6 +823,73 @@ namespace DeepSeek_v4_for_VisualStudio.Services
             {
                 Logger.Error($"图像 OCR 失败: {filePath}", ex);
                 return $"[图像解析失败: {ex.Message}]";
+            }
+        }
+
+        /// <summary>
+        /// 解析 PowerPoint：官方 OCR 可直接识别原文件；本地 OCR 先渲染幻灯片图片；
+        /// OCR 不可用或未识别到文字时，从 PPTX XML / PowerPoint COM 提取文本。
+        /// </summary>
+        private static async Task<string?> ParsePresentationFileAsync(string filePath)
+        {
+            try
+            {
+                if (!OcrService.VisionModelActive &&
+                    OcrService.CurrentEngine == OcrEngineType.DeepSeekOfficial &&
+                    OcrService.IsEngineReady())
+                {
+                    string? officialText = await OcrService.ExtractTextFromFileAsync(filePath);
+                    if (!string.IsNullOrWhiteSpace(officialText))
+                        return officialText;
+                }
+                else if (!OcrService.VisionModelActive && OcrService.IsEngineReady())
+                {
+                    List<byte[]> slides = await PresentationRenderService.RenderPresentationToPngAsync(
+                        filePath);
+                    if (slides.Count > 0)
+                    {
+                        string tempDir = Path.Combine(
+                            Path.GetTempPath(),
+                            "DeepSeekVS_PptOcr",
+                            Guid.NewGuid().ToString("N"));
+                        Directory.CreateDirectory(tempDir);
+                        try
+                        {
+                            var builder = new StringBuilder();
+                            for (int index = 0; index < slides.Count; index++)
+                            {
+                                string pngPath = Path.Combine(tempDir, $"slide-{index + 1:D3}.png");
+                                File.WriteAllBytes(pngPath, slides[index]);
+                                string? text = await OcrService.ExtractTextFromImageAsync(pngPath);
+                                if (string.IsNullOrWhiteSpace(text)) continue;
+                                builder.AppendLine($"--- Slide {index + 1}/{slides.Count} ---");
+                                builder.AppendLine(text);
+                                builder.AppendLine();
+                            }
+
+                            string ocrText = builder.ToString().Trim();
+                            if (!string.IsNullOrWhiteSpace(ocrText))
+                                return ocrText;
+                        }
+                        finally
+                        {
+                            try { Directory.Delete(tempDir, recursive: true); } catch { }
+                        }
+                    }
+                }
+
+                string? extractedText = await PresentationRenderService.ExtractPresentationTextAsync(filePath);
+                if (!string.IsNullOrWhiteSpace(extractedText))
+                    return extractedText;
+
+                return LocalizationService.Instance["file.presentationTextUnavailable"];
+            }
+            catch (Exception ex)
+            {
+                Logger.Error($"PowerPoint 解析失败: {filePath}", ex);
+                return string.Format(
+                    LocalizationService.Instance["file.presentationParseFailed"],
+                    ex.Message);
             }
         }
 

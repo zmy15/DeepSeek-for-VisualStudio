@@ -43,18 +43,21 @@ namespace DeepSeek_v4_for_VisualStudio.Services
         {
             try
             {
-                List<string> uris = await RenderPdfToPngDataUrisAsync(
+                List<byte[]> pages = await RenderPdfPagesToPngAsync(
                     pdfPath, cancellationToken);
-                if (uris.Count == 0)
+                if (pages.Count == 0)
                     return null;
 
-                var parts = new List<ChatContentPart>(uris.Count);
-                foreach (string uri in uris)
+                var parts = new List<ChatContentPart>(pages.Count);
+                foreach (byte[] png in pages)
                 {
                     parts.Add(new ChatContentPart
                     {
                         Type = "image_url",
-                        ImageUrl = new ChatImageUrl { Url = uri },
+                        ImageUrl = new ChatImageUrl
+                        {
+                            Url = "data:image/png;base64," + Convert.ToBase64String(png),
+                        },
                     });
                 }
                 return parts;
@@ -67,13 +70,13 @@ namespace DeepSeek_v4_for_VisualStudio.Services
         }
 
         /// <summary>
-        /// 将 PDF 逐页渲染为 PNG data URI 列表。受 <see cref="MaxPages"/> 页数上限约束。
+        /// 将 PDF 逐页渲染为 PNG 字节列表。受 <see cref="MaxPages"/> 页数上限约束。
         /// </summary>
-        private static async Task<List<string>> RenderPdfToPngDataUrisAsync(
+        public static async Task<List<byte[]>> RenderPdfPagesToPngAsync(
             string pdfPath,
             CancellationToken cancellationToken)
         {
-            var uris = new List<string>();
+            var pages = new List<byte[]>();
 
             StorageFile file = await StorageFile.GetFileFromPathAsync(pdfPath);
             PdfDocument pdf = await PdfDocument.LoadFromFileAsync(file);
@@ -89,7 +92,7 @@ namespace DeepSeek_v4_for_VisualStudio.Services
                 using (PdfPage page = pdf.GetPage((uint)i))
                 {
                     byte[] png = await RenderPageToPngAsync(page);
-                    uris.Add("data:image/png;base64," + Convert.ToBase64String(png));
+                    pages.Add(png);
                 }
             }
 
@@ -98,7 +101,7 @@ namespace DeepSeek_v4_for_VisualStudio.Services
                 Logger.Warn($"[Vision] PDF 共 {total} 页，仅直传前 {MaxPages} 页 ← {Path.GetFileName(pdfPath)}");
             }
 
-            return uris;
+            return pages;
         }
 
         /// <summary>
