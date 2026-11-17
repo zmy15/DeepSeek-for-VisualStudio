@@ -57,6 +57,7 @@ public class AskAgentTests
         // 只读边界与 Git/终端能力说明已下沉到各工具的 description，
         // Agent 专属提示词只保留角色定位与移交规则（见 tool.git.desc / tool.run_in_terminal.desc）。
         agent.Definition.SystemPrompt.Should().Contain("VisualStudio_askQuestions");
+        agent.Definition.SystemPrompt.Should().Contain("```svg");
         agent.Definition.SystemPrompt.Should().Contain("必须直接调用");
         agent.Definition.SystemPrompt.Should().Contain(
             global::DeepSeek_v4_for_VisualStudio.Services.AiPrompts.AgentConclusionStopRule);
@@ -71,12 +72,23 @@ public class AskAgentTests
 
         handoffPrompt.Should().Contain("Markdown");
         handoffPrompt.Should().Contain("Mermaid");
+        handoffPrompt.Should().Contain("SVG");
         handoffPrompt.Should().Contain("LaTeX");
         handoffPrompt.Should().Contain("不要求固定结构");
 
         summaryOnlyPrompt.Should().Contain("禁止调用任何工具");
         summaryOnlyPrompt.Should().Contain("DSML");
         summaryOnlyPrompt.Should().Contain("系统如检测到误调用会返回工具结果并继续");
+    }
+
+    [Fact]
+    public void SharedImmutablePrefix_AdvertisesStaticSvgDiagramCapability()
+    {
+        string prefix = global::DeepSeek_v4_for_VisualStudio.Services.AiPrompts.SharedImmutablePrefix;
+
+        prefix.Should().Contain("```svg");
+        prefix.Should().Contain("<svg>");
+        prefix.Should().Contain("foreignObject");
     }
 
     [Fact]

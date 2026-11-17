@@ -455,6 +455,9 @@ window.__appendMessageHtml=function(html){
     if (typeof window.__scrollToBottom === 'function') {
         window.__scrollToBottom('smooth');
     }
+    if (typeof window.__wireSvgDiagramPreviews === 'function') {
+        window.__wireSvgDiagramPreviews(container);
+    }
     // 渲染数学公式（KaTeX）
     window.__renderMath(container);
     // 渲染 Mermaid 图表
@@ -491,6 +494,168 @@ window.__openAttachment=function(path){
     if(!path)return;
     window.__sendToHost({type:'openAttachment',path:path});
 };
+window.__saveSvgImage=function(element){
+    try{
+        var container=element&&element.closest?element.closest('.svg-diagram-preview'):null;
+        var img=container?container.querySelector('img'):null;
+        var src=img?(img.getAttribute('src')||''):'';
+        var comma=src.indexOf(',');
+        if(comma<0)return;
+        var binary=atob(src.substring(comma+1));
+        var bytes=new Uint8Array(binary.length);
+        for(var i=0;i<binary.length;i++)bytes[i]=binary.charCodeAt(i);
+        var svg;
+        if(typeof TextDecoder!=='undefined'){
+            svg=new TextDecoder('utf-8').decode(bytes);
+        }else{
+            var escaped='';
+            for(var j=0;j<bytes.length;j++)escaped+='%'+bytes[j].toString(16).padStart(2,'0');
+            svg=decodeURIComponent(escaped);
+        }
+        window.__sendToHost({type:'saveDiagramAs',svg:svg});
+    }catch(e){
+        try{console.error('[DeepSeek] saveSvgImage:',e);}catch(e2){}
+    }
+};
+window.__closeSvgPreview=function(){
+    var overlay=document.getElementById('svg-preview-overlay');
+    if(overlay){
+        overlay._svgZoom=1;
+        overlay._svgPanX=0;
+        overlay._svgPanY=0;
+        overlay._svgOverlayPointerDown=false;
+        overlay.classList.remove('is-open','is-zoomed','is-dragging');
+        window.__applySvgPreviewTransform(overlay);
+    }
+    document.body.classList.remove('svg-preview-open');
+};
+window.__applySvgPreviewTransform=function(overlay){
+    if(!overlay)return;
+    var img=overlay.querySelector('.svg-preview-image-container img');
+    var zoom=overlay._svgZoom||1;
+    var panX=overlay._svgPanX||0;
+    var panY=overlay._svgPanY||0;
+    if(img)img.style.transform='translate('+panX+'px,'+panY+'px) scale('+zoom+')';
+    var badge=overlay.querySelector('.svg-preview-zoom');
+    if(badge)badge.textContent=Math.round(zoom*100)+'%';
+};
+window.__openSvgPreview=function(img){
+    try{
+        if(!img)return;
+        var overlay=document.getElementById('svg-preview-overlay');
+        if(!overlay){
+            overlay=document.createElement('div');
+            overlay.id='svg-preview-overlay';
+            overlay.className='svg-preview-overlay';
+            var canvas=document.createElement('div');
+            canvas.className='svg-preview-image-container';
+            var close=document.createElement('button');
+            close.type='button';
+            close.className='svg-preview-close';
+            close.textContent='×';
+            close.addEventListener('click',function(){window.__closeSvgPreview();});
+            var zoomLabel=document.createElement('div');
+            zoomLabel.className='svg-preview-zoom';
+            zoomLabel.textContent='100%';
+            overlay.appendChild(canvas);
+            overlay.appendChild(close);
+            overlay.appendChild(zoomLabel);
+            overlay.addEventListener('click',function(e){
+                if(e.target===overlay&&overlay._svgOverlayPointerDown)window.__closeSvgPreview();
+                overlay._svgOverlayPointerDown=false;
+            });
+            overlay.addEventListener('wheel',function(e){
+                if(!overlay.classList.contains('is-open'))return;
+                e.preventDefault();
+                var factor=e.deltaY<0?1.15:1/1.15;
+                var next=Math.max(1,Math.min(8,(overlay._svgZoom||1)*factor));
+                overlay._svgZoom=next;
+                if(next<=1){
+                    overlay._svgPanX=0;
+                    overlay._svgPanY=0;
+                }
+                overlay.classList.toggle('is-zoomed',next>1);
+                window.__applySvgPreviewTransform(overlay);
+            },{passive:false});
+            overlay.addEventListener('pointerdown',function(e){
+                overlay._svgOverlayPointerDown=e.target===overlay;
+                if(e.target.tagName!=='IMG'||(overlay._svgZoom||1)<=1)return;
+                e.preventDefault();
+                overlay._svgDragging=true;
+                overlay._svgDragX=e.clientX;
+                overlay._svgDragY=e.clientY;
+                overlay.classList.add('is-dragging');
+                try{overlay.setPointerCapture(e.pointerId);}catch(e2){}
+            });
+            overlay.addEventListener('pointermove',function(e){
+                if(!overlay._svgDragging)return;
+                overlay._svgPanX=(overlay._svgPanX||0)+(e.clientX-(overlay._svgDragX||0));
+                overlay._svgPanY=(overlay._svgPanY||0)+(e.clientY-(overlay._svgDragY||0));
+                overlay._svgDragX=e.clientX;
+                overlay._svgDragY=e.clientY;
+                window.__applySvgPreviewTransform(overlay);
+            });
+            var stopSvgDrag=function(e){
+                if(!overlay._svgDragging)return;
+                overlay._svgDragging=false;
+                overlay.classList.remove('is-dragging');
+                try{overlay.releasePointerCapture(e.pointerId);}catch(e2){}
+            };
+            overlay.addEventListener('pointerup',stopSvgDrag);
+            overlay.addEventListener('pointercancel',stopSvgDrag);
+            document.body.appendChild(overlay);
+        }
+        var imageContainer=overlay.querySelector('.svg-preview-image-container');
+        var closeButton=overlay.querySelector('.svg-preview-close');
+        var closeLabel=img.getAttribute('data-preview-close-label')||'Close';
+        if(closeButton){
+            closeButton.setAttribute('aria-label',closeLabel);
+            closeButton.title=closeLabel;
+        }
+        if(imageContainer){
+            imageContainer.textContent='';
+            var enlarged=document.createElement('img');
+            enlarged.src=img.currentSrc||img.src;
+            enlarged.alt=img.alt||'SVG diagram';
+            imageContainer.appendChild(enlarged);
+        }
+        overlay._svgZoom=1;
+        overlay._svgPanX=0;
+        overlay._svgPanY=0;
+        overlay._svgDragging=false;
+        overlay._svgOverlayPointerDown=false;
+        overlay.classList.remove('is-zoomed','is-dragging');
+        window.__applySvgPreviewTransform(overlay);
+        overlay.classList.add('is-open');
+        document.body.classList.add('svg-preview-open');
+    }catch(e){
+        try{console.error('[DeepSeek] openSvgPreview:',e);}catch(e2){}
+    }
+};
+window.__wireSvgDiagramPreviews=function(container){
+    if(!container)return;
+    var previews=container.querySelectorAll('.svg-diagram-preview');
+    for(var i=0;i<previews.length;i++){
+        var preview=previews[i];
+        if(preview.getAttribute('data-svg-wired')==='1')continue;
+        var img=preview.querySelector('img.svg-preview-target');
+        var button=preview.querySelector('button.svg-save-button');
+        if(img){
+            img.addEventListener('click',function(){window.__openSvgPreview(this);});
+            img.addEventListener('keydown',function(e){
+                if(e.key==='Enter'||e.key===' '){
+                    e.preventDefault();
+                    window.__openSvgPreview(this);
+                }
+            });
+        }
+        if(button)button.addEventListener('click',function(){window.__saveSvgImage(this);});
+        preview.setAttribute('data-svg-wired','1');
+    }
+};
+document.addEventListener('keydown',function(e){
+    if(e.key==='Escape'||e.key==='Esc')window.__closeSvgPreview();
+});
 window.__retryMessage=function(msgIndex){
     window.__sendToHost({type:'retryMessage',messageIndex:msgIndex});
 };
@@ -674,6 +839,7 @@ window._showCopyFeedback=function(msgIndex){
 // ═══════════════════════════════════════════════
 (function(){
     var _streamBuf={};          // 消息索引 → 累积内容
+    var _htmlChunks={};         // 大段初始 HTML 的分块投递缓冲区
     var _rafPending=false;      // 是否已有待处理的 rAF
     var _rafTimer=null;         // 兜底定时器（防止 rAF 不触发）
 
@@ -762,6 +928,19 @@ window._showCopyFeedback=function(msgIndex){
                     _renderCtxDebug(msg.d||{});
                     return;
                 }
+                if(msg.type==='htmlChunk'){
+                    var chunkBuf=_htmlChunks[msg.id];
+                    if(msg.reset||!chunkBuf){
+                        chunkBuf=[];
+                        _htmlChunks[msg.id]=chunkBuf;
+                    }
+                    if(msg.html)chunkBuf.push(msg.html);
+                    if(msg.final){
+                        delete _htmlChunks[msg.id];
+                        window.__appendMessageHtml(chunkBuf.join(''));
+                    }
+                    return;
+                }
                 if(msg.type==='stream'){
                     _streamBuf[msg.i]=msg;
                     if(!_rafPending){
@@ -827,6 +1006,7 @@ window._showCopyFeedback=function(msgIndex){
                                 window.__renderMath(container);
                                 // 渲染 Mermaid 图表
                                 window.__renderMermaid(container);
+                                window.__wireSvgDiagramPreviews(container);
                             }
                         } catch(renderErr) {
                             // ── innerHTML 渲染失败时的降级：显示带样式的错误提示 ──
@@ -877,7 +1057,12 @@ window._showCopyFeedback=function(msgIndex){
                     if (st) st.textContent = '';
                 }else if(msg.type==='prependHtml'){
                     var cc2=document.getElementById('chat-container');
-                    if(cc2){cc2.insertAdjacentHTML('afterbegin',msg.html);}
+                    if(cc2){
+                        cc2.insertAdjacentHTML('afterbegin',msg.html);
+                        if(typeof window.__wireSvgDiagramPreviews==='function'){
+                            window.__wireSvgDiagramPreviews(cc2);
+                        }
+                    }
                     var lb=document.getElementById('load-earlier-wrap');
                     if(lb&&!msg.hasMore){lb.parentNode.removeChild(lb);}
                 }else if(msg.type==='appendHtml'){

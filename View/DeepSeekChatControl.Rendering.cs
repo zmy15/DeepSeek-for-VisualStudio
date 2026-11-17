@@ -934,6 +934,13 @@ namespace DeepSeek_v4_for_VisualStudio.View
 
                 string allMessages = _messagesHtml.ToString();
 
+                // 初始页面尚未完成分块注入时，不能走增量路径，否则会与暂缓内容重复或竞态。
+                if (_pendingInitialHtml != null)
+                {
+                    Logger.Debug("[Render] 暂缓消息 HTML 尚未注入，跳过本次增量更新");
+                    return;
+                }
+
                 // ── 增量更新路径 ──
                 if (_browserInitialized && allMessages.Length > _lastRenderedMessagesLength)
                 {
@@ -1118,9 +1125,18 @@ namespace DeepSeek_v4_for_VisualStudio.View
 
         private int _renderWindowStart;
         private const int RenderWindowBatchSize = 40;
+        private const int InitialHtmlChunkChars = 32 * 1024;
 
         /// <summary>
-        /// WebView2 <c>NavigateToString</c> 的官方上限：2 MB（2 * 1024 * 1024 UTF-8 bytes）。
+        /// 因超过 NavigateToString 限制而暂缓注入的消息 HTML。
+        /// 页面就绪后通过 PostWebMessageAsString 分块发送，避免调试启动/结束时
+        /// WebView 重建因单次导航失败而永久空白。
+        /// </summary>
+        private string? _pendingInitialHtml;
+
+        /// <summary>
+        /// WebView2 <c>NavigateToString</c> 的官方上限：2 MB（2 * 1024 * 1024 bytes）。
+        /// 运行时按 LPCWSTR 传递时也可能按 UTF-16 计长，因此实际校验取 UTF-8/UTF-16 的较大值。
         /// </summary>
         internal const int WebViewNavigateToStringMaxBytes = 2 * 1024 * 1024;
 
@@ -1131,6 +1147,8 @@ namespace DeepSeek_v4_for_VisualStudio.View
         /// </summary>
         private void RebuildMessagesHtml()
         {
+            _pendingInitialHtml = null;
+
             // 流式正文/思考先写入消息对象；否则 WebView 重建只读取旧字段，会丢失当前思考过程。
             SyncStreamingSnapshotToMessageForRebuild();
 
@@ -1178,6 +1196,8 @@ namespace DeepSeek_v4_for_VisualStudio.View
             if (maxBytes <= 0)
                 throw new ArgumentOutOfRangeException(nameof(maxBytes));
 
+            _pendingInitialHtml = null;
+
             // 主题切换/全量刷新也可能绕过 RebuildMessagesHtml，导航前统一同步当前流式快照。
             SyncStreamingSnapshotToMessageForRebuild();
 
@@ -1186,7 +1206,7 @@ namespace DeepSeek_v4_for_VisualStudio.View
             {
                 string windowHtml = BuildMessagesWindowHtml(windowSize, out int windowStart);
                 string pageHtml = ChatHtmlService.BuildInitialPageFromMessagesHtml(windowHtml);
-                int pageBytes = Encoding.UTF8.GetByteCount(pageHtml);
+                int pageBytes = GetNavigateToStringPayloadBytes(pageHtml);
 
                 if (pageBytes <= maxBytes)
                 {
@@ -1198,6 +1218,30 @@ namespace DeepSeek_v4_for_VisualStudio.View
 
                     ApplyMessagesWindow(windowHtml, windowStart);
                     return pageHtml;
+                }
+
+                // 单条最新消息仍超限时，不能继续缩到空窗口并把历史静默丢掉。
+                // 先导航不含消息的轻量页面，再由 __pageReady__ 分块补发完整窗口。
+                if (windowSize <= 1)
+                {
+                    string shellHtml = ChatHtmlService.BuildInitialPageFromMessagesHtml(string.Empty);
+                    int shellBytes = GetNavigateToStringPayloadBytes(shellHtml);
+                    if (shellBytes > maxBytes)
+                    {
+                        throw new InvalidOperationException(
+                            $"WebView2 空页面 {shellBytes:N0} bytes，超过 NavigateToString 上限 {maxBytes:N0} bytes");
+                    }
+
+                    ApplyMessagesWindow(windowHtml, windowStart);
+                    _pendingInitialHtml = windowHtml.Length > 0 ? windowHtml : null;
+
+                    if (_pendingInitialHtml != null)
+                    {
+                        Logger.Warn($"[Render] 消息 HTML {windowHtml.Length:N0} 字符超过 NavigateToString 安全限制，"
+                            + $"改为页面就绪后分块注入（窗口起点={windowStart}）");
+                    }
+
+                    return shellHtml;
                 }
 
                 if (windowSize == 0)
@@ -1214,15 +1258,177 @@ namespace DeepSeek_v4_for_VisualStudio.View
         }
 
         /// <summary>
+        /// 估算 NavigateToString 收到的载荷大小。官方文档只写 2 MB，但实现路径不同：
+        /// UTF-8 字节数对中文更保守，UTF-16 字节数对 ASCII 更保守，取二者最大值可覆盖两种计法。
+        /// </summary>
+        internal static int GetNavigateToStringPayloadBytes(string html)
+        {
+            if (html == null)
+                throw new ArgumentNullException(nameof(html));
+
+            return Math.Max(
+                Encoding.UTF8.GetByteCount(html),
+                Encoding.Unicode.GetByteCount(html));
+        }
+
+        /// <summary>
+        /// 生成不含正文内容的安全诊断摘要，用于定位 NavigateToString 拒绝载荷的原因。
+        /// </summary>
+        internal static string DescribeNavigateToStringPayload(string html)
+        {
+            if (html == null)
+                throw new ArgumentNullException(nameof(html));
+
+            int utf8Bytes = Encoding.UTF8.GetByteCount(html);
+            int utf16Bytes = Encoding.Unicode.GetByteCount(html);
+            int nullCount = 0;
+            int controlCount = 0;
+            int unpairedSurrogateCount = 0;
+            int replacementCharCount = 0;
+            int nonAsciiCount = 0;
+
+            for (int i = 0; i < html.Length; i++)
+            {
+                char c = html[i];
+
+                if (c == '\0')
+                    nullCount++;
+                else if (c < 0x20 && c != '\r' && c != '\n' && c != '\t')
+                    controlCount++;
+
+                if (c > 0x7F)
+                    nonAsciiCount++;
+                if (c == '\uFFFD')
+                    replacementCharCount++;
+
+                if (char.IsHighSurrogate(c))
+                {
+                    if (i + 1 < html.Length && char.IsLowSurrogate(html[i + 1]))
+                    {
+                        i++;
+                    }
+                    else
+                    {
+                        unpairedSurrogateCount++;
+                    }
+                }
+                else if (char.IsLowSurrogate(c))
+                {
+                    unpairedSurrogateCount++;
+                }
+            }
+
+            int maxBytes = Math.Max(utf8Bytes, utf16Bytes);
+            return $"chars={html.Length:N0}, utf8={utf8Bytes:N0}, utf16={utf16Bytes:N0}, "
+                + $"navBytes={maxBytes:N0}, nul={nullCount}, controls={controlCount}, "
+                + $"unpairedSurrogate={unpairedSurrogateCount}, replacement={replacementCharCount}, "
+                + $"nonAscii={nonAsciiCount}";
+        }
+
+        /// <summary>
+        /// 记录导航调用时的控件状态；不访问页面源码或聊天正文。
+        /// </summary>
+        private string DescribeWebViewNavigationState(CoreWebView2 core)
+        {
+            bool isLoaded = false;
+            bool isVisible = false;
+            int viewHash = 0;
+            string browserVersion = "unknown";
+
+            try { viewHash = ChatWebView?.GetHashCode() ?? 0; } catch { }
+            try { isLoaded = ChatWebView?.IsLoaded == true; } catch { }
+            try { isVisible = ChatWebView?.IsVisible == true; } catch { }
+            try { browserVersion = core?.Environment?.BrowserVersionString ?? "unknown"; } catch { }
+
+            return $"uiThread={Dispatcher.CheckAccess()}, disposed={_disposed}, "
+                + $"view={viewHash}, loaded={isLoaded}, visible={isVisible}, "
+                + $"stale={_webViewInstanceStale}, webViewInitialized={_webViewInitialized}, "
+                + $"pageReady={_pageReady}, browserInitialized={_browserInitialized}, "
+                + $"pendingInitialHtml={_pendingInitialHtml != null}, runtime={browserVersion}";
+        }
+
+        /// <summary>
         /// 统一整页导航入口：构建不超过 WebView2 2 MB 限制的安全页面并同步渲染状态。
         /// 所有 <c>NavigateToString</c> 必须经由此方法，避免后续新增路径绕过体积保护。
         /// </summary>
         private void NavigateBrowserToInitialPage(CoreWebView2 core, string? pageHtml = null)
         {
             string html = pageHtml ?? BuildNavigableInitialPageHtml();
-            core.NavigateToString(html);
+
+            try
+            {
+                if (Logger.Level <= LogLevel.Debug)
+                {
+                    Logger.Debug("[Render] NavigateToString request | "
+                        + DescribeNavigateToStringPayload(html) + " | "
+                        + DescribeWebViewNavigationState(core));
+                }
+
+                core.NavigateToString(html);
+            }
+            catch (ArgumentException ex)
+            {
+                Logger.Warn($"[Render] NavigateToString rejected | hresult=0x{ex.HResult:X8} "
+                    + $"| message={ex.Message} | {DescribeNavigateToStringPayload(html)} "
+                    + $"| {DescribeWebViewNavigationState(core)}");
+
+                if (_pendingInitialHtml != null)
+                    throw;
+
+                // 即使预估未超限，也保留运行时兜底：某些 WebView2 版本对字符计法或
+                // 非法控制字符仍会抛 ArgumentException。改用轻量页面 + 分块注入可恢复历史。
+                string deferredHtml = _messagesHtml.ToString();
+                if (string.IsNullOrEmpty(deferredHtml))
+                    throw;
+
+                string shellHtml = ChatHtmlService.BuildInitialPageFromMessagesHtml(string.Empty);
+                Logger.Warn($"[Render] NavigateToString fallback | deferred: {DescribeNavigateToStringPayload(deferredHtml)} "
+                    + $"| shell: {DescribeNavigateToStringPayload(shellHtml)}");
+                core.NavigateToString(shellHtml);
+                _pendingInitialHtml = deferredHtml;
+            }
+
             _browserInitialized = true;
-            _lastRenderedMessagesLength = _messagesHtml.Length;
+            _lastRenderedMessagesLength = _pendingInitialHtml == null ? _messagesHtml.Length : 0;
+        }
+
+        /// <summary>
+        /// 页面就绪后把暂缓的消息 HTML 分块投递到 JS 缓冲区。
+        /// 分块使用 PostWebMessageAsString，不经过 NavigateToString/ExecuteScript 的大字符串限制。
+        /// </summary>
+        private void DeliverPendingInitialHtml()
+        {
+            Microsoft.VisualStudio.Shell.ThreadHelper.ThrowIfNotOnUIThread();
+
+            string? pendingHtml = _pendingInitialHtml;
+            if (string.IsNullOrEmpty(pendingHtml))
+                return;
+
+            if (!TryGetLiveCoreWebView(out var core))
+            {
+                Logger.Warn("[Render] 页面就绪但控件不可用，暂缓消息 HTML 保留到下次恢复");
+                return;
+            }
+
+            string deliveryId = Guid.NewGuid().ToString("N");
+            int chunkCount = 0;
+            foreach (string json in ChatHtmlService.BuildInitialHtmlChunkMessages(
+                deliveryId, pendingHtml, InitialHtmlChunkChars))
+            {
+                core!.PostWebMessageAsString(json);
+                chunkCount++;
+            }
+
+            // PostWebMessageAsString 按调用顺序投递；后续增量消息会排在这些分块之后。
+            if (!ReferenceEquals(_pendingInitialHtml, pendingHtml))
+            {
+                Logger.Info("[Render] 分块投递期间页面内容已被替换，跳过渲染状态推进");
+                return;
+            }
+
+            _pendingInitialHtml = null;
+            _lastRenderedMessagesLength = pendingHtml.Length;
+            Logger.Info($"[Render] 暂缓消息 HTML 已分块投递: {pendingHtml.Length:N0} 字符, {chunkCount} 块");
         }
 
         private string BuildMessagesWindowHtml(int maxMessages, out int windowStart)

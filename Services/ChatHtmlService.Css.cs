@@ -13,7 +13,7 @@ namespace DeepSeek_v4_for_VisualStudio.Services
         private const string KaTeXCdnScript = "https://cdnjs.cloudflare.com/ajax/libs/KaTeX/0.16.9/katex.min.js";
 
         // ── Mermaid 图表渲染 ──
-        private const string MermaidCdnScript = "https://cdnjs.cloudflare.com/ajax/libs/mermaid/10.9.0/mermaid.min.js";
+        private const string MermaidCdnScript = "https://cdnjs.cloudflare.com/ajax/libs/mermaid/11.17.2/mermaid.min.js";
 
         /// <summary>
         /// 获取当前主题对应的 Highlight.js CSS CDN 链接。

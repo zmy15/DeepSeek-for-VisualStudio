@@ -9,6 +9,14 @@ namespace DeepSeek_v4_for_VisualStudio.Tests.Unit.View;
 public class DiagramExportTests
 {
     [Fact]
+    public void BuildDiagramSaveFileName_UsesSvgExtensionAndTimestamp()
+    {
+        DeepSeekChatControl.BuildDiagramSaveFileName(
+            new DateTime(2026, 11, 15, 13, 14, 15))
+            .Should().Be("diagram_20261115_131415.svg");
+    }
+
+    [Fact]
     public void IsExportableDiagramSvg_MermaidSvg_ReturnsTrue()
     {
         const string svg = "<svg id=\"mermaid-svg-1\" viewBox=\"0 0 100 50\" "
