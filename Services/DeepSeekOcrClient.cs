@@ -19,7 +19,7 @@ namespace DeepSeek_v4_for_VisualStudio.Services
 
     /// <summary>
     /// DeepSeek 官方 OCR API 客户端。
-    /// 参考: https://api-docs.deepseek.com/zh-cn/guides/ocr
+    /// 参考: https://api-docs.deepseek.com/zh-cn/api/ocr
     /// </summary>
     public class DeepSeekOcrClient : IDisposable
     {
@@ -118,7 +118,15 @@ namespace DeepSeek_v4_for_VisualStudio.Services
                     request,
                     HttpCompletionOption.ResponseHeadersRead,
                     cts.Token);
-                string responseJson = await response.Content.ReadAsStringAsync();
+                Task<string> responseReadTask = response.Content.ReadAsStringAsync();
+                Task readDeadlineTask = Task.Delay(Timeout.InfiniteTimeSpan, cts.Token);
+                Task completedTask = await Task.WhenAny(responseReadTask, readDeadlineTask);
+                if (completedTask != responseReadTask)
+                {
+                    cts.Token.ThrowIfCancellationRequested();
+                    throw new TimeoutException("OCR response body read timed out");
+                }
+                string responseJson = await responseReadTask;
 
                 if (!response.IsSuccessStatusCode)
                 {
@@ -179,10 +187,20 @@ namespace DeepSeek_v4_for_VisualStudio.Services
                     return null;
                 }
 
-                int pageCount = root.TryGetProperty("page_count", out var pageCountElement) &&
-                                pageCountElement.TryGetInt32(out int parsedPageCount)
-                    ? parsedPageCount
-                    : pages.GetArrayLength();
+                if (!root.TryGetProperty("page_count", out var pageCountElement) ||
+                    !pageCountElement.TryGetInt32(out int pageCount))
+                {
+                    Logger.Warn("[OCR-DeepSeek] response missing a valid page_count");
+                    return null;
+                }
+
+                int arrayPageCount = pages.GetArrayLength();
+                if (pageCount != arrayPageCount)
+                {
+                    Logger.Warn(
+                        $"[OCR-DeepSeek] page_count mismatch: page_count={pageCount}, pages={arrayPageCount}");
+                    return null;
+                }
                 var builder = new StringBuilder();
                 int pageIndex = 0;
                 foreach (var page in pages.EnumerateArray())

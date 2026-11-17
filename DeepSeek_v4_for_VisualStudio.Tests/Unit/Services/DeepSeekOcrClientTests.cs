@@ -84,6 +84,14 @@ public class DeepSeekOcrClientTests
         DeepSeekOcrClient.ParseResponseText(responseJson).Should().BeNull();
     }
 
+    [Theory]
+    [InlineData("""{"pages":[{"index":0,"text":"x","finish_reason":"stop"}]}""")]
+    [InlineData("""{"page_count":2,"pages":[{"index":0,"text":"x","finish_reason":"stop"}]}""")]
+    public void ParseResponseResult_RejectsMissingOrMismatchedPageCount(string responseJson)
+    {
+        DeepSeekOcrClient.ParseResponseResult(responseJson).Should().BeNull();
+    }
+
     [Fact]
     public void OfficialOcrBilling_UsesSuccessfulPageCountAndDualCurrencyRates()
     {
