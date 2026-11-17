@@ -36,6 +36,23 @@ public class RuntimeSettingsSnapshotTests
     }
 
     [Fact]
+    public void OfficialOcrPurposeChange_RefreshesOcrOnly()
+    {
+        var previous = CreateSnapshot();
+        var current = previous with
+        {
+            OfficialOcrPurpose = DeepSeekOcrClient.RichLayoutRecognitionPurpose,
+        };
+
+        var changes = RuntimeSettingsChangeSet.Between(previous, current);
+
+        changes.OcrChanged.Should().BeTrue();
+        changes.EndpointChanged.Should().BeFalse();
+        changes.ModelControlsChanged.Should().BeFalse();
+        changes.WebSearchChanged.Should().BeFalse();
+    }
+
+    [Fact]
     public void ModelChange_RefreshesEndpointAndModelControlsOnly()
     {
         var previous = CreateSnapshot();

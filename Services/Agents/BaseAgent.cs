@@ -155,10 +155,10 @@ namespace DeepSeek_v4_for_VisualStudio.Services.Agents
 
         /// <summary>
         /// 判断视觉模型下是否应禁用 OCR 工具（执行层判定）。
-        /// 用户显式要求 OCR（消息中含 OCR / 文字识别等）时返回 false，放行。
+        /// 视觉模型直接读图，OCR 始终禁用。
         /// </summary>
         internal static bool ShouldSuppressOcrTools(bool isVisionModel, string? userMessage)
-            => isVisionModel && !DeepSeekChatControl.IsOcrExplicitlyRequested(userMessage, null);
+            => isVisionModel;
 
         /// <summary>
         /// 构建完整工具集（不过滤白名单），用于 DeepSeek Prefix Cache 稳定。
@@ -220,7 +220,7 @@ namespace DeepSeek_v4_for_VisualStudio.Services.Agents
         ///
         /// 该判定作用于<b>执行层</b>，而不是工具集：OCR 工具始终随完整工具集发送，
         /// 以保持请求前缀稳定（前缀缓存），视觉模型调用时直接拒绝并返回指引。
-        /// 用户显式要求 OCR（消息中含 OCR/文字识别等）时放行。
+        /// 视觉模型直接读图，OCR 始终禁用。
         /// </summary>
         internal static bool ShouldBlockOcrToolExecution(
             string toolName, bool isVisionModel, string? userMessage)
@@ -1320,6 +1320,9 @@ namespace DeepSeek_v4_for_VisualStudio.Services.Agents
             int configuredSafetyLimit = Settings.DeepSeekOptionsPage.Instance?.MaxToolCallRounds ?? 200;
             if (configuredSafetyLimit < 1) configuredSafetyLimit = 200;
             bool loopDetected = false;
+            bool conversationTitleRequestSent = false;
+            bool conversationTitleReceived = false;
+            bool conversationTitleRequestCompleted = false;
 
             // MaxToolCallRounds is a per-Agent-invocation limit. The global
             // CurrentRound is only a cache-age offset and must not consume the
@@ -1503,10 +1506,52 @@ namespace DeepSeek_v4_for_VisualStudio.Services.Agents
                     await Task.Delay(backoff, ct);
                 }
 
+                bool TryHandleConversationTitleChunk(string chunk)
+                {
+                    if (!chunk.StartsWith("[TITLE]", StringComparison.Ordinal))
+                        return false;
+
+                    conversationTitleReceived = true;
+                    try
+                    {
+                        Context?.OnConversationTitleReceived?.Invoke(chunk.Substring(7));
+                    }
+                    catch (Exception ex)
+                    {
+                        Logger.Warn($"[AI标题] 处理官方 title 回调失败: {ex.Message}");
+                    }
+                    return true;
+                }
+
+                void CompleteConversationTitleRequestIfNeeded()
+                {
+                    if (!conversationTitleRequestSent || conversationTitleRequestCompleted)
+                        return;
+
+                    conversationTitleRequestCompleted = true;
+                    if (Context != null)
+                        Context.RequestConversationTitle = false;
+                    if (conversationTitleReceived)
+                        return;
+
+                    try
+                    {
+                        Context?.OnConversationTitleRequestCompleted?.Invoke();
+                    }
+                    catch (Exception ex)
+                    {
+                        Logger.Warn($"[AI标题] 官方 title 未返回时执行兜底失败: {ex.Message}");
+                    }
+                }
+
                 while (!streamSuccess && streamAttempt < maxStreamAttempts)
                 {
                     try
                     {
+                        bool requestConversationTitle =
+                            Context?.RequestConversationTitle == true &&
+                            !conversationTitleRequestSent;
+
                         // 如果是重试，将已接收的部分内容注入对话上下文
                         if (streamAttempt > 0 || reasoningLoopRetryPending)
                         {
@@ -1543,10 +1588,16 @@ namespace DeepSeek_v4_for_VisualStudio.Services.Agents
                                 resumeMessages, toolDefs, ct,
                                 toolChoice: toolChoice,
                                 temperature: temperature,
-                                responseFormat: responseFormat))
+                                responseFormat: responseFormat,
+                                requestConversationTitle: requestConversationTitle))
                             {
-                                ThrowIfReasoningLoopDetected(chunk, reasoningGuard);
-                                ProcessStreamChunk(chunk, reasoningBuilder, contentBuilder, toolCallAccumulator, onThinking, onContent);
+                                if (requestConversationTitle)
+                                    conversationTitleRequestSent = true;
+                                if (!TryHandleConversationTitleChunk(chunk))
+                                {
+                                    ThrowIfReasoningLoopDetected(chunk, reasoningGuard);
+                                    ProcessStreamChunk(chunk, reasoningBuilder, contentBuilder, toolCallAccumulator, onThinking, onContent);
+                                }
                             }
                         }
                         else
@@ -1556,13 +1607,22 @@ namespace DeepSeek_v4_for_VisualStudio.Services.Agents
                                 messages, toolDefs, ct,
                                 toolChoice: toolChoice,
                                 temperature: temperature,
-                                responseFormat: responseFormat))
+                                responseFormat: responseFormat,
+                                requestConversationTitle: requestConversationTitle))
                             {
-                                ThrowIfReasoningLoopDetected(chunk, reasoningGuard);
-                                ProcessStreamChunk(chunk, reasoningBuilder, contentBuilder, toolCallAccumulator, onThinking, onContent);
+                                if (requestConversationTitle)
+                                    conversationTitleRequestSent = true;
+                                if (!TryHandleConversationTitleChunk(chunk))
+                                {
+                                    ThrowIfReasoningLoopDetected(chunk, reasoningGuard);
+                                    ProcessStreamChunk(chunk, reasoningBuilder, contentBuilder, toolCallAccumulator, onThinking, onContent);
+                                }
                             }
                         }
 
+                        if (requestConversationTitle)
+                            conversationTitleRequestSent = true;
+                        CompleteConversationTitleRequestIfNeeded();
                         streamSuccess = true;
                         if (streamAttempt > 0)
                         {
@@ -4299,6 +4359,10 @@ namespace DeepSeek_v4_for_VisualStudio.Services.Agents
             {
                 // Cache 统计信息 — 过滤，不混入正文
             }
+            else if (chunk.StartsWith("[TITLE]"))
+            {
+                // 官方会话标题元数据 — 由 CallAiWithToolLoopAsync 单独分派，不混入正文
+            }
             else
             {
                 contentBuilder.Append(chunk);
@@ -4313,7 +4377,8 @@ namespace DeepSeek_v4_for_VisualStudio.Services.Agents
         {
             return !chunk.StartsWith("[THINKING]")
                 && !chunk.StartsWith("[TOOL_CALL]")
-                && !chunk.StartsWith("[CACHE]");
+                && !chunk.StartsWith("[CACHE]")
+                && !chunk.StartsWith("[TITLE]");
         }
 
         /// <summary>

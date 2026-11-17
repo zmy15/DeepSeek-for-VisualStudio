@@ -173,7 +173,6 @@ namespace DeepSeek_v4_for_VisualStudio.View
             // 视觉能力判定统一走 ApiService 权威标志（resolver 在构造/热更新时写入），
             // 与 BuiltInToolService/BaseAgent 工具层读同一数据源，避免 UI/工具层分裂。
             bool visionModelSelected = _apiService?.CurrentIsVision ?? false;
-            bool ocrExplicitlyRequested = IsOcrExplicitlyRequested(userText, effectiveUserText);
 
             if (!isQueuedAppend && _attachedFilePaths.Count > 0)
             {
@@ -188,13 +187,16 @@ namespace DeepSeek_v4_for_VisualStudio.View
                 parseResults = FileParserService.CreateFileReferences(_attachedFilePaths);
                 fileContext = FileParserService.FormatParseResultsForContext(parseResults);
 
-                if (visionModelSelected && !ocrExplicitlyRequested)
+                if (visionModelSelected)
                 {
                     var directImagePaths = _attachedFilePaths
                         .Where(IsVisionImageFile)
                         .ToList();
                     var directPdfPaths = _attachedFilePaths
                         .Where(IsPdfFile)
+                        .ToList();
+                    var directPresentationPaths = _attachedFilePaths
+                        .Where(PresentationRenderService.IsPresentationFile)
                         .ToList();
                     var visionParts = new List<ChatContentPart>();
 
@@ -219,10 +221,23 @@ namespace DeepSeek_v4_for_VisualStudio.View
                             if (pdfParts is { Count: > 0 })
                                 visionParts.AddRange(pdfParts);
                         }
+
+                        // PowerPoint 幻灯片逐页导出为 PNG 后直传视觉模型
+                        foreach (string presentation in directPresentationPaths)
+                        {
+                            if (streamingCts.IsCancellationRequested)
+                                break;
+
+                            var slideParts = await PresentationRenderService
+                                .BuildPresentationVisionPartsAsync(
+                                    presentation, streamingCts.Token);
+                            if (slideParts is { Count: > 0 })
+                                visionParts.AddRange(slideParts);
+                        }
                     });
 
                     visionContent = visionParts.Count > 0 ? visionParts : null;
-                    Logger.Info($"[Vision] 直传图片 {directImagePaths.Count} 张，直传 PDF {directPdfPaths.Count} 个；其余文件按路径引用");
+                    Logger.Info($"[Vision] 直传图片 {directImagePaths.Count} 张，PDF {directPdfPaths.Count} 个，PowerPoint {directPresentationPaths.Count} 个；其余文件按路径引用");
                 }
 
                 if (TryCompleteCancelledGeneration(streamingCts))
@@ -251,6 +266,9 @@ namespace DeepSeek_v4_for_VisualStudio.View
 
             // 记录视觉模型直传的 PDF 附件路径，供重试/回退恢复时重新渲染页面
             List<string> attachedPdfPaths = _attachedFilePaths.Where(IsPdfFile).ToList();
+            List<string> attachedPresentationPaths = _attachedFilePaths
+                .Where(PresentationRenderService.IsPresentationFile)
+                .ToList();
 
             // 构建用户消息内容
             string analyzeFilesPrompt = LocalizationService.Instance["messaging.analyzeFilesPrompt"];
@@ -279,6 +297,7 @@ namespace DeepSeek_v4_for_VisualStudio.View
                 AttachedImageFileNames = attachedImageFileNames,
                 AttachedImagePaths = attachedImagePaths,
                 AttachedPdfPaths = attachedPdfPaths,
+                AttachedPresentationPaths = attachedPresentationPaths,
                 Timestamp = DateTime.Now,
             };
             int earlyUserMsgIndex;
@@ -539,20 +558,6 @@ namespace DeepSeek_v4_for_VisualStudio.View
             return string.Equals(Path.GetExtension(filePath), ".pdf", StringComparison.OrdinalIgnoreCase);
         }
 
-        internal static bool IsOcrExplicitlyRequested(string? userText, string? effectiveUserText)
-        {
-            string text = ((effectiveUserText ?? string.Empty) + "\n" + (userText ?? string.Empty))
-                .ToLowerInvariant();
-
-            return text.Contains("ocr")
-                || text.Contains("文字识别")
-                || text.Contains("识别文字")
-                || text.Contains("提取文字")
-                || text.Contains("提取图片文字")
-                || text.Contains("读取图片文字")
-                || text.Contains("图片文字");
-        }
-
         internal static bool IsOcrToolName(string toolName)
         {
             var ocrKeywords = new[] { "ocr", "recognize_text", "paddle_ocr", "ocr_image", "image_to_text", "read_text" };
@@ -636,6 +641,20 @@ namespace DeepSeek_v4_for_VisualStudio.View
                     var pdfParts = PdfRenderService.BuildPdfVisionParts(pdf);
                     if (pdfParts is { Count: > 0 })
                         parts.AddRange(pdfParts);
+                }
+            }
+
+            // 视觉模型直传的 PowerPoint：重新渲染幻灯片并恢复图片内容块。
+            if (message.AttachedPresentationPaths is { Count: > 0 })
+            {
+                foreach (string presentation in message.AttachedPresentationPaths)
+                {
+                    var slideParts = PresentationRenderService
+                        .BuildPresentationVisionPartsAsync(presentation)
+                        .GetAwaiter()
+                        .GetResult();
+                    if (slideParts is { Count: > 0 })
+                        parts.AddRange(slideParts);
                 }
             }
 

@@ -32,7 +32,8 @@ namespace DeepSeek_v4_for_VisualStudio.Settings
         int BottomAreaScalePercent,
         int WebView2ZoomPercent,
         string CustomEndpointsData = "",
-        string ActiveCustomEndpointId = "")
+        string ActiveCustomEndpointId = "",
+        string OfficialOcrPurpose = "")
     {
         public static RuntimeSettingsSnapshot Capture(DeepSeekOptionsPage options)
         {
@@ -66,7 +67,8 @@ namespace DeepSeek_v4_for_VisualStudio.Settings
                 options.BottomAreaScalePercent,
                 options.WebView2ZoomPercent,
                 options.CustomEndpointsData ?? string.Empty,
-                options.ActiveCustomEndpointId ?? string.Empty);
+                options.ActiveCustomEndpointId ?? string.Empty,
+                options.OfficialOcrPurpose ?? string.Empty);
         }
 
         public override string ToString() => "RuntimeSettingsSnapshot { redacted }";
@@ -142,7 +144,9 @@ namespace DeepSeek_v4_for_VisualStudio.Settings
                 ApprovalChanged: Changed(previous.ApprovalMode, current.ApprovalMode),
                 AutoSkillRoutingChanged:
                     previous.EnableAutoSkillRouting != current.EnableAutoSkillRouting,
-                OcrChanged: Changed(previous.OcrEngine, current.OcrEngine),
+                OcrChanged:
+                    Changed(previous.OcrEngine, current.OcrEngine) ||
+                    Changed(previous.OfficialOcrPurpose, current.OfficialOcrPurpose),
                 WebSearchChanged:
                     previous.EnableWebSearch != current.EnableWebSearch ||
                     Changed(previous.SearchProvider, current.SearchProvider) ||

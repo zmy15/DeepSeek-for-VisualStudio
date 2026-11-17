@@ -66,6 +66,12 @@ namespace DeepSeek_v4_for_VisualStudio.Services
             ".pdf",
         };
 
+        /// <summary>PowerPoint 文档扩展名集合（仅 DeepSeek 官方 OCR 支持）。</summary>
+        private static readonly HashSet<string> PresentationExtensions = new(StringComparer.OrdinalIgnoreCase)
+        {
+            ".ppt", ".pptx",
+        };
+
         /// <summary>
         /// 支持 OCR 的图像文件扩展名集合。
         /// </summary>
@@ -92,6 +98,9 @@ namespace DeepSeek_v4_for_VisualStudio.Services
         /// </summary>
         private const int MaxParsedChars = int.MaxValue;
 
+        /// <summary>单次本地 OCR 最多处理的 PDF/PPT 页数。</summary>
+        private const int ParserOcrPageBatchLimit = 50;
+
         #endregion
 
         #region Public Methods
@@ -109,6 +118,7 @@ namespace DeepSeek_v4_for_VisualStudio.Services
                 || WordExtensions.Contains(ext)
                 || ExcelExtensions.Contains(ext)
                 || PdfExtensions.Contains(ext)
+                || PresentationExtensions.Contains(ext)
                 || ImageExtensions.Contains(ext);
         }
 
@@ -128,9 +138,10 @@ namespace DeepSeek_v4_for_VisualStudio.Services
         public static string GetFileFilter()
         {
             var L = LocalizationService.Instance;
-            return $"{L["file.filter.allSupported"]}|*.txt;*.c;*.py;*.cs;*.cpp;*.h;*.java;*.js;*.ts;*.html;*.css;*.xml;*.json;*.yaml;*.yml;*.md;*.sql;*.doc;*.docx;*.xls;*.xlsx;*.pdf;*.png;*.jpg;*.jpeg;*.bmp;*.gif;*.tiff;*.tif|" +
+            return $"{L["file.filter.allSupported"]}|*.txt;*.c;*.py;*.cs;*.cpp;*.h;*.java;*.js;*.ts;*.html;*.css;*.xml;*.json;*.yaml;*.yml;*.md;*.sql;*.doc;*.docx;*.xls;*.xlsx;*.pdf;*.ppt;*.pptx;*.png;*.jpg;*.jpeg;*.bmp;*.gif;*.tiff;*.tif|" +
                    $"{L["file.filter.textFiles"]}|*.txt;*.c;*.py;*.cs;*.cpp;*.h;*.java;*.js;*.ts;*.html;*.css;*.xml;*.json;*.yaml;*.yml;*.md;*.sql;*.csv|" +
                    $"{L["file.filter.wordDocs"]}|*.doc;*.docx|" +
+                   $"{L["file.filter.powerPointDocs"]}|*.ppt;*.pptx|" +
                    $"{L["file.filter.excelDocs"]}|*.xls;*.xlsx|" +
                    $"{L["file.filter.pdfDocs"]}|*.pdf|" +
                    $"{L["file.filter.imageFiles"]}|*.png;*.jpg;*.jpeg;*.bmp;*.gif;*.tiff;*.tif|" +
@@ -175,27 +186,43 @@ namespace DeepSeek_v4_for_VisualStudio.Services
                 {
                     result.Content = await ReadTextFileAsync(filePath);
                 }
+                // DeepSeek 官方 OCR 优先处理其原生支持的文档
+                else if (OcrService.CurrentEngine == OcrEngineType.DeepSeekOfficial &&
+                         OcrService.IsOfficialOcrDocumentFile(filePath))
+                {
+                    result.Content = await OcrService.ExtractTextFromFileAsync(filePath);
+                    if (result.Content != null)
+                    {
+                        result.Success = true;
+                        return result;
+                    }
+                }
                 // Word 文档
-                else if (WordExtensions.Contains(ext))
+                if (result.Content == null && WordExtensions.Contains(ext))
                 {
                     result.Content = await ParseWordDocumentAsync(filePath);
                 }
                 // Excel 文档
-                else if (ExcelExtensions.Contains(ext))
+                else if (result.Content == null && ExcelExtensions.Contains(ext))
                 {
                     result.Content = await Task.Run(() => ParseExcelDocument(filePath));
                 }
                 // PDF 文档
-                else if (PdfExtensions.Contains(ext))
+                else if (result.Content == null && PdfExtensions.Contains(ext))
                 {
-                    result.Content = await Task.Run(() => ParsePdfDocument(filePath));
+                    result.Content = await ParsePdfFileAsync(filePath);
+                }
+                // PowerPoint：视觉直传由上层处理；此处执行 OCR 或文本提取兜底
+                else if (result.Content == null && PresentationExtensions.Contains(ext))
+                {
+                    result.Content = await ParsePresentationFileAsync(filePath);
                 }
                 // 图像文件（OCR）
-                else if (ImageExtensions.Contains(ext))
+                else if (result.Content == null && ImageExtensions.Contains(ext))
                 {
                     result.Content = await ParseImageFileAsync(filePath);
                 }
-                else
+                else if (result.Content == null)
                 {
                     result.Error = string.Format(LocalizationService.Instance["file.unsupportedFormat"], ext);
                     return result;
@@ -317,18 +344,30 @@ namespace DeepSeek_v4_for_VisualStudio.Services
         {
             string ext = Path.GetExtension(filePath).ToLowerInvariant();
 
-            if (WordExtensions.Contains(ext)
-                || ExcelExtensions.Contains(ext)
-                || PdfExtensions.Contains(ext)
-                || ImageExtensions.Contains(ext))
+            if (RequiresDocumentParsing(filePath))
             {
                 var parsed = await ParseFileAsync(filePath);
                 if (!parsed.Success)
-                    throw new InvalidOperationException(parsed.Error ?? LocalizationService.Instance["tool.readFile.failed"]);
+                {
+                    string failureReason = string.IsNullOrWhiteSpace(parsed.Error)
+                        ? LocalizationService.Instance["tool.common.unknownReason"]
+                        : parsed.Error;
+                    throw new InvalidOperationException(failureReason);
+                }
                 return parsed.Content ?? string.Empty;
             }
 
             return await ReadTextFileAsync(filePath);
+        }
+
+        internal static bool RequiresDocumentParsing(string filePath)
+        {
+            string ext = Path.GetExtension(filePath).ToLowerInvariant();
+            return WordExtensions.Contains(ext)
+                || ExcelExtensions.Contains(ext)
+                || PdfExtensions.Contains(ext)
+                || PresentationExtensions.Contains(ext)
+                || ImageExtensions.Contains(ext);
         }
 
         #endregion
@@ -730,6 +769,41 @@ namespace DeepSeek_v4_for_VisualStudio.Services
         }
 
         /// <summary>
+        /// 解析 PDF：非视觉模型优先官方 OCR 或逐页 OCR；失败后回退 PdfPig 文本提取。
+        /// </summary>
+        private static async Task<string?> ParsePdfFileAsync(string filePath)
+        {
+            try
+            {
+                if (!OcrService.VisionModelActive && OcrService.IsEngineReady())
+                {
+                    if (OcrService.CurrentEngine == OcrEngineType.DeepSeekOfficial)
+                    {
+                        string? officialText = await OcrService.ExtractTextFromFileAsync(filePath);
+                        if (!string.IsNullOrWhiteSpace(officialText))
+                            return officialText;
+                    }
+                    else
+                    {
+                        List<byte[]> pages = await PdfRenderService.RenderPdfPagesToPngAsync(
+                            filePath,
+                            CancellationToken.None,
+                            ParserOcrPageBatchLimit);
+                        string? ocrText = await OcrRenderedPagesAsync(pages, "Page");
+                        if (!string.IsNullOrWhiteSpace(ocrText))
+                            return ocrText;
+                    }
+                }
+            }
+            catch (Exception ex)
+            {
+                Logger.Warn($"PDF OCR 失败，回退文本提取: {Path.GetFileName(filePath)} - {ex.Message}");
+            }
+
+            return await Task.Run(() => ParsePdfDocument(filePath));
+        }
+
+        /// <summary>
         /// 解析 PDF 文档，使用 PdfPig 提取全部页面文本。
         /// </summary>
         private static string ParsePdfDocument(string filePath)
@@ -746,13 +820,13 @@ namespace DeepSeek_v4_for_VisualStudio.Services
                     pageCount++;
                     string pageText = page.Text?.Trim();
 
+                    if (totalPages > 1)
+                        sb.AppendLine($"--- 第 {pageCount}/{totalPages} 页 ---");
                     if (!string.IsNullOrWhiteSpace(pageText))
                     {
-                        if (totalPages > 1)
-                            sb.AppendLine($"--- 第 {pageCount}/{totalPages} 页 ---");
                         sb.AppendLine(pageText);
-                        sb.AppendLine();
                     }
+                    sb.AppendLine();
                 }
 
                 Logger.Info($"PDF 解析完成: {pageCount} 页, {sb.Length} 个字符 ← {Path.GetFileName(filePath)}");
@@ -786,6 +860,8 @@ namespace DeepSeek_v4_for_VisualStudio.Services
                 string engineHint = OcrService.CurrentEngine switch
                 {
                     OcrEngineType.PaddleOCR => "3. PaddleOCR 引擎初始化失败（工具 → 选项 → DeepSeek Chat → OCR Settings）",
+                    OcrEngineType.DeepSeekOfficial =>
+                        "3. " + LocalizationService.Instance["status.ocrOfficialUnavailable"],
                     _ => "3. 系统未安装中文/英文 OCR 语言包（设置 → 语言 → 添加语言）",
                 };
 
@@ -800,6 +876,85 @@ namespace DeepSeek_v4_for_VisualStudio.Services
             {
                 Logger.Error($"图像 OCR 失败: {filePath}", ex);
                 return $"[图像解析失败: {ex.Message}]";
+            }
+        }
+
+        /// <summary>
+        /// 解析 PowerPoint：官方 OCR 可直接识别原文件；本地 OCR 先渲染幻灯片图片；
+        /// OCR 不可用或未识别到文字时，从 PPTX XML / PowerPoint COM 提取文本。
+        /// </summary>
+        private static async Task<string?> ParsePresentationFileAsync(string filePath)
+        {
+            try
+            {
+                if (!OcrService.VisionModelActive &&
+                    OcrService.CurrentEngine == OcrEngineType.DeepSeekOfficial &&
+                    OcrService.IsEngineReady())
+                {
+                    string? officialText = await OcrService.ExtractTextFromFileAsync(filePath);
+                    if (!string.IsNullOrWhiteSpace(officialText))
+                        return officialText;
+                }
+                else if (!OcrService.VisionModelActive && OcrService.IsEngineReady())
+                {
+                    List<byte[]> slides = await PresentationRenderService.RenderPresentationToPngAsync(
+                        filePath,
+                        CancellationToken.None,
+                        ParserOcrPageBatchLimit);
+                    string? ocrText = await OcrRenderedPagesAsync(slides, "Slide");
+                    if (!string.IsNullOrWhiteSpace(ocrText))
+                        return ocrText;
+                }
+
+                string? extractedText = await PresentationRenderService.ExtractPresentationTextAsync(filePath);
+                if (!string.IsNullOrWhiteSpace(extractedText))
+                    return extractedText;
+
+                return LocalizationService.Instance["file.presentationTextUnavailable"];
+            }
+            catch (Exception ex)
+            {
+                Logger.Error($"PowerPoint 解析失败: {filePath}", ex);
+                return string.Format(
+                    LocalizationService.Instance["file.presentationParseFailed"],
+                    ex.Message);
+            }
+        }
+
+        private static async Task<string?> OcrRenderedPagesAsync(
+            IReadOnlyList<byte[]> pages,
+            string pageLabel)
+        {
+            if (pages.Count == 0) return null;
+
+            string tempDir = Path.Combine(
+                Path.GetTempPath(),
+                "DeepSeekVS_OcrPages",
+                Guid.NewGuid().ToString("N"));
+            Directory.CreateDirectory(tempDir);
+            try
+            {
+                var builder = new StringBuilder();
+                bool hasRecognizedText = false;
+                for (int index = 0; index < pages.Count; index++)
+                {
+                    string pngPath = Path.Combine(tempDir, $"page-{index + 1:D3}.png");
+                    File.WriteAllBytes(pngPath, pages[index]);
+                    string? text = await OcrService.ExtractTextFromImageAsync(pngPath);
+                    if (pages.Count > 1)
+                        builder.AppendLine($"--- {pageLabel} {index + 1}/{pages.Count} ---");
+                    if (!string.IsNullOrWhiteSpace(text))
+                    {
+                        builder.AppendLine(text);
+                        hasRecognizedText = true;
+                    }
+                    builder.AppendLine();
+                }
+                return hasRecognizedText ? builder.ToString().Trim() : null;
+            }
+            finally
+            {
+                try { Directory.Delete(tempDir, recursive: true); } catch { }
             }
         }
 

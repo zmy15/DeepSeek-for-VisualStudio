@@ -1210,6 +1210,7 @@ namespace DeepSeek_v4_for_VisualStudio.View
                     AttachedImageFileNames = originalUserMsg?.AttachedImageFileNames ?? new List<string>(),
                     AttachedImagePaths = originalUserMsg?.AttachedImagePaths ?? new List<string>(),
                     AttachedPdfPaths = originalUserMsg?.AttachedPdfPaths ?? new List<string>(),
+                    AttachedPresentationPaths = originalUserMsg?.AttachedPresentationPaths ?? new List<string>(),
                     Timestamp = DateTime.Now,
                     AgentType = originalUserMsg?.AgentType, // 保留原 Agent 类型
                 };

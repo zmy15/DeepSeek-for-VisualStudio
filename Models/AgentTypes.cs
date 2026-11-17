@@ -187,6 +187,23 @@ namespace DeepSeek_v4_for_VisualStudio.Models
         [JsonIgnore]
         public List<ChatContentPart>? VisionContent { get; set; }
 
+        /// <summary>
+        /// 是否在本次 Agent 工作流的第一条主对话请求中启用 DeepSeek 官方会话标题。
+        /// 只在会话标题尚未生成时由界面层设置，且仅官方 DeepSeek 端点会实际发送。
+        /// </summary>
+        [JsonIgnore]
+        public bool RequestConversationTitle { get; set; }
+
+        /// <summary>DeepSeek 官方接口返回流式 title 时触发。</summary>
+        [JsonIgnore]
+        public Action<string>? OnConversationTitleReceived { get; set; }
+
+        /// <summary>
+        /// 首条主对话请求已结束但未返回 title 时触发，由界面层执行本地兜底。
+        /// </summary>
+        [JsonIgnore]
+        public Action? OnConversationTitleRequestCompleted { get; set; }
+
         /// <summary>文件读取回调</summary>
         [JsonIgnore]
         public Func<string, Task<string?>>? ReadFileAsync { get; set; }

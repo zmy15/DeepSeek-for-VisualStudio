@@ -1,5 +1,6 @@
 using DeepSeek_v4_for_VisualStudio.Models;
 using DeepSeek_v4_for_VisualStudio.Services;
+using DeepSeek_v4_for_VisualStudio.Services.Agents;
 using DeepSeek_v4_for_VisualStudio.Utils;
 using Microsoft.VisualStudio.Shell;
 using System;
@@ -136,6 +137,9 @@ namespace DeepSeek_v4_for_VisualStudio.View
                 _activeSession.CumulativeOfficialSearchCount = _webSearchService.OfficialSearchSuccessCount;
                 _activeSession.CumulativeOfficialFetchCount = _webSearchService.OfficialFetchSuccessCount;
             }
+
+            // ── 持久化官方 OCR 成功页数（按页计费，重启后恢复费用）──
+            _activeSession.CumulativeOfficialOcrPageCount = OcrService.OfficialOcrSuccessPageCount;
 
             _sessionsContainer.ActiveSessionId = _activeSession.Id;
             ChatPersistenceService.SaveSessions(_solutionPath, _sessionsContainer);
@@ -389,8 +393,8 @@ namespace DeepSeek_v4_for_VisualStudio.View
         }
 
         /// <summary>
-        /// 根据第一条用户消息，标记等待 AI 生成会话标题。
-        /// 首轮对话完成后，由流式响应结束逻辑调用 GenerateAiTitleAsync 实际生成标题。
+        /// 根据第一条用户消息，标记等待生成会话标题。
+        /// 官方 DeepSeek 端点在首轮主对话请求中顺带生成；自定义端点仍使用独立 AI 摘要。
         /// </summary>
         private void AutoTitleSession()
         {
@@ -409,19 +413,46 @@ namespace DeepSeek_v4_for_VisualStudio.View
             Logger.Info($"[AI标题] 已标记等待生成，首条用户消息长度: {_firstUserMessageForTitle.Length}");
         }
 
+        /// <summary>规范化 AI/官方接口返回的标题：去引号、取第一行、去首尾空白。</summary>
+        internal static string NormalizeGeneratedSessionTitle(string? rawTitle)
+        {
+            if (string.IsNullOrWhiteSpace(rawTitle)) return string.Empty;
+
+            string title = rawTitle.Trim().Trim('"', '\'', '「', '」', '《', '》');
+            int newlineIdx = title.IndexOfAny(new[] { '\r', '\n' });
+            if (newlineIdx >= 0)
+                title = title.Substring(0, newlineIdx).Trim();
+            return title.Trim('"', '\'', '「', '」', '《', '》');
+        }
+
+        /// <summary>构建本地兜底标题：取第一条用户消息的第一行，保留完整长度。</summary>
+        internal static string BuildFallbackSessionTitle(string firstUserMessage)
+        {
+            if (string.IsNullOrWhiteSpace(firstUserMessage)) return string.Empty;
+
+            string title = firstUserMessage.Trim();
+            int newlineIdx = title.IndexOfAny(new[] { '\r', '\n' });
+            if (newlineIdx >= 0)
+                title = title.Substring(0, newlineIdx).Trim();
+            // RAG-MARK: no-truncate — 不再截断回退标题
+            return title;
+        }
+
         /// <summary>
-        /// 使用 AI 根据首轮对话内容生成会话标题。
-        /// 在首轮助手回复完成后由流式响应结束逻辑调用。
+        /// 使用独立 AI 请求为自定义端点生成会话标题。
+        /// 官方 DeepSeek 端点不使用此路径。
         /// </summary>
-        /// <param name="firstUserMessage">第一条用户消息内容</param>
-        /// <param name="firstAssistantReply">第一条助手回复内容</param>
-        private async Task GenerateAiTitleAsync(string firstUserMessage, string firstAssistantReply)
+        private async Task GenerateAiTitleAsync(
+            BaseAgent titleAgent,
+            ChatSession targetSession,
+            string firstUserMessage,
+            string firstAssistantReply)
         {
             try
             {
-                if (_activeAgent == null) return;
-                if (_activeSession == null) return;
-                if (!_activeSession.HasEmptyTitle) return;
+                if (titleAgent == null) return;
+                if (targetSession == null) return;
+                if (!targetSession.HasEmptyTitle) return;
 
                 string userSnippet = firstUserMessage;
                 string assistantSnippet = firstAssistantReply;
@@ -454,72 +485,131 @@ namespace DeepSeek_v4_for_VisualStudio.View
                 if (string.IsNullOrWhiteSpace(titleModel))
                 {
                     Logger.Warn("[AI标题] 当前未选择模型，回退到截取模式");
-                    FallbackAutoTitle(firstUserMessage);
+                    FallbackAutoTitle(targetSession, firstUserMessage);
                     return;
                 }
-                string rawTitle = await _activeAgent.CallAiWithMessagesAsync(messages, cts.Token, maxTokens: 128, temperature: 0.3, toolChoice: "none", model: titleModel, thinkingEnabled: false);
+                string rawTitle = await titleAgent.CallAiWithMessagesAsync(messages, cts.Token, maxTokens: 128, temperature: 0.3, toolChoice: "none", model: titleModel, thinkingEnabled: false);
 
                 if (string.IsNullOrWhiteSpace(rawTitle))
                 {
                     Logger.Warn($"[AI标题] API 返回空标题 (raw='{rawTitle ?? "<null>"}')，回退到截取模式");
-                    FallbackAutoTitle(firstUserMessage);
+                    FallbackAutoTitle(targetSession, firstUserMessage);
                     return;
                 }
 
-                // 清理标题：去除引号、换行、首尾空白
-                string title = rawTitle.Trim().Trim('"', '\'', '「', '」', '《', '》', '"', '"');
+                string title = NormalizeGeneratedSessionTitle(rawTitle);
 
                 if (string.IsNullOrWhiteSpace(title))
                 {
                     Logger.Warn($"[AI标题] 清理后标题为空 (raw='{rawTitle}', trimmed='{title}')，回退到截取模式");
-                    FallbackAutoTitle(firstUserMessage);
+                    FallbackAutoTitle(targetSession, firstUserMessage);
                     return;
                 }
 
                 // 期间标题已被生成（或用户改写）→ 不覆盖
-                if (!_activeSession.HasEmptyTitle)
+                if (!TryApplySessionTitle(targetSession, title, isFallback: false))
                 {
-                    Logger.Info($"[AI标题] 标题已被更新为 '{_activeSession.Title}'，跳过覆盖");
+                    Logger.Info($"[AI标题] 会话标题已被更新为 '{targetSession.Title}'，跳过覆盖");
                     return;
                 }
 
-                _activeSession.Title = title;
-                await ThreadHelper.JoinableTaskFactory.SwitchToMainThreadAsync();
-                PopulateSessionComboBox();
-                SaveCurrentSession();
+                await PersistSessionTitleAsync(targetSession);
                 Logger.Info($"[AI标题] 会话标题已更新为: {title} (raw='{rawTitle}')");
             }
             catch (Exception ex)
             {
                 Logger.Warn($"[AI标题] 生成失败，回退到截取模式: {ex.Message}");
-                FallbackAutoTitle(firstUserMessage);
+                FallbackAutoTitle(targetSession, firstUserMessage);
             }
             finally
             {
-                _pendingAiTitle = false;
-                _firstUserMessageForTitle = null;
+                if (ReferenceEquals(_activeSession, targetSession))
+                {
+                    _pendingAiTitle = false;
+                    _firstUserMessageForTitle = null;
+                }
+            }
+        }
+
+        /// <summary>接收 DeepSeek 官方 Chat Completions 顺带返回的 title。</summary>
+        private void ApplyOfficialConversationTitle(ChatSession targetSession, string rawTitle)
+        {
+            if (!TryApplySessionTitle(targetSession, rawTitle, isFallback: false))
+                return;
+
+            Logger.Info($"[AI标题] 已使用 DeepSeek 官方 title: {targetSession.Title}");
+            _ = PersistSessionTitleAsync(targetSession);
+        }
+
+        /// <summary>官方接口未返回 title 时，立即使用首条用户消息兜底。</summary>
+        private void ApplyOfficialConversationTitleFallback(ChatSession targetSession, string firstUserMessage)
+        {
+            if (!TryApplySessionTitle(targetSession, firstUserMessage, isFallback: true))
+                return;
+
+            Logger.Info($"[AI标题] 官方 title 未返回，已使用本地兜底: {targetSession.Title}");
+            _ = PersistSessionTitleAsync(targetSession);
+        }
+
+        /// <summary>仅当目标会话仍无标题时写入，防止覆盖用户或其它路径已生成的标题。</summary>
+        private bool TryApplySessionTitle(ChatSession targetSession, string? rawTitle, bool isFallback)
+        {
+            if (targetSession == null) return false;
+
+            string title = isFallback
+                ? BuildFallbackSessionTitle(rawTitle ?? string.Empty)
+                : NormalizeGeneratedSessionTitle(rawTitle);
+            if (string.IsNullOrWhiteSpace(title)) return false;
+
+            lock (_lock)
+            {
+                if (!targetSession.HasEmptyTitle) return false;
+                targetSession.Title = title;
+            }
+            return true;
+        }
+
+        /// <summary>
+        /// 标题可能在原会话已切换走后返回，因此持久化按目标会话身份处理。
+        /// 只有目标仍是当前会话时才刷新当前标题与历史浮层。
+        /// </summary>
+        private async Task PersistSessionTitleAsync(ChatSession targetSession)
+        {
+            try
+            {
+                await ThreadHelper.JoinableTaskFactory.SwitchToMainThreadAsync();
+                if (_disposed || targetSession == null) return;
+
+                if (ReferenceEquals(_activeSession, targetSession))
+                {
+                    _pendingAiTitle = false;
+                    _firstUserMessageForTitle = null;
+                    PopulateSessionComboBox();
+                }
+
+                // 标题可能在 Agent 工具循环尚未结束时到达。这里只保存会话容器，
+                // 不调用 SaveCurrentSession，避免用半完成的树/上下文覆盖权威会话文件。
+                if (_sessionsContainer != null)
+                {
+                    ChatPersistenceService.SaveSessions(_solutionPath, _sessionsContainer);
+                }
+            }
+            catch (Exception ex)
+            {
+                Logger.Warn($"[AI标题] 持久化会话标题失败: {ex.Message}");
             }
         }
 
         /// <summary>
-        /// 回退标题生成：截取第一条用户消息的前30个字符作为标题。
-        /// 当 AI 标题生成失败时使用。
+        /// 回退标题生成：取第一条用户消息的第一行作为标题。
         /// </summary>
-        private void FallbackAutoTitle(string firstUserMessage)
+        private void FallbackAutoTitle(ChatSession targetSession, string firstUserMessage)
         {
-            if (_activeSession == null) return;
-            if (!_activeSession.HasEmptyTitle) return;
+            if (!TryApplySessionTitle(targetSession, firstUserMessage, isFallback: true))
+                return;
 
-            string title = firstUserMessage.Trim();
-            int newlineIdx = title.IndexOf('\n');
-            if (newlineIdx > 0)
-                title = title.Substring(0, newlineIdx).Trim();
-            // RAG-MARK: no-truncate — 不再截断回退标题
-
-            _activeSession.Title = title;
-            PopulateSessionComboBox();
-            SaveCurrentSession();
-            Logger.Info($"[AI标题] 回退标题: {title}");
+            Logger.Info($"[AI标题] 回退标题: {targetSession.Title}");
+            _ = PersistSessionTitleAsync(targetSession);
         }
 
         /// <summary>
@@ -944,6 +1034,7 @@ namespace DeepSeek_v4_for_VisualStudio.View
             _webSearchService?.ResetQuotaState();
             // 重置官方 Search / Fetch 的按次计费用量统计
             _webSearchService?.ResetOfficialToolStats();
+            OcrService.ResetOfficialOcrStats();
 
             // 清空附件列表
             ClearAttachedFiles();
@@ -1134,6 +1225,7 @@ namespace DeepSeek_v4_for_VisualStudio.View
                 _apiService?.ResetAccumulatedStats();
                 // 官方 Search / Fetch 调用次数同属本会话累计，清空消息时一并归零
                 _webSearchService?.ResetOfficialToolStats();
+                OcrService.ResetOfficialOcrStats();
 
                 // ── 聊天区即将重建：清空审批显示队列，移除残留审批卡片 ──
                 ResetApprovalQueue();

@@ -3,6 +3,7 @@ using DeepSeek_v4_for_VisualStudio.Utils;
 using System;
 using System.Collections.Generic;
 using System.IO;
+using System.Linq;
 using System.Threading;
 using System.Threading.Tasks;
 using Windows.Data.Pdf;
@@ -12,6 +13,17 @@ using Windows.Storage.Streams;
 
 namespace DeepSeek_v4_for_VisualStudio.Services
 {
+    public sealed class RenderedDocumentPageBatch
+    {
+        public int TotalPages { get; init; }
+        public int StartPage { get; init; }
+        public IReadOnlyList<byte[]> Pages { get; init; } = Array.Empty<byte[]>();
+
+        public int ShownEndPage => Pages.Count == 0
+            ? 0
+            : StartPage + Pages.Count - 1;
+    }
+
     /// <summary>
     /// 将 PDF 文档逐页渲染为 PNG 图片，供视觉模型（deepseek-v4-flash-vision-exp）直接读取。
     /// 底层使用 Windows 10+ 内置的 Windows.Data.Pdf 渲染引擎，无需额外原生依赖。
@@ -43,18 +55,21 @@ namespace DeepSeek_v4_for_VisualStudio.Services
         {
             try
             {
-                List<string> uris = await RenderPdfToPngDataUrisAsync(
+                List<byte[]> pages = await RenderPdfPagesToPngAsync(
                     pdfPath, cancellationToken);
-                if (uris.Count == 0)
+                if (pages.Count == 0)
                     return null;
 
-                var parts = new List<ChatContentPart>(uris.Count);
-                foreach (string uri in uris)
+                var parts = new List<ChatContentPart>(pages.Count);
+                foreach (byte[] png in pages)
                 {
                     parts.Add(new ChatContentPart
                     {
                         Type = "image_url",
-                        ImageUrl = new ChatImageUrl { Url = uri },
+                        ImageUrl = new ChatImageUrl
+                        {
+                            Url = "data:image/png;base64," + Convert.ToBase64String(png),
+                        },
                     });
                 }
                 return parts;
@@ -67,38 +82,68 @@ namespace DeepSeek_v4_for_VisualStudio.Services
         }
 
         /// <summary>
-        /// 将 PDF 逐页渲染为 PNG data URI 列表。受 <see cref="MaxPages"/> 页数上限约束。
+        /// 将 PDF 逐页渲染为 PNG 字节列表。受 <see cref="MaxPages"/> 页数上限约束。
         /// </summary>
-        private static async Task<List<string>> RenderPdfToPngDataUrisAsync(
+        public static async Task<List<byte[]>> RenderPdfPagesToPngAsync(
             string pdfPath,
-            CancellationToken cancellationToken)
+            CancellationToken cancellationToken,
+            int maxPages = MaxPages)
         {
-            var uris = new List<string>();
+            RenderedDocumentPageBatch batch = await RenderPdfPageBatchToPngAsync(
+                pdfPath,
+                cancellationToken,
+                startPage: 1,
+                maxPages);
+            return batch.Pages.ToList();
+        }
+
+        /// <summary>
+        /// 将 PDF 指定页范围渲染为 PNG 字节列表，并返回文档总页数。
+        /// </summary>
+        public static async Task<RenderedDocumentPageBatch> RenderPdfPageBatchToPngAsync(
+            string pdfPath,
+            CancellationToken cancellationToken = default,
+            int startPage = 1,
+            int maxPages = MaxPages)
+        {
+            var pages = new List<byte[]>();
+            int normalizedStartPage = Math.Max(1, startPage);
+            int pageLimit = Math.Max(1, maxPages);
 
             StorageFile file = await StorageFile.GetFileFromPathAsync(pdfPath);
             PdfDocument pdf = await PdfDocument.LoadFromFileAsync(file);
 
             int total = (int)pdf.PageCount;
-            int count = Math.Min(total, MaxPages);
+            int firstPageIndex = normalizedStartPage - 1;
+            int count = normalizedStartPage > total
+                ? 0
+                : Math.Min(total - firstPageIndex, pageLimit);
 
-            for (int i = 0; i < count; i++)
+            for (int offset = 0; offset < count; offset++)
             {
                 if (cancellationToken.IsCancellationRequested)
                     break;
 
-                using (PdfPage page = pdf.GetPage((uint)i))
+                using (PdfPage page = pdf.GetPage((uint)(firstPageIndex + offset)))
                 {
                     byte[] png = await RenderPageToPngAsync(page);
-                    uris.Add("data:image/png;base64," + Convert.ToBase64String(png));
+                    pages.Add(png);
                 }
             }
 
-            if (total > MaxPages)
+            int shownEndPage = normalizedStartPage + pages.Count - 1;
+            if (pages.Count > 0 && shownEndPage < total)
             {
-                Logger.Warn($"[Vision] PDF 共 {total} 页，仅直传前 {MaxPages} 页 ← {Path.GetFileName(pdfPath)}");
+                Logger.Warn(
+                    $"[PDF] total={total}, rendered pages {normalizedStartPage}-{shownEndPage} ← {Path.GetFileName(pdfPath)}");
             }
 
-            return uris;
+            return new RenderedDocumentPageBatch
+            {
+                TotalPages = total,
+                StartPage = normalizedStartPage,
+                Pages = pages,
+            };
         }
 
         /// <summary>

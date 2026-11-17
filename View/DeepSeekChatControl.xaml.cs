@@ -1453,14 +1453,20 @@ namespace DeepSeek_v4_for_VisualStudio.View
 
             // ── API 消耗 + 费用部分 ──
             string apiPart;
-            // 官方 Search / Fetch 按次计费与本会话 token 费用合并展示：
-            // 即使 token 为 0（例如只调用了 web_search 就被停止），也要显示这部分费用。
+            // 官方 Search / Fetch 按次计费、OCR 按页计费与本会话 token 费用合并展示：
+            // 即使 token 为 0（例如只执行了官方工具调用），也要显示这部分费用。
             double officialToolCost = 0;
             if (IsOfficialSource && _webSearchService != null)
             {
                 officialToolCost = ResolveAccountCurrency() == "USD"
                     ? _webSearchService.OfficialToolCostUsd
                     : _webSearchService.OfficialToolCostYuan;
+            }
+            if (IsOfficialSource)
+            {
+                officialToolCost += ResolveAccountCurrency() == "USD"
+                    ? OcrService.OfficialOcrCostUsd
+                    : OcrService.OfficialOcrCostYuan;
             }
 
             if (totalTokens == 0 && officialToolCost <= 0)
@@ -1502,7 +1508,7 @@ namespace DeepSeek_v4_for_VisualStudio.View
                                   + completionTokens / 1_000_000.0 * outputPrice;
                     }
 
-                    // 叠加官方 Search / Fetch 的按次计费
+                    // 叠加官方 Search / Fetch 按次计费与 OCR 按页计费
                     totalCost += officialToolCost;
 
                     string costStr = totalCost >= 0.01
@@ -1578,8 +1584,8 @@ namespace DeepSeek_v4_for_VisualStudio.View
         }
 
         /// <summary>
-        /// 刷新会话消耗标签的 ToolTip：说明官方 Search / Fetch 的按次计费口径
-        /// （成功请求才计费、北京时间 2026-11-01 00:00 起生效）与本会话实际用量。
+        /// 刷新会话消耗标签的 ToolTip：说明官方 Search / Fetch 按次计费、
+        /// OCR 按成功识别页数计费，以及本会话实际用量。
         /// 非官方来源（不产生官方计费）时清除 ToolTip。
         /// </summary>
         private void UpdateSessionConsumptionToolTip()
@@ -1587,17 +1593,18 @@ namespace DeepSeek_v4_for_VisualStudio.View
             var balanceLabel = BalanceLabel;
             if (balanceLabel == null) return;
 
-            if (_webSearchService == null || !IsOfficialSource)
+            if (!IsOfficialSource)
             {
                 balanceLabel.ToolTip = null;
                 return;
             }
 
-            int searchCount = _webSearchService.OfficialSearchSuccessCount;
-            int fetchCount = _webSearchService.OfficialFetchSuccessCount;
+            int searchCount = _webSearchService?.OfficialSearchSuccessCount ?? 0;
+            int fetchCount = _webSearchService?.OfficialFetchSuccessCount ?? 0;
+            long ocrPageCount = OcrService.OfficialOcrSuccessPageCount;
 
-            // 两类调用都没发生时不必显示计费说明，避免悬停出现无信息量的提示。
-            if (searchCount == 0 && fetchCount == 0)
+            // 没有官方工具调用时不必显示计费说明，避免悬停出现无信息量的提示。
+            if (searchCount == 0 && fetchCount == 0 && ocrPageCount == 0)
             {
                 balanceLabel.ToolTip = null;
                 return;
@@ -1606,14 +1613,15 @@ namespace DeepSeek_v4_for_VisualStudio.View
             string currency = ResolveAccountCurrency();
             string symbol = GetCurrencySymbol(currency);
             double cost = currency == "USD"
-                ? _webSearchService.OfficialToolCostUsd
-                : _webSearchService.OfficialToolCostYuan;
+                ? (_webSearchService?.OfficialToolCostUsd ?? 0) + OcrService.OfficialOcrCostUsd
+                : (_webSearchService?.OfficialToolCostYuan ?? 0) + OcrService.OfficialOcrCostYuan;
             string costStr = cost >= 0.01 ? $"{symbol}{cost:F2}" : $"{symbol}{cost:F4}";
 
             balanceLabel.ToolTip = LocalizationService.Instance.Format(
                 "status.toolBilling.tooltip",
                 searchCount,
                 fetchCount,
+                ocrPageCount,
                 costStr);
         }
 

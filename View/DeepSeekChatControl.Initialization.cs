@@ -40,6 +40,8 @@ namespace DeepSeek_v4_for_VisualStudio.View
             if (string.IsNullOrEmpty(config.ApiKey))
             {
                 // ── 无 Key：释放旧服务，避免残留旧 Key 继续发送请求 ──
+                OcrService.ConfigureDeepSeekOfficial(null, isOfficialEndpoint: false);
+                OcrService.VisionModelActive = false;
                 SubscribeApiRequestCompletion(null);
                 _apiService?.Dispose();
                 _apiService = null;
@@ -52,6 +54,7 @@ namespace DeepSeek_v4_for_VisualStudio.View
             _apiService = new DeepSeekApiService(config.ApiKey, config.Model,
                 baseUrl: config.BaseUrl,
                 isVision: config.IsVision, isCustom: config.IsCustom);
+            ConfigureOcrRuntimeFromSettings();
             SubscribeApiRequestCompletion(_apiService);
             _apiService.ConfigureThinking(_options.IsThinkingEnabled, _options.ReasoningEffort);
 
@@ -216,12 +219,7 @@ namespace DeepSeek_v4_for_VisualStudio.View
                 }
 
                 Logger.Info($"[OCR] 开始初始化，用户选择引擎: {_options.OcrEngine}");
-
-                OcrService.CurrentEngine = _options.OcrEngine switch
-                {
-                    "PaddleOCR-Sharp" => OcrEngineType.PaddleOCR,
-                    _ => OcrEngineType.WindowsBuiltIn,
-                };
+                ConfigureOcrRuntimeFromSettings();
                 Logger.Info($"[OCR] 引擎类型已设置: {OcrService.CurrentEngine}");
 
                 // 检查引擎状态
@@ -234,6 +232,40 @@ namespace DeepSeek_v4_for_VisualStudio.View
                 //  关键：OCR 初始化失败绝不能影响聊天核心功能
                 Logger.Error($"[OCR] Error: 初始化失败（已降级，不影响聊天）: {ex.GetType().Name} - {ex.Message}", ex);
                 OcrService.CurrentEngine = OcrEngineType.WindowsBuiltIn;
+            }
+        }
+
+        private void ConfigureOcrRuntimeFromSettings()
+        {
+            if (_options == null) return;
+
+            var config = DeepSeekEndpointResolver.Resolve(_options);
+            string officialOcrPurpose = DeepSeekOptionsPage.NormalizeOfficialOcrPurpose(
+                _options.OfficialOcrPurpose);
+            OcrService.ConfigureDeepSeekOfficial(
+                config.ApiKey,
+                !config.IsCustom,
+                officialOcrPurpose);
+            OcrService.VisionModelActive = _apiService?.CurrentIsVision ?? false;
+
+            string selectedEngine = _options.OcrEngine;
+            if (string.Equals(selectedEngine, "DeepSeek Official", StringComparison.Ordinal) &&
+                !OcrService.IsDeepSeekOfficialAvailable)
+            {
+                Logger.Info("[OCR] 官方 OCR 当前不可用（需要 DeepSeek 官方 API），运行时回退到 Windows 内置 OCR");
+                selectedEngine = "Windows Built-in";
+            }
+
+            OcrService.CurrentEngine = selectedEngine switch
+            {
+                "PaddleOCR-Sharp" => OcrEngineType.PaddleOCR,
+                "DeepSeek Official" => OcrEngineType.DeepSeekOfficial,
+                _ => OcrEngineType.WindowsBuiltIn,
+            };
+
+            if (OcrService.CurrentEngine == OcrEngineType.DeepSeekOfficial)
+            {
+                Logger.Info($"[OCR] 官方 OCR 模式: {officialOcrPurpose}");
             }
         }
 
@@ -357,6 +389,7 @@ namespace DeepSeek_v4_for_VisualStudio.View
             _apiService?.UpdateEndpoint(config);
             _agentFactory?.InvalidateFullToolSetCache();
             UpdateEndpointCapabilityControls();
+            ConfigureOcrRuntimeFromSettings();
         }
 
         private void ApplyContextBudgetFromSettings(string? model = null)

@@ -757,6 +757,14 @@ namespace DeepSeek_v4_for_VisualStudio.View
         {
             if (_activeAgent == null || _agentFactory == null) return;
             string? workflowSessionId = _activeSession?.Id;
+            ChatSession? workflowSession = _activeSession;
+            string? titleFirstUserMessage = _pendingAiTitle ? _firstUserMessageForTitle : null;
+            bool requestOfficialConversationTitle =
+                workflowSession != null &&
+                !string.IsNullOrWhiteSpace(titleFirstUserMessage) &&
+                workflowSession.HasEmptyTitle &&
+                _apiService?.IsDeepSeekEndpoint == true &&
+                !_apiService.CurrentIsCustom;
             bool parallelMemoryExtractionStarted = false;
             bool executingPlanFromText = routing?.TargetAgent == AgentType.Edit
                 && _pendingHandoff?.TargetAgent == AgentType.Edit;
@@ -838,6 +846,7 @@ namespace DeepSeek_v4_for_VisualStudio.View
                     PreClassifiedTaskSize = routing?.TaskSize ?? TaskSize.Small,
                     IsExplicitRoute = routing?.IsExplicit == true,
                     ExplicitRouteTarget = routing?.IsExplicit == true ? routing.TargetAgent : null,
+                    RequestConversationTitle = requestOfficialConversationTitle,
                     CancellationToken = GetStreamingToken(),
                     ReadFileAsync = async (path) =>
                     {
@@ -847,6 +856,15 @@ namespace DeepSeek_v4_for_VisualStudio.View
                         return null;
                     },
                 };
+                if (requestOfficialConversationTitle)
+                {
+                    ChatSession titleTargetSession = workflowSession!;
+                    string titleFallbackMessage = titleFirstUserMessage!;
+                    context.OnConversationTitleReceived = title =>
+                        ApplyOfficialConversationTitle(titleTargetSession, title);
+                    context.OnConversationTitleRequestCompleted = () =>
+                        ApplyOfficialConversationTitleFallback(titleTargetSession, titleFallbackMessage);
+                }
 
                 // ── 上下文感知执行：路由到 Edit 且存在待处理计划时，恢复 ActivePlan ──
                 // 场景：用户输入"开始执行"后 OverrideRoutingForPlanContext 路由到 Edit，
@@ -1424,37 +1442,49 @@ namespace DeepSeek_v4_for_VisualStudio.View
                 _discardContextOnNextSend = true;
             }
 
-            // ── AI 自动生成会话标题（Agent 工作流完成后触发，独立 try 确保同步失败也不影响标题生成）──
+            // ── 会话标题收尾 ──
+            // 官方端点在首条主对话请求中已顺带生成 title，并会在流结束前即时写回；
+            // 自定义端点仍沿用独立 AI 摘要，本地兜底始终只写入发起本轮请求的会话。
             try
             {
-                if (_pendingAiTitle && !string.IsNullOrWhiteSpace(_firstUserMessageForTitle))
+                if (workflowSession != null
+                    && !string.IsNullOrWhiteSpace(titleFirstUserMessage)
+                    && workflowSession.HasEmptyTitle)
                 {
-                    var capturedFirstUserMsg = _firstUserMessageForTitle;
-                    // 从 Agent 响应消息中获取第一条助手回复作为标题生成的上下文
-                    string firstAssistantReply = string.Empty;
-                    lock (_lock)
+                    if (requestOfficialConversationTitle)
                     {
-                        if (_agentStreamingMsgIndex >= 0 && _agentStreamingMsgIndex < _messages.Count)
-                        {
-                            firstAssistantReply = _messages[_agentStreamingMsgIndex].Content ?? string.Empty;
-                        }
+                        // 正常路径已由首个响应回调处理；这里覆盖 Agent 尚未发起流式请求的异常路径。
+                        ApplyOfficialConversationTitleFallback(workflowSession, titleFirstUserMessage);
                     }
-                    _ = Task.Run(async () =>
+                    else
                     {
-                        try
+                        // 从 Agent 响应消息中获取第一条助手回复作为标题生成的上下文
+                        string firstAssistantReply = string.Empty;
+                        lock (_lock)
                         {
-                            await GenerateAiTitleAsync(capturedFirstUserMsg, firstAssistantReply);
-                        }
-                        catch (Exception ex)
-                        {
-                            Logger.Warn($"[AI标题] Agent 工作流标题生成异常: {ex.Message}");
-                            // 最终兜底：直接使用用户消息作为标题
-                            if (_activeSession != null && _activeSession.HasEmptyTitle)
+                            if (_agentStreamingMsgIndex >= 0 && _agentStreamingMsgIndex < _messages.Count)
                             {
-                                FallbackAutoTitle(capturedFirstUserMsg);
+                                firstAssistantReply = _messages[_agentStreamingMsgIndex].Content ?? string.Empty;
                             }
                         }
-                    });
+                        BaseAgent titleAgent = _activeAgent!;
+                        _ = Task.Run(async () =>
+                        {
+                            try
+                            {
+                                await GenerateAiTitleAsync(
+                                    titleAgent,
+                                    workflowSession,
+                                    titleFirstUserMessage,
+                                    firstAssistantReply);
+                            }
+                            catch (Exception ex)
+                            {
+                                Logger.Warn($"[AI标题] Agent 工作流标题生成异常: {ex.Message}");
+                                FallbackAutoTitle(workflowSession, titleFirstUserMessage);
+                            }
+                        });
+                    }
                 }
             }
             catch (Exception ex)
@@ -2319,7 +2349,19 @@ namespace DeepSeek_v4_for_VisualStudio.View
         /// </summary>
         private void RestoreCacheStatsFromSession()
         {
-            if (_apiService == null || _activeSession == null) return;
+            if (_activeSession == null) return;
+
+            try
+            {
+                OcrService.RestoreOfficialOcrStats(_activeSession.CumulativeOfficialOcrPageCount);
+                Logger.Info($"[OCR] 从会话恢复官方 OCR 成功页数: {_activeSession.CumulativeOfficialOcrPageCount}");
+            }
+            catch (Exception ex)
+            {
+                Logger.Warn($"[OCR] 恢复官方 OCR 计费统计失败: {ex.Message}");
+            }
+
+            if (_apiService == null) return;
 
             try
             {

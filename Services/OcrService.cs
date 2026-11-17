@@ -26,6 +26,9 @@ namespace DeepSeek_v4_for_VisualStudio.Services
 
         /// <summary>MCP 服务器 OCR — 通过 MCP 协议调用远程/本地 OCR 服务，优先使用</summary>
         McpServer,
+
+        /// <summary>DeepSeek 官方 OCR API（仅官方端点和官方 API Key 可用）。</summary>
+        DeepSeekOfficial,
     }
 
     /// <summary>
@@ -46,8 +49,21 @@ namespace DeepSeek_v4_for_VisualStudio.Services
         /// <summary>支持的图像文件扩展名</summary>
         public static readonly string[] SupportedImageExtensions = { ".png", ".jpg", ".jpeg", ".bmp", ".gif", ".tiff", ".tif", ".webp" };
 
-        /// <summary>最大图像文件大小（字节），超过此大小不进行 OCR</summary>
+        /// <summary>DeepSeek 官方 OCR 支持的文档扩展名。</summary>
+        public static readonly string[] SupportedOfficialDocumentExtensions =
+            { ".pdf", ".doc", ".docx", ".ppt", ".pptx" };
+
+        /// <summary>本地 OCR 最大图像文件大小（字节）</summary>
         private const long MaxImageFileSizeBytes = 10 * 1024 * 1024; // 10MB
+
+        /// <summary>DeepSeek 官方 OCR 最大文件大小（100 MiB）。</summary>
+        private const long MaxOfficialOcrFileSizeBytes = 100 * 1024 * 1024;
+
+        /// <summary>DeepSeek 官方 OCR 计费单价（人民币 / 每 1000 页）。</summary>
+        public const double OfficialOcrPriceCnyPer1K = 1.5;
+
+        /// <summary>DeepSeek 官方 OCR 计费单价（美元 / 每 1000 页）。</summary>
+        public const double OfficialOcrPriceUsdPer1K = 0.225;
 
         #endregion
 
@@ -58,6 +74,49 @@ namespace DeepSeek_v4_for_VisualStudio.Services
 
         /// <summary>MCP 管理器引用（用于 MCP 服务器 OCR）</summary>
         public static McpManagerService? McpManager { get; set; }
+
+        private static readonly DeepSeekOcrClient OfficialClient = new();
+        private static long _officialOcrSuccessPageCount;
+
+        /// <summary>当前视觉模型是否启用。启用时所有 OCR 路径禁用。</summary>
+        public static bool VisionModelActive { get; set; }
+
+        /// <summary>DeepSeek 官方 OCR 当前是否可用。</summary>
+        public static bool IsDeepSeekOfficialAvailable => OfficialClient.IsAvailable;
+
+        /// <summary>本会话官方 OCR 成功识别的页数。</summary>
+        public static long OfficialOcrSuccessPageCount
+            => Interlocked.Read(ref _officialOcrSuccessPageCount);
+
+        /// <summary>本会话官方 OCR 费用（人民币）。</summary>
+        public static double OfficialOcrCostYuan
+            => OfficialOcrSuccessPageCount / 1000.0 * OfficialOcrPriceCnyPer1K;
+
+        /// <summary>本会话官方 OCR 费用（美元）。</summary>
+        public static double OfficialOcrCostUsd
+            => OfficialOcrSuccessPageCount / 1000.0 * OfficialOcrPriceUsdPer1K;
+
+        /// <summary>配置 DeepSeek 官方 OCR 凭据和端点可用性。</summary>
+        public static void ConfigureDeepSeekOfficial(
+            string? apiKey,
+            bool isOfficialEndpoint,
+            string? recognitionPurpose = null)
+            => OfficialClient.Configure(apiKey, isOfficialEndpoint, recognitionPurpose);
+
+        /// <summary>重置官方 OCR 成功页数统计。</summary>
+        public static void ResetOfficialOcrStats()
+            => Interlocked.Exchange(ref _officialOcrSuccessPageCount, 0);
+
+        /// <summary>从会话恢复官方 OCR 成功页数。</summary>
+        public static void RestoreOfficialOcrStats(long pageCount)
+            => Interlocked.Exchange(ref _officialOcrSuccessPageCount, Math.Max(0, pageCount));
+
+        /// <summary>记录一次成功返回 page_count 的官方 OCR 调用。</summary>
+        internal static void RecordOfficialOcrSuccess(int pageCount)
+        {
+            if (pageCount <= 0) return;
+            Interlocked.Add(ref _officialOcrSuccessPageCount, pageCount);
+        }
 
 
         #endregion
@@ -79,45 +138,93 @@ namespace DeepSeek_v4_for_VisualStudio.Services
             return false;
         }
 
+        /// <summary>判断文件是否可由 DeepSeek 官方 OCR 处理。</summary>
+        public static bool IsOfficialOcrSupportedFile(string filePath)
+        {
+            if (string.IsNullOrWhiteSpace(filePath)) return false;
+            string ext = Path.GetExtension(filePath);
+            return SupportedImageExtensions.Contains(ext, StringComparer.OrdinalIgnoreCase) ||
+                   SupportedOfficialDocumentExtensions.Contains(ext, StringComparer.OrdinalIgnoreCase);
+        }
+
+        /// <summary>判断文件是否为官方 OCR 支持的文档（不含图片）。</summary>
+        public static bool IsOfficialOcrDocumentFile(string filePath)
+        {
+            if (string.IsNullOrWhiteSpace(filePath)) return false;
+            return SupportedOfficialDocumentExtensions.Contains(
+                Path.GetExtension(filePath),
+                StringComparer.OrdinalIgnoreCase);
+        }
+
         /// <summary>
         /// 从图像文件中提取文字。
         /// 根据 CurrentEngine 设置自动选择 OCR 引擎。
         /// </summary>
         /// <param name="imagePath">图像文件路径</param>
         /// <returns>OCR 识别出的文本；失败时返回 null。</returns>
-        public static async Task<string?> ExtractTextFromImageAsync(string imagePath)
+        public static Task<string?> ExtractTextFromImageAsync(string imagePath)
+            => ExtractTextFromFileAsync(imagePath);
+
+        /// <summary>
+        /// 从文件（图片、PDF、Word、PowerPoint）中提取文字。
+        /// 本地引擎仅处理图片；DeepSeek 官方引擎处理其 API 支持的全部格式。
+        /// </summary>
+        public static async Task<string?> ExtractTextFromFileAsync(string filePath)
         {
-            if (string.IsNullOrWhiteSpace(imagePath) || !File.Exists(imagePath))
+            if (VisionModelActive)
             {
-                Logger.Info($"[OCR] 跳过: 文件不存在或路径为空 - {imagePath ?? "(null)"}");
+                Logger.Info($"[OCR] 跳过: 当前使用视觉模型，OCR 已禁用 - {filePath}");
                 return null;
             }
 
-            var fileInfo = new FileInfo(imagePath);
-            if (fileInfo.Length > MaxImageFileSizeBytes)
+            if (string.IsNullOrWhiteSpace(filePath) || !File.Exists(filePath))
             {
-                Logger.Info($"[OCR] 跳过: 图像文件过大 ({FileSizeFormatter.Format(fileInfo.Length)}) - {Path.GetFileName(imagePath)}");
+                Logger.Info($"[OCR] 跳过: 文件不存在或路径为空 - {filePath ?? "(null)"}");
                 return null;
             }
 
-            Logger.Info($"[OCR] 开始识别: {Path.GetFileName(imagePath)} ({FileSizeFormatter.Format(fileInfo.Length)}), 引擎={CurrentEngine}");
+            var fileInfo = new FileInfo(filePath);
+            long maxFileSize = CurrentEngine == OcrEngineType.DeepSeekOfficial
+                ? MaxOfficialOcrFileSizeBytes
+                : MaxImageFileSizeBytes;
+            if (fileInfo.Length > maxFileSize)
+            {
+                Logger.Info($"[OCR] 跳过: 文件过大 ({FileSizeFormatter.Format(fileInfo.Length)}) - {Path.GetFileName(filePath)}");
+                return null;
+            }
+
+            Logger.Info($"[OCR] 开始识别: {Path.GetFileName(filePath)} ({FileSizeFormatter.Format(fileInfo.Length)}), 引擎={CurrentEngine}");
 
             try
             {
                 // ── 优先级 1: MCP 服务器 OCR（如果可用）──
-                string? mcpResult = await TryMcpOcrAsync(imagePath);
-                if (!string.IsNullOrWhiteSpace(mcpResult))
+                if (CurrentEngine != OcrEngineType.DeepSeekOfficial)
                 {
-                    Logger.Info($"[OCR]  MCP 服务器 OCR 成功: {mcpResult!.Length} 字符");
-                    return mcpResult;
+                    string? mcpResult = await TryMcpOcrAsync(filePath);
+                    if (!string.IsNullOrWhiteSpace(mcpResult))
+                    {
+                        Logger.Info($"[OCR]  MCP 服务器 OCR 成功: {mcpResult!.Length} 字符");
+                        return mcpResult;
+                    }
                 }
 
                 // ── 优先级 2: 用户选择的引擎 ──
-                string? result = CurrentEngine switch
+                string? result;
+                if (CurrentEngine == OcrEngineType.DeepSeekOfficial)
                 {
-                    OcrEngineType.PaddleOCR => await PaddleEngineWrapper.ExtractTextAsync(imagePath),
-                    _ => await WindowsEngineWrapper.ExtractTextAsync(imagePath),
-                };
+                    DeepSeekOcrResult? officialResult = await OfficialClient.ExtractResultAsync(filePath);
+                    if (officialResult != null)
+                        RecordOfficialOcrSuccess(officialResult.PageCount);
+                    result = officialResult?.Text;
+                }
+                else
+                {
+                    result = CurrentEngine switch
+                    {
+                        OcrEngineType.PaddleOCR => await PaddleEngineWrapper.ExtractTextAsync(filePath),
+                        _ => await WindowsEngineWrapper.ExtractTextAsync(filePath),
+                    };
+                }
 
                 if (!string.IsNullOrWhiteSpace(result))
                 {
@@ -131,7 +238,7 @@ namespace DeepSeek_v4_for_VisualStudio.Services
                     Logger.Info("[OCR] 所选引擎未返回结果，尝试回退到 Windows 内置 OCR...");
                     try
                     {
-                        var fallbackResult = await WindowsEngineWrapper.ExtractTextAsync(imagePath);
+                        var fallbackResult = await WindowsEngineWrapper.ExtractTextAsync(filePath);
                         if (!string.IsNullOrWhiteSpace(fallbackResult))
                         {
                             Logger.Info($"[OCR]  回退成功: {fallbackResult!.Length} 字符 (Windows 内置)");
@@ -317,10 +424,14 @@ namespace DeepSeek_v4_for_VisualStudio.Services
         /// </summary>
         public static string GetEngineStatus()
         {
+            if (VisionModelActive)
+                return LocalizationService.Instance["status.ocrDisabledForVision"];
+
             return CurrentEngine switch
             {
                 OcrEngineType.WindowsBuiltIn => WindowsEngineWrapper.GetStatus(),
                 OcrEngineType.PaddleOCR => PaddleEngineWrapper.GetStatus(),
+                OcrEngineType.DeepSeekOfficial => OfficialClient.GetStatus(),
                 _ => "未知引擎",
             };
         }
@@ -334,6 +445,7 @@ namespace DeepSeek_v4_for_VisualStudio.Services
             {
                 OcrEngineType.WindowsBuiltIn => WindowsEngineWrapper.IsAvailable(),
                 OcrEngineType.PaddleOCR => PaddleEngineWrapper.IsAvailable(),
+                OcrEngineType.DeepSeekOfficial => OfficialClient.IsAvailable,
                 _ => false,
             };
         }

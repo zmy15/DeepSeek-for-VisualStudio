@@ -55,6 +55,13 @@ namespace DeepSeek_v4_for_VisualStudio.Services.Providers
             => string.Equals(BaseUrl.TrimEnd('/'), DefaultBaseUrl, StringComparison.OrdinalIgnoreCase);
 
         /// <summary>
+        /// 会话标题是 DeepSeek 官方 Chat Completions 扩展字段，仅官方端点支持。
+        /// 自定义聚合端点即使使用 DeepSeek 模型也不能假定其支持该字段。
+        /// </summary>
+        protected override bool SupportsConversationTitleRequest
+            => IsDeepSeekEndpoint && !CurrentIsCustom;
+
+        /// <summary>
         /// DeepSeek 原生模型支持 JSON Output。自定义聚合端点上的非 DeepSeek
         /// 模型无法可靠判断，因此不发送可能不被上游接受的 response_format。
         /// </summary>

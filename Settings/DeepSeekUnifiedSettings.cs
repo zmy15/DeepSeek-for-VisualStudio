@@ -1,3 +1,4 @@
+using DeepSeek_v4_for_VisualStudio.Services;
 using Microsoft.VisualStudio.Extensibility;
 using Microsoft.VisualStudio.Extensibility.Settings;
 #pragma warning disable VSEXTPREVIEW_SETTINGS // Settings API is experimental
@@ -249,6 +250,83 @@ namespace DeepSeek_v4_for_VisualStudio
                 defaultValue: "Windows Built-in")
             {
                 Description = "%DeepSeek.Chat.settings.ocrEngine.description%",
+            };
+
+        /// <summary>
+        /// 内部模型来源标记（official/custom/unavailable），仅用于驱动官方 OCR 项的可见性。
+        /// 通过永不匹配的规则对用户隐藏。
+        /// </summary>
+        [VisualStudioContribution]
+        internal static Setting.Enum EffectiveModelSource { get; } =
+            new(
+                "deepseekEffectiveModelSource",
+                "%DeepSeek.Chat.Settings.EffectiveModelSourceInternal%",
+                GeneralCategory,
+                new[]
+                {
+                    new EnumSettingEntry("official", "%DeepSeek.Chat.Settings.ModelSourceOfficial%"),
+                    new EnumSettingEntry("custom", "%DeepSeek.Chat.Settings.ModelSourceCustom%"),
+                    new EnumSettingEntry("unavailable", "%DeepSeek.Chat.Settings.ModelSourceUnavailable%"),
+                },
+                defaultValue: "unavailable")
+            {
+                VisibleWhen = SettingRule.Equal(SelectedModel, "__deepseek_internal_model_source_never__"),
+            };
+
+        [VisualStudioContribution]
+        internal static Setting.Boolean EffectiveVisionModel { get; } =
+            new(
+                "deepseekEffectiveVisionModel",
+                "%DeepSeek.Chat.Settings.EffectiveVisionModelInternal%",
+                GeneralCategory,
+                defaultValue: false)
+            {
+                VisibleWhen = SettingRule.Equal(SelectedModel, "__deepseek_internal_vision_model_never__"),
+            };
+
+        [VisualStudioContribution]
+        internal static Setting.Boolean UseDeepSeekOfficialOcr { get; } =
+            new(
+                "deepseekUseOfficialOcr",
+                "%DeepSeek.Chat.settings.useDeepSeekOfficialOcr.displayName%",
+                GeneralCategory,
+                defaultValue: false)
+            {
+                Description = "%DeepSeek.Chat.settings.useDeepSeekOfficialOcr.description%",
+                SearchKeywords = new[] { "OCR", "DeepSeek", "official", "image", "text recognition" },
+                VisibleWhen = SettingRule.And(
+                    SettingRule.Equal(EffectiveModelSource, "official"),
+                    SettingRule.Equal(EffectiveVisionModel, false)),
+            };
+
+        [VisualStudioContribution]
+        internal static Setting.Enum OfficialOcrPurpose { get; } =
+            new(
+                "deepseekOfficialOcrPurpose",
+                "%DeepSeek.Chat.settings.officialOcrPurpose.displayName%",
+                GeneralCategory,
+                new[]
+                {
+                    new EnumSettingEntry(
+                        DeepSeekOcrClient.TextRecognitionPurpose,
+                        "%DeepSeek.Chat.Settings.OcrPurposeTextRecognition%"),
+                    new EnumSettingEntry(
+                        DeepSeekOcrClient.RichLayoutRecognitionPurpose,
+                        "%DeepSeek.Chat.Settings.OcrPurposeRichLayoutRecognition%"),
+                },
+                defaultValue: DeepSeekOcrClient.TextRecognitionPurpose)
+            {
+                Description = "%DeepSeek.Chat.settings.officialOcrPurpose.description%",
+                SearchKeywords = new[]
+                {
+                    "OCR", "DeepSeek", "purpose", "layout", "recognition",
+                    "文字", "版面", "布局", "坐标",
+                },
+                VisibleWhen = SettingRule.And(
+                    SettingRule.Equal(UseDeepSeekOfficialOcr, true),
+                    SettingRule.And(
+                        SettingRule.Equal(EffectiveModelSource, "official"),
+                        SettingRule.Equal(EffectiveVisionModel, false))),
             };
 
         [VisualStudioContribution]

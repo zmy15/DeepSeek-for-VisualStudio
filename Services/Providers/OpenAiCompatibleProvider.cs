@@ -398,6 +398,12 @@ namespace DeepSeek_v4_for_VisualStudio.Services.Providers
         }
 
         /// <summary>
+        /// 当前 Provider 是否支持 DeepSeek 官方会话标题字段。
+        /// 通用 OpenAI 兼容端点默认关闭，避免把非标准 title 字段发给未知上游。
+        /// </summary>
+        protected virtual bool SupportsConversationTitleRequest => false;
+
+        /// <summary>
         /// 当前请求是否要求所有历史 assistant 消息都携带 reasoning_content。
         /// 默认关闭；仅由需要严格回传思考内容的 Provider（如 DeepSeek 思考模式）覆写。
         /// </summary>
@@ -488,7 +494,8 @@ namespace DeepSeek_v4_for_VisualStudio.Services.Providers
             double? temperature = null,
             string? responseFormat = null,
             string? model = null,
-            bool? thinkingEnabled = null)
+            bool? thinkingEnabled = null,
+            bool requestConversationTitle = false)
         {
             LastFinishReason = null;
 
@@ -514,6 +521,10 @@ namespace DeepSeek_v4_for_VisualStudio.Services.Providers
                 Temperature = temperature,
                 ResponseFormat = CreateResponseFormat(responseFormat, effectiveModel)
             };
+            if (requestConversationTitle && SupportsConversationTitleRequest)
+            {
+                request.Title = new ConversationTitleOptions { Enabled = true };
+            }
             ApplyProviderRequestOptions(request, thinkingEnabled);
             ApplyProviderEndpointShaping(request, isStreaming: true);
             Logger.Info($"[Reasoning] Provider={ProviderName}, 端点={_baseUrl}, 模型={request.Model}");
@@ -1216,6 +1227,7 @@ namespace DeepSeek_v4_for_VisualStudio.Services.Providers
                 string? content = null;
                 string? toolCallJson = null;
                 string? cacheInfo = null;
+                string? conversationTitle = null;
                 try
                 {
                     var chunk = JsonSerializer.Deserialize<DeepSeekStreamChunk>(jsonData);
@@ -1236,6 +1248,7 @@ namespace DeepSeek_v4_for_VisualStudio.Services.Providers
                     {
                         reasoning = delta.ReasoningContent;
                         content = delta.Content;
+                        conversationTitle = delta.Title;
                         if (delta.ToolCalls != null && delta.ToolCalls.Count > 0)
                             toolCallJson = JsonSerializer.Serialize(delta.ToolCalls);
                     }
@@ -1264,6 +1277,7 @@ namespace DeepSeek_v4_for_VisualStudio.Services.Providers
                 if (!string.IsNullOrEmpty(reasoning)) yield return $"[THINKING]{reasoning}";
                 if (!string.IsNullOrEmpty(toolCallJson)) yield return $"[TOOL_CALL]{toolCallJson}";
                 if (!string.IsNullOrEmpty(cacheInfo)) yield return $"[CACHE]{cacheInfo}";
+                if (!string.IsNullOrEmpty(conversationTitle)) yield return $"[TITLE]{conversationTitle}";
 
                 // ── 普通内容：聚合到缓冲区，达到阈值再 yield ──
                 if (!string.IsNullOrEmpty(content))
