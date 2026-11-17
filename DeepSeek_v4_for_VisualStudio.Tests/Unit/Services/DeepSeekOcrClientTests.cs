@@ -54,6 +54,55 @@ public class DeepSeekOcrClientTests
     }
 
     [Fact]
+    public async Task ExtractTextAsync_RichLayoutModePreservesMarkersAndCoordinates()
+    {
+        const string responseJson =
+            """
+            {
+              "page_count": 1,
+              "pages": [
+                {"index":0,"text":"<｜ref｜>标题<｜/ref｜><｜box｜>[[10,20,300,80]]<｜/box｜>","finish_reason":"stop"}
+              ]
+            }
+            """;
+        var handler = new CapturingHandler(responseJson);
+        using var httpClient = new HttpClient(handler);
+        using var client = new DeepSeekOcrClient(httpClient);
+        client.Configure(
+            "test-key",
+            isOfficialEndpoint: true,
+            DeepSeekOcrClient.RichLayoutRecognitionPurpose);
+        string filePath = CreateTempFile(".pdf");
+
+        try
+        {
+            DeepSeekOcrResult? result = await client.ExtractResultAsync(filePath);
+
+            result.Should().NotBeNull();
+            result!.Text.Should().Contain("<｜ref｜>标题<｜/ref｜>");
+            result.Text.Should().Contain("[[10,20,300,80]]");
+            handler.RequestBody.Should().Contain(
+                DeepSeekOcrClient.RichLayoutRecognitionPurpose);
+        }
+        finally
+        {
+            File.Delete(filePath);
+        }
+    }
+
+    [Theory]
+    [InlineData(null, DeepSeekOcrClient.TextRecognitionPurpose)]
+    [InlineData("", DeepSeekOcrClient.TextRecognitionPurpose)]
+    [InlineData("invalid", DeepSeekOcrClient.TextRecognitionPurpose)]
+    [InlineData(DeepSeekOcrClient.RichLayoutRecognitionPurpose, DeepSeekOcrClient.RichLayoutRecognitionPurpose)]
+    public void NormalizePurpose_UsesDocumentedValues(
+        string? input,
+        string expected)
+    {
+        DeepSeekOcrClient.NormalizePurpose(input).Should().Be(expected);
+    }
+
+    [Fact]
     public async Task ExtractTextAsync_RequiresOfficialEndpoint()
     {
         var handler = new CapturingHandler("{}");

@@ -1,3 +1,4 @@
+using DeepSeek_v4_for_VisualStudio.Services;
 using Microsoft.VisualStudio.Extensibility;
 using Microsoft.VisualStudio.Extensibility.Settings;
 #pragma warning disable VSEXTPREVIEW_SETTINGS // Settings API is experimental
@@ -296,6 +297,36 @@ namespace DeepSeek_v4_for_VisualStudio
                 VisibleWhen = SettingRule.And(
                     SettingRule.Equal(EffectiveModelSource, "official"),
                     SettingRule.Equal(EffectiveVisionModel, false)),
+            };
+
+        [VisualStudioContribution]
+        internal static Setting.Enum OfficialOcrPurpose { get; } =
+            new(
+                "deepseekOfficialOcrPurpose",
+                "%DeepSeek.Chat.settings.officialOcrPurpose.displayName%",
+                GeneralCategory,
+                new[]
+                {
+                    new EnumSettingEntry(
+                        DeepSeekOcrClient.TextRecognitionPurpose,
+                        "%DeepSeek.Chat.Settings.OcrPurposeTextRecognition%"),
+                    new EnumSettingEntry(
+                        DeepSeekOcrClient.RichLayoutRecognitionPurpose,
+                        "%DeepSeek.Chat.Settings.OcrPurposeRichLayoutRecognition%"),
+                },
+                defaultValue: DeepSeekOcrClient.TextRecognitionPurpose)
+            {
+                Description = "%DeepSeek.Chat.settings.officialOcrPurpose.description%",
+                SearchKeywords = new[]
+                {
+                    "OCR", "DeepSeek", "purpose", "layout", "recognition",
+                    "文字", "版面", "布局", "坐标",
+                },
+                VisibleWhen = SettingRule.And(
+                    SettingRule.Equal(UseDeepSeekOfficialOcr, true),
+                    SettingRule.And(
+                        SettingRule.Equal(EffectiveModelSource, "official"),
+                        SettingRule.Equal(EffectiveVisionModel, false))),
             };
 
         [VisualStudioContribution]

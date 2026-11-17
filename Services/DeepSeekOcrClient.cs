@@ -25,7 +25,8 @@ namespace DeepSeek_v4_for_VisualStudio.Services
     {
         internal const string OcrEndpoint = "https://api.deepseek.com/v1/tools/ocr";
         public const int MaxPagesPerRequest = 1000;
-        private const string RecognitionPurpose = "text_recognition";
+        public const string TextRecognitionPurpose = "text_recognition";
+        public const string RichLayoutRecognitionPurpose = "rich_layout_recognition";
         private static readonly TimeSpan OcrTimeout = TimeSpan.FromSeconds(190);
 
         private readonly HttpClient _httpClient;
@@ -33,6 +34,7 @@ namespace DeepSeek_v4_for_VisualStudio.Services
         private readonly object _configLock = new();
         private string? _apiKey;
         private bool _officialEndpointEnabled;
+        private string _recognitionPurpose = TextRecognitionPurpose;
 
         public DeepSeekOcrClient()
         {
@@ -58,12 +60,16 @@ namespace DeepSeek_v4_for_VisualStudio.Services
             }
         }
 
-        public void Configure(string? apiKey, bool isOfficialEndpoint)
+        public void Configure(
+            string? apiKey,
+            bool isOfficialEndpoint,
+            string? recognitionPurpose = null)
         {
             lock (_configLock)
             {
                 _apiKey = apiKey;
                 _officialEndpointEnabled = isOfficialEndpoint;
+                _recognitionPurpose = NormalizePurpose(recognitionPurpose);
             }
         }
 
@@ -89,6 +95,7 @@ namespace DeepSeek_v4_for_VisualStudio.Services
             }
 
             string? apiKey;
+            string recognitionPurpose;
             lock (_configLock)
             {
                 if (!_officialEndpointEnabled || string.IsNullOrWhiteSpace(_apiKey))
@@ -97,6 +104,7 @@ namespace DeepSeek_v4_for_VisualStudio.Services
                     return null;
                 }
                 apiKey = _apiKey;
+                recognitionPurpose = _recognitionPurpose;
             }
 
             using var cts = CancellationTokenSource.CreateLinkedTokenSource(cancellationToken);
@@ -109,10 +117,10 @@ namespace DeepSeek_v4_for_VisualStudio.Services
             var fileContent = new StreamContent(File.OpenRead(filePath));
             fileContent.Headers.ContentType = new MediaTypeHeaderValue(GetMimeType(filePath));
             form.Add(fileContent, "file", Path.GetFileName(filePath));
-            form.Add(new StringContent(RecognitionPurpose, Encoding.UTF8), "purpose");
+            form.Add(new StringContent(recognitionPurpose, Encoding.UTF8), "purpose");
             request.Content = form;
 
-            Logger.Info($"[OCR-DeepSeek] start: {Path.GetFileName(filePath)}, purpose={RecognitionPurpose}");
+            Logger.Info($"[OCR-DeepSeek] start: {Path.GetFileName(filePath)}, purpose={recognitionPurpose}");
             try
             {
                 using var response = await _httpClient.SendAsync(
@@ -135,7 +143,13 @@ namespace DeepSeek_v4_for_VisualStudio.Services
                     return null;
                 }
 
-                DeepSeekOcrResult? result = ParseResponseResult(responseJson);
+                bool preserveLayoutMarkers = string.Equals(
+                    recognitionPurpose,
+                    RichLayoutRecognitionPurpose,
+                    StringComparison.Ordinal);
+                DeepSeekOcrResult? result = ParseResponseResult(
+                    responseJson,
+                    preserveLayoutMarkers);
                 if (result == null)
                 {
                     Logger.Warn($"[OCR-DeepSeek] invalid response: {TruncateForLog(responseJson)}");
@@ -165,7 +179,9 @@ namespace DeepSeek_v4_for_VisualStudio.Services
         internal static string? ParseResponseText(string? responseJson)
             => ParseResponseResult(responseJson)?.Text;
 
-        internal static DeepSeekOcrResult? ParseResponseResult(string? responseJson)
+        internal static DeepSeekOcrResult? ParseResponseResult(
+            string? responseJson,
+            bool preserveLayoutMarkers = false)
         {
             if (string.IsNullOrWhiteSpace(responseJson)) return null;
 
@@ -211,9 +227,12 @@ namespace DeepSeek_v4_for_VisualStudio.Services
                                 indexElement.TryGetInt32(out int parsedIndex)
                         ? parsedIndex
                         : pageIndex;
-                    string text = page.TryGetProperty("text", out var textElement)
-                        ? NormalizePageText(textElement.GetString())
+                    string rawText = page.TryGetProperty("text", out var textElement)
+                        ? textElement.GetString() ?? string.Empty
                         : string.Empty;
+                    string text = preserveLayoutMarkers
+                        ? rawText
+                        : NormalizePageText(rawText);
                     string finishReason = page.TryGetProperty("finish_reason", out var finishElement)
                         ? finishElement.GetString() ?? string.Empty
                         : string.Empty;
@@ -263,6 +282,14 @@ namespace DeepSeek_v4_for_VisualStudio.Services
                 RegexOptions.IgnoreCase);
             return normalized.Trim();
         }
+
+        internal static string NormalizePurpose(string? purpose)
+            => string.Equals(
+                purpose,
+                RichLayoutRecognitionPurpose,
+                StringComparison.Ordinal)
+                    ? RichLayoutRecognitionPurpose
+                    : TextRecognitionPurpose;
 
         private static string GetMimeType(string filePath)
         {

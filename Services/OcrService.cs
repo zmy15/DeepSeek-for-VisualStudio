@@ -97,8 +97,11 @@ namespace DeepSeek_v4_for_VisualStudio.Services
             => OfficialOcrSuccessPageCount / 1000.0 * OfficialOcrPriceUsdPer1K;
 
         /// <summary>配置 DeepSeek 官方 OCR 凭据和端点可用性。</summary>
-        public static void ConfigureDeepSeekOfficial(string? apiKey, bool isOfficialEndpoint)
-            => OfficialClient.Configure(apiKey, isOfficialEndpoint);
+        public static void ConfigureDeepSeekOfficial(
+            string? apiKey,
+            bool isOfficialEndpoint,
+            string? recognitionPurpose = null)
+            => OfficialClient.Configure(apiKey, isOfficialEndpoint, recognitionPurpose);
 
         /// <summary>重置官方 OCR 成功页数统计。</summary>
         public static void ResetOfficialOcrStats()

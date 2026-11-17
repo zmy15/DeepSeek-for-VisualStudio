@@ -240,7 +240,12 @@ namespace DeepSeek_v4_for_VisualStudio.View
             if (_options == null) return;
 
             var config = DeepSeekEndpointResolver.Resolve(_options);
-            OcrService.ConfigureDeepSeekOfficial(config.ApiKey, !config.IsCustom);
+            string officialOcrPurpose = DeepSeekOptionsPage.NormalizeOfficialOcrPurpose(
+                _options.OfficialOcrPurpose);
+            OcrService.ConfigureDeepSeekOfficial(
+                config.ApiKey,
+                !config.IsCustom,
+                officialOcrPurpose);
             OcrService.VisionModelActive = _apiService?.CurrentIsVision ?? false;
 
             string selectedEngine = _options.OcrEngine;
@@ -257,6 +262,11 @@ namespace DeepSeek_v4_for_VisualStudio.View
                 "DeepSeek Official" => OcrEngineType.DeepSeekOfficial,
                 _ => OcrEngineType.WindowsBuiltIn,
             };
+
+            if (OcrService.CurrentEngine == OcrEngineType.DeepSeekOfficial)
+            {
+                Logger.Info($"[OCR] 官方 OCR 模式: {officialOcrPurpose}");
+            }
         }
 
         /// <summary>

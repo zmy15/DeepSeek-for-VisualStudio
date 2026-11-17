@@ -39,6 +39,8 @@ namespace DeepSeek_v4_for_VisualStudio.Settings
         internal const int MinApiMaxRetryCount = 0;
         internal const int MaxApiMaxRetryCount = 10;
         internal const int DefaultApiMaxRetryCount = 3;
+        internal const string DefaultOfficialOcrPurpose =
+            DeepSeekOcrClient.TextRecognitionPurpose;
 
         /// <summary>
         /// 推理强度兜底档位。官方模型以 /models 的 effort.supported_levels 为准，
@@ -1231,6 +1233,7 @@ namespace DeepSeek_v4_for_VisualStudio.Settings
             WebFetchMode = DefaultWebFetchMode;
             ShowDiffMarkersInEditor = true;
             OcrEngine = "Windows Built-in";
+            OfficialOcrPurpose = DefaultOfficialOcrPurpose;
             AutoCompleteEnabled = false;
             AutoCompleteDelay = 800;
             AutoCompleteContinueAfterAccept = true;
@@ -1417,6 +1420,19 @@ namespace DeepSeek_v4_for_VisualStudio.Settings
                 }
             }
         }
+
+        /// <summary>
+        /// DeepSeek 官方 OCR 的返回模式。仅在 OcrEngine 选择 DeepSeek Official 时生效。
+        /// </summary>
+        [LocalizedCategory("settings.category.ocr")]
+        [LocalizedDisplayName("settings.officialOcrPurpose.displayName")]
+        [LocalizedDescription("settings.officialOcrPurpose.description")]
+        [TypeConverter(typeof(OfficialOcrPurposeConverter))]
+        [DesignerSerializationVisibility(DesignerSerializationVisibility.Visible)]
+        public string OfficialOcrPurpose { get; set; } = DefaultOfficialOcrPurpose;
+
+        internal static string NormalizeOfficialOcrPurpose(string? purpose)
+            => DeepSeekOcrClient.NormalizePurpose(purpose);
 
         // ═══════════════════════════════════════════════
         //  DeepSeek 自动补全（幽灵文本）设置
@@ -1843,6 +1859,21 @@ namespace DeepSeek_v4_for_VisualStudio.Settings
             }
             return new(values);
         }
+    }
+
+    /// <summary>
+    /// DeepSeek 官方 OCR 的两种识别模式。
+    /// </summary>
+    internal class OfficialOcrPurposeConverter : StringConverter
+    {
+        public override bool GetStandardValuesSupported(ITypeDescriptorContext? context) => true;
+
+        public override StandardValuesCollection GetStandardValues(ITypeDescriptorContext? context)
+            => new(new[]
+            {
+                DeepSeekOcrClient.TextRecognitionPurpose,
+                DeepSeekOcrClient.RichLayoutRecognitionPurpose,
+            });
     }
 
     /// <summary>
