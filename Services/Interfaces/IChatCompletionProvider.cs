@@ -75,7 +75,10 @@ namespace DeepSeek_v4_for_VisualStudio.Services
         /// <summary>运行时一次性应用端点配置。</summary>
         void UpdateEndpoint(DeepSeekEndpointConfig config);
 
-        /// <summary>流式聊天调用。</summary>
+        /// <summary>
+        /// 流式聊天调用。requestConversationTitle 仅由 DeepSeek 官方端点消费，
+        /// 用于在会话首条主对话请求中顺带生成 title。
+        /// </summary>
         IAsyncEnumerable<string> ChatStreamAsync(
             IEnumerable<ChatApiMessage> messages,
             List<ToolDefinition>? tools = null,
@@ -85,7 +88,8 @@ namespace DeepSeek_v4_for_VisualStudio.Services
             double? temperature = null,
             string? responseFormat = null,
             string? model = null,
-            bool? thinkingEnabled = null);
+            bool? thinkingEnabled = null,
+            bool requestConversationTitle = false);
 
         /// <summary>非流式完整调用。</summary>
         Task<string> CompleteAsync(

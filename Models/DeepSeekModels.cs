@@ -91,6 +91,15 @@ namespace DeepSeek_v4_for_VisualStudio.Models
         [JsonPropertyName("response_format")]
         [JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)]
         public ResponseFormat? ResponseFormat { get; set; }
+
+        /// <summary>
+        /// DeepSeek 官方 Chat Completions 会话标题开关。
+        /// 仅在会话第一次主对话请求中设置，响应会通过 message.title / delta.title 返回。
+        /// 参考: https://api-docs.deepseek.com/zh-cn/guides/conversation_title
+        /// </summary>
+        [JsonPropertyName("title")]
+        [JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)]
+        public ConversationTitleOptions? Title { get; set; }
     }
 
     /// <summary>
@@ -100,6 +109,13 @@ namespace DeepSeek_v4_for_VisualStudio.Models
     {
         [JsonPropertyName("type")]
         public string Type { get; set; } = "json_object";
+    }
+
+    /// <summary>DeepSeek 官方会话标题生成开关。</summary>
+    public class ConversationTitleOptions
+    {
+        [JsonPropertyName("enabled")]
+        public bool Enabled { get; set; }
     }
 
     public class ThinkingControl
@@ -297,6 +313,10 @@ namespace DeepSeek_v4_for_VisualStudio.Models
         [JsonPropertyName("content")]
         public string? Content { get; set; }
 
+        /// <summary>非流式 Chat Completions 响应中的会话标题。</summary>
+        [JsonPropertyName("title")]
+        public string? Title { get; set; }
+
         [JsonPropertyName("reasoning_content")]
         public string? ReasoningContent { get; set; }
 
@@ -312,6 +332,10 @@ namespace DeepSeek_v4_for_VisualStudio.Models
 
         [JsonPropertyName("content")]
         public string? Content { get; set; }
+
+        /// <summary>流式 Chat Completions 最后一个 chunk 中的会话标题。</summary>
+        [JsonPropertyName("title")]
+        public string? Title { get; set; }
 
         [JsonPropertyName("reasoning_content")]
         public string? ReasoningContent { get; set; }
