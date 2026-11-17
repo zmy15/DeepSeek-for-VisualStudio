@@ -1294,6 +1294,27 @@ namespace DeepSeek_v4_for_VisualStudio.Settings
         [DesignerSerializationVisibility(DesignerSerializationVisibility.Visible)] // Fix for WFO1000
         public string ActiveModelSource { get; set; } = "auto";
 
+        /// <summary>
+        /// 解析后的实际模型来源，供 Unified Settings 控制官方 OCR 项可见性。
+        /// official/custom/unavailable 三态避免把未配置官方 Key 的情况误判为可用。
+        /// </summary>
+        [Browsable(false)]
+        [DesignerSerializationVisibility(DesignerSerializationVisibility.Hidden)]
+        public string EffectiveModelSource
+        {
+            get
+            {
+                var config = DeepSeekEndpointResolver.Resolve(this);
+                if (config.IsCustom) return "custom";
+                return string.IsNullOrWhiteSpace(config.ApiKey) ? "unavailable" : "official";
+            }
+        }
+
+        /// <summary>当前模型是否为视觉模型，供 Unified Settings 隐藏不可用的官方 OCR 开关。</summary>
+        [Browsable(false)]
+        [DesignerSerializationVisibility(DesignerSerializationVisibility.Hidden)]
+        public bool EffectiveVisionModel => DeepSeekEndpointResolver.Resolve(this).IsVision;
+
         [LocalizedCategory("settings.category.model")]
         [LocalizedDisplayName("settings.enableThinking.displayName")]
         [LocalizedDescription("settings.enableThinking.description")]
@@ -1374,6 +1395,28 @@ namespace DeepSeek_v4_for_VisualStudio.Settings
         [TypeConverter(typeof(OcrEngineConverter))]
         [DesignerSerializationVisibility(DesignerSerializationVisibility.Visible)]
         public string OcrEngine { get; set; } = "Windows Built-in";
+
+        /// <summary>
+        /// Unified Settings 使用的官方 OCR 开关；仅当当前模型来源为官方 API 时显示。
+        /// 经典属性页通过 OcrEngine 下拉框选择，不重复展示该布尔项。
+        /// </summary>
+        [Browsable(false)]
+        [DesignerSerializationVisibility(DesignerSerializationVisibility.Visible)]
+        public bool UseDeepSeekOfficialOcr
+        {
+            get => string.Equals(OcrEngine, "DeepSeek Official", StringComparison.Ordinal);
+            set
+            {
+                if (value)
+                {
+                    OcrEngine = "DeepSeek Official";
+                }
+                else if (string.Equals(OcrEngine, "DeepSeek Official", StringComparison.Ordinal))
+                {
+                    OcrEngine = "Windows Built-in";
+                }
+            }
+        }
 
         // ═══════════════════════════════════════════════
         //  DeepSeek 自动补全（幽灵文本）设置
@@ -1711,6 +1754,17 @@ namespace DeepSeek_v4_for_VisualStudio.Settings
             get => _themeMode;
             set => _themeMode = value;
         }
+
+        /// <summary>当前配置是否可使用 DeepSeek 官方 OCR。</summary>
+        internal static bool IsDeepSeekOfficialOcrAvailable(DeepSeekOptionsPage? page)
+        {
+            if (page == null) return false;
+            var config = DeepSeekEndpointResolver.Resolve(page);
+            return IsDeepSeekOfficialOcrAvailable(config);
+        }
+
+        internal static bool IsDeepSeekOfficialOcrAvailable(DeepSeekEndpointConfig config)
+            => !config.IsCustom && !config.IsVision && !string.IsNullOrWhiteSpace(config.ApiKey);
     }
 
     /// <summary>
@@ -1772,13 +1826,21 @@ namespace DeepSeek_v4_for_VisualStudio.Settings
     }
 
     /// <summary>
-    /// OCR 引擎下拉选项。PaddleOCR-Sharp 仅在 x64 完整版中提供。
+    /// OCR 引擎下拉选项。DeepSeek 官方 OCR 仅在官方端点和官方 Key 均可用时显示。
     /// </summary>
     internal class OcrEngineConverter : StringConverter
     {
         public override bool GetStandardValuesSupported(ITypeDescriptorContext? context) => true;
         public override StandardValuesCollection GetStandardValues(ITypeDescriptorContext? context)
-            => new(new[] { "Windows Built-in", "PaddleOCR-Sharp" });
+        {
+            var values = new List<string> { "Windows Built-in", "PaddleOCR-Sharp" };
+            if (context?.Instance is DeepSeekOptionsPage page &&
+                DeepSeekOptionsPage.IsDeepSeekOfficialOcrAvailable(page))
+            {
+                values.Add("DeepSeek Official");
+            }
+            return new(values);
+        }
     }
 
     /// <summary>

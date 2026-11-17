@@ -2349,7 +2349,19 @@ namespace DeepSeek_v4_for_VisualStudio.View
         /// </summary>
         private void RestoreCacheStatsFromSession()
         {
-            if (_apiService == null || _activeSession == null) return;
+            if (_activeSession == null) return;
+
+            try
+            {
+                OcrService.RestoreOfficialOcrStats(_activeSession.CumulativeOfficialOcrPageCount);
+                Logger.Info($"[OCR] 从会话恢复官方 OCR 成功页数: {_activeSession.CumulativeOfficialOcrPageCount}");
+            }
+            catch (Exception ex)
+            {
+                Logger.Warn($"[OCR] 恢复官方 OCR 计费统计失败: {ex.Message}");
+            }
+
+            if (_apiService == null) return;
 
             try
             {

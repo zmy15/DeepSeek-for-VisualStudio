@@ -155,10 +155,10 @@ namespace DeepSeek_v4_for_VisualStudio.Services.Agents
 
         /// <summary>
         /// 判断视觉模型下是否应禁用 OCR 工具（执行层判定）。
-        /// 用户显式要求 OCR（消息中含 OCR / 文字识别等）时返回 false，放行。
+        /// 视觉模型直接读图，OCR 始终禁用。
         /// </summary>
         internal static bool ShouldSuppressOcrTools(bool isVisionModel, string? userMessage)
-            => isVisionModel && !DeepSeekChatControl.IsOcrExplicitlyRequested(userMessage, null);
+            => isVisionModel;
 
         /// <summary>
         /// 构建完整工具集（不过滤白名单），用于 DeepSeek Prefix Cache 稳定。
@@ -220,7 +220,7 @@ namespace DeepSeek_v4_for_VisualStudio.Services.Agents
         ///
         /// 该判定作用于<b>执行层</b>，而不是工具集：OCR 工具始终随完整工具集发送，
         /// 以保持请求前缀稳定（前缀缓存），视觉模型调用时直接拒绝并返回指引。
-        /// 用户显式要求 OCR（消息中含 OCR/文字识别等）时放行。
+        /// 视觉模型直接读图，OCR 始终禁用。
         /// </summary>
         internal static bool ShouldBlockOcrToolExecution(
             string toolName, bool isVisionModel, string? userMessage)

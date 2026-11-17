@@ -36,10 +36,10 @@ public class BaseAgentTests
 
     [Theory]
     [InlineData(true, "分析这些截图", true)]
-    [InlineData(true, "请 OCR 这些图片", false)]
-    [InlineData(true, "识别图片文字", false)]
+    [InlineData(true, "请 OCR 这些图片", true)]
+    [InlineData(true, "识别图片文字", true)]
     [InlineData(false, "分析这些截图", false)]
-    public void ShouldSuppressOcrTools_OnlyForVisionWithoutExplicitOcr(
+    public void ShouldSuppressOcrTools_ForVisionModel(
         bool isVisionModel,
         string userMessage,
         bool expected)
@@ -49,8 +49,8 @@ public class BaseAgentTests
 
     [Theory]
     [InlineData("paddleocr_vl", true, "分析这些截图", true)]        // 视觉 + 未显式要求 OCR → 禁用
-    [InlineData("paddleocr_vl", true, "请 OCR 这些图片", false)]    // 显式要求 OCR → 放行
-    [InlineData("paddleocr_vl", true, "识别图片文字", false)]
+    [InlineData("paddleocr_vl", true, "请 OCR 这些图片", true)]     // 视觉模型始终禁用
+    [InlineData("paddleocr_vl", true, "识别图片文字", true)]
     [InlineData("paddleocr_vl", false, "分析这些截图", false)]      // 非视觉模型 → 不干预
     [InlineData("read_file", true, "分析这些截图", false)]          // 非 OCR 工具 → 不干预
     public void ShouldBlockOcrToolExecution_OnlyBlocksVisionModeOcrWithoutExplicitRequest(

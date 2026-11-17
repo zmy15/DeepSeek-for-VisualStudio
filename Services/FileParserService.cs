@@ -66,6 +66,12 @@ namespace DeepSeek_v4_for_VisualStudio.Services
             ".pdf",
         };
 
+        /// <summary>PowerPoint 文档扩展名集合（仅 DeepSeek 官方 OCR 支持）。</summary>
+        private static readonly HashSet<string> PresentationExtensions = new(StringComparer.OrdinalIgnoreCase)
+        {
+            ".ppt", ".pptx",
+        };
+
         /// <summary>
         /// 支持 OCR 的图像文件扩展名集合。
         /// </summary>
@@ -128,9 +134,10 @@ namespace DeepSeek_v4_for_VisualStudio.Services
         public static string GetFileFilter()
         {
             var L = LocalizationService.Instance;
-            return $"{L["file.filter.allSupported"]}|*.txt;*.c;*.py;*.cs;*.cpp;*.h;*.java;*.js;*.ts;*.html;*.css;*.xml;*.json;*.yaml;*.yml;*.md;*.sql;*.doc;*.docx;*.xls;*.xlsx;*.pdf;*.png;*.jpg;*.jpeg;*.bmp;*.gif;*.tiff;*.tif|" +
+            return $"{L["file.filter.allSupported"]}|*.txt;*.c;*.py;*.cs;*.cpp;*.h;*.java;*.js;*.ts;*.html;*.css;*.xml;*.json;*.yaml;*.yml;*.md;*.sql;*.doc;*.docx;*.xls;*.xlsx;*.pdf;*.ppt;*.pptx;*.png;*.jpg;*.jpeg;*.bmp;*.gif;*.tiff;*.tif|" +
                    $"{L["file.filter.textFiles"]}|*.txt;*.c;*.py;*.cs;*.cpp;*.h;*.java;*.js;*.ts;*.html;*.css;*.xml;*.json;*.yaml;*.yml;*.md;*.sql;*.csv|" +
                    $"{L["file.filter.wordDocs"]}|*.doc;*.docx|" +
+                   $"{L["file.filter.powerPointDocs"]}|*.ppt;*.pptx|" +
                    $"{L["file.filter.excelDocs"]}|*.xls;*.xlsx|" +
                    $"{L["file.filter.pdfDocs"]}|*.pdf|" +
                    $"{L["file.filter.imageFiles"]}|*.png;*.jpg;*.jpeg;*.bmp;*.gif;*.tiff;*.tif|" +
@@ -175,27 +182,41 @@ namespace DeepSeek_v4_for_VisualStudio.Services
                 {
                     result.Content = await ReadTextFileAsync(filePath);
                 }
+                // DeepSeek 官方 OCR 优先处理其原生支持的文档
+                else if (OcrService.CurrentEngine == OcrEngineType.DeepSeekOfficial &&
+                         OcrService.IsOfficialOcrDocumentFile(filePath))
+                {
+                    result.Content = await OcrService.ExtractTextFromFileAsync(filePath);
+                    if (result.Content != null)
+                        return result;
+                }
                 // Word 文档
-                else if (WordExtensions.Contains(ext))
+                if (result.Content == null && WordExtensions.Contains(ext))
                 {
                     result.Content = await ParseWordDocumentAsync(filePath);
                 }
                 // Excel 文档
-                else if (ExcelExtensions.Contains(ext))
+                else if (result.Content == null && ExcelExtensions.Contains(ext))
                 {
                     result.Content = await Task.Run(() => ParseExcelDocument(filePath));
                 }
                 // PDF 文档
-                else if (PdfExtensions.Contains(ext))
+                else if (result.Content == null && PdfExtensions.Contains(ext))
                 {
                     result.Content = await Task.Run(() => ParsePdfDocument(filePath));
                 }
+                // PowerPoint 没有本地解析器，只能依赖 DeepSeek 官方 OCR
+                else if (result.Content == null && PresentationExtensions.Contains(ext))
+                {
+                    result.Error = LocalizationService.Instance["file.powerPointRequiresOfficialOcr"];
+                    return result;
+                }
                 // 图像文件（OCR）
-                else if (ImageExtensions.Contains(ext))
+                else if (result.Content == null && ImageExtensions.Contains(ext))
                 {
                     result.Content = await ParseImageFileAsync(filePath);
                 }
-                else
+                else if (result.Content == null)
                 {
                     result.Error = string.Format(LocalizationService.Instance["file.unsupportedFormat"], ext);
                     return result;
@@ -786,6 +807,8 @@ namespace DeepSeek_v4_for_VisualStudio.Services
                 string engineHint = OcrService.CurrentEngine switch
                 {
                     OcrEngineType.PaddleOCR => "3. PaddleOCR 引擎初始化失败（工具 → 选项 → DeepSeek Chat → OCR Settings）",
+                    OcrEngineType.DeepSeekOfficial =>
+                        "3. " + LocalizationService.Instance["status.ocrOfficialUnavailable"],
                     _ => "3. 系统未安装中文/英文 OCR 语言包（设置 → 语言 → 添加语言）",
                 };
 

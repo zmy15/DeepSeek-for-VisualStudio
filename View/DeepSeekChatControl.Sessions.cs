@@ -138,6 +138,9 @@ namespace DeepSeek_v4_for_VisualStudio.View
                 _activeSession.CumulativeOfficialFetchCount = _webSearchService.OfficialFetchSuccessCount;
             }
 
+            // ── 持久化官方 OCR 成功页数（按页计费，重启后恢复费用）──
+            _activeSession.CumulativeOfficialOcrPageCount = OcrService.OfficialOcrSuccessPageCount;
+
             _sessionsContainer.ActiveSessionId = _activeSession.Id;
             ChatPersistenceService.SaveSessions(_solutionPath, _sessionsContainer);
         }
@@ -1031,6 +1034,7 @@ namespace DeepSeek_v4_for_VisualStudio.View
             _webSearchService?.ResetQuotaState();
             // 重置官方 Search / Fetch 的按次计费用量统计
             _webSearchService?.ResetOfficialToolStats();
+            OcrService.ResetOfficialOcrStats();
 
             // 清空附件列表
             ClearAttachedFiles();
@@ -1221,6 +1225,7 @@ namespace DeepSeek_v4_for_VisualStudio.View
                 _apiService?.ResetAccumulatedStats();
                 // 官方 Search / Fetch 调用次数同属本会话累计，清空消息时一并归零
                 _webSearchService?.ResetOfficialToolStats();
+                OcrService.ResetOfficialOcrStats();
 
                 // ── 聊天区即将重建：清空审批显示队列，移除残留审批卡片 ──
                 ResetApprovalQueue();

@@ -36,6 +36,9 @@ public class UnifiedSettingsCoverageTests
         (nameof(DeepSeekOptionsPage.ShowDiffMarkersInEditor), "deepseekShowDiffMarkers"),
         (nameof(DeepSeekOptionsPage.EnableApiDebugDump), "deepseekApiDebugDump"),
         (nameof(DeepSeekOptionsPage.OcrEngine), "deepseekOcrEngine"),
+        (nameof(DeepSeekOptionsPage.EffectiveModelSource), "deepseekEffectiveModelSource"),
+        (nameof(DeepSeekOptionsPage.EffectiveVisionModel), "deepseekEffectiveVisionModel"),
+        (nameof(DeepSeekOptionsPage.UseDeepSeekOfficialOcr), "deepseekUseOfficialOcr"),
         (nameof(DeepSeekOptionsPage.AutoCompleteEnabled), "deepseekAutoCompleteEnabled"),
         (nameof(DeepSeekOptionsPage.AutoCompleteDelay), "deepseekAutoCompleteDelay"),
         (nameof(DeepSeekOptionsPage.AutoCompleteContinueAfterAccept), "deepseekAutoCompleteContinueAfterAccept"),
@@ -77,7 +80,7 @@ public class UnifiedSettingsCoverageTests
         var declaredIds = GetDeclaredSettingIds();
         var boundMonikers = GetBoundMonikers();
 
-        declaredIds.Should().HaveCount(50);
+        declaredIds.Should().HaveCount(53);
         foreach (var guideSettingId in GuideSettingIds)
             declaredIds.Should().Contain(guideSettingId);
 
@@ -85,8 +88,8 @@ public class UnifiedSettingsCoverageTests
             .Where(id => !GuideSettingIds.Contains(id, StringComparer.Ordinal))
             .ToList();
 
-        synchronizedIds.Should().HaveCount(44);
-        boundMonikers.Should().HaveCount(44);
+        synchronizedIds.Should().HaveCount(47);
+        boundMonikers.Should().HaveCount(47);
         declaredIds.GroupBy(id => id, StringComparer.Ordinal).Should().OnlyContain(group => group.Count() == 1);
         boundMonikers.GroupBy(id => id, StringComparer.Ordinal).Should().OnlyContain(group => group.Count() == 1);
 
@@ -100,7 +103,7 @@ public class UnifiedSettingsCoverageTests
     [Fact]
     public void UnifiedSettings_CoverLegacyNonSensitiveOptions()
     {
-        ExpectedCoverage.Should().HaveCount(44);
+        ExpectedCoverage.Should().HaveCount(47);
 
         var optionProperties = typeof(DeepSeekOptionsPage)
             .GetProperties(BindingFlags.Public | BindingFlags.Instance)

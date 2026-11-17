@@ -173,7 +173,6 @@ namespace DeepSeek_v4_for_VisualStudio.View
             // 视觉能力判定统一走 ApiService 权威标志（resolver 在构造/热更新时写入），
             // 与 BuiltInToolService/BaseAgent 工具层读同一数据源，避免 UI/工具层分裂。
             bool visionModelSelected = _apiService?.CurrentIsVision ?? false;
-            bool ocrExplicitlyRequested = IsOcrExplicitlyRequested(userText, effectiveUserText);
 
             if (!isQueuedAppend && _attachedFilePaths.Count > 0)
             {
@@ -188,7 +187,7 @@ namespace DeepSeek_v4_for_VisualStudio.View
                 parseResults = FileParserService.CreateFileReferences(_attachedFilePaths);
                 fileContext = FileParserService.FormatParseResultsForContext(parseResults);
 
-                if (visionModelSelected && !ocrExplicitlyRequested)
+                if (visionModelSelected)
                 {
                     var directImagePaths = _attachedFilePaths
                         .Where(IsVisionImageFile)
@@ -537,20 +536,6 @@ namespace DeepSeek_v4_for_VisualStudio.View
                 return false;
 
             return string.Equals(Path.GetExtension(filePath), ".pdf", StringComparison.OrdinalIgnoreCase);
-        }
-
-        internal static bool IsOcrExplicitlyRequested(string? userText, string? effectiveUserText)
-        {
-            string text = ((effectiveUserText ?? string.Empty) + "\n" + (userText ?? string.Empty))
-                .ToLowerInvariant();
-
-            return text.Contains("ocr")
-                || text.Contains("文字识别")
-                || text.Contains("识别文字")
-                || text.Contains("提取文字")
-                || text.Contains("提取图片文字")
-                || text.Contains("读取图片文字")
-                || text.Contains("图片文字");
         }
 
         internal static bool IsOcrToolName(string toolName)
