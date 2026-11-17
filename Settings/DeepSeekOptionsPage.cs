@@ -1834,7 +1834,9 @@ namespace DeepSeek_v4_for_VisualStudio.Settings
         public override StandardValuesCollection GetStandardValues(ITypeDescriptorContext? context)
         {
             var values = new List<string> { "Windows Built-in", "PaddleOCR-Sharp" };
-            if (context?.Instance is DeepSeekOptionsPage page &&
+            var page = context?.Instance as DeepSeekOptionsPage
+                ?? DeepSeekOptionsPage.Instance;
+            if (page != null &&
                 DeepSeekOptionsPage.IsDeepSeekOfficialOcrAvailable(page))
             {
                 values.Add("DeepSeek Official");

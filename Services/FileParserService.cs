@@ -98,6 +98,9 @@ namespace DeepSeek_v4_for_VisualStudio.Services
         /// </summary>
         private const int MaxParsedChars = int.MaxValue;
 
+        /// <summary>单次本地 OCR 最多处理的 PDF/PPT 页数。</summary>
+        private const int ParserOcrPageBatchLimit = 50;
+
         #endregion
 
         #region Public Methods
@@ -189,7 +192,10 @@ namespace DeepSeek_v4_for_VisualStudio.Services
                 {
                     result.Content = await OcrService.ExtractTextFromFileAsync(filePath);
                     if (result.Content != null)
+                    {
+                        result.Success = true;
                         return result;
+                    }
                 }
                 // Word 文档
                 if (result.Content == null && WordExtensions.Contains(ext))
@@ -204,7 +210,7 @@ namespace DeepSeek_v4_for_VisualStudio.Services
                 // PDF 文档
                 else if (result.Content == null && PdfExtensions.Contains(ext))
                 {
-                    result.Content = await Task.Run(() => ParsePdfDocument(filePath));
+                    result.Content = await ParsePdfFileAsync(filePath);
                 }
                 // PowerPoint：视觉直传由上层处理；此处执行 OCR 或文本提取兜底
                 else if (result.Content == null && PresentationExtensions.Contains(ext))
@@ -338,18 +344,30 @@ namespace DeepSeek_v4_for_VisualStudio.Services
         {
             string ext = Path.GetExtension(filePath).ToLowerInvariant();
 
-            if (WordExtensions.Contains(ext)
-                || ExcelExtensions.Contains(ext)
-                || PdfExtensions.Contains(ext)
-                || ImageExtensions.Contains(ext))
+            if (RequiresDocumentParsing(filePath))
             {
                 var parsed = await ParseFileAsync(filePath);
                 if (!parsed.Success)
-                    throw new InvalidOperationException(parsed.Error ?? LocalizationService.Instance["tool.readFile.failed"]);
+                {
+                    string failureReason = string.IsNullOrWhiteSpace(parsed.Error)
+                        ? LocalizationService.Instance["tool.common.unknownReason"]
+                        : parsed.Error;
+                    throw new InvalidOperationException(failureReason);
+                }
                 return parsed.Content ?? string.Empty;
             }
 
             return await ReadTextFileAsync(filePath);
+        }
+
+        internal static bool RequiresDocumentParsing(string filePath)
+        {
+            string ext = Path.GetExtension(filePath).ToLowerInvariant();
+            return WordExtensions.Contains(ext)
+                || ExcelExtensions.Contains(ext)
+                || PdfExtensions.Contains(ext)
+                || PresentationExtensions.Contains(ext)
+                || ImageExtensions.Contains(ext);
         }
 
         #endregion
@@ -751,6 +769,41 @@ namespace DeepSeek_v4_for_VisualStudio.Services
         }
 
         /// <summary>
+        /// 解析 PDF：非视觉模型优先官方 OCR 或逐页 OCR；失败后回退 PdfPig 文本提取。
+        /// </summary>
+        private static async Task<string?> ParsePdfFileAsync(string filePath)
+        {
+            try
+            {
+                if (!OcrService.VisionModelActive && OcrService.IsEngineReady())
+                {
+                    if (OcrService.CurrentEngine == OcrEngineType.DeepSeekOfficial)
+                    {
+                        string? officialText = await OcrService.ExtractTextFromFileAsync(filePath);
+                        if (!string.IsNullOrWhiteSpace(officialText))
+                            return officialText;
+                    }
+                    else
+                    {
+                        List<byte[]> pages = await PdfRenderService.RenderPdfPagesToPngAsync(
+                            filePath,
+                            CancellationToken.None,
+                            ParserOcrPageBatchLimit);
+                        string? ocrText = await OcrRenderedPagesAsync(pages, "Page");
+                        if (!string.IsNullOrWhiteSpace(ocrText))
+                            return ocrText;
+                    }
+                }
+            }
+            catch (Exception ex)
+            {
+                Logger.Warn($"PDF OCR 失败，回退文本提取: {Path.GetFileName(filePath)} - {ex.Message}");
+            }
+
+            return await Task.Run(() => ParsePdfDocument(filePath));
+        }
+
+        /// <summary>
         /// 解析 PDF 文档，使用 PdfPig 提取全部页面文本。
         /// </summary>
         private static string ParsePdfDocument(string filePath)
@@ -767,13 +820,13 @@ namespace DeepSeek_v4_for_VisualStudio.Services
                     pageCount++;
                     string pageText = page.Text?.Trim();
 
+                    if (totalPages > 1)
+                        sb.AppendLine($"--- 第 {pageCount}/{totalPages} 页 ---");
                     if (!string.IsNullOrWhiteSpace(pageText))
                     {
-                        if (totalPages > 1)
-                            sb.AppendLine($"--- 第 {pageCount}/{totalPages} 页 ---");
                         sb.AppendLine(pageText);
-                        sb.AppendLine();
                     }
+                    sb.AppendLine();
                 }
 
                 Logger.Info($"PDF 解析完成: {pageCount} 页, {sb.Length} 个字符 ← {Path.GetFileName(filePath)}");
@@ -845,37 +898,12 @@ namespace DeepSeek_v4_for_VisualStudio.Services
                 else if (!OcrService.VisionModelActive && OcrService.IsEngineReady())
                 {
                     List<byte[]> slides = await PresentationRenderService.RenderPresentationToPngAsync(
-                        filePath);
-                    if (slides.Count > 0)
-                    {
-                        string tempDir = Path.Combine(
-                            Path.GetTempPath(),
-                            "DeepSeekVS_PptOcr",
-                            Guid.NewGuid().ToString("N"));
-                        Directory.CreateDirectory(tempDir);
-                        try
-                        {
-                            var builder = new StringBuilder();
-                            for (int index = 0; index < slides.Count; index++)
-                            {
-                                string pngPath = Path.Combine(tempDir, $"slide-{index + 1:D3}.png");
-                                File.WriteAllBytes(pngPath, slides[index]);
-                                string? text = await OcrService.ExtractTextFromImageAsync(pngPath);
-                                if (string.IsNullOrWhiteSpace(text)) continue;
-                                builder.AppendLine($"--- Slide {index + 1}/{slides.Count} ---");
-                                builder.AppendLine(text);
-                                builder.AppendLine();
-                            }
-
-                            string ocrText = builder.ToString().Trim();
-                            if (!string.IsNullOrWhiteSpace(ocrText))
-                                return ocrText;
-                        }
-                        finally
-                        {
-                            try { Directory.Delete(tempDir, recursive: true); } catch { }
-                        }
-                    }
+                        filePath,
+                        CancellationToken.None,
+                        ParserOcrPageBatchLimit);
+                    string? ocrText = await OcrRenderedPagesAsync(slides, "Slide");
+                    if (!string.IsNullOrWhiteSpace(ocrText))
+                        return ocrText;
                 }
 
                 string? extractedText = await PresentationRenderService.ExtractPresentationTextAsync(filePath);
@@ -890,6 +918,43 @@ namespace DeepSeek_v4_for_VisualStudio.Services
                 return string.Format(
                     LocalizationService.Instance["file.presentationParseFailed"],
                     ex.Message);
+            }
+        }
+
+        private static async Task<string?> OcrRenderedPagesAsync(
+            IReadOnlyList<byte[]> pages,
+            string pageLabel)
+        {
+            if (pages.Count == 0) return null;
+
+            string tempDir = Path.Combine(
+                Path.GetTempPath(),
+                "DeepSeekVS_OcrPages",
+                Guid.NewGuid().ToString("N"));
+            Directory.CreateDirectory(tempDir);
+            try
+            {
+                var builder = new StringBuilder();
+                bool hasRecognizedText = false;
+                for (int index = 0; index < pages.Count; index++)
+                {
+                    string pngPath = Path.Combine(tempDir, $"page-{index + 1:D3}.png");
+                    File.WriteAllBytes(pngPath, pages[index]);
+                    string? text = await OcrService.ExtractTextFromImageAsync(pngPath);
+                    if (pages.Count > 1)
+                        builder.AppendLine($"--- {pageLabel} {index + 1}/{pages.Count} ---");
+                    if (!string.IsNullOrWhiteSpace(text))
+                    {
+                        builder.AppendLine(text);
+                        hasRecognizedText = true;
+                    }
+                    builder.AppendLine();
+                }
+                return hasRecognizedText ? builder.ToString().Trim() : null;
+            }
+            finally
+            {
+                try { Directory.Delete(tempDir, recursive: true); } catch { }
             }
         }
 

@@ -25,6 +25,12 @@ namespace DeepSeek_v4_for_VisualStudio.Services
         private const int ExportHeight = 900;
         private const int LibreOfficeTimeoutMs = 120_000;
 
+        private sealed class PresentationPageRenderBatch
+        {
+            public int TotalPages { get; init; }
+            public List<string> Files { get; init; } = new();
+        }
+
         public static readonly string[] SupportedExtensions = { ".ppt", ".pptx" };
 
         public static bool IsPresentationFile(string? filePath)
@@ -54,11 +60,28 @@ namespace DeepSeek_v4_for_VisualStudio.Services
 
         public static async Task<List<byte[]>> RenderPresentationToPngAsync(
             string filePath,
-            CancellationToken cancellationToken = default)
+            CancellationToken cancellationToken = default,
+            int maxPages = MaxSlides)
+        {
+            RenderedDocumentPageBatch batch = await RenderPresentationPageBatchToPngAsync(
+                filePath,
+                cancellationToken,
+                startPage: 1,
+                maxPages);
+            return batch.Pages.ToList();
+        }
+
+        public static async Task<RenderedDocumentPageBatch> RenderPresentationPageBatchToPngAsync(
+            string filePath,
+            CancellationToken cancellationToken = default,
+            int startPage = 1,
+            int maxPages = MaxSlides)
         {
             if (!File.Exists(filePath) || !IsPresentationFile(filePath))
-                return new List<byte[]>();
+                return new RenderedDocumentPageBatch();
 
+            int normalizedStartPage = Math.Max(1, startPage);
+            int pageLimit = Math.Max(1, maxPages);
             string workDir = Path.Combine(
                 Path.GetTempPath(),
                 "DeepSeekVS_Presentation",
@@ -67,16 +90,24 @@ namespace DeepSeek_v4_for_VisualStudio.Services
             try
             {
                 cancellationToken.ThrowIfCancellationRequested();
-                List<string> pngFiles = await TryRenderWithPowerPointAsync(
-                    filePath, workDir, cancellationToken);
-                if (pngFiles.Count == 0)
+                PresentationPageRenderBatch rendered = await TryRenderWithPowerPointAsync(
+                    filePath,
+                    workDir,
+                    normalizedStartPage,
+                    pageLimit,
+                    cancellationToken);
+                if (rendered.Files.Count == 0 && rendered.TotalPages <= 0)
                 {
-                    pngFiles = await TryRenderWithLibreOfficeAsync(
-                        filePath, workDir, cancellationToken);
+                    rendered = await TryRenderWithLibreOfficeAsync(
+                        filePath,
+                        workDir,
+                        normalizedStartPage,
+                        pageLimit,
+                        cancellationToken);
                 }
 
                 var pages = new List<byte[]>();
-                foreach (string pngFile in pngFiles.Take(MaxSlides))
+                foreach (string pngFile in rendered.Files.Take(pageLimit))
                 {
                     if (cancellationToken.IsCancellationRequested) break;
                     try
@@ -88,7 +119,12 @@ namespace DeepSeek_v4_for_VisualStudio.Services
                         Logger.Warn($"[PPT] failed to read rendered slide image: {ex.Message}");
                     }
                 }
-                return pages;
+                return new RenderedDocumentPageBatch
+                {
+                    TotalPages = rendered.TotalPages,
+                    StartPage = normalizedStartPage,
+                    Pages = pages,
+                };
             }
             finally
             {
@@ -133,6 +169,7 @@ namespace DeepSeek_v4_for_VisualStudio.Services
                     .ToList();
 
                 var builder = new StringBuilder();
+                int totalSlides = slideEntries.Count;
                 for (int slideIndex = 0; slideIndex < slideEntries.Count; slideIndex++)
                 {
                     var slide = slideEntries[slideIndex];
@@ -147,9 +184,8 @@ namespace DeepSeek_v4_for_VisualStudio.Services
                         .Where(text => !string.IsNullOrWhiteSpace(text))
                         .Select(text => text.Trim())
                         .ToArray();
-                    if (paragraphs.Length == 0) continue;
 
-                    builder.AppendLine($"--- Slide {slideIndex + 1} ---");
+                    builder.AppendLine($"--- Slide {slideIndex + 1}/{totalSlides} ---");
                     foreach (string paragraph in paragraphs)
                         builder.AppendLine(paragraph);
                     builder.AppendLine();
@@ -163,13 +199,15 @@ namespace DeepSeek_v4_for_VisualStudio.Services
             }
         }
 
-        private static async Task<List<string>> TryRenderWithPowerPointAsync(
+        private static async Task<PresentationPageRenderBatch> TryRenderWithPowerPointAsync(
             string filePath,
             string workDir,
+            int startPage,
+            int maxPages,
             CancellationToken cancellationToken)
         {
             Type? type = Type.GetTypeFromProgID("PowerPoint.Application");
-            if (type == null) return new List<string>();
+            if (type == null) return new PresentationPageRenderBatch();
 
             string exportDir = Path.Combine(workDir, "powerpoint");
             Directory.CreateDirectory(exportDir);
@@ -185,19 +223,23 @@ namespace DeepSeek_v4_for_VisualStudio.Services
                         application = Activator.CreateInstance(type);
                         presentation = application.Presentations.Open(filePath, -1, 0, 0);
                         int totalSlides = (int)presentation.Slides.Count;
-                        int slideCount = Math.Min(totalSlides, MaxSlides);
-                        if (totalSlides > MaxSlides)
-                            Logger.Warn($"[PPT] {totalSlides} slides found, rendering first {MaxSlides}");
-                        for (int index = 1; index <= slideCount; index++)
+                        int slideCount = startPage > totalSlides
+                            ? 0
+                            : Math.Min(totalSlides - startPage + 1, maxPages);
+                        for (int index = startPage; index < startPage + slideCount; index++)
                         {
                             cancellationToken.ThrowIfCancellationRequested();
                             string output = Path.Combine(exportDir, $"slide-{index:D3}.png");
                             presentation.Slides[index].Export(
                                 output, "PNG", ExportWidth, ExportHeight);
                         }
-                        return Directory.GetFiles(exportDir, "*.png", SearchOption.AllDirectories)
-                            .OrderBy(path => NaturalSortKey(path))
-                            .ToList();
+                        return new PresentationPageRenderBatch
+                        {
+                            TotalPages = totalSlides,
+                            Files = Directory.GetFiles(exportDir, "*.png", SearchOption.AllDirectories)
+                                .OrderBy(path => NaturalSortKey(path))
+                                .ToList(),
+                        };
                     }
                     finally
                     {
@@ -221,17 +263,19 @@ namespace DeepSeek_v4_for_VisualStudio.Services
             catch (Exception ex)
             {
                 Logger.Warn($"[PPT] PowerPoint rendering failed: {ex.Message}");
-                return new List<string>();
+                return new PresentationPageRenderBatch();
             }
         }
 
-        private static async Task<List<string>> TryRenderWithLibreOfficeAsync(
+        private static async Task<PresentationPageRenderBatch> TryRenderWithLibreOfficeAsync(
             string filePath,
             string workDir,
+            int startPage,
+            int maxPages,
             CancellationToken cancellationToken)
         {
             string? soffice = FindLibreOfficeExecutable();
-            if (soffice == null) return new List<string>();
+            if (soffice == null) return new PresentationPageRenderBatch();
 
             string outputDir = Path.Combine(workDir, "libreoffice");
             string profileDir = Path.Combine(workDir, "profile");
@@ -260,30 +304,39 @@ namespace DeepSeek_v4_for_VisualStudio.Services
                 {
                     try { process.Kill(); } catch { }
                     Logger.Warn("[PPT] LibreOffice conversion timed out");
-                    return new List<string>();
+                    return new PresentationPageRenderBatch();
                 }
                 cancellationToken.ThrowIfCancellationRequested();
                 if (process.ExitCode != 0)
                 {
                     Logger.Warn($"[PPT] LibreOffice conversion failed with exit code {process.ExitCode}");
-                    return new List<string>();
+                    return new PresentationPageRenderBatch();
                 }
 
                 string pdfPath = Path.Combine(
                     outputDir,
                     Path.GetFileNameWithoutExtension(filePath) + ".pdf");
-                if (!File.Exists(pdfPath)) return new List<string>();
+                if (!File.Exists(pdfPath)) return new PresentationPageRenderBatch();
 
-                List<byte[]> pdfPages = await PdfRenderService.RenderPdfPagesToPngAsync(
-                    pdfPath, cancellationToken);
+                RenderedDocumentPageBatch pdfPages =
+                    await PdfRenderService.RenderPdfPageBatchToPngAsync(
+                        pdfPath,
+                        cancellationToken,
+                        startPage,
+                        maxPages);
                 var files = new List<string>();
-                for (int index = 0; index < pdfPages.Count; index++)
+                for (int index = 0; index < pdfPages.Pages.Count; index++)
                 {
-                    string pngPath = Path.Combine(outputDir, $"slide-{index + 1:D3}.png");
-                    File.WriteAllBytes(pngPath, pdfPages[index]);
+                    int slideNumber = startPage + index;
+                    string pngPath = Path.Combine(outputDir, $"slide-{slideNumber:D3}.png");
+                    File.WriteAllBytes(pngPath, pdfPages.Pages[index]);
                     files.Add(pngPath);
                 }
-                return files;
+                return new PresentationPageRenderBatch
+                {
+                    TotalPages = pdfPages.TotalPages,
+                    Files = files,
+                };
             }
             catch (OperationCanceledException)
             {
@@ -292,7 +345,7 @@ namespace DeepSeek_v4_for_VisualStudio.Services
             catch (Exception ex)
             {
                 Logger.Warn($"[PPT] LibreOffice rendering failed: {ex.Message}");
-                return new List<string>();
+                return new PresentationPageRenderBatch();
             }
         }
 
@@ -315,14 +368,14 @@ namespace DeepSeek_v4_for_VisualStudio.Services
                         cancellationToken.ThrowIfCancellationRequested();
                         application = Activator.CreateInstance(type);
                         presentation = application.Presentations.Open(filePath, -1, 0, 0);
-                        int slideCount = Math.Min((int)presentation.Slides.Count, MaxSlides);
-                        for (int index = 1; index <= slideCount; index++)
+                        int totalSlides = (int)presentation.Slides.Count;
+                        for (int index = 1; index <= totalSlides; index++)
                         {
                             cancellationToken.ThrowIfCancellationRequested();
                             string slideText = ExtractShapesText(presentation.Slides[index].Shapes);
-                            if (string.IsNullOrWhiteSpace(slideText)) continue;
-                            builder.AppendLine($"--- Slide {index} ---");
-                            builder.AppendLine(slideText);
+                            builder.AppendLine($"--- Slide {index}/{totalSlides} ---");
+                            if (!string.IsNullOrWhiteSpace(slideText))
+                                builder.AppendLine(slideText);
                             builder.AppendLine();
                         }
                         return builder.ToString().Trim();

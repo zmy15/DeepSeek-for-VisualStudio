@@ -24,6 +24,7 @@ namespace DeepSeek_v4_for_VisualStudio.Services
     public class DeepSeekOcrClient : IDisposable
     {
         internal const string OcrEndpoint = "https://api.deepseek.com/v1/tools/ocr";
+        public const int MaxPagesPerRequest = 1000;
         private const string RecognitionPurpose = "text_recognition";
         private static readonly TimeSpan OcrTimeout = TimeSpan.FromSeconds(190);
 
@@ -202,6 +203,7 @@ namespace DeepSeek_v4_for_VisualStudio.Services
                     return null;
                 }
                 var builder = new StringBuilder();
+                bool hasRecognizedText = false;
                 int pageIndex = 0;
                 foreach (var page in pages.EnumerateArray())
                 {
@@ -216,13 +218,14 @@ namespace DeepSeek_v4_for_VisualStudio.Services
                         ? finishElement.GetString() ?? string.Empty
                         : string.Empty;
 
+                    if (pageCount > 1)
+                        builder.AppendLine($"--- Page {index + 1}/{pageCount} ---");
                     if (!string.IsNullOrWhiteSpace(text))
                     {
-                        if (pageCount > 1)
-                            builder.AppendLine($"--- Page {index + 1}/{pageCount} ---");
                         builder.AppendLine(text);
-                        builder.AppendLine();
+                        hasRecognizedText = true;
                     }
+                    builder.AppendLine();
 
                     if (string.Equals(finishReason, "length", StringComparison.OrdinalIgnoreCase))
                     {
@@ -233,7 +236,7 @@ namespace DeepSeek_v4_for_VisualStudio.Services
 
                 return new DeepSeekOcrResult
                 {
-                    Text = builder.ToString().Trim(),
+                    Text = hasRecognizedText ? builder.ToString().Trim() : string.Empty,
                     PageCount = pageCount > 0 ? pageCount : 0,
                 };
             }

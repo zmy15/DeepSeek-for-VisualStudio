@@ -93,6 +93,50 @@ public class DeepSeekOcrClientTests
     }
 
     [Fact]
+    public void ParseResponseResult_PreservesBlankPageBoundaries()
+    {
+        const string responseJson =
+            """
+            {
+              "page_count": 3,
+              "pages": [
+                {"index":0,"text":"first","finish_reason":"stop"},
+                {"index":1,"text":"","finish_reason":"stop"},
+                {"index":2,"text":"third","finish_reason":"stop"}
+              ]
+            }
+            """;
+
+        DeepSeekOcrResult? result = DeepSeekOcrClient.ParseResponseResult(responseJson);
+
+        result.Should().NotBeNull();
+        result!.Text.Should().Contain("Page 1/3");
+        result.Text.Should().Contain("Page 2/3");
+        result.Text.Should().Contain("Page 3/3");
+    }
+
+    [Fact]
+    public void ParseResponseResult_AllBlankPagesReturnsEmptyTextButKeepsBillingCount()
+    {
+        const string responseJson =
+            """
+            {
+              "page_count": 2,
+              "pages": [
+                {"index":0,"text":"","finish_reason":"stop"},
+                {"index":1,"text":"  ","finish_reason":"stop"}
+              ]
+            }
+            """;
+
+        DeepSeekOcrResult? result = DeepSeekOcrClient.ParseResponseResult(responseJson);
+
+        result.Should().NotBeNull();
+        result!.Text.Should().BeEmpty();
+        result.PageCount.Should().Be(2);
+    }
+
+    [Fact]
     public void OfficialOcrBilling_UsesSuccessfulPageCountAndDualCurrencyRates()
     {
         try

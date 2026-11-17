@@ -389,7 +389,11 @@ namespace DeepSeek_v4_for_VisualStudio.Services
         {
             var snapshot = new Dictionary<string, string>(StringComparer.OrdinalIgnoreCase);
             foreach (var kvp in _fileReadCache)
+            {
+                if (kvp.Key.StartsWith("paged|", StringComparison.OrdinalIgnoreCase))
+                    continue;
                 snapshot[kvp.Key] = kvp.Value.FullContent;
+            }
             return snapshot;
         }
 
@@ -422,6 +426,7 @@ namespace DeepSeek_v4_for_VisualStudio.Services
         public void InvalidateFileReadCache(string filePath)
         {
             _fileReadCache.TryRemove(filePath, out _);
+            _fileReadCache.TryRemove("paged|" + filePath, out _);
         }
 
         /// <summary>
@@ -440,7 +445,10 @@ namespace DeepSeek_v4_for_VisualStudio.Services
         public void InvalidateFileReadCache(IEnumerable<string> filePaths)
         {
             foreach (var path in filePaths)
+            {
                 _fileReadCache.TryRemove(path, out _);
+                _fileReadCache.TryRemove("paged|" + path, out _);
+            }
         }
 
         #endregion

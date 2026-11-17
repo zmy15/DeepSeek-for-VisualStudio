@@ -22,6 +22,9 @@ namespace DeepSeek_v4_for_VisualStudio.Services.BuiltInTools
         /// <summary>上次读取时的 API 请求轮次号（0 表示未在工具循环中读取）</summary>
         public int LastReadRound;
 
+        /// <summary>分页文档缓存对应的源文件最后写入时间（UTC ticks）。</summary>
+        public long SourceLastWriteUtcTicks;
+
         /// <summary>
         /// 判断给定行范围是否已被已有范围完全覆盖。
         /// </summary>

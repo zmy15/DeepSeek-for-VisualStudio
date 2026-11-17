@@ -7,6 +7,7 @@ using System.IO;
 using System.Linq;
 using System.Text;
 using System.Text.Json;
+using System.Text.RegularExpressions;
 using System.Threading.Tasks;
 
 namespace DeepSeek_v4_for_VisualStudio.Services.BuiltInTools
@@ -76,6 +77,12 @@ namespace DeepSeek_v4_for_VisualStudio.Services.BuiltInTools
         /// <summary>小文件快速通道：字节阈值</summary>
         public const int SmallFileBytesThreshold = 16 * 1024;
 
+        /// <summary>分页文档默认单次读取页数。</summary>
+        public const int DefaultMaxPages = 50;
+
+        /// <summary>显式页范围单次读取硬上限。</summary>
+        public const int HardMaxPages = 200;
+
         public ReadFileTool(ConcurrentDictionary<string, FileReadCacheEntry> fileReadCache)
         {
             _fileReadCache = fileReadCache ?? throw new ArgumentNullException(nameof(fileReadCache));
@@ -98,6 +105,19 @@ namespace DeepSeek_v4_for_VisualStudio.Services.BuiltInTools
                         properties = new
                         {
                             filePath = new { type = "string", description = LocalizationService.Instance["tool.readFile.param.filePath"] },
+                            startPage = new { type = "integer", description = LocalizationService.Instance["tool.readFile.param.startPage"] },
+                            endPage = new
+                            {
+                                type = "integer",
+                                description = LocalizationService.Instance.Format(
+                                    "tool.readFile.param.endPage", HardMaxPages),
+                            },
+                            maxPages = new
+                            {
+                                type = "integer",
+                                description = LocalizationService.Instance.Format(
+                                    "tool.readFile.param.maxPages", DefaultMaxPages, HardMaxPages),
+                            },
                             startLine = new { type = "integer", description = LocalizationService.Instance["tool.readFile.param.startLine"] },
                             endLine = new { type = "integer", description = LocalizationService.Instance["tool.readFile.param.endLine"] + $" (clamped to startLine+{HardMaxLines} max)" },
                             maxLines = new { type = "integer", description = LocalizationService.Instance["tool.readFile.param.maxLines"] ?? $"Max lines to return (default {DefaultMaxLines}, max {HardMaxLines})" }
@@ -111,9 +131,15 @@ namespace DeepSeek_v4_for_VisualStudio.Services.BuiltInTools
         public override string GetDisplayText(Dictionary<string, JsonElement> args)
         {
             string filePath = GetStringArg(args, "filePath");
+            int sPage = GetIntArgAlias(args, "startPage", "start_page", 0);
+            int ePage = GetIntArgAlias(args, "endPage", "end_page", 0);
             int sLine = GetIntArg(args, "startLine", 0);
             int eLine = GetIntArg(args, "endLine", 0);
             string fileName = string.IsNullOrEmpty(filePath) ? "?" : Path.GetFileName(filePath);
+            if (sPage > 0 && ePage > 0 && ePage >= sPage)
+                return LocalizationService.Instance.Format("tool.readFile.displayTextPageRange", fileName, sPage, ePage);
+            if (sPage > 0)
+                return LocalizationService.Instance.Format("tool.readFile.displayTextPageFrom", fileName, sPage);
             if (sLine > 0 && eLine > 0 && eLine > sLine)
                 return LocalizationService.Instance.Format("tool.readFile.displayTextRange", fileName, sLine, eLine);
             else if (sLine > 0)
@@ -133,6 +159,13 @@ namespace DeepSeek_v4_for_VisualStudio.Services.BuiltInTools
 
             var readLines = toolResult.Split('\n');
             string firstLine = readLines.Length > 0 ? readLines[0].Trim() : "";
+            var pageCountMatch = Regex.Match(
+                firstLine, @"total_pages=""(\d+)""",
+                RegexOptions.IgnoreCase);
+            if (pageCountMatch.Success)
+                return LocalizationService.Instance.Format(
+                    "tool.readFile.readCompletePages",
+                    pageCountMatch.Groups[1].Value);
             var lineCountMatch = System.Text.RegularExpressions.Regex.Match(
                 firstLine, @"(?:共|total|总计)\s*(\d+)\s*(?:行|lines)",
                 System.Text.RegularExpressions.RegexOptions.IgnoreCase);
@@ -147,14 +180,35 @@ namespace DeepSeek_v4_for_VisualStudio.Services.BuiltInTools
             if (string.IsNullOrEmpty(filePath))
                 return LocalizationService.Instance["tool.readFile.missingParam"];
 
+            int reqStartPage = Math.Max(1, GetIntArgAlias(args, "startPage", "start_page", 1));
+            int requestedEndPage = GetIntArgAlias(args, "endPage", "end_page", int.MaxValue);
+            int requestedMaxPages = GetIntArgAlias(args, "maxPages", "max_pages", DefaultMaxPages);
             int reqStartLine = GetIntArg(args, "startLine", 1);
             int reqEndLine = GetIntArg(args, "endLine", int.MaxValue);
             bool cacheable = !RequiresStructuredParsing(filePath);
+            int visionMaxPages = requestedEndPage == int.MaxValue
+                ? requestedMaxPages
+                : requestedEndPage - reqStartPage + 1;
+            visionMaxPages = Math.Max(1, Math.Min(visionMaxPages, HardMaxPages));
+
+            // ── PDF 视觉直传：逐页渲染后交给视觉模型。 ──
+            if (CanUseVisionPdfPassthrough(filePath))
+            {
+                string? pdfResult = await BuildVisionPdfResultAsync(
+                    filePath,
+                    reqStartPage,
+                    visionMaxPages);
+                if (!string.IsNullOrWhiteSpace(pdfResult))
+                    return pdfResult;
+            }
 
             // ── PowerPoint 视觉直传：本地导出幻灯片 PNG，交给视觉模型。 ──
             if (CanUseVisionPresentationPassthrough(filePath))
             {
-                string? presentationResult = await BuildVisionPresentationResultAsync(filePath);
+                string? presentationResult = await BuildVisionPresentationResultAsync(
+                    filePath,
+                    reqStartPage,
+                    visionMaxPages);
                 if (!string.IsNullOrWhiteSpace(presentationResult))
                     return presentationResult;
             }
@@ -319,8 +373,44 @@ namespace DeepSeek_v4_for_VisualStudio.Services.BuiltInTools
 
             try
             {
-                // 读取完整文件内容用于缓存
-                string fullContent = await FileParserService.ReadFileContentForToolAsync(filePath);
+                bool isPagedDocument = IsPagedDocument(filePath);
+                string pagedCacheKey = "paged|" + filePath;
+                long sourceLastWriteTicks = File.GetLastWriteTimeUtc(filePath).Ticks;
+                string fullContent;
+
+                if (isPagedDocument
+                    && _fileReadCache.TryGetValue(pagedCacheKey, out FileReadCacheEntry pagedCache)
+                    && pagedCache.SourceLastWriteUtcTicks == sourceLastWriteTicks)
+                {
+                    fullContent = pagedCache.FullContent;
+                }
+                else
+                {
+                    // 读取完整文件内容用于缓存
+                    fullContent = await FileParserService.ReadFileContentForToolAsync(filePath);
+                    if (isPagedDocument)
+                    {
+                        _fileReadCache[pagedCacheKey] = new FileReadCacheEntry
+                        {
+                            FullContent = fullContent,
+                            ReadRanges = new List<(int, int)>(),
+                            LastReadRound = CurrentRound,
+                            SourceLastWriteUtcTicks = sourceLastWriteTicks,
+                        };
+                    }
+                }
+
+                if (isPagedDocument)
+                {
+                    ActiveFileTracker?.ObserveRead(filePath, Name, CurrentRound);
+                    return BuildPagedDocumentResult(
+                        filePath,
+                        fullContent,
+                        reqStartPage,
+                        requestedEndPage,
+                        requestedMaxPages);
+                }
+
                 int totalLines = fullContent.Count(c => c == '\n') + 1;
                 int totalBytes = Encoding.UTF8.GetByteCount(fullContent);
 
@@ -484,23 +574,103 @@ namespace DeepSeek_v4_for_VisualStudio.Services.BuiltInTools
                 && PresentationRenderService.IsPresentationFile(filePath);
         }
 
-        private static async Task<string?> BuildVisionPresentationResultAsync(string filePath)
+        private bool CanUseVisionPdfPassthrough(string filePath)
         {
-            var parts = await PresentationRenderService.BuildPresentationVisionPartsAsync(filePath);
-            if (parts is not { Count: > 0 })
+            return IsVisionModel()
+                && !string.IsNullOrWhiteSpace(filePath)
+                && File.Exists(filePath)
+                && string.Equals(Path.GetExtension(filePath), ".pdf", StringComparison.OrdinalIgnoreCase);
+        }
+
+        private static async Task<string?> BuildVisionPdfResultAsync(
+            string filePath,
+            int startPage,
+            int maxPages)
+        {
+            try
+            {
+                RenderedDocumentPageBatch batch =
+                    await PdfRenderService.RenderPdfPageBatchToPngAsync(
+                        filePath,
+                        startPage: startPage,
+                        maxPages: maxPages);
+                return BuildVisionDocumentResult(
+                    filePath,
+                    "pdf",
+                    batch);
+            }
+            catch (Exception ex)
+            {
+                Logger.Warn(
+                    $"[Vision] PDF render failed, fallback to text/OCR: {Path.GetFileName(filePath)} - {ex.Message}");
+                return null;
+            }
+        }
+
+        private static async Task<string?> BuildVisionPresentationResultAsync(
+            string filePath,
+            int startPage,
+            int maxPages)
+        {
+            try
+            {
+                RenderedDocumentPageBatch batch =
+                    await PresentationRenderService.RenderPresentationPageBatchToPngAsync(
+                        filePath,
+                        startPage: startPage,
+                        maxPages: maxPages);
+                return BuildVisionDocumentResult(
+                    filePath,
+                    "powerpoint",
+                    batch);
+            }
+            catch (Exception ex)
+            {
+                Logger.Warn(
+                    $"[Vision] PowerPoint render failed, fallback to text/OCR: {Path.GetFileName(filePath)} - {ex.Message}");
+                return null;
+            }
+        }
+
+        internal static string? BuildVisionDocumentResult(
+            string filePath,
+            string kind,
+            RenderedDocumentPageBatch batch)
+        {
+            if (batch.TotalPages <= 0 && batch.Pages.Count == 0)
                 return null;
 
             var builder = new StringBuilder();
-            builder.AppendLine(
-                $"<file path=\"{filePath}\" kind=\"powerpoint\" size_bytes=\"{new FileInfo(filePath).Length}\" vision_passthrough=\"true\">");
-            builder.AppendLine(VisionImageBlockStart);
-            foreach (var part in parts)
+            if (batch.StartPage > batch.TotalPages)
             {
-                string? uri = part.ImageUrl?.Url;
-                if (!string.IsNullOrWhiteSpace(uri))
-                    builder.AppendLine(uri);
+                builder.AppendLine(
+                    $"<file path=\"{filePath}\" kind=\"{kind}\" total_pages=\"{batch.TotalPages}\" shown_pages=\"none\" truncated=\"false\" read_mode=\"pages\" vision_passthrough=\"true\">");
+                builder.AppendLine(
+                    $"[NO CONTENT] start_page {batch.StartPage} is beyond total_pages {batch.TotalPages}.");
+                builder.Append("</file>");
+                return builder.ToString();
+            }
+
+            if (batch.Pages.Count == 0)
+                return null;
+
+            int shownEndPage = batch.ShownEndPage;
+            bool truncated = shownEndPage < batch.TotalPages;
+            builder.AppendLine(
+                $"<file path=\"{filePath}\" kind=\"{kind}\" size_bytes=\"{new FileInfo(filePath).Length}\" total_pages=\"{batch.TotalPages}\" shown_pages=\"{batch.StartPage}-{shownEndPage}\" truncated=\"{truncated.ToString().ToLowerInvariant()}\" read_mode=\"pages\"{(truncated ? $" next_start_page=\"{shownEndPage + 1}\"" : string.Empty)} vision_passthrough=\"true\">");
+            builder.AppendLine(VisionImageBlockStart);
+            foreach (byte[] png in batch.Pages)
+            {
+                builder.Append("data:image/png;base64,");
+                builder.AppendLine(Convert.ToBase64String(png));
             }
             builder.AppendLine(VisionImageBlockEnd);
+            if (truncated)
+            {
+                builder.AppendLine(
+                    $"[PAGED] Showing pages {batch.StartPage}-{shownEndPage} of {batch.TotalPages}. " +
+                    $"To continue, call read_file with path=\"{filePath}\" start_page={shownEndPage + 1}.");
+            }
             builder.AppendLine("</file>");
             return builder.ToString();
         }
@@ -554,6 +724,97 @@ namespace DeepSeek_v4_for_VisualStudio.Services.BuiltInTools
             return (cleanText, uris);
         }
 
+        /// <summary>PDF 与 PowerPoint 使用页范围读取，不进入行分页。</summary>
+        public static bool IsPagedDocument(string filePath)
+        {
+            string ext = Path.GetExtension(filePath).ToLowerInvariant();
+            return ext == ".pdf" || ext == ".ppt" || ext == ".pptx";
+        }
+
+        /// <summary>
+        /// 解析 OCR/文本提取结果中的页标记，返回按页拆分的文本。
+        /// 支持 Page/Slide 与中文“第 N/M 页”格式。
+        /// </summary>
+        internal static List<string> SplitPagedDocumentContent(string content)
+        {
+            if (string.IsNullOrWhiteSpace(content))
+                return new List<string> { string.Empty };
+
+            MatchCollection markers = Regex.Matches(
+                content,
+                @"^---\s*(?:(?:Page|Slide)\s+\d+(?:\s*/\s*\d+)?|第\s*\d+(?:\s*/\s*\d+)?\s*页)\s*---\s*$",
+                RegexOptions.Multiline | RegexOptions.IgnoreCase);
+            if (markers.Count == 0)
+                return new List<string> { content.Trim() };
+
+            var pages = new List<string>(markers.Count);
+            for (int index = 0; index < markers.Count; index++)
+            {
+                int start = markers[index].Index;
+                int end = index + 1 < markers.Count
+                    ? markers[index + 1].Index
+                    : content.Length;
+                pages.Add(content.Substring(start, end - start).Trim());
+            }
+
+            string preface = content.Substring(0, markers[0].Index).Trim();
+            if (!string.IsNullOrWhiteSpace(preface))
+                pages[0] = preface + "\n" + pages[0];
+            return pages;
+        }
+
+        internal static string BuildPagedDocumentResult(
+            string filePath,
+            string fullContent,
+            int startPage,
+            int requestedEndPage,
+            int requestedMaxPages)
+        {
+            List<string> pages = SplitPagedDocumentContent(fullContent);
+            int totalPages = pages.Count;
+            int start = Math.Max(1, Math.Min(startPage, totalPages));
+            int maxPages = requestedEndPage == int.MaxValue
+                ? Math.Max(1, Math.Min(requestedMaxPages, HardMaxPages))
+                : HardMaxPages;
+            int end = requestedEndPage == int.MaxValue
+                ? Math.Min(totalPages, start + maxPages - 1)
+                : Math.Min(totalPages, Math.Min(requestedEndPage, start + maxPages - 1));
+            end = Math.Max(start, end);
+
+            var builder = new StringBuilder();
+            if (startPage > totalPages)
+            {
+                builder.AppendLine(
+                    $"<file path=\"{filePath}\" total_pages=\"{totalPages}\" shown_pages=\"none\" truncated=\"false\" read_mode=\"pages\">");
+                builder.AppendLine(
+                    $"[NO CONTENT] start_page {startPage} is beyond total_pages {totalPages}.");
+                builder.Append("</file>");
+                return builder.ToString();
+            }
+
+            bool truncated = end < totalPages;
+            builder.Append(
+                $"<file path=\"{filePath}\" total_pages=\"{totalPages}\" shown_pages=\"{start}-{end}\" truncated=\"{truncated.ToString().ToLowerInvariant()}\" read_mode=\"pages\"");
+            if (truncated)
+                builder.Append($" next_start_page=\"{end + 1}\"");
+            builder.AppendLine(">");
+
+            for (int page = start; page <= end; page++)
+            {
+                builder.AppendLine(pages[page - 1]);
+                builder.AppendLine();
+            }
+
+            if (truncated)
+            {
+                builder.Append(
+                    $"[PAGED] Showing pages {start}-{end} of {totalPages}. " +
+                    $"To continue, call read_file with path=\"{filePath}\" start_page={end + 1}.");
+            }
+            builder.Append("</file>");
+            return builder.ToString();
+        }
+
         private static string? TryBuildImageDataUri(string filePath)
         {
             try
@@ -605,6 +866,17 @@ namespace DeepSeek_v4_for_VisualStudio.Services.BuiltInTools
                 sb.AppendLine($"{i +1,6}│ {line}");
             }
             return sb.ToString().TrimEnd();
+        }
+
+        private static int GetIntArgAlias(
+            Dictionary<string, JsonElement> args,
+            string camelCaseKey,
+            string snakeCaseKey,
+            int defaultValue)
+        {
+            int value = GetIntArg(args, camelCaseKey, int.MinValue);
+            if (value != int.MinValue) return value;
+            return GetIntArg(args, snakeCaseKey, defaultValue);
         }
 
         /// <summary>

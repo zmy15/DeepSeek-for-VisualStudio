@@ -17,6 +17,19 @@ public class PresentationRenderServiceTests
             FileParserService.IsSupportedFormat(path).Should().BeTrue();
     }
 
+    [Theory]
+    [InlineData("slides.ppt", true)]
+    [InlineData("slides.pptx", true)]
+    [InlineData("notes.docx", true)]
+    [InlineData("image.png", true)]
+    [InlineData("source.cs", false)]
+    public void RequiresDocumentParsing_RoutesPowerPointThroughParser(
+        string path,
+        bool expected)
+    {
+        FileParserService.RequiresDocumentParsing(path).Should().Be(expected);
+    }
+
     [Fact]
     public void TryExtractPptxText_ExtractsSlidesInNumericOrder()
     {
