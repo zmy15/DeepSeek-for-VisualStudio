@@ -92,7 +92,9 @@ body:
     id: logs
     attributes:
       label: 日志或错误信息 / Logs or Error Message
-      description: 请移除 API Key、解决方案路径、公司代码等敏感信息。 / Remove sensitive information such as API keys, solution paths, and proprietary code.
+      description: |-
+        日志路径：`%LocalAppData%\DeepSeekVS\extension-date.log`（`date` 为日志日期，例如 `extension-2026-11-17.log`）。请移除 API Key、解决方案路径、公司代码等敏感信息。
+        Log path: `%LocalAppData%\DeepSeekVS\extension-date.log` (`date` is the log date, for example `extension-2026-11-17.log`). Remove sensitive information such as API keys, solution paths, and proprietary code.
       render: text
 
   - type: textarea
