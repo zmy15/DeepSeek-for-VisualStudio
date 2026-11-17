@@ -70,10 +70,13 @@ def scrub_file_parser():
 def scrub_settings_surfaces():
     options = Path("Settings/DeepSeekOptionsPage.cs")
     text = options.read_text(**UTF8)
-    text = text.replace(
-        'new(new[] { "Windows Built-in", "PaddleOCR-Sharp" });',
-        'new(new[] { "Windows Built-in" });',
+    text, count = re.subn(
+        r'"Windows Built-in"\s*,\s*"PaddleOCR-Sharp"',
+        '"Windows Built-in"',
+        text,
     )
+    if count != 1:
+        raise RuntimeError("Unexpected classic OCR engine list layout")
     text = text.replace(
         "PaddleOCR-Sharp 仅在 x64 完整版中提供。",
         "PaddleOCR-Sharp 已从此 No-Local-OCR 变体移除。",
@@ -99,14 +102,12 @@ def scrub_settings_surfaces():
     initialization = Path("View/DeepSeekChatControl.Initialization.cs")
     text = initialization.read_text(**UTF8)
     text, count = re.subn(
-        r'OcrService\.CurrentEngine = _options\.OcrEngine switch\s*\{\s*'
-        r'"PaddleOCR-Sharp" => OcrEngineType\.PaddleOCR,\s*'
-        r'_ => OcrEngineType\.WindowsBuiltIn,\s*\};',
-        'OcrService.CurrentEngine = OcrEngineType.WindowsBuiltIn;',
+        r'\s*"PaddleOCR-Sharp" => OcrEngineType\.PaddleOCR,',
+        "",
         text,
     )
     if count != 1:
-        raise RuntimeError("Unexpected OCR initialization mapping layout")
+        raise RuntimeError("Unexpected OCR initialization PaddleOCR mapping")
     text = re.sub(
         r'if \(!ocrReady && _options\?\.OcrEngine == "PaddleOCR-Sharp"\).*?else if \(!ocrReady\)',
         "if (!ocrReady)",
