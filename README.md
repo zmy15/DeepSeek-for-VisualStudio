@@ -403,7 +403,7 @@ settings UI, kept in two-way sync.
 | **Model** | Selected Model, Enable Deep Thinking, Reasoning Effort (`low`/`high`/`max`), LLM Timeout |
 | **Web & vision** | Enable Web Search, Search Provider, Web Fetch Mode, Baidu/Bing keys, OCR Engine |
 | **Editing** | Show Diff Markers, Enable Autocomplete, Autocomplete Delay, Continue After Accept |
-| **Context** | Token Budget (%), Auto Compression, Compression Threshold, Preserve Recent Turns, RAG, RAG Top K, Context Stats, IDE Context Injection |
+| **Context** | Token Budget (%), Auto Compression, Compression Threshold, Preserve Recent Turns, Context Stats, IDE Context Injection |
 | **Agent & safety** | Approval Mode, Max Tool Call Rounds, Max Repeated Same Call, Max Consecutive Errors, wall-clock/token/tool-call/depth budgets, No-Progress Rounds, Auto Build, Auto Skill Routing, Append Message Mode |
 | **Interface** | Language, Theme Mode, Input Box Height, Bottom Area Scale, System Prompt, Restore Defaults, API Debug Dump |
 
