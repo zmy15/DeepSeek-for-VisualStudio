@@ -197,6 +197,10 @@
     <Compile Remove="DeepSeek_v4_for_VisualStudio.Tests\**\*.cs" />
     <None Remove="DeepSeek_v4_for_VisualStudio.Tests\**\*" />
   </ItemGroup>
+  <!-- 排除测试运行生成的工作区副本，避免其中的源文件被再次编译 -->
+  <ItemGroup>
+    <Compile Remove="TestResults\**\*.cs" />
+  </ItemGroup>
   <!-- 允许测试项目访问 internal 类型 -->
   <ItemGroup>
     <AssemblyAttribute Include="System.Runtime.CompilerServices.InternalsVisibleTo">

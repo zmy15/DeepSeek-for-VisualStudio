@@ -12,6 +12,7 @@ public class BuildAgentTests
         agent.Definition.AllowedTools.Should().Contain("file_search");
         agent.Definition.AllowedTools.Should().Contain("grep_search");
         agent.Definition.AllowedTools.Should().Contain("list_dir");
+        agent.Definition.AllowedTools.Should().Contain("get_current_time");
     }
 
     [Fact]

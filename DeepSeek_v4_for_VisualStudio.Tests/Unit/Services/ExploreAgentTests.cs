@@ -104,6 +104,7 @@ public class ExploreAgentTests
         ExploreAgent.DefaultReadTools.Should().Contain("symbol_search");
         ExploreAgent.DefaultReadTools.Should().Contain("run_in_terminal");
         ExploreAgent.DefaultReadTools.Should().Contain("get_terminal_output");
+        ExploreAgent.DefaultReadTools.Should().Contain("get_current_time");
         ExploreAgent.DefaultReadTools.Should().NotContain("search");
         ExploreAgent.DefaultReadTools.Should().NotContain("get_changed_files");
         ExploreAgent.DefaultReadTools.Should().NotContain("github_repo");

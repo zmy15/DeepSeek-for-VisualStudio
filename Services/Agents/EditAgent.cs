@@ -113,6 +113,7 @@ namespace DeepSeek_v4_for_VisualStudio.Services.Agents
             "get_file_symbols",
             "list_dir",
             "get_errors",
+            "get_current_time",
             "runSubagent",
             // 终端、构建与 Git
             "build_solution",

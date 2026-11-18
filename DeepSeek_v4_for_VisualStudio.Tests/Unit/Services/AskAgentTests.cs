@@ -167,6 +167,7 @@ public class AskAgentTests
         AskAgent.AskTools.Should().Contain("read_file");
         AskAgent.AskTools.Should().Contain("list_dir");
         AskAgent.AskTools.Should().Contain("get_errors");
+        AskAgent.AskTools.Should().Contain("get_current_time");
     }
 
     [Fact]

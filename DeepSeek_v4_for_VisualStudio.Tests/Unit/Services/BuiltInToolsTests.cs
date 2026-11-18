@@ -47,6 +47,12 @@ public class BuiltInToolsTests
     }
 
     [Fact]
+    public void GetCurrentTimeTool_HasCorrectName()
+    {
+        new GetCurrentTimeTool().Name.Should().Be("get_current_time");
+    }
+
+    [Fact]
     public void FetchWebpageTool_HasCorrectName()
     {
         new FetchWebpageTool().Name.Should().Be("fetch_webpage");
@@ -361,6 +367,7 @@ public class BuiltInToolsTests
             new GrepSearchTool(),
             new FileSymbolsTool(),
             new GetErrorsTool(),
+            new GetCurrentTimeTool(),
             new FetchWebpageTool(),
             new CaptureWindowTool(),
             new BuildSolutionTool(),

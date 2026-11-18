@@ -489,7 +489,7 @@ public class BaseAgentTests
 
         var expected = new HashSet<string>(StringComparer.OrdinalIgnoreCase)
         {
-            "list_dir", "read_file", "file_search", "grep_search", "symbol_search", "get_file_symbols", "get_errors",
+            "list_dir", "read_file", "file_search", "grep_search", "symbol_search", "get_file_symbols", "get_errors", "get_current_time",
             "fetch_webpage", "web_search", "capture_window", "capture_webpage", "build_solution",
             "run_tests",
             "replace_string_in_file", "multi_replace_string_in_file",

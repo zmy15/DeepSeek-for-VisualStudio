@@ -515,6 +515,7 @@ public class EditAgentTests
         tools.Should().Contain("list_dir");
         tools.Should().Contain("run_in_terminal");
         tools.Should().Contain("get_terminal_output");
+        tools.Should().Contain("get_current_time");
         tools.Should().Contain("VisualStudio_askQuestions");
         tools.Should().Contain("build_solution");
         tools.Should().Contain("create_file");

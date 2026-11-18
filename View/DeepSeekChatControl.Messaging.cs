@@ -60,8 +60,6 @@ namespace DeepSeek_v4_for_VisualStudio.View
                 : InputTextBox.Text?.Trim();
             // ── 安全净化：防止用户通过 <|tool_calls|> 等标记注入工具调用 ──
             userText = StringExtensions.SanitizeUserInput(userText ?? string.Empty);
-            // ── 时间词语解析：将"今天""本周"等替换为具体日期 ──
-            userText = ResolveTimeExpressions(userText ?? string.Empty);
             if (string.IsNullOrWhiteSpace(userText)) userText = string.Empty;
             bool hasAttachments = !isQueuedAppend && _attachedFilePaths.Count > 0;
 
@@ -1140,56 +1138,6 @@ namespace DeepSeek_v4_for_VisualStudio.View
         #endregion
 
         #region Utility Helpers
-
-        /// <summary>
-        /// 将用户输入中的时间词语替换为具体日期。
-        /// </summary>
-        private static string ResolveTimeExpressions(string query)
-        {
-            if (string.IsNullOrWhiteSpace(query)) return query;
-
-            var now = DateTime.Now;
-            string today = now.ToString("yyyy-MM-dd");
-            string yesterday = now.AddDays(-1).ToString("yyyy-MM-dd");
-            string tomorrow = now.AddDays(1).ToString("yyyy-MM-dd");
-            string thisWeekStart = now.AddDays(-(int)now.DayOfWeek + 1).ToString("yyyy-MM-dd");
-            string thisWeekEnd = now.AddDays(7 - (int)now.DayOfWeek).ToString("yyyy-MM-dd");
-            string thisMonth = now.ToString("yyyy年M月");
-            string lastMonth = now.AddMonths(-1).ToString("yyyy年M月");
-            string thisYear = now.ToString("yyyy年");
-
-            var result = query;
-
-            var replacements = new Dictionary<string, string>
-            {
-                ["今天"] = today,
-                ["今日"] = today,
-                ["昨天"] = yesterday,
-                ["昨日"] = yesterday,
-                ["明天"] = tomorrow,
-                ["明日"] = tomorrow,
-                ["本周"] = $"{thisWeekStart} 至 {thisWeekEnd}",
-                ["这周"] = $"{thisWeekStart} 至 {thisWeekEnd}",
-                ["这个月"] = thisMonth,
-                ["本月"] = thisMonth,
-                ["上个月"] = lastMonth,
-                ["上月"] = lastMonth,
-                ["今年"] = thisYear,
-                ["当前日期"] = today,
-                ["最近一周"] = $"最近一周({thisWeekStart} 至 {thisWeekEnd})",
-                ["最近一个月"] = $"最近一个月({lastMonth} 至 {thisMonth})",
-                ["最近几天"] = $"最近几天({yesterday} 至 {today})",
-                ["前几天"] = $"前几天({yesterday} 至 {today})",
-            };
-
-            foreach (var kvp in replacements)
-                result = result.Replace(kvp.Key, kvp.Value);
-
-            if (result != query)
-                Logger.Info($"时间词语解析: \"{query}\" → \"{result}\"");
-
-            return result;
-        }
 
         /// <summary>
         /// 预处理 OCR 工具参数：AI 可能传文件名而非 base64，自动转换。

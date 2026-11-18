@@ -104,7 +104,7 @@
 语法高亮、KaTeX 数学公式、Mermaid 图表（可导出 SVG）；多会话管理，标题由 AI 自动生成；
 消息重试/编辑/复制与版本、分支导航；视觉模型下可直接查看图片。
 
-**Agent 能力** —— 五种专职 Agent（Ask / Explore / Plan / Edit / Build）彼此移交任务；28 个内置工具
+**Agent 能力** —— 五种专职 Agent（Ask / Explore / Plan / Edit / Build）彼此移交任务；29 个内置工具
 外加任意数量的 MCP 工具；自主工具循环，可读取、检索、编辑、构建、测试并持续迭代；最多 3 个 Explore
 子代理并行；持久化记忆；可复用技能。
 
@@ -242,11 +242,11 @@ Ask Agent 也可以在多选题不足以决策时，弹出结构化提问卡片�
 
 ## 内置工具
 
-共 28 个内置工具。`🔒` 标记仅 Edit/Build Agent 可用的工具 —— 只读 Agent 是在运行时被拦截，而非仅靠提示词约束。
+共 29 个内置工具。`🔒` 标记仅 Edit/Build Agent 可用的工具 —— 只读 Agent 是在运行时被拦截，而非仅靠提示词约束。
 
 | 分组 | 工具 |
 |---|---|
-| **读取与探索** | `list_dir`、`read_file`、`file_search`、`grep_search`、`symbol_search`、`get_file_symbols`、`get_errors` |
+| **读取与探索** | `list_dir`、`read_file`、`file_search`、`grep_search`、`symbol_search`、`get_file_symbols`、`get_errors`、`get_current_time` |
 | **写入与编辑** 🔒 | `replace_string_in_file`、`multi_replace_string_in_file`、`create_file`、`delete_file`、`apply_patch`、`create_directory` |
 | **构建、测试、终端** | `build_solution`、`run_tests`、`run_in_terminal`、`get_terminal_output` |
 | **网页与视觉** | `web_search`、`fetch_webpage`、`capture_window` 🔍、`capture_webpage` 🔍 |

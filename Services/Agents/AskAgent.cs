@@ -45,6 +45,7 @@ namespace DeepSeek_v4_for_VisualStudio.Services.Agents
             "read_file",          // 读取文件
             "list_dir",           // 浏览目录结构
             "get_errors",         // 获取编译错误
+            "get_current_time",   // 获取当前日期、时间与时区
             // ── 终端（只读：运行时禁止修改文件）──
             "run_in_terminal",    // 执行终端命令（仅放行不修改文件的命令）
             "get_terminal_output",// 获取异步终端输出

@@ -47,6 +47,7 @@ namespace DeepSeek_v4_for_VisualStudio.Services.Agents
             "capture_webpage",  // 离屏渲染 URL 截图（视觉模型直接查看）
             "list_dir",         // 列出目录内容
             "get_errors",       // 获取编译错误
+            "get_current_time", // 获取当前日期、时间与时区
             "fetch_webpage",    // 获取网页内容
             "web_search",       // 联网搜索（需在设置中开启）
             "memory",           // 记忆管理
