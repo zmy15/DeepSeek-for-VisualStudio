@@ -126,6 +126,7 @@ public class AskAgentTests
         // Ask agent has built-in search/read tools for self-service code lookup
         agent.Definition.AllowedTools.Should().Contain("symbol_search");
         agent.Definition.AllowedTools.Should().Contain("get_file_symbols");
+        agent.Definition.AllowedTools.Should().Contain("get_file_comments");
         agent.Definition.AllowedTools.Should().Contain("file_search");
         agent.Definition.AllowedTools.Should().Contain("grep_search");
         agent.Definition.AllowedTools.Should().Contain("read_file");
@@ -162,13 +163,13 @@ public class AskAgentTests
         // Ask agent has built-in search/read tools
         AskAgent.AskTools.Should().Contain("symbol_search");
         AskAgent.AskTools.Should().Contain("get_file_symbols");
+        AskAgent.AskTools.Should().Contain("get_file_comments");
         AskAgent.AskTools.Should().Contain("file_search");
         AskAgent.AskTools.Should().Contain("grep_search");
         AskAgent.AskTools.Should().Contain("read_file");
         AskAgent.AskTools.Should().Contain("list_dir");
         AskAgent.AskTools.Should().Contain("get_errors");
         AskAgent.AskTools.Should().Contain("get_current_time");
-        AskAgent.AskTools.Should().NotContain("get_file_comments");
     }
 
     [Fact]
