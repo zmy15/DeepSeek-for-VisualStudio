@@ -101,9 +101,33 @@ namespace DeepSeek_v4_for_VisualStudio.Utils
         /// （无 BOM 的 UTF-16 字节本身是合法 UTF-8——NUL 是合法字节——因此不能只靠「UTF-8 解码失败」发现它。）
         /// </summary>
         /// <param name="filePath">目标文件路径。</param>
-        /// <returns>文件文本内容（BOM 已被剥离）。</returns>
-        /// <exception cref="IOException">文件不存在或无法读取时由底层 IO 抛出（与 File.ReadAllText 一致）。</exception>
+        /// <returns>文件文本内容（BOM 已被剥离）；文件不存在时返回空字符串。</returns>
+        /// <exception cref="IOException">文件存在但无法读取时由底层 IO 抛出。</exception>
         public static string ReadAllText(string filePath)
+        {
+            // 后台读取、项目监听和拖拽处理都可能在 File.Exists 与 open 之间遇到文件被删除。
+            // 缺失文件不应把 FileNotFoundException 逃逸到 VS 调试器，按“无内容可读”处理。
+            if (string.IsNullOrWhiteSpace(filePath) || !File.Exists(filePath))
+                return string.Empty;
+
+            try
+            {
+                return ReadAllTextCore(filePath);
+            }
+            catch (FileNotFoundException)
+            {
+                return string.Empty;
+            }
+            catch (DirectoryNotFoundException)
+            {
+                return string.Empty;
+            }
+        }
+
+        /// <summary>执行编码探测与实际读取；缺失文件异常由调用方统一降级。</summary>
+        /// <param name="filePath">已通过存在性检查的目标文件路径。</param>
+        /// <returns>文件文本内容（BOM 已被剥离）。</returns>
+        private static string ReadAllTextCore(string filePath)
         {
             string? utf8Content = TryReadAllTextAsStrictUtf8(filePath);
 
@@ -172,6 +196,45 @@ namespace DeepSeek_v4_for_VisualStudio.Utils
         /// <exception cref="IOException">文件不存在或无法读取时由底层 IO 抛出。</exception>
         public static Encoding DetectFileEncoding(string filePath)
         {
+            if (TryDetectFileEncoding(filePath, out Encoding? encoding))
+                return encoding!;
+
+            throw new FileNotFoundException($"无法探测文件编码，文件不存在: {filePath}", filePath);
+        }
+
+        /// <summary>
+        /// 安全尝试探测已存在文件的编码。
+        /// 文件在检查与打开之间被删除时返回 false，不向后台调用方抛出未处理异常。
+        /// </summary>
+        /// <param name="filePath">目标文件路径。</param>
+        /// <param name="encoding">探测成功时的编码实例。</param>
+        /// <returns>文件存在且探测成功时返回 true。</returns>
+        public static bool TryDetectFileEncoding(string filePath, out Encoding? encoding)
+        {
+            encoding = null;
+            if (string.IsNullOrWhiteSpace(filePath) || !File.Exists(filePath))
+                return false;
+
+            try
+            {
+                encoding = DetectFileEncodingCore(filePath);
+                return true;
+            }
+            catch (FileNotFoundException)
+            {
+                return false;
+            }
+            catch (DirectoryNotFoundException)
+            {
+                return false;
+            }
+        }
+
+        /// <summary>执行编码探测；文件存在性与缺失异常由安全包装层处理。</summary>
+        /// <param name="filePath">已通过存在性检查的文件路径。</param>
+        /// <returns>探测出的编码。</returns>
+        private static Encoding DetectFileEncodingCore(string filePath)
+        {
             byte[] head = new byte[HeadSampleBytes];
             int read = ReadHead(filePath, head);
 
@@ -218,8 +281,8 @@ namespace DeepSeek_v4_for_VisualStudio.Utils
             try
             {
                 // 1) 已存在文件 → 保持其原有编码
-                if (File.Exists(filePath))
-                    return DetectExistingFileEncoding(filePath);
+                if (TryDetectFileEncoding(filePath, out Encoding? existingEncoding))
+                    return existingEncoding!;
 
                 // 2) 新建文件 → 探测项目内同类文件的编码惯例
                 string? root = !string.IsNullOrEmpty(workspaceRoot)
