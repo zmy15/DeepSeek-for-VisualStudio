@@ -1753,7 +1753,6 @@
 	"agent.log.explorePromptBuilt": "Explore prompt built ({0} chars), workspaceRoot={1}",
 	"agent.log.exploreStarted": "Explore Agent started: \"{0}\"",
 	"agent.log.exploreStartedShort": "Explore Agent started",
-	"agent.log.exploreTrace": "Exploration trace ({0} steps)",
 	"agent.log.fileDeleteConfirm": "File deletion confirmation: {0}  {1}",
 	"agent.log.fileStaged": "Staged to workspace (pending review): {0} (+{1} -{2})",
 	"agent.log.gitOperationApproved": "User approved the git {0} operation",

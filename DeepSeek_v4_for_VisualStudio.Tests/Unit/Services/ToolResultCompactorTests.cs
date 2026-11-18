@@ -46,7 +46,7 @@ public class ToolResultCompactorTests
         // 回归保护：web 工具豁免不应顺带放开其它噪音工具的裁剪。
         string content = new string('y', 50_000);
 
-        var result = _compactor.CompactToolResultForContext("grep_search", content, "deepseek-flash");
+        var result = _compactor.CompactToolResultForContext("grep_search", content, "gpt-4.1");
 
         result.Length.Should().BeLessThan(content.Length);
         result.Should().Contain("内容已截断");
@@ -59,5 +59,50 @@ public class ToolResultCompactorTests
 
         _compactor.CompactToolResultForContext("web_search", shortResult, "deepseek-v4")
             .Should().Be(shortResult);
+    }
+
+    [Fact]
+    public void DeepSeekFlash_IsTreatedAsLargeContextModel()
+    {
+        ToolResultCompactor.IsLargeContextModel("deepseek-flash").Should().BeTrue();
+    }
+
+    [Fact]
+    public void RunSubagent_18KExploreReport_IsPreservedForDeepSeekFlash()
+    {
+        string report = "Explore 汇报\n" + new string('字', 18_000);
+
+        string result = _compactor.CompactToolResultForContext(
+            "runSubagent",
+            report,
+            "deepseek-flash");
+
+        result.Should().Be(report);
+    }
+
+    [Fact]
+    public void RunSubagent_ModerateReport_IsPreservedOnSmallContextModel()
+    {
+        string report = new string('x', 18_000);
+
+        string result = _compactor.CompactToolResultForContext(
+            "runSubagent",
+            report,
+            "gpt-4.1");
+
+        result.Should().Be(report, "runSubagent must not have a tool-level truncation limit");
+    }
+
+    [Fact]
+    public void RunSubagent_OversizedReport_IsPreserved()
+    {
+        string report = new string('z', 100_000);
+
+        string result = _compactor.CompactToolResultForContext(
+            "runSubagent",
+            report,
+            "gpt-4.1");
+
+        result.Should().Be(report);
     }
 }

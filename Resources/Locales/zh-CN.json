@@ -1752,7 +1752,6 @@
 	"agent.log.explorePromptBuilt": "Explore prompt 已构建 ({0} 字符), workspaceRoot={1}",
 	"agent.log.exploreStarted": "Explore Agent 开始执行: \"{0}\"",
 	"agent.log.exploreStartedShort": "Explore Agent 开始执行",
-	"agent.log.exploreTrace": "探索过程（{0} 步）",
 	"agent.log.fileDeleteConfirm": "文件删除确认结果: {0}  {1}",
 	"agent.log.fileStaged": "已暂存到工作区（待确认）: {0} (+{1} -{2})",
 	"agent.log.gitOperationApproved": "用户批准了 git {0} 操作",

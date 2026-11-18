@@ -126,8 +126,6 @@ namespace DeepSeek_v4_for_VisualStudio.Services.Agents
 
                 // ── 使用工具调用循环 ──
                 string thinkingContent = string.Empty;
-                string fullContent = string.Empty;
-                var internalToolCalls = new List<string>();  // 收集内部工具调用，用于展示探索过程
 
                 string aiResponse = await CallAiWithToolLoopAsync(
                     messages,
@@ -140,30 +138,12 @@ namespace DeepSeek_v4_for_VisualStudio.Services.Agents
                     },
                     onContent: (content) =>
                     {
-                        fullContent += content;
                         context.OnContentChunk?.Invoke(content);
                     },
                     onToolCall: (toolSummary) =>
                     {
                         AddLog("TOOL", $"{toolSummary}");
-                        internalToolCalls.Add(toolSummary);
                     });
-
-                // ── 构建探索过程追踪（纯 Markdown blockquote，[explore-trace] 标记供主流程提取）──
-                string explorationTraceMd = string.Empty;
-                if (internalToolCalls.Count > 0)
-                {
-                    var traceBuilder = new StringBuilder();
-                    traceBuilder.AppendLine("[explore-trace]");
-                    traceBuilder.AppendLine($"> {LocalizationService.Instance.Format("agent.log.exploreTrace", internalToolCalls.Count)}");
-                    foreach (var call in internalToolCalls)
-                    {
-                        traceBuilder.AppendLine($"> - {call}");
-                    }
-                    traceBuilder.AppendLine("[/explore-trace]");
-                    traceBuilder.AppendLine();
-                    explorationTraceMd = traceBuilder.ToString();
-                }
 
                 // ── 如果工具调用后有思考内容，通过 ReasoningContent 传递，让 UI 渲染原生思考面板 ──
                 if (!string.IsNullOrEmpty(thinkingContent))
@@ -171,10 +151,9 @@ namespace DeepSeek_v4_for_VisualStudio.Services.Agents
                     result.ReasoningContent = thinkingContent;
                 }
 
-                // ── 最终内容 = 探索追踪 + AI 回答
-                result.Content = string.IsNullOrEmpty(explorationTraceMd)
-                    ? aiResponse
-                    : $"{explorationTraceMd}\n\n{aiResponse}";
+                // 探索过程已通过 AddLog / result.Logs 进入 UI 时间线；
+                // 不再拼进 Content，避免父 Agent 为展示过程额外消耗大量上下文。
+                result.Content = aiResponse;
 
                 result.Logs.AddRange(_logs);
 
