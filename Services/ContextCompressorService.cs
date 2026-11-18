@@ -40,6 +40,8 @@ namespace DeepSeek_v4_for_VisualStudio.Services
         private readonly CompressionConfig _config;
         private readonly List<CompressedTurnSummary> _compressedSummaries = new();
         private readonly ContextSummarizer? _summarizer;
+        private readonly object _summaryLock = new();
+        private string? _frozenCompressedContextText;
 
         /// <summary>已压缩的轮次摘要列表</summary>
         public IReadOnlyList<CompressedTurnSummary> CompressedSummaries => _compressedSummaries;
@@ -66,31 +68,45 @@ namespace DeepSeek_v4_for_VisualStudio.Services
         /// <summary>
         /// 计算压缩后的摘要 Token 总数。
         /// </summary>
-        public int TotalCompressedTokens => _compressedSummaries.Sum(s => s.CompressedTokens);
+        public int TotalCompressedTokens
+        {
+            get
+            {
+                lock (_summaryLock)
+                    return _compressedSummaries.Sum(s => s.CompressedTokens);
+            }
+        }
 
         /// <summary>
         /// 获取所有压缩摘要的合并文本（用于注入到 system 消息）。
         /// </summary>
         public string GetCompressedContextText()
         {
-            if (_compressedSummaries.Count == 0)
-                return string.Empty;
-
-            var sb = new StringBuilder();
-            var L = LocalizationService.Instance;
-            sb.AppendLine(L["compress.historyHeader"]);
-            sb.AppendLine(L["compress.historyIntro"]);
-            sb.AppendLine();
-
-            foreach (var summary in _compressedSummaries.OrderBy(s => s.FromTurn))
+            lock (_summaryLock)
             {
-                sb.AppendLine(string.Format(L["compress.turnSeparator"], summary.FromTurn, summary.ToTurn));
-                sb.AppendLine(summary.Summary);
-                sb.AppendLine();
-            }
+                if (_compressedSummaries.Count == 0)
+                    return string.Empty;
 
-            sb.AppendLine(L["compress.historyFooter"]);
-            return sb.ToString();
+                if (_frozenCompressedContextText != null)
+                    return _frozenCompressedContextText;
+
+                var sb = new StringBuilder();
+                var L = LocalizationService.Instance;
+                sb.AppendLine(L["compress.historyHeader"]);
+                sb.AppendLine(L["compress.historyIntro"]);
+                sb.AppendLine();
+
+                foreach (var summary in _compressedSummaries.OrderBy(s => s.FromTurn))
+                {
+                    sb.AppendLine(string.Format(L["compress.turnSeparator"], summary.FromTurn, summary.ToTurn));
+                    sb.AppendLine(PrepareSummaryForInjection(summary.Summary));
+                    sb.AppendLine();
+                }
+
+                sb.AppendLine(L["compress.historyFooter"]);
+                _frozenCompressedContextText = sb.ToString();
+                return _frozenCompressedContextText;
+            }
         }
 
         /// <summary>
@@ -166,6 +182,11 @@ namespace DeepSeek_v4_for_VisualStudio.Services
                 summary = ExtractLocalSummary(rawText, turnsToCompress);
             }
 
+            // 不启用 response_format；通过固定 Markdown 章节约束模型输出。
+            // 结构不完整时直接回退到本地结构化摘要，绝不把自由格式正文注入 system。
+            string? structuredSummary = NormalizeStructuredSummary(summary);
+            summary = structuredSummary ?? ExtractLocalSummary(rawText, turnsToCompress);
+
             int compressedTokens = ConversationContextManager.EstimateTokens(summary);
 
             var result = new CompressedTurnSummary
@@ -177,7 +198,11 @@ namespace DeepSeek_v4_for_VisualStudio.Services
                 CompressedTokens = compressedTokens,
             };
 
-            _compressedSummaries.Add(result);
+            lock (_summaryLock)
+            {
+                _compressedSummaries.Add(result);
+                _frozenCompressedContextText = null;
+            }
 
             Logger.Info($"[ContextCompressor] 压缩第 {fromTurn}-{toTurn} 轮: " +
                 $"{originalTokens} → {compressedTokens} tokens " +
@@ -191,7 +216,11 @@ namespace DeepSeek_v4_for_VisualStudio.Services
         /// </summary>
         public void Clear()
         {
-            _compressedSummaries.Clear();
+            lock (_summaryLock)
+            {
+                _compressedSummaries.Clear();
+                _frozenCompressedContextText = null;
+            }
         }
 
         /// <summary>
@@ -199,21 +228,25 @@ namespace DeepSeek_v4_for_VisualStudio.Services
         /// </summary>
         public void ReplaceSummaries(IEnumerable<CompressedTurnSummary>? summaries)
         {
-            _compressedSummaries.Clear();
-            if (summaries == null)
-                return;
-
-            foreach (var summary in summaries.OrderBy(s => s.FromTurn))
+            lock (_summaryLock)
             {
-                _compressedSummaries.Add(new CompressedTurnSummary
+                _compressedSummaries.Clear();
+                _frozenCompressedContextText = null;
+                if (summaries == null)
+                    return;
+
+                foreach (var summary in summaries.OrderBy(s => s.FromTurn))
                 {
-                    Summary = summary.Summary,
-                    FromTurn = summary.FromTurn,
-                    ToTurn = summary.ToTurn,
-                    OriginalTokens = summary.OriginalTokens,
-                    CompressedTokens = summary.CompressedTokens,
-                    CompressedAt = summary.CompressedAt,
-                });
+                    _compressedSummaries.Add(new CompressedTurnSummary
+                    {
+                        Summary = summary.Summary,
+                        FromTurn = summary.FromTurn,
+                        ToTurn = summary.ToTurn,
+                        OriginalTokens = summary.OriginalTokens,
+                        CompressedTokens = summary.CompressedTokens,
+                        CompressedAt = summary.CompressedAt,
+                    });
+                }
             }
         }
 
@@ -221,11 +254,12 @@ namespace DeepSeek_v4_for_VisualStudio.Services
 
         private static int ResolveTargetSummaryTokens(int originalTokens, int targetSummaryTokens)
         {
-            int target = targetSummaryTokens > 0
+            int configuredTarget = targetSummaryTokens > 0
                 ? targetSummaryTokens
                 : Math.Max(1, originalTokens / 10);
 
-            return Math.Max(1, target);
+            int sourceBasedTarget = Math.Max(1, originalTokens / 10);
+            return Math.Max(1, Math.Min(configuredTarget, sourceBasedTarget));
         }
 
         private static string BuildCompressionPrompt(string? template, int targetTokens)
@@ -239,6 +273,101 @@ namespace DeepSeek_v4_for_VisualStudio.Services
                 + string.Format(
                     LocalizationService.Instance["compress.targetTokensInstruction"],
                     targetText);
+        }
+
+        internal static string[] GetSummarySectionHeadings()
+        {
+            var L = LocalizationService.Instance;
+            return new[]
+            {
+                "## " + L["compress.section.goals"],
+                "## " + L["compress.section.status"],
+                "## " + L["compress.section.completed"],
+                "## " + L["compress.section.decisions"],
+                "## " + L["compress.section.files"],
+                "## " + L["compress.section.errors"],
+                "## " + L["compress.section.pending"],
+                "## " + L["compress.section.context"],
+            };
+        }
+
+        /// <summary>
+        /// 将自由格式模型输出规范化为固定 Markdown 章节。
+        /// 不使用 response_format；若章节缺失则返回 null，由本地规则摘要兜底。
+        /// </summary>
+        internal static string? NormalizeStructuredSummary(string? rawSummary)
+        {
+            if (string.IsNullOrWhiteSpace(rawSummary))
+                return null;
+
+            string text = StripCodeFence(rawSummary.Trim());
+            string[] headings = GetSummarySectionHeadings();
+
+            foreach (string heading in headings)
+            {
+                if (text.IndexOf(heading, StringComparison.Ordinal) < 0)
+                    return null;
+            }
+
+            var sb = new StringBuilder();
+            for (int i = 0; i < headings.Length; i++)
+            {
+                string heading = headings[i];
+                int headingIndex = text.IndexOf(heading, StringComparison.Ordinal);
+                int bodyStart = headingIndex + heading.Length;
+                int bodyEnd = text.Length;
+
+                foreach (string otherHeading in headings)
+                {
+                    int otherIndex = text.IndexOf(otherHeading, bodyStart, StringComparison.Ordinal);
+                    if (otherIndex >= 0 && otherIndex < bodyEnd)
+                        bodyEnd = otherIndex;
+                }
+
+                string body = text.Substring(bodyStart, Math.Max(0, bodyEnd - bodyStart)).Trim();
+                if (body.Length == 0)
+                    body = LocalizationService.Instance["compress.none"];
+
+                if (sb.Length > 0)
+                    sb.AppendLine();
+                sb.AppendLine(heading);
+                sb.AppendLine(body);
+            }
+
+            return sb.ToString().TrimEnd();
+        }
+
+        private static string PrepareSummaryForInjection(string summary)
+        {
+            string? structured = NormalizeStructuredSummary(summary);
+            if (structured != null)
+                return structured;
+
+            string[] headings = GetSummarySectionHeadings();
+            var sb = new StringBuilder();
+            for (int i = 0; i < headings.Length; i++)
+            {
+                if (sb.Length > 0)
+                    sb.AppendLine();
+                sb.AppendLine(headings[i]);
+                sb.AppendLine(i == headings.Length - 1
+                    ? summary.Trim()
+                    : LocalizationService.Instance["compress.none"]);
+            }
+            return sb.ToString().TrimEnd();
+        }
+
+        private static string StripCodeFence(string text)
+        {
+            if (!text.StartsWith("```", StringComparison.Ordinal))
+                return text;
+
+            int firstLineBreak = text.IndexOf('\n');
+            int closingFence = text.LastIndexOf("```", StringComparison.Ordinal);
+            if (firstLineBreak < 0 || closingFence <= firstLineBreak)
+                return text;
+
+            return text.Substring(firstLineBreak + 1, closingFence - firstLineBreak - 1).Trim();
         }
 
         /// <summary>
@@ -261,8 +390,6 @@ namespace DeepSeek_v4_for_VisualStudio.Services
                 sb.AppendLine($"[{roleLabel}]");
                 if (!string.IsNullOrEmpty(entry.Content))
                 {
-                    // RAG-MARK: no-truncate — 不再截断对话消息，完整传递给压缩器
-                    // RAG-SOURCE: conversation-history 对话消息内容（上下文压缩输入）
                     sb.AppendLine(entry.Content);
                 }
                 if (!string.IsNullOrEmpty(entry.ReasoningContent))
@@ -285,7 +412,11 @@ namespace DeepSeek_v4_for_VisualStudio.Services
         /// </summary>
         private static string ExtractLocalSummary(string rawText, List<ConversationContextManager.ContextEntry> entries)
         {
-            var sb = new StringBuilder();
+            var L = LocalizationService.Instance;
+            string[] headings = GetSummarySectionHeadings();
+            var sections = new Dictionary<string, List<string>>(StringComparer.Ordinal);
+            foreach (string heading in headings)
+                sections[heading] = new List<string>();
 
             // 提取用户消息的核心内容
             var userMessages = entries
@@ -294,19 +425,27 @@ namespace DeepSeek_v4_for_VisualStudio.Services
 
             if (userMessages.Count > 0)
             {
-                sb.AppendLine(LocalizationService.Instance["compress.extractUserQuestion"]);
-                foreach (var msg in userMessages)
+                foreach (var msg in userMessages.Take(20))
                 {
                     string content = msg.Content ?? "";
-                    // 提取第一行（通常是主要问题）
                     int newlineIdx = content.IndexOf('\n');
                     string firstLine = newlineIdx > 0
                         ? content.Substring(0, newlineIdx).Trim()
                         : content.Trim();
-                    // RAG-MARK: no-truncate — 不再截断用户消息首行
-                    sb.AppendLine($"  • {firstLine}");
+                    if (firstLine.Length > 0)
+                        sections[headings[0]].Add($"- {firstLine}");
                 }
-                sb.AppendLine();
+            }
+
+            sections[headings[1]].Add($"- {L["compress.status.inProgress"]}");
+
+            var lastAssistant = entries.LastOrDefault(e => e.Role == "assistant" && !string.IsNullOrEmpty(e.Content));
+            if (lastAssistant != null)
+            {
+                string content = lastAssistant.Content ?? "";
+                if (content.Length > 800)
+                    content = content.Substring(content.Length - 800);
+                sections[headings[2]].Add(content.Trim());
             }
 
             // 提取文件路径引用
@@ -324,10 +463,8 @@ namespace DeepSeek_v4_for_VisualStudio.Services
             }
             if (files.Count > 0)
             {
-                sb.AppendLine(LocalizationService.Instance["compress.extractFilesInvolved"]);
                 foreach (var f in files.Take(10))
-                    sb.AppendLine($"  • {f}");
-                sb.AppendLine();
+                    sections[headings[4]].Add($"- {f}");
             }
 
             // 提取错误信息
@@ -341,27 +478,30 @@ namespace DeepSeek_v4_for_VisualStudio.Services
                 foreach (System.Text.RegularExpressions.Match m in errorPattern.Matches(entry.Content))
                 {
                     string err = m.Groups[1].Value.Trim();
-                    // RAG-MARK: no-truncate — 不再截断错误信息
                     errors.Add(err);
                 }
             }
             if (errors.Count > 0)
             {
-                sb.AppendLine(LocalizationService.Instance["compress.extractErrors"]);
                 foreach (var e in errors.Take(5))
-                    sb.AppendLine($"  • {e}");
-                sb.AppendLine();
+                    sections[headings[5]].Add($"- {e}");
             }
 
-            // 提取助手回答的结论（最后一条助手消息的末尾）
-            var lastAssistant = entries.LastOrDefault(e => e.Role == "assistant" && !string.IsNullOrEmpty(e.Content));
-            if (lastAssistant != null)
+            sections[headings[7]].Add(string.Format(
+                L["compress.localContextStats"],
+                entries.Count,
+                ConversationContextManager.EstimateTokens(rawText)));
+
+            var sb = new StringBuilder();
+            foreach (string heading in headings)
             {
-                string content = lastAssistant.Content ?? "";
-                if (content.Length > 300)
-                    content = content.Substring(content.Length - 300);
-                sb.AppendLine(LocalizationService.Instance["compress.extractConclusion"]);
-                sb.AppendLine($"  {content.Trim()}");
+                if (sb.Length > 0)
+                    sb.AppendLine();
+                sb.AppendLine(heading);
+                if (sections[heading].Count == 0)
+                    sb.AppendLine(L["compress.none"]);
+                else
+                    sb.AppendLine(string.Join(Environment.NewLine, sections[heading]));
             }
 
             return sb.ToString().Trim();

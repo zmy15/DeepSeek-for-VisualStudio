@@ -54,7 +54,6 @@ namespace DeepSeek_v4_for_VisualStudio.Services
                     return new SessionsContainer { SolutionPath = solutionPath ?? "(unsaved)" };
                 }
 
-                // RAG-SOURCE: file-read 读取会话持久化文件（JSON 反序列化）
                 var json = File.ReadAllText(filePath, Encoding.UTF8);
 
                 var container = JsonSerializer.Deserialize<SessionsContainer>(json, JsonOptions);
@@ -116,6 +115,14 @@ namespace DeepSeek_v4_for_VisualStudio.Services
             var filePath = GetStoragePath(solutionPath);
             container.LastSaved = DateTime.Now;
             container.SolutionPath = solutionPath ?? "(unsaved)";
+
+            // 空容器通常是“加载失败后沿用了旧活跃会话”等状态错误。
+            // 绝不能用它覆盖已有历史文件；正常保存前必须先把活跃会话登记进容器。
+            if (container.Sessions == null || container.Sessions.Count == 0)
+            {
+                Logger.Warn($"[会话] 拒绝保存空会话容器，避免覆盖历史: {Path.GetFileName(filePath)}");
+                return;
+            }
 
             try
             {

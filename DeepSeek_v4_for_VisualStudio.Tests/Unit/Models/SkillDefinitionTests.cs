@@ -111,7 +111,6 @@ public class SkillDefinitionTests
     [Fact]
     public void SkillDefinition_GetCompactInstructions_LongBody_NoLongerTruncates()
     {
-        // RAG-MARK: no-truncate — 技能正文不再截断，完整传递
         var skill = new SkillDefinition
         {
             Name = "test",

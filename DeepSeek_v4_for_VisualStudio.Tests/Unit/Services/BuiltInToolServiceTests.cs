@@ -15,14 +15,16 @@ public class BuiltInToolServiceTests
     #region Tool Registration
 
     [Fact]
-    public void Constructor_RegistersAll27Tools()
+    public void Constructor_RegistersAll29Tools()
     {
         var service = new BuiltInToolService();
 
         var defs = service.GetFilteredToolDefinitions(null);
 
-        defs.Should().HaveCount(27);
+        defs.Should().HaveCount(29);
         defs.Select(d => d.Function.Name).Should().Contain("get_file_symbols");
+        defs.Select(d => d.Function.Name).Should().Contain("get_file_comments");
+        defs.Select(d => d.Function.Name).Should().Contain("get_current_time");
         defs.Select(d => d.Function.Name).Should().Contain("list_skills");
         defs.Select(d => d.Function.Name).Should().Contain("run_tests");
     }
@@ -102,7 +104,7 @@ public class BuiltInToolServiceTests
 
         var defs = service.GetFilteredToolDefinitions(new List<string>());
 
-        defs.Should().HaveCount(27);
+        defs.Should().HaveCount(29);
     }
 
     [Fact]
@@ -112,7 +114,7 @@ public class BuiltInToolServiceTests
 
         var defs = service.GetFilteredToolDefinitions(null);
 
-        defs.Should().HaveCount(27);
+        defs.Should().HaveCount(29);
     }
 
     [Theory]
@@ -145,7 +147,9 @@ public class BuiltInToolServiceTests
     [InlineData("file_search", true)]
     [InlineData("grep_search", true)]
     [InlineData("get_file_symbols", true)]
+    [InlineData("get_file_comments", true)]
     [InlineData("get_errors", true)]
+    [InlineData("get_current_time", true)]
     [InlineData("list_skills", true)]
     [InlineData("load_skill", true)]
     [InlineData("read_skill_resource", true)]

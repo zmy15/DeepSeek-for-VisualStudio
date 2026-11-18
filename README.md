@@ -36,6 +36,7 @@
 - [Building & Testing](#building--testing)
 - [Troubleshooting](#troubleshooting)
 - [Contributing](#contributing)
+- [Support](#support)
 - [Star History](#star-history)
 - [License](#license)
 
@@ -101,6 +102,15 @@ plus Prompt and Completion token usage.
 The session history list: titles are generated automatically by AI (e.g. "Demo handoff verification to Plan
 agent", "DeepSeek VSIX Project Structure Analysis"), sorted newest first, each removable.
 
+### Quick Settings
+
+![Quick Settings](https://raw.githubusercontent.com/zmy15/DeepSeek-for-VisualStudio/master/docs/images/en_us/15.png)
+
+Open Quick Settings from the gear button at the top of the chat window to configure the model, message handling
+while generating, MCP servers, web search, OCR, interface scaling, and About information. Model and endpoint
+configuration is available through **Model Settings**, while context limits, Agent thresholds, and diagnostics
+remain in the original options page.
+
 ---
 
 ## Features
@@ -111,7 +121,7 @@ AI-generated titles; message retry/edit/copy plus version and branch navigation;
 vision models.
 
 **Agentic** — five specialised agents (Ask / Explore / Plan / Edit / Build) that hand work off to each other;
-28 built-in tools plus any number of MCP tools; an autonomous tool loop that reads, searches, edits, builds,
+30 built-in tools plus any number of MCP tools; an autonomous tool loop that reads, searches, edits, builds,
 tests, and iterates; up to 3 parallel Explore sub-agents; persistent memory; reusable skills.
 
 **Editing** — inline code completion (ghost text) via a FIM endpoint; **Inline Edit (Ctrl+I)** to issue
@@ -258,12 +268,12 @@ down requirements:
 
 ## Built-in Tools
 
-28 built-in tools. `🔒` marks tools available only to Edit/Build agents — read-only agents are blocked at
-runtime, not merely by prompt.
+30 built-in tools. `🔒` marks tools available only to Edit/Build agents; `🧭` marks tools available only to the
+Explore agent. Read-only boundaries are enforced at runtime, not merely by prompt.
 
 | Group | Tools |
 |---|---|
-| **Read & explore** | `list_dir`, `read_file`, `file_search`, `grep_search`, `symbol_search`, `get_file_symbols`, `get_errors` |
+| **Read & explore** | `list_dir`, `read_file`, `file_search`, `grep_search`, `symbol_search`, `get_file_symbols`, `get_file_comments` 🧭, `get_errors`, `get_current_time` |
 | **Write & edit** 🔒 | `replace_string_in_file`, `multi_replace_string_in_file`, `create_file`, `delete_file`, `apply_patch`, `create_directory` |
 | **Build, test, terminal** | `build_solution`, `run_tests`, `run_in_terminal`, `get_terminal_output` |
 | **Web & vision** | `web_search`, `fetch_webpage`, `capture_window` 🔍, `capture_webpage` 🔍 |
@@ -403,7 +413,7 @@ settings UI, kept in two-way sync.
 | **Model** | Selected Model, Enable Deep Thinking, Reasoning Effort (`low`/`high`/`max`), LLM Timeout |
 | **Web & vision** | Enable Web Search, Search Provider, Web Fetch Mode, Baidu/Bing keys, OCR Engine |
 | **Editing** | Show Diff Markers, Enable Autocomplete, Autocomplete Delay, Continue After Accept |
-| **Context** | Token Budget (%), Auto Compression, Compression Threshold, Preserve Recent Turns, RAG, RAG Top K, Context Stats, IDE Context Injection |
+| **Context** | Token Budget (%), Auto Compression, Compression Threshold, Preserve Recent Turns, Context Stats, IDE Context Injection |
 | **Agent & safety** | Approval Mode, Max Tool Call Rounds, Max Repeated Same Call, Max Consecutive Errors, wall-clock/token/tool-call/depth budgets, No-Progress Rounds, Auto Build, Auto Skill Routing, Append Message Mode |
 | **Interface** | Language, Theme Mode, Input Box Height, Bottom Area Scale, System Prompt, Restore Defaults, API Debug Dump |
 
@@ -538,6 +548,17 @@ Contributions are welcome. Please read the flow below before starting.
 A PR automatically triggers the **Build & Test** workflow (compile, unit tests with an uploaded coverage report,
 and the CJK hard-coded string check); everything must pass before it can be merged. Please address review comments
 with follow-up commits rather than force-pushing over existing discussion.
+
+---
+
+## Support
+
+If you think this project is useful, you can support its continued maintenance.
+
+Donations do not grant additional benefits, but they motivate me to keep maintaining the project.
+
+[![PayPal](https://img.shields.io/badge/PayPal-Support-00457C?logo=paypal&logoColor=white)](https://paypal.me/zmy151)
+[![Afdian](https://img.shields.io/badge/Afdian-Support-EA4AAA)](https://ifdian.net/a/zmy15)
 
 ---
 

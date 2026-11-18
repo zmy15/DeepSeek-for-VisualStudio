@@ -17,7 +17,7 @@ namespace DeepSeek_v4_for_VisualStudio.Services
         bool IsEmpty { get; }
         double UsageRatio { get; }
         double UsagePercent { get; }
-        string? RagContext { get; }
+        bool HasMemoryContext { get; }
 
         // ── 缓存友好窗口（v1.1.10）──
         /// <summary>缓存窗口最大 token 数（0 = 禁用）</summary>
@@ -31,7 +31,6 @@ namespace DeepSeek_v4_for_VisualStudio.Services
         void SetSystemPrompt(string? prompt);
         void SetSolutionPath(string? solutionPath);
         void SetSkillContext(string? skillContext);
-        void SetRagContext(string? ragContext);
         void SetMemoryContext(string? memoryContext);
         void SetCompressor(ContextCompressorService? compressor);
         void SetActiveFileTracker(IActiveFileTracker? tracker);
@@ -79,9 +78,9 @@ namespace DeepSeek_v4_for_VisualStudio.Services
         bool HasVolatileSnapshotInCurrentTurn(string? volatileBlock);
 
         /// <summary>
-        /// 构建易变上下文块（Working Set + RAG）。
+        /// 构建易变上下文块（Working Set + IDE 实时态）。
         /// 这些内容在同一会话内可能每轮都变，应放在消息数组末尾以保护前缀缓存。
-        /// 与 BuildDynamicContextBlock() 分离：后者包含稳定的内容（压缩摘要、搜索、记忆），
+        /// 与 BuildDynamicContextBlock() 分离：后者包含稳定的压缩摘要与记忆，
         /// 始终占据 messages[2] 固定位置。
         /// </summary>
         string? BuildVolatileContextBlock();

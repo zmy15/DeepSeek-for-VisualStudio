@@ -8,11 +8,7 @@ public class DeepSeekOptionsPageModelChoiceTests
 {
     private static readonly string[] ModelSettingsProperties =
     {
-        nameof(DeepSeekOptionsPage.ApiKey),
-        nameof(DeepSeekOptionsPage.CustomApiKey),
-        nameof(DeepSeekOptionsPage.ApiBaseUrl),
         nameof(DeepSeekOptionsPage.ModelCatalog),
-        nameof(DeepSeekOptionsPage.TestConnection),
         nameof(DeepSeekOptionsPage.SelectedModelChoice),
         nameof(DeepSeekOptionsPage.IsThinkingEnabled),
         nameof(DeepSeekOptionsPage.ReasoningEffort),
@@ -43,10 +39,6 @@ public class DeepSeekOptionsPageModelChoiceTests
     {
         string[] expectedOrder =
         {
-            nameof(DeepSeekOptionsPage.ApiKey),
-            nameof(DeepSeekOptionsPage.ApiBaseUrl),
-            nameof(DeepSeekOptionsPage.CustomApiKey),
-            nameof(DeepSeekOptionsPage.TestConnection),
             nameof(DeepSeekOptionsPage.ModelCatalog),
             nameof(DeepSeekOptionsPage.SelectedModelChoice),
             nameof(DeepSeekOptionsPage.IsThinkingEnabled),
@@ -59,7 +51,7 @@ public class DeepSeekOptionsPageModelChoiceTests
             .ToList();
 
         displayNames.Select(name => name.Length >= 3 ? name.Substring(0, 3) : string.Empty)
-            .Should().Equal("01.", "02.", "03.", "04.", "05.", "06.", "07.", "08.");
+            .Should().Equal("01.", "02.", "03.", "04.");
         displayNames
             .SequenceEqual(displayNames.OrderBy(name => name, StringComparer.CurrentCulture))
             .Should().BeTrue();
@@ -97,6 +89,14 @@ public class DeepSeekOptionsPageModelChoiceTests
             nameof(DeepSeekOptionsPage.CustomVisionModels),
             nameof(DeepSeekOptionsPage.CustomModelMetadata),
             nameof(DeepSeekOptionsPage.CustomModelPicker),
+            nameof(DeepSeekOptionsPage.ApiKey),
+            nameof(DeepSeekOptionsPage.CustomApiKey),
+            nameof(DeepSeekOptionsPage.ApiBaseUrl),
+            nameof(DeepSeekOptionsPage.TestConnection),
+            nameof(DeepSeekOptionsPage.About),
+            nameof(DeepSeekOptionsPage.AppendMessageMode),
+            nameof(DeepSeekOptionsPage.InputBoxHeight),
+            nameof(DeepSeekOptionsPage.BottomAreaScalePercent),
         })
         {
             var property = typeof(DeepSeekOptionsPage).GetProperty(legacyName)!;

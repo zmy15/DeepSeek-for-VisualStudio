@@ -231,8 +231,12 @@
                 BorderBrush="#3F3F46" BorderThickness="0,0,0,1"
                 Padding="6,4">
             <Grid>
+                <Grid.ColumnDefinitions>
+                    <ColumnDefinition Width="*" />
+                    <ColumnDefinition Width="Auto" />
+                </Grid.ColumnDefinitions>
                 <!-- P-B：Copilot 式历史交互 —— 时钟按钮打开历史浮层，标题常显 -->
-                <StackPanel Orientation="Horizontal">
+                <StackPanel Grid.Column="0" Orientation="Horizontal">
                     <Button x:Name="HistoryToggleButton"
                             Content="&#xE81C;"
                             Click="HistoryToggleButton_Click"
@@ -253,11 +257,22 @@
                                MaxWidth="220" />
                 </StackPanel>
 
-                <StackPanel Orientation="Horizontal" HorizontalAlignment="Right">
+                <StackPanel Grid.Column="1" Orientation="Horizontal" HorizontalAlignment="Right">
                     <Button x:Name="NewChatButton" Content="+ 新对话" Click="NewChatButton_Click"
                             Style="{StaticResource TransparentButton}"
                             Margin="0,0,6,0" FontSize="12"
                             Foreground="#4EC9B0" />
+                    <Button x:Name="QuickSettingsButton"
+                            Content="&#xE713;"
+                            Click="QuickSettingsButton_Click"
+                            Style="{StaticResource TransparentButton}"
+                            ToolTip="{utils:I18n settings.quick.title}"
+                            FontFamily="{StaticResource IconFontFamily}"
+                            FontSize="12"
+                            Foreground="#C8C8C8"
+                            Padding="5,0"
+                            Margin="0,0,4,0"
+                            VerticalAlignment="Center" />
                     <Button x:Name="DeleteSessionButton"
                             Content="&#xE74D;" FontFamily="{StaticResource IconFontFamily}"
                             ToolTip="删除当前对话"
@@ -1073,16 +1088,6 @@
                             SelectionChanged="WebSearchEngineComboBox_SelectionChanged"
                             ToolTip="选择搜索引擎"
                             Visibility="Collapsed" />
-                        <Button x:Name="McpConfigButton"
-                                Click="McpConfigButton_Click"
-                                Style="{StaticResource TransparentButton}"
-                                ToolTip="配置 MCP 服务器"
-                                FontSize="14" Padding="4,0" Margin="0,0,2,0"
-                                Foreground="#888888">
-                            <Button.Content>
-                                <TextBlock Text="&#xE713;" FontSize="13" FontFamily="{StaticResource IconFontFamily}" />
-                            </Button.Content>
-                        </Button>
                         <!-- 清空按钮：置于左侧设置组末尾，与发送保持远距离防误触 -->
                         <Rectangle Width="1" Height="14" Fill="#454545"
                                    VerticalAlignment="Center" Margin="4,0,4,0" />

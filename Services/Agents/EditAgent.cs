@@ -113,6 +113,7 @@ namespace DeepSeek_v4_for_VisualStudio.Services.Agents
             "get_file_symbols",
             "list_dir",
             "get_errors",
+            "get_current_time",
             "runSubagent",
             // 终端、构建与 Git
             "build_solution",
@@ -287,7 +288,7 @@ namespace DeepSeek_v4_for_VisualStudio.Services.Agents
 
             // ═══════════════════════════════════════════════════════════════
             // 缓存策略：将 BuiltInToolService 已读取的文件同步到 AgentContext
-            // 全局缓存，避免后续步骤重复 read_file（以后会被 RAG 替代）
+            // 全局缓存，避免后续步骤重复 read_file
             // ═══════════════════════════════════════════════════════════════
             if (context.FileReadCache.Count == 0 && BuiltInTools != null)
             {
@@ -773,7 +774,6 @@ namespace DeepSeek_v4_for_VisualStudio.Services.Agents
 
                     if (hasOriginal)
                     {
-                        // RAG-SOURCE: file-read 读取最终文件内容（计算变更统计）
                         string final = File.Exists(r.FilePath)
                             ? FileEncodingHelper.ReadAllText(r.FilePath)
                             : (r.FinalContent ?? string.Empty);
@@ -2236,7 +2236,7 @@ namespace DeepSeek_v4_for_VisualStudio.Services.Agents
             // 只有真实触发且失败的验证才进入 Build 修复。
             // 未调用验证工具、测试无有效结论但 AI 未选择构建，均不算失败。
             bool testsFailed = didAttemptTests && lastTestsPassed == false;
-            bool buildFailed = didAttemptBuild && lastBuildSucceeded != true;
+            bool buildFailed = didAttemptBuild && lastBuildSucceeded == false;
             return testsFailed || buildFailed;
         }
 

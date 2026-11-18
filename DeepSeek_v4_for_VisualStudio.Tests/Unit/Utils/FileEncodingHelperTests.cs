@@ -182,13 +182,37 @@ public class FileEncodingHelperTests : IDisposable
     }
 
     [Fact]
-    public void ReadAllText_MissingFile_ThrowsLikeFileReadAllText()
+    public void ReadAllText_MissingFile_ReturnsEmptyWithoutEscapingException()
     {
         string path = Path.Combine(_tempDir, $"missing-{Guid.NewGuid():N}.cs");
 
-        Action act = () => FileEncodingHelper.ReadAllText(path);
+        FileEncodingHelper.ReadAllText(path).Should().BeEmpty(
+            "后台文件监听与编辑流程可能在读取前遇到文件被删除，缺失文件不应造成未处理异常");
+        FileEncodingHelper.ReadAllLines(path).Should().BeEmpty();
+    }
 
-        act.Should().Throw<IOException>("与 File.ReadAllText 的失败语义保持一致");
+    [Fact]
+    public void TryDetectFileEncoding_MissingFile_ReturnsFalse()
+    {
+        string path = Path.Combine(_tempDir, $"missing-{Guid.NewGuid():N}.cs");
+
+        bool detected = FileEncodingHelper.TryDetectFileEncoding(path, out Encoding? encoding);
+
+        detected.Should().BeFalse();
+        encoding.Should().BeNull();
+    }
+
+    [Fact]
+    public void TryDetectFileEncoding_ExistingFile_ReturnsEncoding()
+    {
+        string path = NewPath();
+        WriteBytes(path, new UTF8Encoding(false), SampleSource);
+
+        bool detected = FileEncodingHelper.TryDetectFileEncoding(path, out Encoding? encoding);
+
+        detected.Should().BeTrue();
+        encoding.Should().NotBeNull();
+        encoding!.CodePage.Should().Be(new UTF8Encoding(false).CodePage);
     }
 
     #endregion

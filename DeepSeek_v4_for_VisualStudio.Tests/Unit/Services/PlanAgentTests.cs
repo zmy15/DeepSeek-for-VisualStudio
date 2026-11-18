@@ -87,6 +87,8 @@ public class PlanAgentTests
         var agent = new PlanAgent(_apiService);
 
         agent.Definition.AllowedTools.Should().Contain("symbol_search");
+        agent.Definition.AllowedTools.Should().Contain("get_current_time");
+        agent.Definition.AllowedTools.Should().NotContain("get_file_comments");
     }
 
     [Fact]

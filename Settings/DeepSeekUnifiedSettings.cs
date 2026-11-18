@@ -387,22 +387,6 @@ namespace DeepSeek_v4_for_VisualStudio
             };
 
         [VisualStudioContribution]
-        internal static Setting.Boolean EnableRag { get; } =
-            new("deepseekEnableRag", "%DeepSeek.Chat.settings.enableRag.displayName%", GeneralCategory, defaultValue: false)
-            {
-                Description = "%DeepSeek.Chat.settings.enableRag.description%",
-            };
-
-        [VisualStudioContribution]
-        internal static Setting.Integer RagTopK { get; } =
-            new("deepseekRagTopK", "%DeepSeek.Chat.settings.ragTopK.displayName%", GeneralCategory, defaultValue: 5)
-            {
-                Description = "%DeepSeek.Chat.settings.ragTopK.description%",
-                Minimum = 1,
-                Maximum = 100,
-            };
-
-        [VisualStudioContribution]
         internal static Setting.Boolean ShowContextStats { get; } =
             new("deepseekContextStats", "%DeepSeek.Chat.settings.showContextStats.displayName%", GeneralCategory, defaultValue: true)
             {

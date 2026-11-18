@@ -99,6 +99,7 @@ namespace DeepSeek_v4_for_VisualStudio.Settings
         [LocalizedCategory("settings.category.about")]
         [LocalizedDisplayName("settings.about.displayName")]
         [LocalizedDescription("settings.about.description")]
+        [Browsable(false)] // 统一放入快速设置。
         [Editor(typeof(AboutEditor), typeof(UITypeEditor))]
         [DesignerSerializationVisibility(DesignerSerializationVisibility.Hidden)]
         public string About
@@ -1046,6 +1047,7 @@ namespace DeepSeek_v4_for_VisualStudio.Settings
         [LocalizedCategory("settings.category.model")]
         [LocalizedDisplayName("settings.apiKey.displayName")]
         [LocalizedDescription("settings.apiKey.description")]
+        [Browsable(false)] // 统一在「05. 模型设置」的端点管理中维护。
         [PasswordPropertyText(true)]
         [DesignerSerializationVisibility(DesignerSerializationVisibility.Visible)] // Fix for WFO1000
         public string ApiKey { get; set; } = string.Empty;
@@ -1057,6 +1059,7 @@ namespace DeepSeek_v4_for_VisualStudio.Settings
         [LocalizedCategory("settings.category.model")]
         [LocalizedDisplayName("settings.customApiKey.displayName")]
         [LocalizedDescription("settings.customApiKey.description")]
+        [Browsable(false)] // 统一在「05. 模型设置」的端点管理中维护。
         [PasswordPropertyText(true)]
         [DesignerSerializationVisibility(DesignerSerializationVisibility.Visible)] // Fix for WFO1000
         public string CustomApiKey { get; set; } = string.Empty;
@@ -1069,6 +1072,7 @@ namespace DeepSeek_v4_for_VisualStudio.Settings
         [LocalizedCategory("settings.category.model")]
         [LocalizedDisplayName("settings.apiBaseUrl.displayName")]
         [LocalizedDescription("settings.apiBaseUrl.description")]
+        [Browsable(false)] // 统一在「05. 模型设置」的端点管理中维护。
         [DesignerSerializationVisibility(DesignerSerializationVisibility.Visible)] // Fix for WFO1000
         public string ApiBaseUrl { get; set; } = string.Empty;
 
@@ -1157,6 +1161,7 @@ namespace DeepSeek_v4_for_VisualStudio.Settings
         [LocalizedCategory("settings.category.model")]
         [LocalizedDisplayName("settings.testConnection.displayName")]
         [LocalizedDescription("settings.testConnection.description")]
+        [Browsable(false)] // 测试入口并入统一端点管理，不再单独占用属性网格行。
         [Editor(typeof(TestConnectionEditor), typeof(UITypeEditor))]
         [DesignerSerializationVisibility(DesignerSerializationVisibility.Hidden)]
         public string TestConnection
@@ -1241,8 +1246,6 @@ namespace DeepSeek_v4_for_VisualStudio.Settings
             EnableAutoCompression = true;
             CompressionThreshold = 85;
             PreserveRecentTurns = 3;
-            EnableRag = false;
-            RagTopK = 5;
             ShowContextStats = true;
             EnableTelemetryExport = true;
             EnableIdeContextInjection = true;
@@ -1489,18 +1492,6 @@ namespace DeepSeek_v4_for_VisualStudio.Settings
         public int PreserveRecentTurns { get; set; } = 3;
 
         [LocalizedCategory("settings.category.context")]
-        [LocalizedDisplayName("settings.enableRag.displayName")]
-        [LocalizedDescription("settings.enableRag.description")]
-        [DesignerSerializationVisibility(DesignerSerializationVisibility.Visible)]
-        public bool EnableRag { get; set; } = false;
-
-        [LocalizedCategory("settings.category.context")]
-        [LocalizedDisplayName("settings.ragTopK.displayName")]
-        [LocalizedDescription("settings.ragTopK.description")]
-        [DesignerSerializationVisibility(DesignerSerializationVisibility.Visible)]
-        public int RagTopK { get; set; } = 5;
-
-        [LocalizedCategory("settings.category.context")]
         [LocalizedDisplayName("settings.showContextStats.displayName")]
         [LocalizedDescription("settings.showContextStats.description")]
         [DesignerSerializationVisibility(DesignerSerializationVisibility.Visible)]
@@ -1629,6 +1620,7 @@ namespace DeepSeek_v4_for_VisualStudio.Settings
         [LocalizedDisplayName("settings.appendMessageMode.displayName")]
         [LocalizedDescription("settings.appendMessageMode.description")]
         [TypeConverter(typeof(AppendMessageModeConverter))]
+        [Browsable(false)] // 统一放入快速设置。
         [DesignerSerializationVisibility(DesignerSerializationVisibility.Visible)]
         public AppendMessageMode AppendMessageMode { get; set; } = DefaultAppendMessageMode;
 
@@ -1675,6 +1667,7 @@ namespace DeepSeek_v4_for_VisualStudio.Settings
         [LocalizedDisplayName("settings.inputBoxHeight.displayName")]
         [LocalizedDescription("settings.inputBoxHeight.description")]
         [DefaultValue(DefaultInputBoxHeight)]
+        [Browsable(false)] // 统一放入快速设置。
         [DesignerSerializationVisibility(DesignerSerializationVisibility.Visible)]
         public int InputBoxHeight
         {
@@ -1695,6 +1688,7 @@ namespace DeepSeek_v4_for_VisualStudio.Settings
         [LocalizedDisplayName("settings.bottomAreaScale.displayName")]
         [LocalizedDescription("settings.bottomAreaScale.description")]
         [DefaultValue(DefaultBottomAreaScalePercent)]
+        [Browsable(false)] // 统一放入快速设置。
         [DesignerSerializationVisibility(DesignerSerializationVisibility.Visible)]
         public int BottomAreaScalePercent
         {

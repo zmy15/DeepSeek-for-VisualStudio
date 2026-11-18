@@ -220,8 +220,17 @@ namespace DeepSeek_v4_for_VisualStudio.View
             // ── 先打开 / 聚焦文件，再确保该文件的内嵌 Diff 预览已弹出 ──
             // 逐块保留 / 撤销完成后，Diff 宿主会通知待处理集合刷新，
             // 列表随之移除已经全部处理完的文件。
-            await NavigateToFileAsync(row.FilePath);
-            await EditorDiffMarkerService.Instance.OpenDiffPreviewForFileAsync(row.FilePath);
+            try
+            {
+                await NavigateToFileAsync(row.FilePath);
+                await EditorDiffMarkerService.Instance.OpenDiffPreviewForFileAsync(row.FilePath);
+            }
+            catch (Exception ex)
+            {
+                // async void 事件没有上层 Task 边界；这里必须兜住，
+                // 否则文件已删除或 VS 编辑器状态变化会直接进入未处理异常通道。
+                Logger.Warn($"[ChangeSummary] 打开文件预览失败 ({row.FilePath}): {ex.Message}");
+            }
         }
 
         private void ChangeSummaryApplyAllButton_Click(object sender, RoutedEventArgs e)

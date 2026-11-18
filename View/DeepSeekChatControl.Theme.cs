@@ -183,11 +183,9 @@ namespace DeepSeek_v4_for_VisualStudio.View
                 if (UploadButton != null) UploadButton.Foreground = new SolidColorBrush(Color.FromRgb(0xCE, 0x91, 0x78));
                 if (DeleteSessionButton != null) DeleteSessionButton.Foreground = mutedText;
                 if (AddContextButton != null) AddContextButton.Foreground = accentBlue;
-                // 联网搜索开关 / MCP 按钮的前景色由运行状态决定
-                // （见 UpdateWebSearchToggleAppearance / UpdateMcpButtonAppearance），
+                // 联网搜索开关的前景色由运行状态决定（见 UpdateWebSearchToggleAppearance），
                 // 主题应用后重新着色，避免被统一覆盖成灰色而丢失开启状态的蓝色高亮。
                 UpdateWebSearchToggleAppearance();
-                UpdateMcpButtonAppearance();
 
                 // ── 添加上下文弹出菜单项颜色 ──
                 UpdatePopupMenuItems(isLight, panelBg, textColor);

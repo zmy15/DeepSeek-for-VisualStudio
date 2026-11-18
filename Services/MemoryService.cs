@@ -179,7 +179,19 @@ namespace DeepSeek_v4_for_VisualStudio.Services
                 var lockObj = GetLock(resolved);
                 lock (lockObj)
                 {
-                    var content = File.ReadAllText(resolved, Encoding.UTF8);
+                    string content;
+                    try
+                    {
+                        content = File.ReadAllText(resolved, Encoding.UTF8);
+                    }
+                    catch (FileNotFoundException)
+                    {
+                        return $"Error: 记忆文件不存在: {scope}/{path}。请先 view 或 create。";
+                    }
+                    catch (DirectoryNotFoundException)
+                    {
+                        return $"Error: 记忆目录不存在: {scope}/{path}。请先 view 或 create。";
+                    }
 
                     // view 返回的文本统一使用 \n；匹配前也统一换行符，避免 CRLF/LF 差异导致误判为未找到。
                     // 写回时沿用文件原本的风格（探测不到则系统默认）。
@@ -218,7 +230,20 @@ namespace DeepSeek_v4_for_VisualStudio.Services
                 var lockObj = GetLock(resolved);
                 lock (lockObj)
                 {
-                    var lines = File.ReadAllLines(resolved, Encoding.UTF8).ToList();
+                    List<string> lines;
+                    try
+                    {
+                        lines = File.ReadAllLines(resolved, Encoding.UTF8).ToList();
+                    }
+                    catch (FileNotFoundException)
+                    {
+                        return $"Error: 记忆文件不存在: {scope}/{path}。请先 view 或 create。";
+                    }
+                    catch (DirectoryNotFoundException)
+                    {
+                        return $"Error: 记忆目录不存在: {scope}/{path}。请先 view 或 create。";
+                    }
+
                     var idx = Math.Max(0, Math.Min(lineNumber, lines.Count));
                     lines.Insert(idx, text);
                     File.WriteAllLines(resolved, lines, Encoding.UTF8);
@@ -323,10 +348,7 @@ namespace DeepSeek_v4_for_VisualStudio.Services
         public string GetMemoryPreviews(MemoryScope scope, string? sessionId = null, string? solutionPath = null)
         {
             var scopeDir = GetScopeDir(scope, sessionId, solutionPath);
-            if (!Directory.Exists(scopeDir))
-                return string.Empty;
-
-            var mdFiles = Directory.GetFiles(scopeDir, "*.md", SearchOption.AllDirectories);
+            var mdFiles = GetMarkdownFilesSafe(scopeDir);
             if (mdFiles.Length == 0)
                 return string.Empty;
 
@@ -353,10 +375,7 @@ namespace DeepSeek_v4_for_VisualStudio.Services
         public string GetMemoryContext(MemoryScope scope, string? sessionId = null, string? solutionPath = null)
         {
             var scopeDir = GetScopeDir(scope, sessionId, solutionPath);
-            if (!Directory.Exists(scopeDir))
-                return string.Empty;
-
-            var mdFiles = Directory.GetFiles(scopeDir, "*.md", SearchOption.AllDirectories);
+            var mdFiles = GetMarkdownFilesSafe(scopeDir);
             if (mdFiles.Length == 0)
                 return string.Empty;
 
@@ -394,6 +413,37 @@ namespace DeepSeek_v4_for_VisualStudio.Services
             return FileLocks.GetOrAdd(Path.GetFullPath(filePath), _ => new object());
         }
 
+        /// <summary>
+        /// 安全枚举记忆目录中的 Markdown 文件。
+        /// 目录可能在 Exists 与枚举之间被删除，或临时不可访问；这些情况按空集合处理。
+        /// </summary>
+        /// <param name="scopeDir">记忆作用域目录。</param>
+        /// <returns>可读取的 Markdown 文件路径；失败时为空数组。</returns>
+        private static string[] GetMarkdownFilesSafe(string scopeDir)
+        {
+            try
+            {
+                if (!Directory.Exists(scopeDir))
+                    return Array.Empty<string>();
+
+                return Directory.GetFiles(scopeDir, "*.md", SearchOption.AllDirectories);
+            }
+            catch (DirectoryNotFoundException)
+            {
+                return Array.Empty<string>();
+            }
+            catch (UnauthorizedAccessException ex)
+            {
+                Logger.Warn($"[Memory] 无法访问记忆目录 {scopeDir}: {ex.Message}");
+                return Array.Empty<string>();
+            }
+            catch (IOException ex)
+            {
+                Logger.Warn($"[Memory] 枚举记忆目录失败 {scopeDir}: {ex.Message}");
+                return Array.Empty<string>();
+            }
+        }
+
         private static MemoryViewResult ListDirectory(string resolvedDir, MemoryScope scope, string relativePath)
         {
             var entries = new List<MemoryEntry>();
@@ -409,28 +459,43 @@ namespace DeepSeek_v4_for_VisualStudio.Services
                 };
             }
 
-            // 列出目录
-            foreach (var dir in Directory.GetDirectories(resolvedDir))
+            try
             {
-                entries.Add(new MemoryEntry
+                // 列出目录
+                foreach (var dir in Directory.GetDirectories(resolvedDir))
                 {
-                    Name = Path.GetFileName(dir) + "/",
-                    IsDirectory = true,
-                    LastModified = Directory.GetLastWriteTime(dir)
-                });
-            }
+                    entries.Add(new MemoryEntry
+                    {
+                        Name = Path.GetFileName(dir) + "/",
+                        IsDirectory = true,
+                        LastModified = Directory.GetLastWriteTime(dir)
+                    });
+                }
 
-            // 列出 .md 文件
-            foreach (var file in Directory.GetFiles(resolvedDir, "*.md"))
-            {
-                var fi = new FileInfo(file);
-                entries.Add(new MemoryEntry
+                // 列出 .md 文件
+                foreach (var file in Directory.GetFiles(resolvedDir, "*.md"))
                 {
-                    Name = fi.Name,
-                    IsDirectory = false,
-                    SizeBytes = fi.Length,
-                    LastModified = fi.LastWriteTime
-                });
+                    var fi = new FileInfo(file);
+                    entries.Add(new MemoryEntry
+                    {
+                        Name = fi.Name,
+                        IsDirectory = false,
+                        SizeBytes = fi.Length,
+                        LastModified = fi.LastWriteTime
+                    });
+                }
+            }
+            catch (DirectoryNotFoundException)
+            {
+                // 目录在 Exists 与枚举之间被删除 → 返回空目录。
+            }
+            catch (UnauthorizedAccessException ex)
+            {
+                Logger.Warn($"[Memory] 无法列出记忆目录 {resolvedDir}: {ex.Message}");
+            }
+            catch (IOException ex)
+            {
+                Logger.Warn($"[Memory] 列举记忆目录失败 {resolvedDir}: {ex.Message}");
             }
 
             return new MemoryViewResult

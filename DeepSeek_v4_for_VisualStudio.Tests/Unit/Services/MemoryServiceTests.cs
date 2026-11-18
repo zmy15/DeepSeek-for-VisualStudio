@@ -343,6 +343,14 @@ public class MemoryServiceTests : IDisposable
         result.Should().Be(string.Empty);
     }
 
+    [Fact]
+    public void GetMemoryContext_EmptyScope_ReturnsEmptyString()
+    {
+        string emptySession = "empty-" + Guid.NewGuid().ToString("N").Substring(0, 8);
+
+        _service.GetMemoryContext(MemoryScope.Session, emptySession).Should().BeEmpty();
+    }
+
     #endregion
 
     #region Cleanup

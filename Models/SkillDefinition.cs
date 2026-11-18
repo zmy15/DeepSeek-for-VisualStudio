@@ -132,8 +132,6 @@ namespace DeepSeek_v4_for_VisualStudio.Models
         public string GetCompactInstructions(int maxBodyChars = 2000)
         {
             string body;
-            // RAG-MARK: no-truncate — 不再截断技能指令正文，完整加载
-            // RAG-SOURCE: skill-definition 技能定义正文
             body = Body;
 
             return $"<skill name=\"{Name}\">\n<description>{Description}</description>\n\n{body}\n</skill>";

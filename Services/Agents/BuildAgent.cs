@@ -44,6 +44,7 @@ namespace DeepSeek_v4_for_VisualStudio.Services.Agents
             "grep_search",      // 直接定位符号/错误文本引用
             "get_file_symbols", // 单文件符号定义列表
             "list_dir",         // 快速查看项目目录结构
+            "get_current_time", // 获取当前日期、时间与时区
             // 文件读写与编辑
             "read_file",
             "web_search",       // 联网搜索（需在设置中开启）

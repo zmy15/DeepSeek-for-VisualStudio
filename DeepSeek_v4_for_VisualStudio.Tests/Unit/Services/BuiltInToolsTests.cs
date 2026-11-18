@@ -47,6 +47,18 @@ public class BuiltInToolsTests
     }
 
     [Fact]
+    public void GetCurrentTimeTool_HasCorrectName()
+    {
+        new GetCurrentTimeTool().Name.Should().Be("get_current_time");
+    }
+
+    [Fact]
+    public void GetFileCommentsTool_HasCorrectName()
+    {
+        new GetFileCommentsTool().Name.Should().Be("get_file_comments");
+    }
+
+    [Fact]
     public void FetchWebpageTool_HasCorrectName()
     {
         new FetchWebpageTool().Name.Should().Be("fetch_webpage");
@@ -360,7 +372,9 @@ public class BuiltInToolsTests
             new FileSearchTool(),
             new GrepSearchTool(),
             new FileSymbolsTool(),
+            new GetFileCommentsTool(),
             new GetErrorsTool(),
+            new GetCurrentTimeTool(),
             new FetchWebpageTool(),
             new CaptureWindowTool(),
             new BuildSolutionTool(),

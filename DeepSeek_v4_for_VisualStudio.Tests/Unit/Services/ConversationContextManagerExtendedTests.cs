@@ -450,7 +450,7 @@ public class ConversationContextManagerExtendedTests
         var compressor = new ContextCompressorService((messages, ct) =>
         {
             capturedMessages = messages;
-            return Task.FromResult("compressed-summary");
+            return Task.FromResult(BuildStructuredSummary("compressed-summary"));
         });
 
         _manager.TokenBudget = 100;
@@ -483,7 +483,7 @@ public class ConversationContextManagerExtendedTests
         var compressor = new ContextCompressorService((messages, ct) =>
         {
             capturedMessages = messages;
-            return Task.FromResult("tool-loop-summary");
+            return Task.FromResult(BuildStructuredSummary("tool-loop-summary"));
         });
 
         _manager.CacheWindowMaxTokens = 1;
@@ -507,10 +507,31 @@ public class ConversationContextManagerExtendedTests
     }
 
     [Fact]
+    public void TryCompressForToolLoop_SameUserTurn_OnlyCompressesOnce()
+    {
+        var compressor = new ContextCompressorService((messages, ct) =>
+            Task.FromResult(BuildStructuredSummary("once")));
+        _manager.CacheWindowMaxTokens = 1;
+        _manager.SetCompressor(compressor);
+        _manager.AddUserMessage("Q1");
+        _manager.AddAssistantMessage("A1");
+        _manager.AddToolResult("call_1", "read_file", "T1");
+
+        bool first = _manager.TryCompressForToolLoop(out _, out _, out _);
+        _manager.AddAssistantMessage("A2");
+        _manager.AddToolResult("call_2", "read_file", "T2");
+        bool second = _manager.TryCompressForToolLoop(out _, out _, out _);
+
+        first.Should().BeTrue();
+        second.Should().BeFalse("the compressed prefix may change only once per user turn");
+    }
+
+    [Fact]
     public void SetCompressor_HotReload_PreservesExistingSummaries()
     {
+        string structuredSummary = BuildStructuredSummary("old-summary");
         var oldCompressor = new ContextCompressorService((messages, ct) =>
-            Task.FromResult("old-summary"));
+            Task.FromResult(structuredSummary));
         _manager.CacheWindowMaxTokens = 1;
         _manager.SetCompressor(oldCompressor);
         _manager.AddUserMessage("Q1");
@@ -519,14 +540,14 @@ public class ConversationContextManagerExtendedTests
 
         _manager.TryCompressForToolLoop(out _, out _, out _).Should().BeTrue();
         _manager.Compressor!.CompressedSummaries.Should().ContainSingle()
-            .Which.Summary.Should().Be("old-summary");
+            .Which.Summary.Should().Be(structuredSummary);
 
         _manager.CacheWindowMaxTokens = 0;
         _manager.SetCompressor(new ContextCompressorService());
         var messages = _manager.BuildApiMessages();
 
         _manager.GetCompressedSummariesSnapshot().Should().ContainSingle()
-            .Which.Summary.Should().Be("old-summary");
+            .Which.Summary.Should().Be(structuredSummary);
         messages.Should().Contain(m =>
             m.Role == "system"
             && m.Content != null
@@ -537,7 +558,7 @@ public class ConversationContextManagerExtendedTests
     public void TryCompressForToolLoop_RaisesCompressionStateChanged()
     {
         var compressor = new ContextCompressorService((messages, ct) =>
-            Task.FromResult("compression-event-summary"));
+            Task.FromResult(BuildStructuredSummary("compression-event-summary")));
         var states = new List<(bool Active, double UsagePercent)>();
 
         _manager.CacheWindowMaxTokens = 1;
@@ -563,7 +584,7 @@ public class ConversationContextManagerExtendedTests
     public void TryCompressForToolLoop_NoNewConversationContent_StopsAndSignalsReset()
     {
         var compressor = new ContextCompressorService((messages, ct) =>
-            Task.FromResult("summary"));
+            Task.FromResult(BuildStructuredSummary("summary")));
 
         _manager.TokenBudget = 1;
         _manager.SetSystemPrompt("system");
@@ -575,8 +596,10 @@ public class ConversationContextManagerExtendedTests
 
         _manager.TryCompressForToolLoop(out _, out _, out _).Should().BeTrue();
 
-        // T1 属于未压缩的新条目，仍可继续压缩。
-        _manager.AddCustomMessage("system", "custom-1");
+        // 新用户轮次允许再次压缩一次。
+        _manager.AddUserMessage("Q2");
+        _manager.AddAssistantMessage("A2");
+        _manager.AddToolResult("call_2", "read_file", "T2");
         _manager.TryCompressForToolLoop(out _, out _, out _).Should().BeTrue();
 
         // 此时边界内只剩两个 custom 条目，没有新的 user/assistant/tool 内容。
@@ -591,7 +614,7 @@ public class ConversationContextManagerExtendedTests
     public void TryCompressForToolLoop_CacheWindowOnlyWithoutBudgetPressure_DoesNotSignalReset()
     {
         var compressor = new ContextCompressorService((messages, ct) =>
-            Task.FromResult("summary"));
+            Task.FromResult(BuildStructuredSummary("summary")));
 
         _manager.CacheWindowMaxTokens = 1;
         _manager.SetCompressor(compressor);
@@ -607,7 +630,7 @@ public class ConversationContextManagerExtendedTests
     public void TryCompressForToolLoop_CompressedSummaryFillsBudget_SignalsReset()
     {
         var compressor = new ContextCompressorService((messages, ct) =>
-            Task.FromResult("summary"));
+            Task.FromResult(BuildStructuredSummary("summary")));
 
         _manager.TokenBudget = 1;
         _manager.SetCompressor(compressor);
@@ -698,7 +721,7 @@ public class ConversationContextManagerExtendedTests
         var compressor = new ContextCompressorService((messages, ct) =>
         {
             capturedCompressionMessages = messages;
-            return Task.FromResult("new-summary");
+            return Task.FromResult(BuildStructuredSummary("new-summary"));
         });
 
         _manager.SetCompressor(compressor);
@@ -708,7 +731,7 @@ public class ConversationContextManagerExtendedTests
             {
                 FromTurn = 1,
                 ToTurn = 2,
-                Summary = "previous-summary",
+                Summary = BuildStructuredSummary("previous-summary"),
                 OriginalTokens = 100,
                 CompressedTokens = 20,
             },
@@ -730,7 +753,7 @@ public class ConversationContextManagerExtendedTests
         capturedCompressionMessages.Should().Contain(m =>
             m.Role == "system"
             && m.Content != null
-            && m.Content.Contains("90,000", StringComparison.Ordinal));
+            && m.Content.Contains("1 tokens", StringComparison.Ordinal));
     }
 
     [Fact]
@@ -1190,17 +1213,6 @@ public class ConversationContextManagerExtendedTests
     }
 
     [Fact]
-    public void BuildVolatileContextBlock_IncludesRagContext()
-    {
-        _manager.SetRagContext("RAG context from database");
-
-        var volatileBlock = _manager.BuildVolatileContextBlock();
-
-        volatileBlock.Should().NotBeNull();
-        volatileBlock!.Should().Contain("RAG context from database");
-    }
-
-    [Fact]
     public void BuildVolatileContextBlock_PlacesSolutionBeforeIdeContext()
     {
         _manager.SetSolutionPath(@"C:\Projects\MyApp\MyApp.sln");
@@ -1213,6 +1225,91 @@ public class ConversationContextManagerExtendedTests
         volatileBlock.Should().Contain("[IDE Context]");
         volatileBlock.IndexOf("MyApp.sln", StringComparison.Ordinal)
             .Should().BeLessThan(volatileBlock.IndexOf("[IDE Context]", StringComparison.Ordinal));
+    }
+
+    [Fact]
+    public void MemoryContext_IsInjectedOnlyOncePerConversation()
+    {
+        const string memory = "## 用户记忆\n- 偏好直接写入文件";
+        _manager.SetSolutionPath(@"C:\Projects\MyApp\MyApp.sln");
+        _manager.SetMemoryContext(memory);
+
+        _manager.AddUserMessage("Q1");
+        _manager.PersistCurrentVolatileSnapshot().Should().BeTrue();
+        _manager.AddAssistantMessage("A1");
+        _manager.AddUserMessage("Q2");
+        _manager.PersistCurrentVolatileSnapshot().Should().BeTrue();
+
+        var messages = _manager.BuildApiMessages();
+
+        _manager.BuildVolatileContextBlock().Should().NotContain("## 用户记忆");
+        messages[1].Role.Should().Be("system");
+        messages[1].Content.Should().Be(memory);
+        messages.Count(message =>
+                message.Role == "system"
+                && message.Content?.Contains("## 用户记忆", StringComparison.Ordinal) == true)
+            .Should().Be(1, "同一会话只应保留首次固化的完整用户记忆");
+    }
+
+    [Fact]
+    public void MemoryContext_IsFrozenForTheConversation()
+    {
+        _manager.SetMemoryContext("## 用户记忆\n- first");
+        _manager.SetMemoryContext("## 用户记忆\n- second");
+        _manager.AddUserMessage("Q1");
+
+        var messages = _manager.BuildApiMessages();
+
+        messages[1].Content.Should().Be("## 用户记忆\n- first");
+    }
+
+    [Fact]
+    public void MemoryContext_RestoredFromHistory_IsNotInjectedAgain()
+    {
+        const string memory = "## 用户记忆\n- 偏好简洁回答";
+        _manager.SetSolutionPath(@"C:\Projects\MyApp\MyApp.sln");
+        _manager.SetMemoryContext(memory);
+        _manager.AddUserMessage("Q1");
+        _manager.PersistCurrentVolatileSnapshot();
+        _manager.AddAssistantMessage("A1");
+
+        var restored = new ConversationContextManager();
+        restored.RestoreFullContext(_manager.GetFullContext());
+        restored.SetSolutionPath(@"C:\Projects\MyApp\MyApp.sln");
+        restored.SetMemoryContext(memory);
+        restored.AddUserMessage("Q2");
+
+        restored.BuildVolatileContextBlock().Should().NotContain("## 用户记忆");
+        restored.BuildApiMessages().Count(message =>
+                message.Role == "system"
+                && message.Content?.Contains("## 用户记忆", StringComparison.Ordinal) == true)
+            .Should().Be(1);
+    }
+
+    [Fact]
+    public void MemoryContext_LegacyVolatileSnapshots_AreMigratedToStablePrefix()
+    {
+        const string memory = "## 用户记忆\n- 旧版重复内容";
+        _manager.RestoreFullContext(new List<ChatApiMessage>
+        {
+            new() { Role = "system", Content = memory + "\n\n[IDE Context] Old" },
+            new() { Role = "user", Content = Prefixed("Q1") },
+            new() { Role = "assistant", Content = "A1" },
+        });
+        _manager.SetMemoryContext(memory);
+        _manager.AddUserMessage("Q2");
+
+        var messages = _manager.BuildApiMessages();
+
+        messages[1].Content.Should().Be(memory);
+        messages.Count(message =>
+                message.Role == "system"
+                && message.Content?.Contains("## 用户记忆", StringComparison.Ordinal) == true)
+            .Should().Be(1);
+        messages.Should().Contain(message =>
+            message.Role == "system"
+            && message.Content != null
+            && message.Content.Contains("[IDE Context] Old", StringComparison.Ordinal));
     }
 
     [Fact]
@@ -1246,32 +1343,6 @@ public class ConversationContextManagerExtendedTests
 
         oldIndex.Should().BeLessThan(q1Index);
         newIndex.Should().BeLessThan(q2Index);
-    }
-
-    #endregion
-
-    #region SetRagContext edge cases
-
-    [Fact]
-    public void SetRagContext_ReplaceExisting_AdjustsTokenCount()
-    {
-        _manager.SetRagContext("Original RAG context");
-        var tokensAfterFirst = _manager.EstimatedTokens;
-
-        _manager.SetRagContext("New RAG context that is much longer than the original one");
-        var tokensAfterSecond = _manager.EstimatedTokens;
-
-        // 第二次设置应替换而非累加
-        tokensAfterSecond.Should().BeGreaterThan(0);
-    }
-
-    [Fact]
-    public void SetRagContext_Null_ClearsContext()
-    {
-        _manager.SetRagContext("Some RAG data");
-        _manager.SetRagContext(null);
-
-        _manager.RagContext.Should().BeNull();
     }
 
     #endregion
@@ -1330,4 +1401,12 @@ public class ConversationContextManagerExtendedTests
     }
 
     #endregion
+
+    private static string BuildStructuredSummary(string marker)
+    {
+        string[] headings = ContextCompressorService.GetSummarySectionHeadings();
+        return string.Join(Environment.NewLine + Environment.NewLine,
+            headings.Select((heading, index) =>
+                heading + Environment.NewLine + (index == 2 ? marker : LocalizationService.Instance["compress.none"])));
+    }
 }

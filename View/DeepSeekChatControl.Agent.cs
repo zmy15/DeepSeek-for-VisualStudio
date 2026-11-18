@@ -166,7 +166,6 @@ namespace DeepSeek_v4_for_VisualStudio.View
         /// <summary>
         /// 获取最近几轮对话文本作为 Discover 的附加上下文，帮助 ExploreAgent 生成更精准的关键词。
         /// </summary>
-        [RagSource("conversation-history", "获取对话历史作为 Discover 附加上下文")]
         private string GetConversationContextForDiscovery()
         {
             try
@@ -183,7 +182,6 @@ namespace DeepSeek_v4_for_VisualStudio.View
                     if (entry.Role == "user" || entry.Role == "assistant")
                     {
                         string text = entry.Content ?? string.Empty;
-                        // RAG-MARK: no-truncate — 不再截断对话上下文，完整传递给 ExploreAgent
                         recentTurns.Insert(0, $"[{entry.Role}]: {text}");
                         turnCount++;
                     }
@@ -233,7 +231,6 @@ namespace DeepSeek_v4_for_VisualStudio.View
         /// <summary>
         /// 获取用于重试/编辑的对话历史上下文摘要（比 Discovery 版本更详细）。
         /// </summary>
-        [RagSource("conversation-history", "获取对话历史作为重试/编辑上下文")]
         private string GetConversationContextForRetry()
         {
             try
@@ -251,7 +248,6 @@ namespace DeepSeek_v4_for_VisualStudio.View
                     {
                         string text = entry.Content ?? string.Empty;
                         string prefix = entry.Role == "user" ? LocalizationService.Instance["chat.role.user"] : LocalizationService.Instance["chat.role.ai"];
-                        // RAG-MARK: no-truncate — 不再截断对话上下文，完整传递给重试流程
                         recentTurns.Insert(0, $"[{prefix}]: {text}");
                         turnCount++;
                     }
@@ -282,7 +278,7 @@ namespace DeepSeek_v4_for_VisualStudio.View
         /// <summary>
         /// 共享系统上下文初始化：组装 system prompt、发现 skill、冻结前缀、注入记忆。
         /// 新会话首次进入 Agent 工作流和会话恢复/重试共用此逻辑。
-        /// RAG 和搜索上下文属于易变上下文，需要在具体发送路径中单独更新。
+        /// 搜索上下文属于易变上下文，需要在具体发送路径中单独更新。
         /// </summary>
         private async Task InitializeSystemContextAsync()
         {
@@ -529,7 +525,6 @@ namespace DeepSeek_v4_for_VisualStudio.View
                     {
                         ide = ide != null,
                         ideChars = _contextManager.IdeContextChars,
-                        rag = _contextManager.HasRagContext,
                     },
                     tokensPerSecond = _latestTurnMetrics == null ? null : new
                     {
@@ -603,7 +598,6 @@ namespace DeepSeek_v4_for_VisualStudio.View
                     var ideCur = _ideContextTracker?.Current;
                     Logger.Info($"[ContextDebug] IDE={(ideCur != null ? ideCur.FilePath : "off")}" +
                         $"(sel={ideCur?.HasSelection == true}, diag={ideCur?.ErrorCount ?? 0}e/{ideCur?.WarningCount ?? 0}w) " +
-                        $"RAG={_contextManager.HasRagContext} " +
                         $"WS={_contextManager.GetWorkingSetTopPaths(6).Count} " +
                         $"Tokens={dbgStats.EstimatedTokens:N0}/{dbgStats.TokenBudget:N0}");
 
@@ -850,7 +844,6 @@ namespace DeepSeek_v4_for_VisualStudio.View
                     CancellationToken = GetStreamingToken(),
                     ReadFileAsync = async (path) =>
                     {
-                        // RAG-SOURCE: file-read Agent 读取文件内容（Ask/Edit/Explore/Plan Agent 上下文）
                         if (File.Exists(path))
                             return await Task.Run(() => FileEncodingHelper.ReadAllText(path));
                         return null;
@@ -1730,7 +1723,7 @@ namespace DeepSeek_v4_for_VisualStudio.View
         }
 
         /// <summary>
-        /// 兼容 json_object 模式下模型偶发返回单对象 {…}（而非协议要求的 JSON 数组）的情况：
+        /// 兼容模型偶发返回单对象 {…}（而非协议要求的 JSON 数组）的情况：
         /// 定位文本中第一个 JSON 对象的起止（括号深度配对，跳过字符串字面量），包装为单元素数组。
         /// 仅在 ExtractJsonArray 解析失败时调用，不影响正常数组响应路径。
         /// </summary>
@@ -1846,7 +1839,6 @@ namespace DeepSeek_v4_for_VisualStudio.View
                 var rawResponse = await _activeAgent.CallAiWithReadOnlyToolLoopAsync(
                     messages, CancellationToken.None,
                     reminderAfterFirstToolRound: LocalizationService.Instance["agent.memoryAutoRecordNoMoreToolsAfterToolRound"],
-                    responseFormat: "json_object",
                     persistToHistory: false);
 
                 await ProcessMemoryDecisionAsync(
@@ -1913,7 +1905,6 @@ namespace DeepSeek_v4_for_VisualStudio.View
                             messages,
                             CancellationToken.None,
                             reminderAfterFirstToolRound: LocalizationService.Instance["agent.memoryAutoRecordNoMoreToolsAfterToolRound"],
-                            responseFormat: "json_object",
                             persistToHistory: false);
 
                         await ProcessMemoryDecisionAsync(rawResponse, memoryService, sessionId, solutionPath);
@@ -2000,7 +1991,7 @@ namespace DeepSeek_v4_for_VisualStudio.View
                 }
 
                 // ── 解析 JSON（DeepSeek JSON Output 模式下仍可能包裹 markdown 或前缀文本）──
-                // 先按协议要求解析数组；json_object 模式下模型偶发返回单对象 {…}，
+                // 先按协议要求解析数组；模型可能偶发返回单对象 {…}，
                 // 需兼容包装为单元素数组，否则会被误判为"无需记录"而静默丢失用户偏好数据。
                 string json = ExtractJsonArray(rawResponse);
                 if (string.IsNullOrWhiteSpace(json)

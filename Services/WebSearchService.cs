@@ -1419,9 +1419,6 @@ namespace DeepSeek_v4_for_VisualStudio.Services
                 // 移除所有 HTML 标签
                 string text = StripHtmlTags(bodyContent);
 
-                // RAG-MARK: no-truncate — 不再截断提取的网页文本
-                // RAG-SOURCE: web-fetch 网页文本提取（HTML 解析结果）
-
                 return text.Trim();
             }
             catch

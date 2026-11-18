@@ -25,17 +25,19 @@ public class SyncCursorCascadeTests
     {
         var mgr = new ConversationContextManager();
 
-        // 1) 旧动态块版本（含 MEM-OLD）
+        // 1) 会话固定记忆前缀
         mgr.SetMemoryContext("MEM-OLD");
         mgr.AddUserMessage("q1");
         mgr.AddAssistantMessage("a1");
 
-        // 2) 按当时的动态块构建出的"已发送列表"
+        // 2) 构建已发送列表
         var sent = mgr.BuildApiMessages();
-        sent.Count(m => m.Role == "system").Should().BeGreaterThanOrEqualTo(2,
-            "发送列表应含稳定前缀与动态块");
+        sent.Count(m => m.Role == "system").Should().Be(2,
+            "稳定 system prompt 与用户记忆应各占一条独立 system 消息");
+        sent[1].Content.Should().Be("MEM-OLD",
+            "用户记忆应位于 messages[1] 的会话固定前缀");
 
-        // 3) 动态块漂移：记忆变化 + 新用户消息落库都会重建 _cachedDynamicBlock
+        // 3) 同一会话中的记忆更新不得替换已固定前缀；继续追加用户消息
         mgr.SetMemoryContext("MEM-NEW");
         mgr.AddUserMessage("q2");
 

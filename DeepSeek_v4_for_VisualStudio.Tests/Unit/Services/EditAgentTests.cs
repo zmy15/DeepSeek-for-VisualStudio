@@ -314,6 +314,7 @@ public class EditAgentTests
     /// </summary>
     [Theory]
     [InlineData(true, true, false, null, false)]    // 测试通过 → 不必移交（无需构建）
+    [InlineData(true, true, true, null, false)]     // 测试通过且旧构建状态已失效 → 不移交
     [InlineData(true, true, true, false, true)]     // 测试通过但构建实际执行并失败 → 仍需移交
     [InlineData(true, false, false, null, true)]    // 测试失败且未构建 → 移交 Build 处理
     [InlineData(true, false, true, true, true)]     // 测试失败不能被后续编译成功覆盖 → 仍移交
@@ -515,10 +516,12 @@ public class EditAgentTests
         tools.Should().Contain("list_dir");
         tools.Should().Contain("run_in_terminal");
         tools.Should().Contain("get_terminal_output");
+        tools.Should().Contain("get_current_time");
         tools.Should().Contain("VisualStudio_askQuestions");
         tools.Should().Contain("build_solution");
         tools.Should().Contain("create_file");
         tools.Should().NotContain("request_handoff");
+        tools.Should().NotContain("get_file_comments");
         tools.Should().NotContain("edit_notebook_file");
 
         var agent = new EditAgent(_apiService);

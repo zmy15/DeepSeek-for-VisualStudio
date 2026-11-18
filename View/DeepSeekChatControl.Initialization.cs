@@ -105,7 +105,7 @@ namespace DeepSeek_v4_for_VisualStudio.View
         internal string GetEffectiveModel() => DeepSeekEndpointResolver.Resolve(_options).Model;
 
         /// <summary>
-        /// 初始化 RAG 服务和上下文压缩服务。
+        /// 初始化上下文压缩服务。
         /// 在 API 服务就绪后调用。
         /// </summary>
         private void InitializeContextServices()
@@ -490,7 +490,7 @@ namespace DeepSeek_v4_for_VisualStudio.View
 
                 if (enabledConfigs.Count == 0)
                 {
-                    Logger.Info("[MCP] 没有启用的 MCP 服务器，跳过初始化。点击  按钮配置。");
+                    Logger.Info("[MCP] 没有启用的 MCP 服务器，跳过初始化。可在快速设置中配置。");
                     return;
                 }
 
@@ -525,10 +525,6 @@ namespace DeepSeek_v4_for_VisualStudio.View
             catch (Exception ex)
             {
                 Logger.Error($"[MCP] MCP 初始化失败: {ex.Message}", ex);
-            }
-            finally
-            {
-                UpdateMcpButtonAppearance();
             }
         }
         #pragma warning restore VSTHRD100
@@ -1278,17 +1274,10 @@ namespace DeepSeek_v4_for_VisualStudio.View
             // 记录「这份对话属于哪个解决方案」：解决方案事件处理靠它识别「同一解决方案重载」。
             _boundSolutionPath = _solutionPath;
 
-            // 确定活跃会话
-            if (!string.IsNullOrEmpty(_sessionsContainer.ActiveSessionId))
-            {
-                _activeSession = _sessionsContainer.Sessions
-                    .FirstOrDefault(s => s.Id == _sessionsContainer.ActiveSessionId);
-            }
-
-            // ActiveSessionId 缺失或指向已删除的会话时，回退到「最近活跃」的会话。
-            // 不能取列表首元素：Sessions 按创建顺序追加（最旧在前），
-            // 而历史浮层按 LastActiveAt 降序展示，取首元素会恢复到最旧的会话。
-            _activeSession ??= SelectFallbackSession(_sessionsContainer.Sessions);
+            // 必须基于刚加载的容器重新选择活跃会话。
+            // 不能沿用上一个解决方案的 _activeSession：文件缺失、损坏或为空容器时，
+            // 旧会话会成为“容器外的幽灵会话”，后续每次保存都写成 0 个会话并覆盖磁盘历史。
+            _activeSession = ResolveActiveSession(_sessionsContainer);
 
             // 如果没有会话，创建默认会话
             if (_activeSession == null)

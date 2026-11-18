@@ -8,6 +8,7 @@ using System.Drawing;
 using System.Drawing.Design;
 using System.Linq;
 using System.Windows.Forms;
+using System.Windows.Interop;
 
 namespace DeepSeek_v4_for_VisualStudio.Settings
 {
@@ -244,20 +245,45 @@ namespace DeepSeek_v4_for_VisualStudio.Settings
             if (context?.Instance is not DeepSeekOptionsPage page)
                 return value;
 
+            ShowEditor(page);
+            return page.CustomModelName;
+        }
+
+        /// <summary>
+        /// Opens the unified model and endpoint settings dialog and applies the result.
+        /// Used by both the options property grid and the quick settings surface.
+        /// </summary>
+        internal static bool ShowEditor(
+            DeepSeekOptionsPage page,
+            System.Windows.Window? owner = null)
+        {
             var rows = ModelCatalogMapping.BuildRows(page);
             var officialModels = OfficialModelCatalogService.GetModels();
 
             using var dialog = new ModelCatalogDialog(
                 rows,
                 officialModels,
-                page.GetCustomEndpoints());
-            if (dialog.ShowDialog() == DialogResult.OK && dialog.ResultRows is { } resultRows)
+                page.GetCustomEndpoints(),
+                page.ApiKey);
+            DialogResult result = owner == null
+                ? dialog.ShowDialog()
+                : dialog.ShowDialog(new WpfWindowOwner(owner));
+            if (result == DialogResult.OK && dialog.ResultRows is { } resultRows)
             {
                 ModelCatalogMapping.ApplyRows(page, resultRows, dialog.ResultEndpoints);
-                return page.CustomModelName;
+                page.ApiKey = dialog.ResultOfficialApiKey;
+                return true;
             }
 
-            return value;
+            return false;
+        }
+
+        private sealed class WpfWindowOwner : System.Windows.Forms.IWin32Window
+        {
+            public IntPtr Handle { get; }
+
+            public WpfWindowOwner(System.Windows.Window window)
+                => Handle = new WindowInteropHelper(window).Handle;
         }
     }
 
@@ -275,6 +301,9 @@ namespace DeepSeek_v4_for_VisualStudio.Settings
         /// <summary>确定后输出的端点集合。</summary>
         public IReadOnlyList<CustomEndpointConfig> ResultEndpoints { get; private set; }
 
+        /// <summary>确定后输出的 DeepSeek 官方 API Key。</summary>
+        public string ResultOfficialApiKey { get; private set; }
+
         /// <summary>
         /// 构造对话框。
         /// </summary>
@@ -283,10 +312,13 @@ namespace DeepSeek_v4_for_VisualStudio.Settings
         public ModelCatalogDialog(
             IReadOnlyList<ModelCatalogRow> rows,
             IReadOnlyList<string> officialModels,
-            IReadOnlyList<CustomEndpointConfig> endpoints)
+            IReadOnlyList<CustomEndpointConfig> endpoints,
+            string officialApiKey)
         {
             _endpoints = DeepSeekOptionsPage.NormalizeCustomEndpoints(endpoints).ToList();
             ResultEndpoints = _endpoints;
+            _officialApiKey = officialApiKey ?? string.Empty;
+            ResultOfficialApiKey = _officialApiKey;
             // 官方模型由远端目录动态提供、删除无处落盘，下次打开必然重现，
             // 故预先构建集合，用于标注来源并拦截对官方行的删除操作。
             _officialSet = new HashSet<string>(officialModels, StringComparer.OrdinalIgnoreCase);
@@ -510,12 +542,14 @@ namespace DeepSeek_v4_for_VisualStudio.Settings
         private void OnAddModels(object? sender, EventArgs e)
         {
             var l = LocalizationService.Instance;
-            using var dialog = new ModelAddDialog(_endpoints);
+            using var dialog = new ModelAddDialog(_endpoints, _officialApiKey);
             if (dialog.ShowDialog(this) != DialogResult.OK)
                 return;
 
             _endpoints = DeepSeekOptionsPage.NormalizeCustomEndpoints(dialog.ResultEndpoints).ToList();
+            _officialApiKey = dialog.ResultOfficialApiKey;
             ResultEndpoints = _endpoints;
+            ResultOfficialApiKey = _officialApiKey;
             var existing = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
             foreach (DataGridViewRow gridRow in _grid.Rows)
             {
@@ -546,12 +580,16 @@ namespace DeepSeek_v4_for_VisualStudio.Settings
 
         private void OnManageEndpoints(object? sender, EventArgs e)
         {
-            using var dialog = new CustomEndpointManagerDialog(_endpoints);
+            using var dialog = new CustomEndpointManagerDialog(
+                _endpoints,
+                _officialApiKey);
             if (dialog.ShowDialog(this) != DialogResult.OK)
                 return;
 
             _endpoints = DeepSeekOptionsPage.NormalizeCustomEndpoints(dialog.ResultEndpoints).ToList();
+            _officialApiKey = dialog.ResultOfficialApiKey;
             ResultEndpoints = _endpoints;
+            ResultOfficialApiKey = _officialApiKey;
             var activeIds = new HashSet<string>(
                 _endpoints.Select(endpoint => endpoint.Id), StringComparer.Ordinal);
             for (int i = _grid.Rows.Count - 1; i >= 0; i--)
@@ -617,6 +655,7 @@ namespace DeepSeek_v4_for_VisualStudio.Settings
             {
                 ResultRows = rows;
                 ResultEndpoints = _endpoints;
+                ResultOfficialApiKey = _officialApiKey;
                 DialogResult = DialogResult.OK;
                 return;
             }
@@ -741,6 +780,7 @@ namespace DeepSeek_v4_for_VisualStudio.Settings
         private readonly HashSet<string> _metadataSet;
 
         private List<CustomEndpointConfig> _endpoints;
+        private string _officialApiKey;
     }
 
     /// <summary>
@@ -755,6 +795,7 @@ namespace DeepSeek_v4_for_VisualStudio.Settings
         private readonly List<CustomEndpointModelEntry> _added = new();
         private readonly HashSet<string> _seen = new(StringComparer.OrdinalIgnoreCase);
         private List<CustomEndpointConfig> _endpoints;
+        private string _officialApiKey;
 
         /// <summary>确定后输出待添加的模型及所属端点。</summary>
         public IReadOnlyList<CustomEndpointModelEntry> AddedModels => _added;
@@ -762,9 +803,15 @@ namespace DeepSeek_v4_for_VisualStudio.Settings
         /// <summary>确定后的端点集合，包括本次新增或修改的端点。</summary>
         public IReadOnlyList<CustomEndpointConfig> ResultEndpoints => _endpoints;
 
-        public ModelAddDialog(IReadOnlyList<CustomEndpointConfig> endpoints)
+        /// <summary>确定后的 DeepSeek 官方 API Key。</summary>
+        public string ResultOfficialApiKey => _officialApiKey;
+
+        public ModelAddDialog(
+            IReadOnlyList<CustomEndpointConfig> endpoints,
+            string officialApiKey)
         {
             _endpoints = endpoints.Select(endpoint => endpoint.Clone()).ToList();
+            _officialApiKey = officialApiKey ?? string.Empty;
 
             var l = LocalizationService.Instance;
             Text = l["settings.modelCatalog.addTitle"];
@@ -872,11 +919,14 @@ namespace DeepSeek_v4_for_VisualStudio.Settings
 
         private void OnManageEndpoints(object? sender, EventArgs e)
         {
-            using var dialog = new CustomEndpointManagerDialog(_endpoints);
+            using var dialog = new CustomEndpointManagerDialog(
+                _endpoints,
+                _officialApiKey);
             if (dialog.ShowDialog(this) != DialogResult.OK)
                 return;
 
             _endpoints = DeepSeekOptionsPage.NormalizeCustomEndpoints(dialog.ResultEndpoints).ToList();
+            _officialApiKey = dialog.ResultOfficialApiKey;
             RebuildAddedModels();
             RefreshEndpointCombo();
         }
@@ -1019,15 +1069,25 @@ namespace DeepSeek_v4_for_VisualStudio.Settings
         private readonly TextBox _nameBox;
         private readonly TextBox _baseUrlBox;
         private readonly TextBox _apiKeyBox;
+        private readonly Button _removeButton;
+        private readonly Label _hintLabel;
         private readonly List<CustomEndpointConfig> _endpoints;
+        private string _officialApiKey;
         private bool _updatingFields;
 
         public IReadOnlyList<CustomEndpointConfig> ResultEndpoints { get; private set; }
 
-        public CustomEndpointManagerDialog(IReadOnlyList<CustomEndpointConfig> endpoints)
+        /// <summary>确定后的 DeepSeek 官方 API Key。</summary>
+        public string ResultOfficialApiKey { get; private set; }
+
+        public CustomEndpointManagerDialog(
+            IReadOnlyList<CustomEndpointConfig> endpoints,
+            string officialApiKey)
         {
             _endpoints = endpoints.Select(endpoint => endpoint.Clone()).ToList();
             ResultEndpoints = _endpoints;
+            _officialApiKey = officialApiKey ?? string.Empty;
+            ResultOfficialApiKey = _officialApiKey;
 
             var l = LocalizationService.Instance;
             Text = l["settings.customEndpoints.title"];
@@ -1049,7 +1109,7 @@ namespace DeepSeek_v4_for_VisualStudio.Settings
             _endpointList = new ListBox
             {
                 Location = new Point(12, 64),
-                Size = new Size(250, 330),
+                Size = new Size(280, 330),
             };
             _endpointList.SelectedIndexChanged += (_, _) => LoadSelectedEndpoint();
 
@@ -1060,59 +1120,59 @@ namespace DeepSeek_v4_for_VisualStudio.Settings
                 Size = new Size(96, 28),
             };
             addButton.Click += (_, _) => AddEndpoint();
-            var removeButton = new Button
+            _removeButton = new Button
             {
                 Text = l["settings.customEndpoints.remove"],
                 Location = new Point(116, 404),
                 Size = new Size(96, 28),
             };
-            removeButton.Click += (_, _) => RemoveEndpoint();
+            _removeButton.Click += (_, _) => RemoveEndpoint();
 
             var nameLabel = new Label
             {
                 Text = l["settings.customEndpoints.name"],
-                Location = new Point(284, 64),
+                Location = new Point(312, 64),
                 AutoSize = true,
             };
             _nameBox = new TextBox
             {
-                Location = new Point(284, 84),
-                Width = 464,
+                Location = new Point(312, 84),
+                Width = 436,
             };
             _nameBox.TextChanged += (_, _) => UpdateSelectedEndpoint();
 
             var baseUrlLabel = new Label
             {
                 Text = l["settings.modelPicker.baseUrl"],
-                Location = new Point(284, 122),
+                Location = new Point(312, 122),
                 AutoSize = true,
             };
             _baseUrlBox = new TextBox
             {
-                Location = new Point(284, 142),
-                Width = 464,
+                Location = new Point(312, 142),
+                Width = 436,
             };
             _baseUrlBox.TextChanged += (_, _) => UpdateSelectedEndpoint();
 
             var apiKeyLabel = new Label
             {
                 Text = l["settings.modelPicker.apiKey"],
-                Location = new Point(284, 180),
+                Location = new Point(312, 180),
                 AutoSize = true,
             };
             _apiKeyBox = new TextBox
             {
-                Location = new Point(284, 200),
-                Width = 464,
+                Location = new Point(312, 200),
+                Width = 436,
                 UseSystemPasswordChar = true,
             };
             _apiKeyBox.TextChanged += (_, _) => UpdateSelectedEndpoint();
 
-            var hintLabel = new Label
+            _hintLabel = new Label
             {
                 Text = l["settings.customEndpoints.modelsHint"],
-                Location = new Point(284, 242),
-                Size = new Size(464, 70),
+                Location = new Point(312, 242),
+                Size = new Size(436, 70),
                 ForeColor = SystemColors.GrayText,
             };
 
@@ -1135,9 +1195,9 @@ namespace DeepSeek_v4_for_VisualStudio.Settings
 
             Controls.AddRange(new Control[]
             {
-                descriptionLabel, _endpointList, addButton, removeButton,
+                descriptionLabel, _endpointList, addButton, _removeButton,
                 nameLabel, _nameBox, baseUrlLabel, _baseUrlBox,
-                apiKeyLabel, _apiKeyBox, hintLabel, okButton, cancelButton,
+                apiKeyLabel, _apiKeyBox, _hintLabel, okButton, cancelButton,
             });
 
             RefreshEndpointList();
@@ -1150,32 +1210,39 @@ namespace DeepSeek_v4_for_VisualStudio.Settings
             var endpoint = new CustomEndpointConfig();
             _endpoints.Add(endpoint);
             RefreshEndpointList();
-            _endpointList.SelectedIndex = _endpoints.Count - 1;
+            _endpointList.SelectedIndex = _endpoints.Count;
             _baseUrlBox.Focus();
         }
 
         private void RemoveEndpoint()
         {
-            int index = _endpointList.SelectedIndex;
-            if (index < 0 || index >= _endpoints.Count)
+            int customIndex = GetSelectedCustomIndex();
+            if (customIndex < 0)
                 return;
 
-            _endpoints.RemoveAt(index);
+            _endpoints.RemoveAt(customIndex);
             RefreshEndpointList();
             if (_endpoints.Count > 0)
-                _endpointList.SelectedIndex = Math.Min(index, _endpoints.Count - 1);
+                _endpointList.SelectedIndex = Math.Min(customIndex + 1, _endpoints.Count);
             else
-                LoadSelectedEndpoint();
+                _endpointList.SelectedIndex = 0;
         }
 
         private void RefreshEndpointList()
         {
             int selected = _endpointList.SelectedIndex;
             _endpointList.Items.Clear();
+            _endpointList.Items.Add(FormatOfficialEndpoint());
             foreach (var endpoint in _endpoints)
                 _endpointList.Items.Add(FormatEndpoint(endpoint));
             if (selected >= 0 && selected < _endpointList.Items.Count)
                 _endpointList.SelectedIndex = selected;
+        }
+
+        private static string FormatOfficialEndpoint()
+        {
+            var l = LocalizationService.Instance;
+            return $"{l["settings.customEndpoints.officialName"]} · {DeepSeekApiService.DefaultBaseUrl}";
         }
 
         private static string FormatEndpoint(CustomEndpointConfig endpoint)
@@ -1188,8 +1255,22 @@ namespace DeepSeek_v4_for_VisualStudio.Settings
 
         private void UpdateEndpointListItem(int index)
         {
-            if (index >= 0 && index < _endpointList.Items.Count && index < _endpoints.Count)
-                _endpointList.Items[index] = FormatEndpoint(_endpoints[index]);
+            int listIndex = index + 1;
+            if (listIndex > 0 &&
+                listIndex < _endpointList.Items.Count &&
+                index >= 0 &&
+                index < _endpoints.Count)
+            {
+                _endpointList.Items[listIndex] = FormatEndpoint(_endpoints[index]);
+            }
+        }
+
+        private int GetSelectedCustomIndex()
+        {
+            int index = _endpointList.SelectedIndex;
+            return index > 0 && index - 1 < _endpoints.Count
+                ? index - 1
+                : -1;
         }
 
         private void LoadSelectedEndpoint()
@@ -1201,22 +1282,45 @@ namespace DeepSeek_v4_for_VisualStudio.Settings
             _updatingFields = true;
             try
             {
-                bool enabled = index >= 0 && index < _endpoints.Count;
-                _nameBox.Enabled = enabled;
-                _baseUrlBox.Enabled = enabled;
-                _apiKeyBox.Enabled = enabled;
-                if (!enabled)
+                _nameBox.Enabled = index >= 0;
+                _baseUrlBox.Enabled = index >= 0;
+                _apiKeyBox.Enabled = index >= 0;
+                if (index < 0)
                 {
                     _nameBox.Clear();
                     _baseUrlBox.Clear();
                     _apiKeyBox.Clear();
+                    _removeButton.Enabled = false;
                     return;
                 }
 
-                var endpoint = _endpoints[index];
+                if (index == 0)
+                {
+                    _nameBox.ReadOnly = true;
+                    _baseUrlBox.ReadOnly = true;
+                    _nameBox.Text = LocalizationService.Instance[
+                        "settings.customEndpoints.officialName"];
+                    _baseUrlBox.Text = DeepSeekApiService.DefaultBaseUrl;
+                    _apiKeyBox.Text = _officialApiKey;
+                    _removeButton.Enabled = false;
+                    _hintLabel.Text = LocalizationService.Instance[
+                        "settings.customEndpoints.officialHint"];
+                    return;
+                }
+
+                int customIndex = index - 1;
+                if (customIndex < 0 || customIndex >= _endpoints.Count)
+                    return;
+
+                _nameBox.ReadOnly = false;
+                _baseUrlBox.ReadOnly = false;
+                var endpoint = _endpoints[customIndex];
                 _nameBox.Text = endpoint.Name;
                 _baseUrlBox.Text = endpoint.BaseUrl;
                 _apiKeyBox.Text = endpoint.ApiKey;
+                _removeButton.Enabled = true;
+                _hintLabel.Text = LocalizationService.Instance[
+                    "settings.customEndpoints.modelsHint"];
             }
             finally
             {
@@ -1229,7 +1333,14 @@ namespace DeepSeek_v4_for_VisualStudio.Settings
             if (_updatingFields)
                 return;
 
-            int index = _endpointList.SelectedIndex;
+            int selectedIndex = _endpointList.SelectedIndex;
+            if (selectedIndex == 0)
+            {
+                _officialApiKey = _apiKeyBox.Text.Trim();
+                return;
+            }
+
+            int index = selectedIndex - 1;
             if (index < 0 || index >= _endpoints.Count)
                 return;
 
@@ -1243,6 +1354,9 @@ namespace DeepSeek_v4_for_VisualStudio.Settings
         private void OnOkClick(object? sender, EventArgs e)
         {
             var l = LocalizationService.Instance;
+            if (_endpointList.SelectedIndex == 0)
+                _officialApiKey = _apiKeyBox.Text.Trim();
+
             foreach (var endpoint in _endpoints)
             {
                 if (!Uri.TryCreate(endpoint.BaseUrl, UriKind.Absolute, out var uri) ||
@@ -1259,6 +1373,7 @@ namespace DeepSeek_v4_for_VisualStudio.Settings
             }
 
             ResultEndpoints = DeepSeekOptionsPage.NormalizeCustomEndpoints(_endpoints);
+            ResultOfficialApiKey = _officialApiKey;
             if (_endpoints.Count > 0 && ResultEndpoints.Count == 0)
             {
                 MessageBox.Show(

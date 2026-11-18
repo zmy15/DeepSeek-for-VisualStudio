@@ -25,7 +25,7 @@ namespace DeepSeek_v4_for_VisualStudio.Services
     /// - read_file 相对宽松（24K），噪音工具严格（4K）
     /// - head-tail 截断保留开头 2/3 + 结尾 1/3，帮助 AI 判断是否需要继续读取
     /// - 大上下文模型（≥500K 窗口）所有限制 ×15
-    /// - 例外：web_search / fetch_webpage 的结果是模型要完整阅读的网页内容，
+    /// - 例外：runSubagent / web_search / fetch_webpage 的结果不做工具级截断，
     ///   一律不截断（见 <see cref="IsNeverTruncateTool"/>）
     /// </summary>
     public class ToolResultCompactor : IToolResultCompactor
@@ -51,9 +51,10 @@ namespace DeepSeek_v4_for_VisualStudio.Services
             if (string.IsNullOrEmpty(rawResult))
                 return rawResult ?? string.Empty;
 
-            // web_search / fetch_webpage 的结果是模型要阅读的正文与网页列表，
+            // runSubagent / web_search / fetch_webpage 的结果是模型要完整阅读的正文、
+            // Explore 汇报或网页列表。
             // 静默 head-tail 截断会让模型拿到残缺内容（例如文档停在章节中间）。
-            // 这两个工具按原文完整保留，长度保护交给会话级上下文预算与自动压缩处理。
+            // 这些工具按原文完整保留，长度保护交给会话级上下文预算与自动压缩处理。
             if (IsNeverTruncateTool(toolName))
                 return rawResult;
 
@@ -83,7 +84,7 @@ namespace DeepSeek_v4_for_VisualStudio.Services
 
         /// <summary>
         /// 判断结果必须完整保留、不做 head-tail 截断的工具。
-        /// 这些工具的输出本身就是需要被完整阅读的内容（网页正文、搜索结果列表）。
+        /// 这些工具的输出本身就是需要被完整阅读的内容（Explore 汇报、网页正文、搜索结果列表）。
         /// </summary>
         private static bool IsNeverTruncateTool(string toolName)
         {
@@ -92,6 +93,7 @@ namespace DeepSeek_v4_for_VisualStudio.Services
                 "web_search" => true,
                 "fetch_webpage" => true,
                 "web_fetch" => true,
+                "runSubagent" => true,
                 _ => false,
             };
         }
@@ -201,10 +203,9 @@ namespace DeepSeek_v4_for_VisualStudio.Services
             if (string.IsNullOrEmpty(model))
                 return true; // 默认按大上下文处理，保守策略
 
-            // DeepSeek 系列
-            if (model.Contains("deepseek", StringComparison.OrdinalIgnoreCase)
-                && (model.Contains("v4", StringComparison.OrdinalIgnoreCase)
-                    || model.Contains("reasoner", StringComparison.OrdinalIgnoreCase)))
+            // DeepSeek 系列统一按大上下文处理。此前只识别 v4/reasoner，
+            // 导致 deepseek-flash 的 18K Explore 报告被 12K 普通阈值错误截断。
+            if (model.Contains("deepseek", StringComparison.OrdinalIgnoreCase))
                 return true;
 
             // 显式标注大上下文的模型

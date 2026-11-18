@@ -310,10 +310,12 @@ namespace DeepSeek_v4_for_VisualStudio.Services
             Register(new GrepSearchTool());
             Register(new SymbolSearchTool());
             Register(new FileSymbolsTool());
+            Register(new GetFileCommentsTool());
             Register(new ListSkillsTool(_skillService));
             Register(new LoadSkillTool(_skillService));
             Register(new ReadSkillResourceTool(_skillService));
             Register(new GetErrorsTool(_buildService));
+            Register(new GetCurrentTimeTool());
             Register(new FetchWebpageTool(_webSearchService));
             // 联网搜索工具：仅当开关开启时注册（默认开启，由 UI 初始化后覆盖）。
             if (_webSearchEnabled)
@@ -468,10 +470,12 @@ namespace DeepSeek_v4_for_VisualStudio.Services
                 new GrepSearchTool(),
                 new SymbolSearchTool(),
                 new FileSymbolsTool(),
+                new GetFileCommentsTool(),
                 new ListSkillsTool(SkillService.Instance),
                 new LoadSkillTool(SkillService.Instance),
                 new ReadSkillResourceTool(SkillService.Instance),
                 new GetErrorsTool(),
+                new GetCurrentTimeTool(),
                 new FetchWebpageTool(),
                 new WebSearchTool(),
                 new CaptureWindowTool(),
@@ -624,8 +628,8 @@ namespace DeepSeek_v4_for_VisualStudio.Services
         {
             return toolName switch
             {
-                "list_dir" or "read_file" or "file_search" or "grep_search" or "symbol_search" or "get_file_symbols" or "get_errors"
-                    or "fetch_webpage" or "web_search" or "capture_window" or "capture_webpage" or "build_solution" or "run_tests"
+                "list_dir" or "read_file" or "file_search" or "grep_search" or "symbol_search" or "get_file_symbols" or "get_file_comments" or "get_errors"
+                    or "get_current_time" or "fetch_webpage" or "web_search" or "capture_window" or "capture_webpage" or "build_solution" or "run_tests"
                     or "replace_string_in_file" or "multi_replace_string_in_file" or "create_file" or "delete_file"
                     or "apply_patch" or "create_directory"
                     or "list_skills" or "load_skill" or "read_skill_resource"

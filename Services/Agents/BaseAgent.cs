@@ -37,7 +37,7 @@ namespace DeepSeek_v4_for_VisualStudio.Services.Agents
         /// <summary>已知内置工具名（MCP 同名工具会覆盖内置，不同名工具按分类注入）</summary>
         protected static readonly HashSet<string> KnownBuiltInToolNames = new(StringComparer.OrdinalIgnoreCase)
         {
-            "list_dir", "read_file", "file_search", "grep_search", "symbol_search", "get_file_symbols", "get_errors",
+            "list_dir", "read_file", "file_search", "grep_search", "symbol_search", "get_file_symbols", "get_file_comments", "get_errors", "get_current_time",
             "fetch_webpage", "web_search", "capture_window", "capture_webpage", "build_solution",
             "run_tests",
             "replace_string_in_file", "multi_replace_string_in_file",
@@ -63,6 +63,7 @@ namespace DeepSeek_v4_for_VisualStudio.Services.Agents
                 "symbol_search",
                 "get_file_symbols",
                 "list_dir",
+                "get_current_time",
                 "memory",
             };
         }
@@ -83,6 +84,7 @@ namespace DeepSeek_v4_for_VisualStudio.Services.Agents
                 "symbol_search",
                 "get_file_symbols",
                 "list_dir",
+                "get_current_time",
                 "memory",
             };
         }
@@ -462,7 +464,6 @@ namespace DeepSeek_v4_for_VisualStudio.Services.Agents
         /// <param name="maxTokens">最大输出 token 数；传 null 表示不限制（不发送 max_tokens 字段）。</param>
         /// <param name="toolChoice">工具调用策略（"none" 禁用工具调用）</param>
         /// <param name="temperature">采样温度（0.0 = 确定性输出）</param>
-        /// <param name="responseFormat">JSON Output 模式: "json_object" 启用，null 不启用</param>
         /// <param name="model">临时覆盖模型；null 使用当前端点模型</param>
         /// <param name="thinkingEnabled">临时覆盖思考模式；null 使用默认设置</param>
         /// <param name="onThinking">思考内容流式回调；null 时使用当前 Agent 回调</param>
@@ -473,7 +474,6 @@ namespace DeepSeek_v4_for_VisualStudio.Services.Agents
             int? maxTokens = null,
             string? toolChoice = null,
             double? temperature = null,
-            string? responseFormat = null,
             string? model = null,
             bool? thinkingEnabled = null,
             Action<string>? onThinking = null,
@@ -485,7 +485,7 @@ namespace DeepSeek_v4_for_VisualStudio.Services.Agents
             var effectiveToolChoice = includeTools ? toolChoice : null;
             var sb = new StringBuilder();
             var effectiveOnThinking = onThinking ?? Context?.OnThinkingChunk;
-            await foreach (var chunk in _apiService.ChatStreamAsync(messages, fullTools, ct, maxTokens, effectiveToolChoice, temperature, responseFormat, model, thinkingEnabled))
+            await foreach (var chunk in _apiService.ChatStreamAsync(messages, fullTools, ct, maxTokens, effectiveToolChoice, temperature, model, thinkingEnabled))
             {
                 if (chunk.StartsWith("[THINKING]"))
                     effectiveOnThinking?.Invoke(chunk.Substring(10));
@@ -508,7 +508,6 @@ namespace DeepSeek_v4_for_VisualStudio.Services.Agents
         /// <param name="messages">预构建的完整消息列表</param>
         /// <param name="ct">取消令牌</param>
         /// <param name="reminderAfterFirstToolRound">首次工具调用后追加的"禁止继续调用工具"提示</param>
-        /// <param name="responseFormat">响应格式（例如 json_object）</param>
         /// <param name="temperature">采样温度</param>
         /// <param name="persistToHistory">
         /// 是否把本轮 assistant/tool 消息与对账结果写入历史。
@@ -519,7 +518,6 @@ namespace DeepSeek_v4_for_VisualStudio.Services.Agents
             List<ChatApiMessage> messages,
             CancellationToken ct,
             string? reminderAfterFirstToolRound = null,
-            string? responseFormat = null,
             double? temperature = null,
             bool persistToHistory = true)
         {
@@ -529,7 +527,6 @@ namespace DeepSeek_v4_for_VisualStudio.Services.Agents
                 ct,
                 toolWhitelist: CreateReadOnlyFinalTaskToolWhitelist(),
                 toolChoiceOverride: "auto",
-                responseFormat: responseFormat,
                 temperature: temperature,
                 noToolsReminderAfterFirstToolRound: reminderAfterFirstToolRound,
                 persistToHistory: persistToHistory);
@@ -728,7 +725,8 @@ namespace DeepSeek_v4_for_VisualStudio.Services.Agents
                 return;
             }
 
-            bool hadDynamicBlock = staticPrefixMessageCount > 1;
+            int dynamicBlockIndex = contextManager.HasMemoryContext ? 2 : 1;
+            bool hadDynamicBlock = staticPrefixMessageCount > dynamicBlockIndex;
             bool hasDynamicBlock = !string.IsNullOrWhiteSpace(dynamicBlock);
 
             messages.RemoveRange(removeStart, removedMessageCount);
@@ -737,7 +735,7 @@ namespace DeepSeek_v4_for_VisualStudio.Services.Agents
 
             if (hasDynamicBlock && !hadDynamicBlock)
             {
-                messages.Insert(1, new ChatApiMessage
+                messages.Insert(dynamicBlockIndex, new ChatApiMessage
                 {
                     Role = "system",
                     Content = dynamicBlock,
@@ -746,12 +744,12 @@ namespace DeepSeek_v4_for_VisualStudio.Services.Agents
             }
             else if (!hasDynamicBlock && hadDynamicBlock)
             {
-                messages.RemoveAt(1);
+                messages.RemoveAt(dynamicBlockIndex);
                 toolInsertPos--;
             }
-            else if (hasDynamicBlock && messages.Count > 1)
+            else if (hasDynamicBlock && messages.Count > dynamicBlockIndex)
             {
-                messages[1].Content = dynamicBlock;
+                messages[dynamicBlockIndex].Content = dynamicBlock;
             }
 
             toolInsertPos = Math.Max(0, Math.Min(toolInsertPos, messages.Count));
@@ -773,8 +771,9 @@ namespace DeepSeek_v4_for_VisualStudio.Services.Agents
         /// 
         /// ── 消息结构（v1.1.12）──
         ///   messages[0] = 稳定 system（SharedImmutablePrefix + fixedPrompt）
-        ///   messages[1] = 可选 dynamicBlock（压缩摘要 + 搜索 + RAG + 记忆）
-        ///   messages[2..N] = 对话历史（来自 ContextManager，起始位置固定）
+        ///   messages[1] = 可选用户记忆（会话级固定前缀）
+        ///   messages[2] = 可选 dynamicBlock（压缩摘要）
+        ///   messages[3..N] = 对话历史（来自 ContextManager，起始位置固定）
         ///   messages[N+1] = 当前用户消息
         ///   [插入点] = 当前用户消息后（工具循环插入 assistant/tool）
         ///   最后一条 = Agent 专属行为指令
@@ -1254,7 +1253,6 @@ namespace DeepSeek_v4_for_VisualStudio.Services.Agents
         /// <param name="onToolCall">工具调用回调（用于 UI 通知）</param>
         /// <param name="maxToolRounds">本次工具循环的最大轮数（null = 仅使用全局安全上限）</param>
         /// <param name="maxAskQuestionsCalls">本次工具循环最多允许执行的 askQuestions 次数（null = 不限制）</param>
-        /// <param name="responseFormat">响应格式（例如 json_object）</param>
         /// <param name="temperature">采样温度</param>
         /// <param name="toolChoiceOverride">覆盖本轮工具选择策略（例如 auto / none）</param>
         /// <param name="noToolsReminderAfterFirstToolRound">首次完成工具调用后追加的“禁止继续调用工具”提示</param>
@@ -1275,7 +1273,6 @@ namespace DeepSeek_v4_for_VisualStudio.Services.Agents
             Action<string>? onToolCall = null,
             int? maxToolRounds = null,
             int? maxAskQuestionsCalls = null,
-            string? responseFormat = null,
             double? temperature = null,
             string? toolChoiceOverride = null,
             string? noToolsReminderAfterFirstToolRound = null,
@@ -1588,7 +1585,6 @@ namespace DeepSeek_v4_for_VisualStudio.Services.Agents
                                 resumeMessages, toolDefs, ct,
                                 toolChoice: toolChoice,
                                 temperature: temperature,
-                                responseFormat: responseFormat,
                                 requestConversationTitle: requestConversationTitle))
                             {
                                 if (requestConversationTitle)
@@ -1607,7 +1603,6 @@ namespace DeepSeek_v4_for_VisualStudio.Services.Agents
                                 messages, toolDefs, ct,
                                 toolChoice: toolChoice,
                                 temperature: temperature,
-                                responseFormat: responseFormat,
                                 requestConversationTitle: requestConversationTitle))
                             {
                                 if (requestConversationTitle)

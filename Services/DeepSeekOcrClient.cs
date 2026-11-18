@@ -114,7 +114,23 @@ namespace DeepSeek_v4_for_VisualStudio.Services
             request.Headers.Accept.Add(new MediaTypeWithQualityHeaderValue("application/json"));
 
             using var form = new MultipartFormDataContent();
-            var fileContent = new StreamContent(File.OpenRead(filePath));
+            Stream fileStream;
+            try
+            {
+                fileStream = File.OpenRead(filePath);
+            }
+            catch (FileNotFoundException)
+            {
+                Logger.Info($"[OCR-DeepSeek] skipped: file disappeared before open - {filePath}");
+                return null;
+            }
+            catch (DirectoryNotFoundException)
+            {
+                Logger.Info($"[OCR-DeepSeek] skipped: directory disappeared before open - {filePath}");
+                return null;
+            }
+
+            using var fileContent = new StreamContent(fileStream);
             fileContent.Headers.ContentType = new MediaTypeHeaderValue(GetMimeType(filePath));
             form.Add(fileContent, "file", Path.GetFileName(filePath));
             form.Add(new StringContent(recognitionPurpose, Encoding.UTF8), "purpose");

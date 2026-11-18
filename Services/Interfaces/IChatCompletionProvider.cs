@@ -86,7 +86,6 @@ namespace DeepSeek_v4_for_VisualStudio.Services
             int? maxTokens = null,
             string? toolChoice = null,
             double? temperature = null,
-            string? responseFormat = null,
             string? model = null,
             bool? thinkingEnabled = null,
             bool requestConversationTitle = false);
@@ -94,8 +93,7 @@ namespace DeepSeek_v4_for_VisualStudio.Services
         /// <summary>非流式完整调用。</summary>
         Task<string> CompleteAsync(
             IEnumerable<ChatApiMessage> messages,
-            CancellationToken cancellationToken = default,
-            string? responseFormat = null);
+            CancellationToken cancellationToken = default);
 
         /// <summary>验证 API Key 是否有效。</summary>
         Task<string?> ValidateApiKeyAsync();

@@ -84,15 +84,6 @@ namespace DeepSeek_v4_for_VisualStudio.Models
         public double? Temperature { get; set; }
 
         /// <summary>
-        /// DeepSeek JSON Output 模式。设置为 {"type": "json_object"} 可确保模型输出合法 JSON。
-        /// 使用前提: system/user prompt 中必须包含 "json" 字样和期望的 JSON 格式样例。
-        /// 参考: https://api-docs.deepseek.com/zh-cn/guides/json_mode
-        /// </summary>
-        [JsonPropertyName("response_format")]
-        [JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)]
-        public ResponseFormat? ResponseFormat { get; set; }
-
-        /// <summary>
         /// DeepSeek 官方 Chat Completions 会话标题开关。
         /// 仅在会话第一次主对话请求中设置，响应会通过 message.title / delta.title 返回。
         /// 参考: https://api-docs.deepseek.com/zh-cn/guides/conversation_title
@@ -100,15 +91,6 @@ namespace DeepSeek_v4_for_VisualStudio.Models
         [JsonPropertyName("title")]
         [JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)]
         public ConversationTitleOptions? Title { get; set; }
-    }
-
-    /// <summary>
-    /// DeepSeek JSON Output 模式的 response_format 参数。
-    /// </summary>
-    public class ResponseFormat
-    {
-        [JsonPropertyName("type")]
-        public string Type { get; set; } = "json_object";
     }
 
     /// <summary>DeepSeek 官方会话标题生成开关。</summary>

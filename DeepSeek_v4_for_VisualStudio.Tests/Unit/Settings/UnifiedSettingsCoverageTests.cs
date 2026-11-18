@@ -47,8 +47,6 @@ public class UnifiedSettingsCoverageTests
         (nameof(DeepSeekOptionsPage.EnableAutoCompression), "deepseekAutoCompression"),
         (nameof(DeepSeekOptionsPage.CompressionThreshold), "deepseekCompressionThreshold"),
         (nameof(DeepSeekOptionsPage.PreserveRecentTurns), "deepseekPreserveRecentTurns"),
-        (nameof(DeepSeekOptionsPage.EnableRag), "deepseekEnableRag"),
-        (nameof(DeepSeekOptionsPage.RagTopK), "deepseekRagTopK"),
         (nameof(DeepSeekOptionsPage.ShowContextStats), "deepseekContextStats"),
         (nameof(DeepSeekOptionsPage.EnableIdeContextInjection), "deepseekIdeContext"),
         (nameof(DeepSeekOptionsPage.EnableTelemetryExport), "deepseekTelemetryExport"),
@@ -81,7 +79,7 @@ public class UnifiedSettingsCoverageTests
         var declaredIds = GetDeclaredSettingIds();
         var boundMonikers = GetBoundMonikers();
 
-        declaredIds.Should().HaveCount(54);
+        declaredIds.Should().HaveCount(52);
         foreach (var guideSettingId in GuideSettingIds)
             declaredIds.Should().Contain(guideSettingId);
 
@@ -89,8 +87,8 @@ public class UnifiedSettingsCoverageTests
             .Where(id => !GuideSettingIds.Contains(id, StringComparer.Ordinal))
             .ToList();
 
-        synchronizedIds.Should().HaveCount(48);
-        boundMonikers.Should().HaveCount(48);
+        synchronizedIds.Should().HaveCount(46);
+        boundMonikers.Should().HaveCount(46);
         declaredIds.GroupBy(id => id, StringComparer.Ordinal).Should().OnlyContain(group => group.Count() == 1);
         boundMonikers.GroupBy(id => id, StringComparer.Ordinal).Should().OnlyContain(group => group.Count() == 1);
 
@@ -104,7 +102,7 @@ public class UnifiedSettingsCoverageTests
     [Fact]
     public void UnifiedSettings_CoverLegacyNonSensitiveOptions()
     {
-        ExpectedCoverage.Should().HaveCount(48);
+        ExpectedCoverage.Should().HaveCount(46);
 
         var optionProperties = typeof(DeepSeekOptionsPage)
             .GetProperties(BindingFlags.Public | BindingFlags.Instance)

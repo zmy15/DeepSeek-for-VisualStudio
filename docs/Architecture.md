@@ -141,7 +141,7 @@ language switch, WebView recovery) is queued and replayed on `__pageReady__` ins
 
 `CompositionRoot` is a static service locator built once during package initialization; `AddDeepSeekServices()`
 registers API services, file parsing, edit patching, context management, prefix caching, compression, skills,
-web search, RAG, memory, MCP, build, test, built-in tools, persistence, notifications, and the agent factory.
+web search, memory, MCP, build, test, built-in tools, persistence, notifications, and the agent factory.
 
 ## Provider layer
 
@@ -176,10 +176,10 @@ DeepSeek's prefix cache only pays off if the message prefix is byte-stable acros
 defends that property deliberately:
 
 - The system prompt is a **shared immutable prefix** (`AiPrompts.SharedImmutablePrefix`) reused by every agent.
-- Volatile content (compression summaries, memory, IDE snapshots, search results, RAG) is confined to a
-  **dynamic block at `messages[1]`** or appended at the tail — never inserted ahead of the stable prefix.
-- Compression summaries therefore merge into the dynamic block rather than being emitted as their own system
-  message.
+- Stable compression summaries occupy the **dynamic block at `messages[1]`** rather than being emitted as
+  separate system messages.
+- Volatile content (memory, IDE snapshots, search results and active working set) is appended at the tail,
+  never inserted ahead of the stable prefix.
 - Tool schemas are **sorted by name** before serialization so registration order cannot perturb the prefix.
 - **The full toolset is always sent** (built-in + MCP) with client-side whitelist enforcement, instead of
   filtering the `tools` array per agent — filtering would change the prefix on every handoff.
@@ -446,7 +446,7 @@ JS→C# 消息统一经 `__sendToHost` 进入 `CoreWebView2_WebMessageReceived`�
 ## 依赖注入
 
 `CompositionRoot` 是在包初始化期间构建一次的静态服务定位器；`AddDeepSeekServices()` 注册 API 服务、
-文件解析、编辑补丁、上下文管理、前缀缓存、压缩、技能、联网搜索、RAG、记忆、MCP、构建、测试、
+文件解析、编辑补丁、上下文管理、前缀缓存、压缩、技能、联网搜索、记忆、MCP、构建、测试、
 内置工具、持久化、通知与 Agent 工厂。
 
 ## 提供方分层
@@ -480,9 +480,8 @@ SiliconFlow/ModelScope、Kimi、GLM、Qwen/DashScope、MiniMax 与 OpenAI o-seri
 DeepSeek 的前缀缓存只有在消息前缀跨请求保持字节级稳定时才有收益。扩展刻意守护这一点：
 
 - 系统提示词是**共享不可变前缀**（`AiPrompts.SharedImmutablePrefix`），所有 Agent 复用。
-- 易变内容（压缩摘要、记忆、IDE 快照、搜索结果、RAG）被限制在 **`messages[1]` 的动态块**或尾部追加，
-  绝不插入到稳定前缀之前。
-- 因此压缩摘要会合并进动态块，而不是单独作为一条 system 消息。
+- 稳定的压缩摘要固定在 **`messages[1]` 的动态块**，不单独作为多条 system 消息。
+- 易变内容（记忆、IDE 快照、搜索结果与活跃工作集）追加在尾部，绝不插入到稳定前缀之前。
 - 工具 schema 在序列化前**按名称排序**，使注册顺序无法扰动前缀。
 - **始终发送完整工具集**（内置 + MCP），在客户端执行白名单拦截，而不是按 Agent 过滤 `tools` 数组 ——
   过滤会导致每次移交都改变前缀。
