@@ -439,18 +439,6 @@ namespace DeepSeek_v4_for_VisualStudio.Services.Providers
         /// <summary>当前使用的模型标识（用于视觉模型等能力分支判断）。</summary>
         public string CurrentModel => _model;
 
-        /// <summary>
-        /// 当前 Provider 是否支持 OpenAI 兼容的 JSON Output 参数
-        /// <c>response_format: {"type":"json_object"}</c>。
-        /// 默认不发送，由具体 Provider 根据端点与模型能力覆写。
-        /// </summary>
-        protected virtual bool SupportsJsonObjectResponseFormat(string model) => false;
-
-        private ResponseFormat? CreateResponseFormat(string? responseFormat, string model)
-            => responseFormat == "json_object" && SupportsJsonObjectResponseFormat(model)
-                ? new ResponseFormat { Type = "json_object" }
-                : null;
-
         /// <summary>当前模型是否具备多模态（视觉）能力，由端点解析器权威赋值。</summary>
         public bool CurrentIsVision { get; protected set; }
 
@@ -492,7 +480,6 @@ namespace DeepSeek_v4_for_VisualStudio.Services.Providers
             int? maxTokens = null,
             string? toolChoice = null,
             double? temperature = null,
-            string? responseFormat = null,
             string? model = null,
             bool? thinkingEnabled = null,
             bool requestConversationTitle = false)
@@ -518,8 +505,7 @@ namespace DeepSeek_v4_for_VisualStudio.Services.Providers
                 Tools = normalizedTools,
                 ToolChoice = effectiveToolChoice,
                 MaxTokens = maxTokens,
-                Temperature = temperature,
-                ResponseFormat = CreateResponseFormat(responseFormat, effectiveModel)
+                Temperature = temperature
             };
             if (requestConversationTitle && SupportsConversationTitleRequest)
             {
@@ -942,7 +928,7 @@ namespace DeepSeek_v4_for_VisualStudio.Services.Providers
             //     计算 messages 在关键前缀边界 [0]、[0..1]、[0..2]、[0..all] 处的 SHA-256 哈希。
             //     跨调用对比哈希值可精确定位缓存断裂发生的位置：
             //     - [0] 变化 → 稳定 system（共享前缀+fixedPrompt）不一致（不应发生）
-            //     - [0..1] 变化 → 动态上下文（搜索/记忆/RAG）变化
+            //     - [0..1] 变化 → 动态上下文（压缩摘要/记忆）变化
             //     - [0..2] 变化 → 对话历史增长或压缩
             //     - [0..all] 变化 → 对话历史增长或压缩
             try
@@ -1526,20 +1512,17 @@ namespace DeepSeek_v4_for_VisualStudio.Services.Providers
         /// </summary>
         /// <param name="messages">消息列表</param>
         /// <param name="cancellationToken">取消令牌</param>
-        /// <param name="responseFormat">JSON Output 模式: "json_object" 启用，null 不启用</param>
         /// <returns>AI 返回的完整文本内容</returns>
         public async Task<string> CompleteAsync(
             IEnumerable<ChatApiMessage> messages,
-            CancellationToken cancellationToken = default,
-            string? responseFormat = null)
+            CancellationToken cancellationToken = default)
         {
             var request = new DeepSeekChatRequest
             {
                 Model = _model,
                 // P1-3 修复：非流式路径同样深克隆，避免对调用方消息对象就地修改（ReasoningContent 注入）
                 Messages = messages.Select(m => CloneMessage(m)).ToList(),
-                Stream = false,
-                ResponseFormat = CreateResponseFormat(responseFormat, _model)
+                Stream = false
             };
             ApplyProviderRequestOptions(request, thinkingEnabled: false);
             ApplyProviderEndpointShaping(request, isStreaming: false);

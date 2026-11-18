@@ -516,7 +516,6 @@ namespace DeepSeek_v4_for_VisualStudio.View
                         routingMessages,
                         cts.Token,
                         toolChoice: "none",
-                        responseFormat: "json_object",
                         includeTools: false);
                     routingResponse = routingResponse?.Trim();
                 }

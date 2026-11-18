@@ -880,7 +880,7 @@ window._showCopyFeedback=function(msgIndex){
                 +'  ('+(tk.percent!=null?tk.percent:0)+'%)');
             var inj=d.injected||{};
             rows.push((t.injected||'Injected')+' : IDE='+!!inj.ide+' ('+(inj.ideChars||0)+' '+(t.characters||'ch')+')'
-                +'  RAG='+!!inj.rag);
+                +'  IDE='+!!inj.ide);
             var ide=d.ideSnapshot;
             if(ide){
                 rows.push((t.file||'File')+' : '+(ide.file||'-'));

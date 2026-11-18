@@ -128,7 +128,7 @@ namespace DeepSeek_v4_for_VisualStudio.Services
         ///   [0..1]   — + 可选 DynamicBlock from CM（压缩摘要/记忆/语言守卫，同轮次内稳定）
         ///   [0..N-1] — 全部消息（含对话历史 + Agent 行为指令 + 用户消息，每次调用不同）
         /// 
-        /// 注：联网搜索和 RAG 上下文位于 volatileBlock，在 BuildContextAwareMessages
+        /// 注：联网搜索等易变上下文位于 volatileBlock，在 BuildContextAwareMessages
         ///     中放在 user 之前；Agent 专属行为指令位于 user 之后。
         ///     它们都不属于固定前缀边界 [0..1]。
         ///     仅 CM 的稳定 system/DB 固定在历史之前（v1.1.11 从历史末尾移至此位置）。

@@ -76,23 +76,11 @@ public class ConversationContextManagerTests
     }
 
     [Fact]
-    public void SetRagContext_UpdatesTokenCount()
-    {
-        var initialTokens = _manager.EstimatedTokens;
-
-        _manager.SetRagContext("RAG context: relevant document content here.");
-
-        _manager.EstimatedTokens.Should().BeGreaterThan(initialTokens);
-        _manager.RagContext.Should().NotBeNull();
-    }
-
-    [Fact]
     public void Clear_ResetsAllState()
     {
         _manager.SetSystemPrompt("prompt");
         _manager.AddUserMessage("hello");
         _manager.AddAssistantMessage("hi");
-        _manager.SetRagContext("rag");
 
         _manager.Clear();
 
@@ -100,7 +88,6 @@ public class ConversationContextManagerTests
         _manager.TurnCount.Should().Be(0);
         _manager.MessageCount.Should().Be(0);
         _manager.EstimatedTokens.Should().Be(0);
-        _manager.RagContext.Should().BeNull();
     }
 
     [Fact]

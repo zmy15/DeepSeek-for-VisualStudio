@@ -20,7 +20,6 @@ namespace DeepSeek_v4_for_VisualStudio.Services
     ///    - 缺失该字段会让 DeepSeek 思考模式在停止、编辑重发等场景返回 HTTP 400
     /// 3. Token 预算估算与自动压缩（不再直接截断/删除旧消息）
     /// 4. 轮次（Turn）边界追踪
-    /// 5. RAG 上下文注入点
     /// 6. 上下文统计与使用率监控
     /// 
     /// DeepSeek 最大上下文窗口: 1M tokens（1,000,000）
@@ -57,9 +56,6 @@ namespace DeepSeek_v4_for_VisualStudio.Services
         /// <summary>始终注入的技能上下文（独立存储，每次对话均注入完整指令）</summary>
         private string? _alwaysInjectSkillsContext;
 
-        /// <summary>RAG 检索上下文（独立存储，注入为 system 消息）</summary>
-        private string? _ragContext;
-
         /// <summary>记忆上下文（独立存储，注入为 system 消息）</summary>
         private string? _memoryContext;
 
@@ -74,6 +70,12 @@ namespace DeepSeek_v4_for_VisualStudio.Services
 
         /// <summary>已经压缩过的最大条目 ID。</summary>
         private long _lastCompressedEntryId;
+
+        /// <summary>当前真实用户轮次。压缩移除旧 user 后仍保持单调递增。</summary>
+        private int _currentTurnIndex;
+
+        /// <summary>最近一次执行压缩的用户轮次，用于保证同一轮最多变更一次前缀。</summary>
+        private int _lastCompressedTurnIndex = -1;
 
         /// <summary>是否需要在本次完整对话结束后提示用户切换新对话。</summary>
         private bool _conversationResetNoticePending;
@@ -169,7 +171,7 @@ namespace DeepSeek_v4_for_VisualStudio.Services
         /// <summary>
         ///  缓存边界快照时的 dynamicBlock 冻结副本（v1.1.10）。
         /// 快照活跃时，BuildApiMessages 使用此冻结版本替代实时 BuildDynamicContextBlock()，
-        /// 防止压缩摘要/搜索/RAG/记忆等动态内容变化导致前缀缓存断裂。
+        /// 防止压缩摘要/搜索/记忆等动态内容变化导致前缀缓存断裂。
         /// null = 无快照或快照时 dynamicBlock 为空。
         /// </summary>
         private string? _cachedDynamicBlock;
@@ -237,9 +239,6 @@ namespace DeepSeek_v4_for_VisualStudio.Services
         /// <summary>获取压缩服务实例</summary>
         public ContextCompressorService? Compressor => _compressor;
 
-        /// <summary>获取 RAG 上下文</summary>
-        public string? RagContext => _ragContext;
-
         #region Core API — 添加消息
 
         /// <summary>
@@ -262,7 +261,7 @@ namespace DeepSeek_v4_for_VisualStudio.Services
         /// <summary>
         /// 设置 IDE 实时态上下文（P1-A）。
         /// 由 View 在每次用户消息发送前捕获快照并格式化后传入；传 null 表示禁用或清空。
-        /// Token 记账与 RAG 上下文一致。
+        /// Token 记账与其他动态上下文一致。
         /// </summary>
         public void SetIdeContext(string? ideContext)
         {
@@ -295,10 +294,6 @@ namespace DeepSeek_v4_for_VisualStudio.Services
         }
 
         // ── Context Debugger 只读探针（P2，序号 20 数据面）──
-
-        /// <summary>本轮是否注入了 RAG 检索上下文</summary>
-        [JsonIgnore]
-        public bool HasRagContext => !string.IsNullOrEmpty(_ragContext);
 
         /// <summary>IDE 实时态上下文字符数（0 = 未注入/已禁用）</summary>
         [JsonIgnore]
@@ -353,23 +348,6 @@ namespace DeepSeek_v4_for_VisualStudio.Services
         public void SetWorkspaceRoot(string? workspaceRoot)
         {
             _workspaceRoot = workspaceRoot;
-        }
-
-        /// <summary>
-        /// 设置 RAG 检索上下文（注入为 system 消息）。
-        /// 由 RagService 在每次用户消息前调用。
-        /// </summary>
-        public void SetRagContext(string? ragContext)
-        {
-            // 移除旧的 RAG 上下文 token 计数
-            if (!string.IsNullOrEmpty(_ragContext))
-                _estimatedTokens -= EstimateTokens(_ragContext);
-
-            _ragContext = ragContext;
-
-            // 添加新的 RAG 上下文 token 计数
-            if (!string.IsNullOrEmpty(_ragContext))
-                _estimatedTokens += EstimateTokens(_ragContext);
         }
 
         /// <summary>
@@ -624,11 +602,12 @@ namespace DeepSeek_v4_for_VisualStudio.Services
                 _cacheSnapshotEntryIndex = null;
             }
 
+            _currentTurnIndex = Math.Max(_currentTurnIndex, TurnCount) + 1;
             _entries.Add(CreateEntry(
                 Role: "user",
                 Content: content,
                 MultimodalContent: normalizedMultimodalContent,
-                TurnIndex: TurnCount + 1)); // 新轮次
+                TurnIndex: _currentTurnIndex));
 
             _estimatedTokens += EstimateTokens(content);
             _estimatedTokens += EstimateMultimodalTokens(multimodalContent);
@@ -717,7 +696,7 @@ namespace DeepSeek_v4_for_VisualStudio.Services
                 ReasoningContent: reasoningContent,
                 ToolCalls: toolCalls,
                 HasToolCalls: toolCalls != null && toolCalls.Count > 0,
-                TurnIndex: TurnCount)); // 属于当前轮次
+                TurnIndex: _currentTurnIndex > 0 ? _currentTurnIndex : TurnCount));
             _estimatedTokens += EstimateTokens(content);
             if (!string.IsNullOrEmpty(reasoningContent))
                 _estimatedTokens += EstimateTokens(reasoningContent);
@@ -760,7 +739,7 @@ namespace DeepSeek_v4_for_VisualStudio.Services
                 MultimodalContent: normalizedMultimodalContent,
                 ToolCallId: toolCallId,
                 Name: toolName,
-                TurnIndex: TurnCount)); // 工具调用属于当前轮次
+                TurnIndex: _currentTurnIndex > 0 ? _currentTurnIndex : TurnCount));
             _estimatedTokens += EstimateTokens(result);
             _estimatedTokens += EstimateMultimodalTokens(normalizedMultimodalContent);
         }
@@ -793,6 +772,9 @@ namespace DeepSeek_v4_for_VisualStudio.Services
         {
             get
             {
+                if (_currentTurnIndex > 0)
+                    return _currentTurnIndex;
+
                 for (int i = _entries.Count - 1; i >= 0; i--)
                 {
                     if (_entries[i].Role == "user" && _entries[i].TurnIndex > 0)
@@ -1194,7 +1176,8 @@ namespace DeepSeek_v4_for_VisualStudio.Services
             // ── 压缩必须在构建正常请求前完成 ──
             //     压缩请求从对话开头截取到待压缩区间末尾，最后只追加压缩指令，
             //     保证待压缩内容既完整出现，又不会破坏这段缓存前缀。
-            if (!_cacheSnapshotEntryIndex.HasValue)
+            if (!_cacheSnapshotEntryIndex.HasValue
+                && HasNewUserTurnSinceLastCompression())
             {
                 int compressionStart = ResolveCompressionStartIndex(
                     startEntryIdx,
@@ -1299,6 +1282,20 @@ namespace DeepSeek_v4_for_VisualStudio.Services
         }
 
         /// <summary>
+        /// 同一用户轮只允许压缩一次。即使压缩移除了该轮的 user 条目，
+        /// 也必须等到出现 TurnIndex 更大的真实 user 轮次后才允许再次压缩。
+        /// </summary>
+        private bool HasNewUserTurnSinceLastCompression()
+        {
+            if (_lastCompressedTurnIndex < 0)
+                return true;
+
+            return _entries.Any(e =>
+                e.Role == "user"
+                && e.TurnIndex > _lastCompressedTurnIndex);
+        }
+
+        /// <summary>
         /// 同一用户请求的 Agent 工具循环中，在工具结果写回后检查并执行压缩。
         /// 返回的消息数量用于同步裁剪本地 messages，避免下一轮仍发送旧历史。
         /// </summary>
@@ -1313,6 +1310,13 @@ namespace DeepSeek_v4_for_VisualStudio.Services
 
             if (_cacheSnapshotEntryIndex.HasValue)
                 return false;
+
+            if (!HasNewUserTurnSinceLastCompression())
+            {
+                if (IsSystemAndCompressedContextAtBudget())
+                    MarkConversationResetNeeded("same-turn-compression-cooldown");
+                return false;
+            }
 
             int compressionStart = ResolveCompressionStartIndex(
                 0,
@@ -1436,8 +1440,8 @@ namespace DeepSeek_v4_for_VisualStudio.Services
         }
 
         /// <summary>
-        /// 构建动态上下文块：合并压缩摘要、记忆上下文和语言守卫。
-        /// 所有同轮次内相对稳定的内容合并为一段文本，作为单条 system 消息注入。
+        /// 构建动态上下文块：只包含版本化压缩摘要。
+        /// 该块作为单条 system 消息注入，并保持逐字节稳定以保护前缀缓存。
         /// 这样将可变内容隔离在一个位置，保护 messages[0] 和对话历史前缀的缓存稳定性。
         /// </summary>
         private string? BuildDynamicContextBlock()
@@ -1452,10 +1456,6 @@ namespace DeepSeek_v4_for_VisualStudio.Services
                     parts.Add(compressedText);
             }
 
-            // 记忆上下文
-            if (!string.IsNullOrWhiteSpace(_memoryContext))
-                parts.Add(_memoryContext!);
-
             if (parts.Count == 0)
                 return null;
 
@@ -1463,7 +1463,7 @@ namespace DeepSeek_v4_for_VisualStudio.Services
         }
 
         /// <summary>
-        /// 构建易变上下文块：Active Working Set + 联网搜索结果 + RAG 检索上下文。
+        /// 构建易变上下文块：Active Working Set 与 IDE 实时态。
         /// 这些内容在同一会话内可能每轮都变，应从消息数组末尾注入以保护前缀缓存。
         /// </summary>
         public string? BuildVolatileContextBlock()
@@ -1477,6 +1477,10 @@ namespace DeepSeek_v4_for_VisualStudio.Services
             if (!string.IsNullOrWhiteSpace(_ideContext))
                 parts.Add(_ideContext!);
 
+            // 记忆属于会随用户偏好和项目知识更新的易变上下文，放到尾部。
+            if (!string.IsNullOrWhiteSpace(_memoryContext))
+                parts.Add(_memoryContext!);
+
             // ── 活跃文件 Working Set ──
             if (_activeFileTracker != null)
             {
@@ -1487,10 +1491,6 @@ namespace DeepSeek_v4_for_VisualStudio.Services
                 if (!string.IsNullOrWhiteSpace(activeFileSummary))
                     parts.Add(activeFileSummary);
             }
-
-            // ── RAG 检索上下文 ──
-            if (!string.IsNullOrWhiteSpace(_ragContext))
-                parts.Add(_ragContext!);
 
             if (parts.Count == 0)
                 return null;
@@ -1726,6 +1726,9 @@ namespace DeepSeek_v4_for_VisualStudio.Services
 
             long lastCompressedEntryId = entriesToCompress.Max(e => e.EntryId);
             _lastCompressedEntryId = Math.Max(_lastCompressedEntryId, lastCompressedEntryId);
+            int currentTurn = CurrentTurnIndex;
+            if (currentTurn >= 0)
+                _lastCompressedTurnIndex = Math.Max(_lastCompressedTurnIndex, currentTurn);
 
             // 确定压缩的轮次范围
             int fromTurn = entriesToCompress.Where(e => e.TurnIndex > 0).Select(e => e.TurnIndex).DefaultIfEmpty(1).First();
@@ -2358,7 +2361,6 @@ namespace DeepSeek_v4_for_VisualStudio.Services
             _solutionContext = null;
             _skillContext = null;
             _alwaysInjectSkillsContext = null;
-            _ragContext = null;
             _memoryContext = null;
             _compressor?.Clear();
             _pendingCompressedSummaries.Clear();
@@ -2366,13 +2368,15 @@ namespace DeepSeek_v4_for_VisualStudio.Services
             _cachedDynamicBlock = null;
             _nextEntryId = 0;
             _lastCompressedEntryId = 0;
+            _lastCompressedTurnIndex = -1;
+            _currentTurnIndex = 0;
             _conversationResetNoticePending = false;
             // 新会话的校准去重标记需复位，否则首个 usage 若与上一会话末次值相同会被误判重复
             _lastCalibratedPromptTokens = 0;
         }
 
         /// <summary>
-        /// 丢弃对话历史与压缩摘要，但保留 system prompt、记忆、RAG、IDE 等系统级上下文。
+        /// 丢弃对话历史与压缩摘要，但保留 system prompt、记忆、IDE 等系统级上下文。
         /// 用于用户忽略“切换新对话”提示后继续发送消息的场景。
         /// </summary>
         public void ClearConversationHistory()
@@ -2385,6 +2389,8 @@ namespace DeepSeek_v4_for_VisualStudio.Services
             _cachedDynamicBlock = null;
             _nextEntryId = 0;
             _lastCompressedEntryId = 0;
+            _lastCompressedTurnIndex = -1;
+            _currentTurnIndex = 0;
             _conversationResetNoticePending = false;
         }
 
@@ -2402,7 +2408,6 @@ namespace DeepSeek_v4_for_VisualStudio.Services
             sb.AppendLine($"系统提示词: {(_systemPrompt != null ? $"{_systemPrompt.Length} 字符 ({stats.SystemPromptTokens} tokens)" : "无")}");
             sb.AppendLine($"Skill 上下文: {(_skillContext != null ? $"{_skillContext.Length} 字符" : "无")}");
             sb.AppendLine($"始终注入 Skill: {(_alwaysInjectSkillsContext != null ? $"{_alwaysInjectSkillsContext.Length} 字符" : "无")}");
-            sb.AppendLine($"RAG 上下文: {(_ragContext != null ? $"{_ragContext.Length} 字符" : "无")}");
             sb.AppendLine($"压缩摘要: {stats.CompressedTurns} 组 ({stats.CompressedSummaryTokens} tokens)");
             sb.AppendLine();
             foreach (var entry in _entries)

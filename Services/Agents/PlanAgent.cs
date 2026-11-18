@@ -521,8 +521,6 @@ namespace DeepSeek_v4_for_VisualStudio.Services.Agents
             }
             if (!string.IsNullOrEmpty(context.FileContext))
             {
-                // RAG-MARK: no-truncate — 不再截断文件上下文，完整传递给计划生成
-                // RAG-SOURCE: file-read 用户上传的文件上下文（PlanAgent）
                 extraSystemMessages.Add(new ChatApiMessage
                 {
                     Role = "system",
@@ -546,7 +544,6 @@ namespace DeepSeek_v4_for_VisualStudio.Services.Agents
                 ct,
                 toolWhitelist: CreateReadOnlyTextPhaseToolWhitelist(),
                 temperature: 0.0,
-                responseFormat: "json_object",
                 toolChoiceOverride: "auto",
                 noToolsReminderAfterFirstToolRound: L["agent.plan.noMoreToolsAfterToolRound"]);
             AddLog("INFO", L["agent.log.planJsonReceived"]);
@@ -590,7 +587,6 @@ namespace DeepSeek_v4_for_VisualStudio.Services.Agents
                         ct,
                         toolChoice: "none",
                         temperature: 0.0,
-                        responseFormat: "json_object",
                         includeTools: false);
 
                     retryResponse = StripDsmlContent(retryResponse);

@@ -1,6 +1,5 @@
 using DeepSeek_v4_for_VisualStudio.Models;
 using DeepSeek_v4_for_VisualStudio.Services;
-using System.Globalization;
 
 namespace DeepSeek_v4_for_VisualStudio.Tests.Unit.Services;
 
@@ -313,7 +312,7 @@ public class ContextCompressorServiceTests
         ContextCompressorService.ContextSummarizer summarizer = (messages, ct) =>
         {
             summarizerCalled = true;
-            return Task.FromResult("Custom summary from LLM");
+            return Task.FromResult(BuildStructuredSummary("Custom summary from LLM"));
         };
 
         var service = new ContextCompressorService(summarizer: summarizer);
@@ -326,7 +325,7 @@ public class ContextCompressorServiceTests
         var summary = service.CompressTurnsAsync(entries, 1, 1).Result;
 
         summarizerCalled.Should().BeTrue();
-        summary.Summary.Should().Be("Custom summary from LLM");
+        summary.Summary.Should().Contain("Custom summary from LLM");
     }
 
     [Fact]
@@ -385,7 +384,8 @@ public class ContextCompressorServiceTests
 
         captured.Should().NotBeNull();
         captured![captured.Count - 1].Content.Should()
-            .Contain(90_000.ToString("N0", CultureInfo.InvariantCulture));
+            .Contain("1");
+        captured[captured.Count - 1].Content.Should().NotContain("90,000");
     }
 
     [Fact]
@@ -437,5 +437,83 @@ public class ContextCompressorServiceTests
         var idx1 = text.IndexOf("第 1-3 轮摘要", StringComparison.Ordinal);
         var idx2 = text.IndexOf("第 5-7 轮摘要", StringComparison.Ordinal);
         idx1.Should().BeLessThan(idx2);
+    }
+
+    [Fact]
+    public void NormalizeStructuredSummary_UnstructuredText_ReturnsNull()
+    {
+        ContextCompressorService.NormalizeStructuredSummary("A free-form summary")
+            .Should().BeNull();
+    }
+
+    [Fact]
+    public void NormalizeStructuredSummary_CodeFenceAndUnorderedSections_AreCanonicalized()
+    {
+        string[] headings = ContextCompressorService.GetSummarySectionHeadings();
+        string raw = "```markdown\n"
+            + headings[1] + "\nstatus\n\n"
+            + headings[0] + "\ngoal\n\n"
+            + string.Join("\n\n", headings.Skip(2).Select(h => h + "\n" + LocalizationService.Instance["compress.none"]))
+            + "\n```";
+
+        string? normalized = ContextCompressorService.NormalizeStructuredSummary(raw);
+
+        normalized.Should().NotBeNull();
+        normalized!.Should().StartWith(headings[0]);
+        normalized.IndexOf(headings[0], StringComparison.Ordinal)
+            .Should().BeLessThan(normalized.IndexOf(headings[1], StringComparison.Ordinal));
+        normalized.Should().NotContain("```");
+        normalized.Should().Contain("goal");
+        normalized.Should().Contain("status");
+    }
+
+    [Fact]
+    public void GetCompressedContextText_RepeatedCalls_ReturnFrozenText()
+    {
+        var service = new ContextCompressorService((messages, ct) =>
+            Task.FromResult(BuildStructuredSummary("stable-summary")));
+        var entries = new List<ConversationContextManager.ContextEntry>
+        {
+            new() { Role = "user", Content = "stable question" },
+        };
+        service.CompressTurnsAsync(entries, 1, 1).Wait();
+
+        string first = service.GetCompressedContextText();
+        string second = service.GetCompressedContextText();
+
+        first.Should().Be(second);
+        first.Should().Contain("stable-summary");
+    }
+
+    [Fact]
+    public void GetCompressedContextText_LegacyFreeformSummary_IsWrappedInStructuredSections()
+    {
+        var service = new ContextCompressorService();
+        service.ReplaceSummaries(new[]
+        {
+            new CompressedTurnSummary
+            {
+                FromTurn = 1,
+                ToTurn = 1,
+                Summary = "legacy free-form summary",
+                OriginalTokens = 100,
+                CompressedTokens = 20,
+            },
+        });
+
+        string text = service.GetCompressedContextText();
+
+        string[] headings = ContextCompressorService.GetSummarySectionHeadings();
+        foreach (string heading in headings)
+            text.Should().Contain(heading);
+        text.Should().Contain("legacy free-form summary");
+    }
+
+    private static string BuildStructuredSummary(string marker)
+    {
+        string[] headings = ContextCompressorService.GetSummarySectionHeadings();
+        return string.Join(Environment.NewLine + Environment.NewLine,
+            headings.Select((heading, index) =>
+                heading + Environment.NewLine + (index == 2 ? marker : LocalizationService.Instance["compress.none"])));
     }
 }

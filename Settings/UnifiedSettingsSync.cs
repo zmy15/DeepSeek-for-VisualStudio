@@ -68,8 +68,6 @@ namespace DeepSeek_v4_for_VisualStudio.Settings
             (CategoryPrefix + "deepseekTokenBudget", p => p.TokenBudget, (p, v) => p.TokenBudget = (int)v!),
             (CategoryPrefix + "deepseekCompressionThreshold", p => p.CompressionThreshold, (p, v) => p.CompressionThreshold = (int)v!),
             (CategoryPrefix + "deepseekPreserveRecentTurns", p => p.PreserveRecentTurns, (p, v) => p.PreserveRecentTurns = (int)v!),
-            (CategoryPrefix + "deepseekEnableRag", p => p.EnableRag, (p, v) => p.EnableRag = (bool)v!),
-            (CategoryPrefix + "deepseekRagTopK", p => p.RagTopK, (p, v) => p.RagTopK = (int)v!),
             (CategoryPrefix + "deepseekLlmTimeoutSeconds", p => p.LlmTimeoutSeconds, (p, v) => p.LlmTimeoutSeconds = (int)v!),
             (CategoryPrefix + "deepseekApiMaxRetryCount", p => p.ApiMaxRetryCount, (p, v) => p.ApiMaxRetryCount = (int)v!),
             (CategoryPrefix + "deepseekLanguage", p => p.Language, (p, v) => p.Language = (string?)v ?? "auto"),

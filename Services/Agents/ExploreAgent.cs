@@ -215,8 +215,6 @@ namespace DeepSeek_v4_for_VisualStudio.Services.Agents
             // 第2层：附加文件上下文（用户提供，会话内稳定）
             if (!string.IsNullOrEmpty(context.FileContext))
             {
-                // RAG-MARK: no-truncate — 不再截断文件上下文，完整提供给 ExploreAgent
-                // RAG-SOURCE: file-read 用户附加的文件上下文（ExploreAgent 概览）
                 sb.AppendLine("## 附加文件上下文");
                 sb.AppendLine(context.FileContext);
                 sb.AppendLine();

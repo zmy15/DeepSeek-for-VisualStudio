@@ -105,7 +105,7 @@ namespace DeepSeek_v4_for_VisualStudio.View
         internal string GetEffectiveModel() => DeepSeekEndpointResolver.Resolve(_options).Model;
 
         /// <summary>
-        /// 初始化 RAG 服务和上下文压缩服务。
+        /// 初始化上下文压缩服务。
         /// 在 API 服务就绪后调用。
         /// </summary>
         private void InitializeContextServices()

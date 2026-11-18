@@ -434,7 +434,6 @@ namespace DeepSeek_v4_for_VisualStudio.View
             int newlineIdx = title.IndexOfAny(new[] { '\r', '\n' });
             if (newlineIdx >= 0)
                 title = title.Substring(0, newlineIdx).Trim();
-            // RAG-MARK: no-truncate — 不再截断回退标题
             return title;
         }
 

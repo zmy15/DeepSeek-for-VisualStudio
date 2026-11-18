@@ -32,8 +32,8 @@ public class SyncCursorCascadeTests
 
         // 2) 按当时的动态块构建出的"已发送列表"
         var sent = mgr.BuildApiMessages();
-        sent.Count(m => m.Role == "system").Should().BeGreaterThanOrEqualTo(2,
-            "发送列表应含稳定前缀与动态块");
+        sent.Count(m => m.Role == "system").Should().Be(1,
+            "记忆已迁到易变尾部，稳定前缀只应包含固定 system prompt");
 
         // 3) 动态块漂移：记忆变化 + 新用户消息落库都会重建 _cachedDynamicBlock
         mgr.SetMemoryContext("MEM-NEW");

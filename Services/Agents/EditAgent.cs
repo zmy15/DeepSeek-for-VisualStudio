@@ -288,7 +288,7 @@ namespace DeepSeek_v4_for_VisualStudio.Services.Agents
 
             // ═══════════════════════════════════════════════════════════════
             // 缓存策略：将 BuiltInToolService 已读取的文件同步到 AgentContext
-            // 全局缓存，避免后续步骤重复 read_file（以后会被 RAG 替代）
+            // 全局缓存，避免后续步骤重复 read_file
             // ═══════════════════════════════════════════════════════════════
             if (context.FileReadCache.Count == 0 && BuiltInTools != null)
             {
@@ -774,7 +774,6 @@ namespace DeepSeek_v4_for_VisualStudio.Services.Agents
 
                     if (hasOriginal)
                     {
-                        // RAG-SOURCE: file-read 读取最终文件内容（计算变更统计）
                         string final = File.Exists(r.FilePath)
                             ? FileEncodingHelper.ReadAllText(r.FilePath)
                             : (r.FinalContent ?? string.Empty);

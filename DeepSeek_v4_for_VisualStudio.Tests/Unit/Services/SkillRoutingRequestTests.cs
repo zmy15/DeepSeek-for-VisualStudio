@@ -32,7 +32,6 @@ public class SkillRoutingRequestTests
             },
             CancellationToken.None,
             toolChoice: "none",
-            responseFormat: "json_object",
             includeTools: false);
 
         response.Should().Be("{\"skill\":null}");
@@ -40,6 +39,7 @@ public class SkillRoutingRequestTests
         var body = handler.RequestBodies.Should().ContainSingle().Subject;
         body.Should().NotContain("\"tools\":");
         body.Should().NotContain("\"tool_choice\":");
+        body.Should().NotContain("\"response_format\":");
     }
 
     [Fact]

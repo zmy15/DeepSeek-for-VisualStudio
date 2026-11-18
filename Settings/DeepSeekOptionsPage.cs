@@ -1241,8 +1241,6 @@ namespace DeepSeek_v4_for_VisualStudio.Settings
             EnableAutoCompression = true;
             CompressionThreshold = 85;
             PreserveRecentTurns = 3;
-            EnableRag = false;
-            RagTopK = 5;
             ShowContextStats = true;
             EnableTelemetryExport = true;
             EnableIdeContextInjection = true;
@@ -1487,18 +1485,6 @@ namespace DeepSeek_v4_for_VisualStudio.Settings
         [LocalizedDescription("settings.preserveRecentTurns.description")]
         [DesignerSerializationVisibility(DesignerSerializationVisibility.Visible)]
         public int PreserveRecentTurns { get; set; } = 3;
-
-        [LocalizedCategory("settings.category.context")]
-        [LocalizedDisplayName("settings.enableRag.displayName")]
-        [LocalizedDescription("settings.enableRag.description")]
-        [DesignerSerializationVisibility(DesignerSerializationVisibility.Visible)]
-        public bool EnableRag { get; set; } = false;
-
-        [LocalizedCategory("settings.category.context")]
-        [LocalizedDisplayName("settings.ragTopK.displayName")]
-        [LocalizedDescription("settings.ragTopK.description")]
-        [DesignerSerializationVisibility(DesignerSerializationVisibility.Visible)]
-        public int RagTopK { get; set; } = 5;
 
         [LocalizedCategory("settings.category.context")]
         [LocalizedDisplayName("settings.showContextStats.displayName")]

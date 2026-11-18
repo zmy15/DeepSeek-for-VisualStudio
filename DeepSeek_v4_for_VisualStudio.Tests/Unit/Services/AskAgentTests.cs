@@ -343,7 +343,7 @@ public class AskAgentTests
         messages.Should().HaveCountGreaterThanOrEqualTo(3);
         messages[0].Content.Should().Be(expectedPrefix[0].Content);
         messages[0].Content.Should().Contain("Custom system prefix");
-        messages[1].Content.Should().Be(expectedPrefix[1].Content);
+        messages[1].Role.Should().Be("system");
         messages[1].Content.Should().Contain("Repository memory");
     }
 

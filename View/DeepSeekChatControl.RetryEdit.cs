@@ -260,7 +260,6 @@ namespace DeepSeek_v4_for_VisualStudio.View
                     CancellationToken = handoffCts.Token,
                     ReadFileAsync = async (path) =>
                     {
-                        // RAG-SOURCE: file-read EditAgent 读取文件内容（Handoff 执行上下文）
                         if (File.Exists(path))
                             return await Task.Run(() => FileEncodingHelper.ReadAllText(path));
                         return null;
