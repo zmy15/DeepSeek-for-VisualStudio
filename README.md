@@ -36,6 +36,7 @@
 - [Building & Testing](#building--testing)
 - [Troubleshooting](#troubleshooting)
 - [Contributing](#contributing)
+- [Support](#support)
 - [Star History](#star-history)
 - [License](#license)
 
@@ -547,6 +548,17 @@ Contributions are welcome. Please read the flow below before starting.
 A PR automatically triggers the **Build & Test** workflow (compile, unit tests with an uploaded coverage report,
 and the CJK hard-coded string check); everything must pass before it can be merged. Please address review comments
 with follow-up commits rather than force-pushing over existing discussion.
+
+---
+
+## Support
+
+If you think this project is useful, you can support its continued maintenance.
+
+Donations do not grant additional benefits, but they motivate me to keep maintaining the project.
+
+[![PayPal](https://img.shields.io/badge/PayPal-Support-00457C?logo=paypal&logoColor=white)](https://paypal.me/zmy151)
+[![Afdian](https://img.shields.io/badge/Afdian-Support-EA4AAA)](https://ifdian.net/a/zmy15)
 
 ---
 

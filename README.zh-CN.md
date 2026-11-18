@@ -35,6 +35,7 @@
 - [构建与测试](#构建与测试)
 - [故障排查](#故障排查)
 - [参与贡献](#参与贡献)
+- [支持项目](#支持项目)
 - [Star 历史](#star-历史)
 - [开源协议](#开源协议)
 
@@ -504,6 +505,17 @@ dotnet test DeepSeek_v4_for_VisualStudio.Tests\DeepSeek_v4_for_VisualStudio.Test
 
 PR 会自动触发 **Build & Test** 工作流（编译、单元测试并上传覆盖率报告、CJK 硬编码字符串检查），必须全部
 通过才能合并。评审意见请通过追加提交处理，避免在评审过程中强制推送覆盖已有讨论。
+
+---
+
+## 支持项目
+
+如果你认为这个项目还不错，也欢迎通过以下方式支持我持续维护。
+
+进行赞赏不会让你额外得到什么，但会增加我维护项目的动力。
+
+[![PayPal](https://img.shields.io/badge/PayPal-支持项目-00457C?logo=paypal&logoColor=white)](https://paypal.me/zmy151)
+[![爱发电](https://img.shields.io/badge/爱发电-支持项目-EA4AAA)](https://ifdian.net/a/zmy15)
 
 ---
 
