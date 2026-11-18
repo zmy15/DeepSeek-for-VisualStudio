@@ -99,6 +99,7 @@ namespace DeepSeek_v4_for_VisualStudio.Settings
         [LocalizedCategory("settings.category.about")]
         [LocalizedDisplayName("settings.about.displayName")]
         [LocalizedDescription("settings.about.description")]
+        [Browsable(false)] // 统一放入快速设置。
         [Editor(typeof(AboutEditor), typeof(UITypeEditor))]
         [DesignerSerializationVisibility(DesignerSerializationVisibility.Hidden)]
         public string About
@@ -1619,6 +1620,7 @@ namespace DeepSeek_v4_for_VisualStudio.Settings
         [LocalizedDisplayName("settings.appendMessageMode.displayName")]
         [LocalizedDescription("settings.appendMessageMode.description")]
         [TypeConverter(typeof(AppendMessageModeConverter))]
+        [Browsable(false)] // 统一放入快速设置。
         [DesignerSerializationVisibility(DesignerSerializationVisibility.Visible)]
         public AppendMessageMode AppendMessageMode { get; set; } = DefaultAppendMessageMode;
 
@@ -1665,6 +1667,7 @@ namespace DeepSeek_v4_for_VisualStudio.Settings
         [LocalizedDisplayName("settings.inputBoxHeight.displayName")]
         [LocalizedDescription("settings.inputBoxHeight.description")]
         [DefaultValue(DefaultInputBoxHeight)]
+        [Browsable(false)] // 统一放入快速设置。
         [DesignerSerializationVisibility(DesignerSerializationVisibility.Visible)]
         public int InputBoxHeight
         {
@@ -1685,6 +1688,7 @@ namespace DeepSeek_v4_for_VisualStudio.Settings
         [LocalizedDisplayName("settings.bottomAreaScale.displayName")]
         [LocalizedDescription("settings.bottomAreaScale.description")]
         [DefaultValue(DefaultBottomAreaScalePercent)]
+        [Browsable(false)] // 统一放入快速设置。
         [DesignerSerializationVisibility(DesignerSerializationVisibility.Visible)]
         public int BottomAreaScalePercent
         {

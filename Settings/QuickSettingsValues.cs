@@ -19,7 +19,11 @@ namespace DeepSeek_v4_for_VisualStudio.Settings
         bool AutoCompleteEnabled,
         bool ShowDiffMarkersInEditor,
         string OcrEngine,
-        string OfficialOcrPurpose)
+        string OfficialOcrPurpose,
+        string AppendMessageMode,
+        int InputBoxHeight,
+        int BottomAreaScalePercent,
+        int WebView2ZoomPercent)
     {
         public static QuickSettingsValues Capture(DeepSeekOptionsPage options)
         {
@@ -39,7 +43,11 @@ namespace DeepSeek_v4_for_VisualStudio.Settings
                 options.AutoCompleteEnabled,
                 options.ShowDiffMarkersInEditor,
                 options.OcrEngine ?? "Windows Built-in",
-                options.OfficialOcrPurpose ?? DeepSeekOptionsPage.DefaultOfficialOcrPurpose);
+                options.OfficialOcrPurpose ?? DeepSeekOptionsPage.DefaultOfficialOcrPurpose,
+                options.AppendMessageMode.ToString(),
+                options.InputBoxHeight,
+                options.BottomAreaScalePercent,
+                options.WebView2ZoomPercent);
         }
 
         public void ApplyTo(DeepSeekOptionsPage options)
@@ -75,6 +83,15 @@ namespace DeepSeek_v4_for_VisualStudio.Settings
                 : OcrEngine;
             options.OfficialOcrPurpose = DeepSeekOptionsPage.NormalizeOfficialOcrPurpose(
                 OfficialOcrPurpose);
+            options.AppendMessageMode = Enum.TryParse<Models.AppendMessageMode>(
+                AppendMessageMode,
+                ignoreCase: true,
+                out var appendMode)
+                ? appendMode
+                : DeepSeekOptionsPage.DefaultAppendMessageMode;
+            options.InputBoxHeight = InputBoxHeight;
+            options.BottomAreaScalePercent = BottomAreaScalePercent;
+            options.WebView2ZoomPercent = WebView2ZoomPercent;
         }
 
         public override string ToString() => "QuickSettingsValues { redacted }";

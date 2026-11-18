@@ -93,6 +93,10 @@ public class DeepSeekOptionsPageModelChoiceTests
             nameof(DeepSeekOptionsPage.CustomApiKey),
             nameof(DeepSeekOptionsPage.ApiBaseUrl),
             nameof(DeepSeekOptionsPage.TestConnection),
+            nameof(DeepSeekOptionsPage.About),
+            nameof(DeepSeekOptionsPage.AppendMessageMode),
+            nameof(DeepSeekOptionsPage.InputBoxHeight),
+            nameof(DeepSeekOptionsPage.BottomAreaScalePercent),
         })
         {
             var property = typeof(DeepSeekOptionsPage).GetProperty(legacyName)!;

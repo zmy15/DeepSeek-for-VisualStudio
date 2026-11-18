@@ -17,6 +17,9 @@
         <SolidColorBrush x:Key="QuickComboPopup" Color="#2D2D2D"/>
         <SolidColorBrush x:Key="QuickComboSelection" Color="#264F78"/>
         <SolidColorBrush x:Key="QuickComboArrow" Color="#A8A8A8"/>
+        <SolidColorBrush x:Key="QuickSliderTrack" Color="#4A4A4A"/>
+        <SolidColorBrush x:Key="QuickSliderFill" Color="#4FC1FF"/>
+        <SolidColorBrush x:Key="QuickSliderThumb" Color="#E8E8E8"/>
 
         <Style TargetType="TextBlock">
             <Setter Property="Foreground" Value="#D4D4D4"/>
@@ -183,6 +186,74 @@
             </Setter>
         </Style>
 
+        <Style x:Key="QuickSliderThumbStyle" TargetType="Thumb">
+            <Setter Property="Width" Value="14"/>
+            <Setter Property="Height" Value="14"/>
+            <Setter Property="Template">
+                <Setter.Value>
+                    <ControlTemplate TargetType="Thumb">
+                        <Ellipse Fill="{DynamicResource QuickSliderThumb}"
+                                 Stroke="{DynamicResource QuickSliderFill}"
+                                 StrokeThickness="1"/>
+                    </ControlTemplate>
+                </Setter.Value>
+            </Setter>
+        </Style>
+
+        <Style x:Key="QuickSliderDecreaseStyle" TargetType="RepeatButton">
+            <Setter Property="Focusable" Value="False"/>
+            <Setter Property="Template">
+                <Setter.Value>
+                    <ControlTemplate TargetType="RepeatButton">
+                        <Border Height="4"
+                                Background="{DynamicResource QuickSliderFill}"
+                                CornerRadius="2"/>
+                    </ControlTemplate>
+                </Setter.Value>
+            </Setter>
+        </Style>
+
+        <Style x:Key="QuickSliderIncreaseStyle" TargetType="RepeatButton">
+            <Setter Property="Focusable" Value="False"/>
+            <Setter Property="Template">
+                <Setter.Value>
+                    <ControlTemplate TargetType="RepeatButton">
+                        <Border Height="4" Background="Transparent"/>
+                    </ControlTemplate>
+                </Setter.Value>
+            </Setter>
+        </Style>
+
+        <Style TargetType="Slider">
+            <Setter Property="MinHeight" Value="22"/>
+            <Setter Property="VerticalAlignment" Value="Center"/>
+            <Setter Property="IsMoveToPointEnabled" Value="True"/>
+            <Setter Property="Template">
+                <Setter.Value>
+                    <ControlTemplate TargetType="Slider">
+                        <Grid VerticalAlignment="Center">
+                            <Border Height="4"
+                                    CornerRadius="2"
+                                    Background="{DynamicResource QuickSliderTrack}"/>
+                            <Track x:Name="PART_Track" VerticalAlignment="Center">
+                                <Track.DecreaseRepeatButton>
+                                    <RepeatButton Command="{x:Static Slider.DecreaseLarge}"
+                                                  Style="{StaticResource QuickSliderDecreaseStyle}"/>
+                                </Track.DecreaseRepeatButton>
+                                <Track.Thumb>
+                                    <Thumb Style="{StaticResource QuickSliderThumbStyle}"/>
+                                </Track.Thumb>
+                                <Track.IncreaseRepeatButton>
+                                    <RepeatButton Command="{x:Static Slider.IncreaseLarge}"
+                                                  Style="{StaticResource QuickSliderIncreaseStyle}"/>
+                                </Track.IncreaseRepeatButton>
+                            </Track>
+                        </Grid>
+                    </ControlTemplate>
+                </Setter.Value>
+            </Setter>
+        </Style>
+
         <Style TargetType="CheckBox">
             <Setter Property="Foreground" Value="#D4D4D4"/>
             <Setter Property="FontSize" Value="12"/>
@@ -265,7 +336,7 @@
                         <StackPanel Grid.Column="2">
                             <Grid>
                                 <Grid.ColumnDefinitions>
-                                    <ColumnDefinition Width="112"/>
+                                    <ColumnDefinition Width="150"/>
                                     <ColumnDefinition Width="*"/>
                                 </Grid.ColumnDefinitions>
                                 <TextBlock x:Name="ApiKeyLabel"
@@ -275,7 +346,7 @@
                                              x:Name="ApiKeyPasswordBox"
                                              PasswordChanged="ApiKeyPasswordBox_PasswordChanged"/>
                             </Grid>
-                            <Grid Margin="122,5,0,0">
+                            <Grid Margin="160,5,0,0">
                                 <Grid.ColumnDefinitions>
                                     <ColumnDefinition Width="Auto"/>
                                     <ColumnDefinition Width="*"/>
@@ -326,7 +397,7 @@
                         <StackPanel Grid.Column="2">
                             <Grid>
                                 <Grid.ColumnDefinitions>
-                                    <ColumnDefinition Width="112"/>
+                                    <ColumnDefinition Width="150"/>
                                     <ColumnDefinition Width="*"/>
                                     <ColumnDefinition Width="Auto"/>
                                 </Grid.ColumnDefinitions>
@@ -389,7 +460,7 @@
                         <StackPanel Grid.Column="2">
                             <Grid>
                                 <Grid.ColumnDefinitions>
-                                    <ColumnDefinition Width="112"/>
+                                    <ColumnDefinition Width="150"/>
                                     <ColumnDefinition Width="*"/>
                                 </Grid.ColumnDefinitions>
                                 <TextBlock Grid.Column="0"
@@ -409,7 +480,7 @@
                             </Grid>
                             <Grid Margin="0,10,0,0">
                                 <Grid.ColumnDefinitions>
-                                    <ColumnDefinition Width="112"/>
+                                    <ColumnDefinition Width="150"/>
                                     <ColumnDefinition Width="*"/>
                                 </Grid.ColumnDefinitions>
                                 <TextBlock x:Name="ApprovalLabel"
@@ -420,7 +491,18 @@
                             </Grid>
                             <Grid Margin="0,10,0,0">
                                 <Grid.ColumnDefinitions>
-                                    <ColumnDefinition Width="112"/>
+                                    <ColumnDefinition Width="150"/>
+                                    <ColumnDefinition Width="*"/>
+                                </Grid.ColumnDefinitions>
+                                <TextBlock x:Name="AppendModeLabel"
+                                           Text="Message mode"
+                                           Style="{StaticResource FieldLabel}"/>
+                                <ComboBox Grid.Column="1"
+                                          x:Name="AppendModeComboBox"/>
+                            </Grid>
+                            <Grid Margin="0,10,0,0">
+                                <Grid.ColumnDefinitions>
+                                    <ColumnDefinition Width="150"/>
                                     <ColumnDefinition Width="*"/>
                                 </Grid.ColumnDefinitions>
                                 <TextBlock x:Name="McpLabel"
@@ -460,7 +542,7 @@
                         <StackPanel Grid.Column="2">
                             <Grid>
                                 <Grid.ColumnDefinitions>
-                                    <ColumnDefinition Width="112"/>
+                                    <ColumnDefinition Width="150"/>
                                     <ColumnDefinition Width="*"/>
                                 </Grid.ColumnDefinitions>
                                 <TextBlock x:Name="OcrEngineLabel"
@@ -474,7 +556,7 @@
                                   Margin="0,10,0,0"
                                   Visibility="Collapsed">
                                 <Grid.ColumnDefinitions>
-                                    <ColumnDefinition Width="112"/>
+                                    <ColumnDefinition Width="150"/>
                                     <ColumnDefinition Width="*"/>
                                 </Grid.ColumnDefinitions>
                                 <TextBlock x:Name="OcrPurposeLabel"
@@ -509,7 +591,7 @@
                         <StackPanel Grid.Column="2">
                             <Grid>
                                 <Grid.ColumnDefinitions>
-                                    <ColumnDefinition Width="112"/>
+                                    <ColumnDefinition Width="150"/>
                                     <ColumnDefinition Width="*"/>
                                 </Grid.ColumnDefinitions>
                                 <TextBlock x:Name="LanguageLabel"
@@ -520,7 +602,7 @@
                             </Grid>
                             <Grid Margin="0,10,0,0">
                                 <Grid.ColumnDefinitions>
-                                    <ColumnDefinition Width="112"/>
+                                    <ColumnDefinition Width="150"/>
                                     <ColumnDefinition Width="*"/>
                                 </Grid.ColumnDefinitions>
                                 <TextBlock x:Name="ThemeLabel"
@@ -528,6 +610,84 @@
                                            Style="{StaticResource FieldLabel}"/>
                                 <ComboBox Grid.Column="1"
                                           x:Name="ThemeComboBox"/>
+                            </Grid>
+                            <Grid Margin="0,10,0,0">
+                                <Grid.ColumnDefinitions>
+                                    <ColumnDefinition Width="150"/>
+                                    <ColumnDefinition Width="*"/>
+                                    <ColumnDefinition Width="Auto"/>
+                                </Grid.ColumnDefinitions>
+                                <TextBlock x:Name="InputBoxHeightLabel"
+                                           Text="Input height"
+                                           Style="{StaticResource FieldLabel}"/>
+                                <Slider Grid.Column="1"
+                                        x:Name="InputBoxHeightSlider"
+                                        Minimum="50"
+                                        Maximum="500"
+                                        SmallChange="5"
+                                        LargeChange="25"
+                                        TickFrequency="5"
+                                        IsSnapToTickEnabled="True"
+                                        ValueChanged="ScaleSlider_ValueChanged"/>
+                                <TextBlock Grid.Column="2"
+                                           x:Name="InputBoxHeightValueLabel"
+                                           Width="46"
+                                           Text="50 px"
+                                           Foreground="#A8A8A8"
+                                           TextAlignment="Right"
+                                           VerticalAlignment="Center"/>
+                            </Grid>
+                            <Grid Margin="0,10,0,0">
+                                <Grid.ColumnDefinitions>
+                                    <ColumnDefinition Width="150"/>
+                                    <ColumnDefinition Width="*"/>
+                                    <ColumnDefinition Width="Auto"/>
+                                </Grid.ColumnDefinitions>
+                                <TextBlock x:Name="BottomAreaScaleLabel"
+                                           Text="Bottom area scale"
+                                           Style="{StaticResource FieldLabel}"/>
+                                <Slider Grid.Column="1"
+                                        x:Name="BottomAreaScaleSlider"
+                                        Minimum="50"
+                                        Maximum="300"
+                                        SmallChange="5"
+                                        LargeChange="25"
+                                        TickFrequency="5"
+                                        IsSnapToTickEnabled="True"
+                                        ValueChanged="ScaleSlider_ValueChanged"/>
+                                <TextBlock Grid.Column="2"
+                                           x:Name="BottomAreaScaleValueLabel"
+                                           Width="46"
+                                           Text="100%"
+                                           Foreground="#A8A8A8"
+                                           TextAlignment="Right"
+                                           VerticalAlignment="Center"/>
+                            </Grid>
+                            <Grid Margin="0,10,0,0">
+                                <Grid.ColumnDefinitions>
+                                    <ColumnDefinition Width="150"/>
+                                    <ColumnDefinition Width="*"/>
+                                    <ColumnDefinition Width="Auto"/>
+                                </Grid.ColumnDefinitions>
+                                <TextBlock x:Name="WebViewZoomLabel"
+                                           Text="Chat zoom"
+                                           Style="{StaticResource FieldLabel}"/>
+                                <Slider Grid.Column="1"
+                                        x:Name="WebViewZoomSlider"
+                                        Minimum="50"
+                                        Maximum="300"
+                                        SmallChange="5"
+                                        LargeChange="25"
+                                        TickFrequency="5"
+                                        IsSnapToTickEnabled="True"
+                                        ValueChanged="ScaleSlider_ValueChanged"/>
+                                <TextBlock Grid.Column="2"
+                                           x:Name="WebViewZoomValueLabel"
+                                           Width="46"
+                                           Text="100%"
+                                           Foreground="#A8A8A8"
+                                           TextAlignment="Right"
+                                           VerticalAlignment="Center"/>
                             </Grid>
                         </StackPanel>
                     </Grid>
@@ -559,6 +719,43 @@
                                       Content="Show diff markers in the editor"
                                       Margin="0,10,0,0"/>
                         </StackPanel>
+                    </Grid>
+                </Border>
+
+                <!-- About -->
+                <Border BorderBrush="#343434"
+                        BorderThickness="0,0,0,1"
+                        Padding="0,0,0,16"
+                        Margin="0,0,0,16">
+                    <Grid>
+                        <Grid.ColumnDefinitions>
+                            <ColumnDefinition Width="165"/>
+                            <ColumnDefinition Width="18"/>
+                            <ColumnDefinition Width="*"/>
+                        </Grid.ColumnDefinitions>
+                        <StackPanel Grid.Column="0">
+                            <TextBlock x:Name="AboutSectionLabel"
+                                       Text="About"
+                                       Style="{StaticResource SectionTitle}"/>
+                            <TextBlock x:Name="AboutHintLabel"
+                                       Text="Version and project links."
+                                       Style="{StaticResource SectionHint}"/>
+                        </StackPanel>
+                        <Grid Grid.Column="2">
+                            <Grid.ColumnDefinitions>
+                                <ColumnDefinition Width="*"/>
+                                <ColumnDefinition Width="Auto"/>
+                            </Grid.ColumnDefinitions>
+                            <TextBlock x:Name="AboutVersionLabel"
+                                       Grid.Column="0"
+                                       Foreground="#8C8C8C"
+                                       VerticalAlignment="Center"/>
+                            <Button Grid.Column="1"
+                                    x:Name="OpenAboutButton"
+                                    Content="About DeepSeek for Visual Studio"
+                                    Padding="10,4"
+                                    Click="OpenAboutButton_Click"/>
+                        </Grid>
                     </Grid>
                 </Border>
 

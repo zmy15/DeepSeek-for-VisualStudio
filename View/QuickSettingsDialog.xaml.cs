@@ -7,6 +7,7 @@ using System.Diagnostics;
 using System.Linq;
 using System.Windows;
 using System.Windows.Controls;
+using System.Windows.Interop;
 using System.Windows.Media;
 
 namespace DeepSeek_v4_for_VisualStudio.View
@@ -69,6 +70,7 @@ namespace DeepSeek_v4_for_VisualStudio.View
             WebSearchLabel.Text = L["settings.enableWebSearch.displayName"];
             WebSearchCheckBox.Content = L["settings.quick.enabled"];
             ApprovalLabel.Text = L["settings.approvalMode.displayName"];
+            AppendModeLabel.Text = L["settings.appendMessageMode.displayName"];
             McpLabel.Text = L["settings.quick.mcpLabel"];
             OpenMcpSettingsButton.Content = L["settings.quick.manageMcp"];
 
@@ -81,11 +83,24 @@ namespace DeepSeek_v4_for_VisualStudio.View
             AppearanceHintLabel.Text = L["settings.quick.appearanceHint"];
             LanguageLabel.Text = L["settings.quick.languageLabel"];
             ThemeLabel.Text = L["settings.themeMode.displayName"];
+            InputBoxHeightLabel.Text = L["settings.inputBoxHeight.displayName"];
+            BottomAreaScaleLabel.Text = L["settings.bottomAreaScale.displayName"];
+            WebViewZoomLabel.Text = L["settings.quick.webViewZoomLabel"];
+            InputBoxHeightSlider.ToolTip = L["settings.inputBoxHeight.description"];
+            BottomAreaScaleSlider.ToolTip = L["settings.bottomAreaScale.description"];
+            WebViewZoomSlider.ToolTip = L["settings.quick.webViewZoomDescription"];
 
             EditorSectionLabel.Text = L["settings.quick.editor"];
             EditorHintLabel.Text = L["settings.quick.editorHint"];
             AutoCompleteCheckBox.Content = L["settings.autocompleteEnabled.displayName"];
             DiffMarkersCheckBox.Content = L["settings.showDiffMarkers.displayName"];
+
+            AboutSectionLabel.Text = L["settings.quick.about"];
+            AboutHintLabel.Text = L["settings.quick.aboutHint"];
+            AboutVersionLabel.Text = L.Format(
+                "settings.about.version",
+                AboutInfo.Version);
+            OpenAboutButton.Content = L["settings.about.displayName"];
 
             AdvancedHintLabel.Text = L["settings.quick.advancedHint"];
             AdvancedSettingsButton.Content = L["settings.quick.advanced"];
@@ -117,6 +132,9 @@ namespace DeepSeek_v4_for_VisualStudio.View
                 var approvalModes = BuildApprovalModeChoices();
                 BindChoices(ApprovalModeComboBox, approvalModes, values.ApprovalMode);
 
+                var appendModes = BuildAppendModeChoices();
+                BindChoices(AppendModeComboBox, appendModes, values.AppendMessageMode);
+
                 var languages = BuildLanguageChoices();
                 BindChoices(LanguageComboBox, languages, values.Language);
 
@@ -125,6 +143,10 @@ namespace DeepSeek_v4_for_VisualStudio.View
 
                 AutoCompleteCheckBox.IsChecked = values.AutoCompleteEnabled;
                 DiffMarkersCheckBox.IsChecked = values.ShowDiffMarkersInEditor;
+                InputBoxHeightSlider.Value = values.InputBoxHeight;
+                BottomAreaScaleSlider.Value = values.BottomAreaScalePercent;
+                WebViewZoomSlider.Value = values.WebView2ZoomPercent;
+                UpdateScaleValueLabels();
                 UpdateSearchProviderAvailability();
             }
             finally
@@ -326,6 +348,20 @@ namespace DeepSeek_v4_for_VisualStudio.View
             };
         }
 
+        private IReadOnlyList<LocalizedChoice> BuildAppendModeChoices()
+        {
+            var L = LocalizationService.Instance;
+            return new[]
+            {
+                new LocalizedChoice(
+                    Models.AppendMessageMode.Queue.ToString(),
+                    L["settings.appendMessageMode.queue"]),
+                new LocalizedChoice(
+                    Models.AppendMessageMode.Guidance.ToString(),
+                    L["settings.appendMessageMode.guidance"]),
+            };
+        }
+
         private IReadOnlyList<LocalizedChoice> BuildLanguageChoices()
         {
             var L = LocalizationService.Instance;
@@ -512,6 +548,30 @@ namespace DeepSeek_v4_for_VisualStudio.View
         private void OpenMcpSettingsButton_Click(object sender, RoutedEventArgs e)
             => _openMcpSettings(this);
 
+        private void ScaleSlider_ValueChanged(
+            object sender,
+            RoutedPropertyChangedEventArgs<double> e)
+            => UpdateScaleValueLabels();
+
+        private void UpdateScaleValueLabels()
+        {
+            if (InputBoxHeightValueLabel != null && InputBoxHeightSlider != null)
+            {
+                InputBoxHeightValueLabel.Text =
+                    $"{Math.Round(InputBoxHeightSlider.Value):0} px";
+            }
+            if (BottomAreaScaleValueLabel != null && BottomAreaScaleSlider != null)
+            {
+                BottomAreaScaleValueLabel.Text =
+                    $"{Math.Round(BottomAreaScaleSlider.Value):0}%";
+            }
+            if (WebViewZoomValueLabel != null && WebViewZoomSlider != null)
+            {
+                WebViewZoomValueLabel.Text =
+                    $"{Math.Round(WebViewZoomSlider.Value):0}%";
+            }
+        }
+
         private void OpenModelSettingsButton_Click(object sender, RoutedEventArgs e)
         {
             if (!_openModelSettings(this))
@@ -524,6 +584,12 @@ namespace DeepSeek_v4_for_VisualStudio.View
                 values.ReasoningEffort,
                 values.OcrEngine,
                 values.OfficialOcrPurpose);
+        }
+
+        private void OpenAboutButton_Click(object sender, RoutedEventArgs e)
+        {
+            using var dialog = new AboutDialog();
+            dialog.ShowDialog(new WpfWindowOwner(this));
         }
 
         private void GetApiKeyButton_Click(object sender, RoutedEventArgs e)
@@ -575,7 +641,13 @@ namespace DeepSeek_v4_for_VisualStudio.View
                         "Windows Built-in"),
                     OfficialOcrPurpose: GetSelectedChoiceValue(
                         OcrPurposeComboBox,
-                        DeepSeekOptionsPage.DefaultOfficialOcrPurpose));
+                        DeepSeekOptionsPage.DefaultOfficialOcrPurpose),
+                    AppendMessageMode: GetSelectedChoiceValue(
+                        AppendModeComboBox,
+                        DeepSeekOptionsPage.DefaultAppendMessageMode.ToString()),
+                    InputBoxHeight: (int)Math.Round(InputBoxHeightSlider.Value),
+                    BottomAreaScalePercent: (int)Math.Round(BottomAreaScaleSlider.Value),
+                    WebView2ZoomPercent: (int)Math.Round(WebViewZoomSlider.Value));
 
                 values.ApplyTo(_options);
                 _options.SaveSettingsToStorage();
@@ -613,6 +685,9 @@ namespace DeepSeek_v4_for_VisualStudio.View
             Resources["QuickComboPopup"] = CreateFrozenBrush(0xFF, 0xFF, 0xFF);
             Resources["QuickComboSelection"] = CreateFrozenBrush(0xCC, 0xE4, 0xF7);
             Resources["QuickComboArrow"] = CreateFrozenBrush(0x60, 0x60, 0x60);
+            Resources["QuickSliderTrack"] = CreateFrozenBrush(0xD0, 0xD0, 0xD0);
+            Resources["QuickSliderFill"] = CreateFrozenBrush(0x00, 0x78, 0xD4);
+            Resources["QuickSliderThumb"] = CreateFrozenBrush(0xFF, 0xFF, 0xFF);
 
             var map = new Dictionary<Color, Color>
             {
@@ -682,5 +757,13 @@ namespace DeepSeek_v4_for_VisualStudio.View
             bool IsVision);
 
         private sealed record LocalizedChoice(string Value, string Display);
+
+        private sealed class WpfWindowOwner : System.Windows.Forms.IWin32Window
+        {
+            public IntPtr Handle { get; }
+
+            public WpfWindowOwner(Window window)
+                => Handle = new WindowInteropHelper(window).Handle;
+        }
     }
 }

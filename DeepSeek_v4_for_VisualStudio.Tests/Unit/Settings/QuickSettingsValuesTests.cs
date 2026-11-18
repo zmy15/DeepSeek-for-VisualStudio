@@ -23,7 +23,11 @@ public class QuickSettingsValuesTests
             AutoCompleteEnabled: true,
             ShowDiffMarkersInEditor: false,
             OcrEngine: "DeepSeek Official",
-            OfficialOcrPurpose: DeepSeekOcrClient.RichLayoutRecognitionPurpose);
+            OfficialOcrPurpose: DeepSeekOcrClient.RichLayoutRecognitionPurpose,
+            AppendMessageMode: "Guidance",
+            InputBoxHeight: 72,
+            BottomAreaScalePercent: 120,
+            WebView2ZoomPercent: 130);
 
         values.ApplyTo(options);
 
@@ -41,6 +45,10 @@ public class QuickSettingsValuesTests
         options.OcrEngine.Should().Be("DeepSeek Official");
         options.OfficialOcrPurpose.Should().Be(
             DeepSeekOcrClient.RichLayoutRecognitionPurpose);
+        options.AppendMessageMode.Should().Be(AppendMessageMode.Guidance);
+        options.InputBoxHeight.Should().Be(72);
+        options.BottomAreaScalePercent.Should().Be(120);
+        options.WebView2ZoomPercent.Should().Be(130);
     }
 
     [Fact]
@@ -52,8 +60,6 @@ public class QuickSettingsValuesTests
         options.PreserveRecentTurns = 7;
         options.MaxToolCallRounds = 321;
         options.AgentMaxDepth = 6;
-        options.InputBoxHeight = 88;
-        options.BottomAreaScalePercent = 125;
         options.EnableApiDebugDump = true;
         options.CustomApiKey = "custom-key";
         options.ApiBaseUrl = "https://example.test/v1";
@@ -73,7 +79,11 @@ public class QuickSettingsValuesTests
             AutoCompleteEnabled: false,
             ShowDiffMarkersInEditor: true,
             OcrEngine: "PaddleOCR-Sharp",
-            OfficialOcrPurpose: DeepSeekOptionsPage.DefaultOfficialOcrPurpose);
+            OfficialOcrPurpose: DeepSeekOptionsPage.DefaultOfficialOcrPurpose,
+            AppendMessageMode: "Queue",
+            InputBoxHeight: 50,
+            BottomAreaScalePercent: 100,
+            WebView2ZoomPercent: 100);
 
         values.ApplyTo(options);
 
@@ -82,8 +92,6 @@ public class QuickSettingsValuesTests
         options.PreserveRecentTurns.Should().Be(7);
         options.MaxToolCallRounds.Should().Be(321);
         options.AgentMaxDepth.Should().Be(6);
-        options.InputBoxHeight.Should().Be(88);
-        options.BottomAreaScalePercent.Should().Be(125);
         options.EnableApiDebugDump.Should().BeTrue();
         options.CustomApiKey.Should().Be("custom-key");
         options.ApiBaseUrl.Should().Be("https://example.test/v1");
