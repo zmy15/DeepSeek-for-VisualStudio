@@ -101,6 +101,15 @@ plus Prompt and Completion token usage.
 The session history list: titles are generated automatically by AI (e.g. "Demo handoff verification to Plan
 agent", "DeepSeek VSIX Project Structure Analysis"), sorted newest first, each removable.
 
+### Quick Settings
+
+![Quick Settings](https://raw.githubusercontent.com/zmy15/DeepSeek-for-VisualStudio/master/docs/images/en_us/15.png)
+
+Open Quick Settings from the gear button at the top of the chat window to configure the model, message handling
+while generating, MCP servers, web search, OCR, interface scaling, and About information. Model and endpoint
+configuration is available through **Model Settings**, while context limits, Agent thresholds, and diagnostics
+remain in the original options page.
+
 ---
 
 ## Features

@@ -96,6 +96,13 @@
 历史会话列表：标题由 AI 自动生成（如「VSIX扩展项目结构分析」「1747个单元测试全部通过」），
 按时间倒序排列，支持逐条删除。
 
+### 快速设置
+
+![快速设置](https://raw.githubusercontent.com/zmy15/DeepSeek-for-VisualStudio/master/docs/images/zh_cn/15.png)
+
+聊天窗口顶部的齿轮入口：集中配置模型、生成中消息处理、MCP、联网搜索、OCR、外观缩放和关于信息。
+模型与端点可通过 **模型设置** 统一管理；上下文限制、Agent 阈值和诊断等高级参数仍保留在原设置页。
+
 ---
 
 ## 功能特性
