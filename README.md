@@ -111,7 +111,7 @@ AI-generated titles; message retry/edit/copy plus version and branch navigation;
 vision models.
 
 **Agentic** — five specialised agents (Ask / Explore / Plan / Edit / Build) that hand work off to each other;
-29 built-in tools plus any number of MCP tools; an autonomous tool loop that reads, searches, edits, builds,
+30 built-in tools plus any number of MCP tools; an autonomous tool loop that reads, searches, edits, builds,
 tests, and iterates; up to 3 parallel Explore sub-agents; persistent memory; reusable skills.
 
 **Editing** — inline code completion (ghost text) via a FIM endpoint; **Inline Edit (Ctrl+I)** to issue
@@ -258,12 +258,12 @@ down requirements:
 
 ## Built-in Tools
 
-29 built-in tools. `🔒` marks tools available only to Edit/Build agents — read-only agents are blocked at
-runtime, not merely by prompt.
+30 built-in tools. `🔒` marks tools available only to Edit/Build agents; `🧭` marks tools available only to the
+Explore agent. Read-only boundaries are enforced at runtime, not merely by prompt.
 
 | Group | Tools |
 |---|---|
-| **Read & explore** | `list_dir`, `read_file`, `file_search`, `grep_search`, `symbol_search`, `get_file_symbols`, `get_errors`, `get_current_time` |
+| **Read & explore** | `list_dir`, `read_file`, `file_search`, `grep_search`, `symbol_search`, `get_file_symbols`, `get_file_comments` 🧭, `get_errors`, `get_current_time` |
 | **Write & edit** 🔒 | `replace_string_in_file`, `multi_replace_string_in_file`, `create_file`, `delete_file`, `apply_patch`, `create_directory` |
 | **Build, test, terminal** | `build_solution`, `run_tests`, `run_in_terminal`, `get_terminal_output` |
 | **Web & vision** | `web_search`, `fetch_webpage`, `capture_window` 🔍, `capture_webpage` 🔍 |

@@ -13,6 +13,7 @@ public class BuildAgentTests
         agent.Definition.AllowedTools.Should().Contain("grep_search");
         agent.Definition.AllowedTools.Should().Contain("list_dir");
         agent.Definition.AllowedTools.Should().Contain("get_current_time");
+        agent.Definition.AllowedTools.Should().NotContain("get_file_comments");
     }
 
     [Fact]

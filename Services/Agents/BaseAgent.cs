@@ -37,7 +37,7 @@ namespace DeepSeek_v4_for_VisualStudio.Services.Agents
         /// <summary>已知内置工具名（MCP 同名工具会覆盖内置，不同名工具按分类注入）</summary>
         protected static readonly HashSet<string> KnownBuiltInToolNames = new(StringComparer.OrdinalIgnoreCase)
         {
-            "list_dir", "read_file", "file_search", "grep_search", "symbol_search", "get_file_symbols", "get_errors", "get_current_time",
+            "list_dir", "read_file", "file_search", "grep_search", "symbol_search", "get_file_symbols", "get_file_comments", "get_errors", "get_current_time",
             "fetch_webpage", "web_search", "capture_window", "capture_webpage", "build_solution",
             "run_tests",
             "replace_string_in_file", "multi_replace_string_in_file",

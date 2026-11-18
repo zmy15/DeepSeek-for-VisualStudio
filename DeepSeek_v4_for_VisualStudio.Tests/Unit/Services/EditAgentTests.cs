@@ -520,6 +520,7 @@ public class EditAgentTests
         tools.Should().Contain("build_solution");
         tools.Should().Contain("create_file");
         tools.Should().NotContain("request_handoff");
+        tools.Should().NotContain("get_file_comments");
         tools.Should().NotContain("edit_notebook_file");
 
         var agent = new EditAgent(_apiService);
