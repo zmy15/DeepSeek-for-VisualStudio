@@ -548,12 +548,12 @@ namespace DeepSeek_v4_for_VisualStudio.Services.Agents
                 noToolsReminderAfterFirstToolRound: L["agent.plan.noMoreToolsAfterToolRound"]);
             AddLog("INFO", L["agent.log.planJsonReceived"]);
 
-            // ── 诊断：记录原始响应用于调试 JSON 解析失败 ──
+            // ── 诊断：原始响应只写入调试日志，不进入用户可见的任务时间线 ──
             string rawResponse = json;
             string rawPreview = rawResponse.Length > 500
                 ? rawResponse.Substring(0, 500) + "..."
                 : rawResponse;
-            AddLog("INFO", $"[Plan] JSON raw response (first 500 chars): {rawPreview}");
+            Logger.Debug($"[Plan] JSON raw response (first 500 chars): {rawPreview}");
             // 先剥离 DSML/XML 标签（DeepSeek 可能在 toolChoice=none 时仍泄露工具调用意图到 content）
             json = StripDsmlContent(json);
             json = ExtractJsonFromMarkdown(json);
@@ -564,7 +564,8 @@ namespace DeepSeek_v4_for_VisualStudio.Services.Agents
                 string truncated = rawResponse.Length > 500
                     ? rawResponse.Substring(0, 500) + "..."
                     : rawResponse;
-                AddLog("WARN", string.Format(L["agent.plan.noJsonInResponse"], truncated));
+                Logger.Debug($"[Plan] No JSON in response. Raw response: {truncated}");
+                AddLog("WARN", L["agent.plan.noJsonInResponse"]);
 
                 // ── 重试：使用更强制性的提示要求 JSON ──
                 AddLog("INFO", "[Plan] Retrying with forceful JSON-only prompt...");
@@ -603,7 +604,8 @@ namespace DeepSeek_v4_for_VisualStudio.Services.Agents
                         string retryTruncated = retryResponse.Length > 300
                             ? retryResponse.Substring(0, 300) + "..."
                             : retryResponse;
-                        AddLog("WARN", string.Format(L["agent.plan.jsonRetryFailed"], retryTruncated));
+                        Logger.Debug($"[Plan] JSON retry returned no valid JSON. Raw response: {retryTruncated}");
+                        AddLog("WARN", L["agent.plan.jsonRetryNoJson"]);
                         return (BuildFallbackPlan(userMessage), messages);
                     }
                 }
@@ -668,7 +670,7 @@ namespace DeepSeek_v4_for_VisualStudio.Services.Agents
                     : rawResponse;
                 var L2 = LocalizationService.Instance;
                 AddLog("WARN", string.Format(L2["agent.plan.jsonParseFailed"], ex.Message));
-                AddLog("INFO", string.Format(L2["agent.log.planJsonRawResponse"], truncated));
+                Logger.Debug($"[Plan] Raw response for JSON parse failure: {truncated}");
 
                 // ── JSON 解析异常 → 尝试从原始文本中提取步骤作为最后手段 ──
                 AddLog("INFO", "[Plan] JSON deserialization threw exception. Attempting text-based step extraction from raw response...");
