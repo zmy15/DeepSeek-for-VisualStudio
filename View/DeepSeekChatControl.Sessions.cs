@@ -141,6 +141,9 @@ namespace DeepSeek_v4_for_VisualStudio.View
             // ── 持久化官方 OCR 成功页数（按页计费，重启后恢复费用）──
             _activeSession.CumulativeOfficialOcrPageCount = OcrService.OfficialOcrSuccessPageCount;
 
+            // 防御性保证：活跃会话必须属于当前容器。
+            // 历史上解决方案切换时可残留上一个容器的会话，导致 SaveSessions 写出 0 个会话。
+            EnsureSessionTracked(_sessionsContainer, _activeSession);
             _sessionsContainer.ActiveSessionId = _activeSession.Id;
             ChatPersistenceService.SaveSessions(_solutionPath, _sessionsContainer);
         }
@@ -1075,6 +1078,43 @@ namespace DeepSeek_v4_for_VisualStudio.View
                 .OrderByDescending(s => s.LastActiveAt)
                 .ThenByDescending(s => s.CreatedAt)
                 .FirstOrDefault();
+        }
+
+        /// <summary>
+        /// 从刚加载的会话容器中解析活跃会话。
+        /// 不读取控件字段，避免解决方案切换时沿用旧容器的会话。
+        /// </summary>
+        /// <param name="container">刚加载的会话容器。</param>
+        /// <returns>匹配 ActiveSessionId 或最近活跃的会话；无会话时返回 null。</returns>
+        internal static ChatSession? ResolveActiveSession(SessionsContainer? container)
+        {
+            if (container?.Sessions == null || container.Sessions.Count == 0)
+                return null;
+
+            if (!string.IsNullOrEmpty(container.ActiveSessionId))
+            {
+                var active = container.Sessions.FirstOrDefault(
+                    session => session.Id == container.ActiveSessionId);
+                if (active != null)
+                    return active;
+            }
+
+            return SelectFallbackSession(container.Sessions);
+        }
+
+        /// <summary>
+        /// 确保活跃会话已被当前容器跟踪，防止零会话容器覆盖已有历史文件。
+        /// </summary>
+        /// <param name="container">当前会话容器。</param>
+        /// <param name="session">当前活跃会话。</param>
+        /// <returns>本次是否补登记了会话。</returns>
+        internal static bool EnsureSessionTracked(SessionsContainer container, ChatSession session)
+        {
+            if (container.Sessions.Any(existing => existing.Id == session.Id))
+                return false;
+
+            container.Sessions.Add(session);
+            return true;
         }
 
         /// <summary>

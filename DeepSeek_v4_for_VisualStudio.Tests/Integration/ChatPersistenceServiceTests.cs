@@ -152,6 +152,34 @@ public class ChatPersistenceServiceTests
     }
 
     [Fact]
+    public void SaveSessions_EmptyContainer_DoesNotOverwriteExistingHistory()
+    {
+        var testPath = string.Format(@"F:\TestData\EmptyGuard{0}\Test.sln", Guid.NewGuid().ToString("N").Substring(0, 8));
+        var original = new SessionsContainer
+        {
+            SolutionPath = testPath,
+            Sessions = new List<ChatSession>
+            {
+                new() { Id = "preserved-session", Title = "Preserved" }
+            },
+            ActiveSessionId = "preserved-session",
+        };
+
+        ChatPersistenceService.SaveSessions(testPath, original);
+        ChatPersistenceService.SaveSessions(testPath, new SessionsContainer
+        {
+            SolutionPath = testPath,
+            Sessions = new List<ChatSession>(),
+        });
+
+        var loaded = ChatPersistenceService.LoadSessions(testPath);
+        loaded.Sessions.Should().ContainSingle()
+            .Which.Id.Should().Be("preserved-session");
+
+        ChatPersistenceService.DeleteAllSessions(testPath);
+    }
+
+    [Fact]
     public void LoadSessions_RepairsStaleSolutionPathMetadata()
     {
         var testPath = string.Format(@"F:\TestData\StaleMetadata{0}\Test.sln", Guid.NewGuid().ToString("N").Substring(0, 8));

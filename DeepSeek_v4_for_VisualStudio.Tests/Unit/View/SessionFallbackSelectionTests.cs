@@ -95,4 +95,37 @@ public class SessionFallbackSelectionTests
         DeepSeekChatControl.SelectFallbackSession(sessions)
             .Should().BeSameAs(uiOrder[0]);
     }
+
+    [Fact]
+    public void ResolveActiveSession_UsesContainerActiveSession()
+    {
+        var active = Session("active", new DateTime(2026, 3, 1));
+        var newer = Session("newer", new DateTime(2026, 9, 1));
+        var container = new SessionsContainer
+        {
+            Sessions = new List<ChatSession> { active, newer },
+            ActiveSessionId = active.Id,
+        };
+
+        DeepSeekChatControl.ResolveActiveSession(container).Should().BeSameAs(active);
+    }
+
+    [Fact]
+    public void ResolveActiveSession_EmptyContainer_ReturnsNull()
+    {
+        DeepSeekChatControl.ResolveActiveSession(new SessionsContainer())
+            .Should().BeNull("解决方案切换时不能沿用旧容器的活跃会话");
+    }
+
+    [Fact]
+    public void EnsureSessionTracked_AddsSessionMissingFromContainer()
+    {
+        var container = new SessionsContainer();
+        var session = Session("active", DateTime.Now);
+
+        bool added = DeepSeekChatControl.EnsureSessionTracked(container, session);
+
+        added.Should().BeTrue();
+        container.Sessions.Should().ContainSingle().Which.Should().BeSameAs(session);
+    }
 }
