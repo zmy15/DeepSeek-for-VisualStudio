@@ -111,5 +111,51 @@ namespace DeepSeek_v4_for_VisualStudio.Tests.Unit.Services
 
             result.Should().Contain("Widget.cs");
         }
+
+        [Theory]
+        [InlineData("Work", "Sample.Widget.Work", "Work", true)]
+        [InlineData("Run", "Sample.Widget.Run", "Sample.Widget.Run", true)]
+        [InlineData("Run", "Sample::Widget::Run", "Run", true)]
+        [InlineData("Run", "Sample.Widget.Run", "Widget.Run", true)]
+        [InlineData("Run", "Sample.Widget.Run", "Other", false)]
+        public void MatchesSymbolName_SupportsSimpleFullAndLanguageSeparators(
+            string simpleName,
+            string fullName,
+            string filter,
+            bool expected)
+        {
+            GetFileCommentsTool.MatchesSymbolName(simpleName, fullName, filter)
+                .Should().Be(expected);
+        }
+
+        [Fact]
+        public void NormalizeSymbolFilter_RemovesParameterList()
+        {
+            GetFileCommentsTool.NormalizeSymbolFilter("Widget.Run(int value)")
+                .Should().Be("Widget.Run");
+        }
+
+        [Fact]
+        public void GetDisplayText_WithSymbol_IncludesSymbolName()
+        {
+            var args = JsonSerializer.Deserialize<Dictionary<string, JsonElement>>(
+                "{\"filePath\":\"C:\\\\src\\\\Widget.cs\",\"symbolName\":\"Widget.Run\"}")!;
+
+            string result = new GetFileCommentsTool().GetDisplayText(args);
+
+            result.Should().Contain("Widget.cs");
+            result.Should().Contain("Widget.Run");
+        }
+
+        [Fact]
+        public void BuildSymbolNoCommentsResult_UsesReadFileFallback()
+        {
+            string result = GetFileCommentsTool.BuildSymbolNoCommentsResult(
+                "src/Widget.cs",
+                "Widget.Run");
+
+            result.Should().Contain("read_file");
+            result.Should().Contain("Widget.Run");
+        }
     }
 }

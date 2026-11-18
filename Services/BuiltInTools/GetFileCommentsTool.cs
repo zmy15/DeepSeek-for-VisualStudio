@@ -50,6 +50,11 @@ namespace DeepSeek_v4_for_VisualStudio.Services.BuiltInTools
                                 type = "integer",
                                 description = L["tool.getFileComments.param.maxResults"],
                             },
+                            symbolName = new
+                            {
+                                type = "string",
+                                description = L["tool.getFileComments.param.symbolName"],
+                            },
                         },
                         required = new[] { "filePath" },
                     },
@@ -60,8 +65,11 @@ namespace DeepSeek_v4_for_VisualStudio.Services.BuiltInTools
         public override string GetDisplayText(Dictionary<string, JsonElement> args)
         {
             string filePath = GetStringArg(args, "filePath");
+            string symbolName = NormalizeSymbolFilter(GetStringArg(args, "symbolName"));
             string fileName = string.IsNullOrEmpty(filePath) ? "?" : Path.GetFileName(filePath);
-            return L.Format("tool.getFileComments.displayText", fileName);
+            return string.IsNullOrEmpty(symbolName)
+                ? L.Format("tool.getFileComments.displayText", fileName)
+                : L.Format("tool.getFileComments.displayTextWithSymbol", fileName, symbolName);
         }
 
         public override string GetResultSummary(string toolResult)
@@ -95,6 +103,7 @@ namespace DeepSeek_v4_for_VisualStudio.Services.BuiltInTools
 
             int maxResults = GetIntArg(args, "maxResults", DefaultMaxResults);
             maxResults = Math.Max(1, Math.Min(maxResults, HardMaxResults));
+            string symbolName = NormalizeSymbolFilter(GetStringArg(args, "symbolName"));
 
             string[] lines;
             try
@@ -126,13 +135,25 @@ namespace DeepSeek_v4_for_VisualStudio.Services.BuiltInTools
 
                 var comments = new List<FileCommentEntry>();
                 var seen = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
-                TraverseCodeElements(fileCodeModel.CodeElements, lines, comments, seen, maxResults);
+                TraverseCodeElements(
+                    fileCodeModel.CodeElements,
+                    lines,
+                    comments,
+                    seen,
+                    maxResults,
+                    symbolName);
 
                 string displayPath = GetDisplayPath(filePath, workspaceRoot);
                 if (comments.Count == 0)
-                    return BuildNoCommentsResult(displayPath);
+                    return string.IsNullOrEmpty(symbolName)
+                        ? BuildNoCommentsResult(displayPath)
+                        : BuildSymbolNoCommentsResult(displayPath, symbolName);
 
-                return FormatCommentsOutput(displayPath, comments, comments.Count >= maxResults);
+                return FormatCommentsOutput(
+                    displayPath,
+                    comments,
+                    comments.Count >= maxResults,
+                    symbolName);
             }
             catch (Exception ex)
             {
@@ -145,7 +166,8 @@ namespace DeepSeek_v4_for_VisualStudio.Services.BuiltInTools
             string[] lines,
             List<FileCommentEntry> comments,
             HashSet<string> seen,
-            int maxResults)
+            int maxResults,
+            string symbolName)
         {
             if (comments.Count >= maxResults)
                 return;
@@ -160,35 +182,44 @@ namespace DeepSeek_v4_for_VisualStudio.Services.BuiltInTools
                     string? kind = MapKind(element.Kind.ToString());
                     if (kind != null)
                     {
-                        int declarationLine = GetDeclarationLine(element);
-                        string? comment = ExtractAttachedComment(lines, declarationLine);
-                        if (comment == null)
+                        string name = GetElementName(element);
+                        if (MatchesSymbolName(element.Name, name, symbolName))
                         {
-                            int rawStartLine = GetRawStartLine(element);
-                            if (rawStartLine != declarationLine)
-                                comment = ExtractAttachedComment(lines, rawStartLine);
-                            if (rawStartLine > 0)
-                                declarationLine = rawStartLine;
-                        }
-
-                        if (!string.IsNullOrWhiteSpace(comment))
-                        {
-                            string name = GetElementName(element);
-                            string key = $"{declarationLine}|{kind}|{name}";
-                            if (seen.Add(key))
+                            int declarationLine = GetDeclarationLine(element);
+                            string? comment = ExtractAttachedComment(lines, declarationLine);
+                            if (comment == null)
                             {
-                                comments.Add(new FileCommentEntry(
-                                    kind,
-                                    TruncateText(name, MaxNameChars),
-                                    declarationLine,
-                                    comment));
+                                int rawStartLine = GetRawStartLine(element);
+                                if (rawStartLine != declarationLine)
+                                    comment = ExtractAttachedComment(lines, rawStartLine);
+                                if (rawStartLine > 0)
+                                    declarationLine = rawStartLine;
+                            }
+
+                            if (!string.IsNullOrWhiteSpace(comment))
+                            {
+                                string key = $"{declarationLine}|{kind}|{name}";
+                                if (seen.Add(key))
+                                {
+                                    comments.Add(new FileCommentEntry(
+                                        kind,
+                                        TruncateText(name, MaxNameChars),
+                                        declarationLine,
+                                        comment));
+                                }
                             }
                         }
                     }
 
                     CodeElements? members = GetMembers(element);
                     if (members != null)
-                        TraverseCodeElements(members, lines, comments, seen, maxResults);
+                        TraverseCodeElements(
+                            members,
+                            lines,
+                            comments,
+                            seen,
+                            maxResults,
+                            symbolName);
                 }
                 catch (Exception ex)
                 {
@@ -252,7 +283,8 @@ namespace DeepSeek_v4_for_VisualStudio.Services.BuiltInTools
         internal static string FormatCommentsOutput(
             string displayPath,
             IReadOnlyList<FileCommentEntry> entries,
-            bool reachedLimit = false)
+            bool reachedLimit = false,
+            string? symbolName = null)
         {
             if (entries.Count == 0)
                 return BuildNoCommentsResult(displayPath);
@@ -286,7 +318,9 @@ namespace DeepSeek_v4_for_VisualStudio.Services.BuiltInTools
             }
 
             var sb = new StringBuilder();
-            sb.AppendLine(L.Format("tool.getFileComments.resultHeader", displayPath, included));
+            sb.AppendLine(string.IsNullOrEmpty(symbolName)
+                ? L.Format("tool.getFileComments.resultHeader", displayPath, included)
+                : L.Format("tool.getFileComments.resultHeaderWithSymbol", displayPath, symbolName, included));
             sb.AppendLine();
             sb.Append(body);
 
@@ -301,6 +335,35 @@ namespace DeepSeek_v4_for_VisualStudio.Services.BuiltInTools
 
         internal static string BuildNoCommentsResult(string displayPath) =>
             L.Format("tool.getFileComments.noComments", displayPath);
+
+        internal static string BuildSymbolNoCommentsResult(string displayPath, string symbolName) =>
+            L.Format("tool.getFileComments.symbolNoComments", displayPath, symbolName);
+
+        internal static string NormalizeSymbolFilter(string? symbolName)
+        {
+            string normalized = symbolName?.Trim() ?? string.Empty;
+            int parenthesis = normalized.IndexOf('(');
+            if (parenthesis > 0)
+                normalized = normalized.Substring(0, parenthesis).Trim();
+            return normalized.TrimEnd('.');
+        }
+
+        internal static bool MatchesSymbolName(
+            string? simpleName,
+            string? fullName,
+            string? symbolFilter)
+        {
+            string filter = NormalizeSymbolFilter(symbolFilter);
+            if (filter.Length == 0)
+                return true;
+
+            string simple = simpleName?.Trim() ?? string.Empty;
+            string full = fullName?.Trim() ?? simple;
+            return string.Equals(simple, filter, StringComparison.OrdinalIgnoreCase)
+                || string.Equals(full, filter, StringComparison.OrdinalIgnoreCase)
+                || full.EndsWith("." + filter, StringComparison.OrdinalIgnoreCase)
+                || full.EndsWith("::" + filter, StringComparison.OrdinalIgnoreCase);
+        }
 
         private static string NormalizeCommentBlock(IReadOnlyList<string> rawLines)
         {
