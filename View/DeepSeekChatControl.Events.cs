@@ -2034,6 +2034,50 @@ namespace DeepSeek_v4_for_VisualStudio.View
             CreateNewChat();
         }
 
+        #pragma warning disable VSTHRD100 // WPF button handler
+        private async void QuickSettingsButton_Click(object sender, RoutedEventArgs e)
+        {
+            try
+            {
+                DeepSeekOptionsPage? options = _options;
+                if (options == null && _package != null)
+                {
+                    options = await _package.LoadPersistedOptionsAsync();
+                    await _package.JoinableTaskFactory.SwitchToMainThreadAsync(_package.DisposalToken);
+                }
+
+                if (_disposed || options == null)
+                    return;
+
+                _options = options;
+                var dialog = new QuickSettingsDialog(
+                    options,
+                    OpenAdvancedSettingsPage,
+                    OpenMcpConfiguration)
+                {
+                    Owner = Window.GetWindow(this),
+                };
+                dialog.ShowDialog();
+            }
+            catch (Exception ex)
+            {
+                Logger.Error($"[Quick Settings] 打开设置失败: {ex.Message}", ex);
+            }
+        }
+        #pragma warning restore VSTHRD100
+
+        private void OpenAdvancedSettingsPage()
+        {
+            try
+            {
+                _package?.ShowOptionPage(typeof(DeepSeekOptionsPage));
+            }
+            catch (Exception ex)
+            {
+                Logger.Error($"[Quick Settings] 打开高级设置失败: {ex.Message}", ex);
+            }
+        }
+
         private void ModelComboBox_SelectionChanged(object sender, SelectionChangedEventArgs e)
         {
             if (_isRefreshingCoreControls) return;
@@ -2238,9 +2282,9 @@ namespace DeepSeek_v4_for_VisualStudio.View
             }
         }
         /// <summary>
-        /// MCP 配置按钮点击：打开 MCP 服务器配置对话框。
+        /// 打开 MCP 服务器配置对话框，保存后重新连接。
         /// </summary>
-        private void McpConfigButton_Click(object sender, RoutedEventArgs e)
+        private void OpenMcpConfiguration(Window owner)
         {
             try
             {
@@ -2254,46 +2298,15 @@ namespace DeepSeek_v4_for_VisualStudio.View
                     Logger.Info($"[MCP Config] 已保存 {savedServers.Count} 个 MCP 服务器配置");
                 });
 
-                dialog.Owner = Window.GetWindow(this);
+                dialog.Owner = owner;
                 dialog.ShowDialog();
 
                 // 重新初始化 MCP 连接
                 InitializeMcp();
-
-                // 刷新 MCP 按钮状态
-                UpdateMcpButtonAppearance();
             }
             catch (Exception ex)
             {
-                Logger.Error($"McpConfigButton_Click 异常: {ex.Message}", ex);
-            }
-        }
-
-        /// <summary>
-        /// 更新 MCP 配置按钮的外观，反映连接状态。
-        /// </summary>
-        private void UpdateMcpButtonAppearance()
-        {
-            try
-            {
-                var L = LocalizationService.Instance;
-                if (_mcpManager == null || _mcpManager.AllTools.Count == 0)
-                {
-                    McpConfigButton.ToolTip = L["input.mcpNotConnected"];
-                    McpConfigButton.Foreground = new SolidColorBrush(
-                        Color.FromRgb(0x88, 0x88, 0x88));
-                }
-                else
-                {
-                    int toolCount = _mcpManager.AllTools.Count;
-                    McpConfigButton.ToolTip = L.Format("input.mcpConnected", toolCount);
-                    McpConfigButton.Foreground = new SolidColorBrush(
-                        Color.FromRgb(0x4E, 0xC9, 0xB0));
-                }
-            }
-            catch (Exception ex)
-            {
-                Logger.Info($"[MCP] 更新按钮外观失败: {ex.Message}");
+                Logger.Error($"OpenMcpConfiguration 异常: {ex.Message}", ex);
             }
         }
 

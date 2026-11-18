@@ -490,7 +490,7 @@ namespace DeepSeek_v4_for_VisualStudio.View
 
                 if (enabledConfigs.Count == 0)
                 {
-                    Logger.Info("[MCP] 没有启用的 MCP 服务器，跳过初始化。点击  按钮配置。");
+                    Logger.Info("[MCP] 没有启用的 MCP 服务器，跳过初始化。可在快速设置中配置。");
                     return;
                 }
 
@@ -525,10 +525,6 @@ namespace DeepSeek_v4_for_VisualStudio.View
             catch (Exception ex)
             {
                 Logger.Error($"[MCP] MCP 初始化失败: {ex.Message}", ex);
-            }
-            finally
-            {
-                UpdateMcpButtonAppearance();
             }
         }
         #pragma warning restore VSTHRD100
