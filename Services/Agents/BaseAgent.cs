@@ -725,7 +725,8 @@ namespace DeepSeek_v4_for_VisualStudio.Services.Agents
                 return;
             }
 
-            bool hadDynamicBlock = staticPrefixMessageCount > 1;
+            int dynamicBlockIndex = contextManager.HasMemoryContext ? 2 : 1;
+            bool hadDynamicBlock = staticPrefixMessageCount > dynamicBlockIndex;
             bool hasDynamicBlock = !string.IsNullOrWhiteSpace(dynamicBlock);
 
             messages.RemoveRange(removeStart, removedMessageCount);
@@ -734,7 +735,7 @@ namespace DeepSeek_v4_for_VisualStudio.Services.Agents
 
             if (hasDynamicBlock && !hadDynamicBlock)
             {
-                messages.Insert(1, new ChatApiMessage
+                messages.Insert(dynamicBlockIndex, new ChatApiMessage
                 {
                     Role = "system",
                     Content = dynamicBlock,
@@ -743,12 +744,12 @@ namespace DeepSeek_v4_for_VisualStudio.Services.Agents
             }
             else if (!hasDynamicBlock && hadDynamicBlock)
             {
-                messages.RemoveAt(1);
+                messages.RemoveAt(dynamicBlockIndex);
                 toolInsertPos--;
             }
-            else if (hasDynamicBlock && messages.Count > 1)
+            else if (hasDynamicBlock && messages.Count > dynamicBlockIndex)
             {
-                messages[1].Content = dynamicBlock;
+                messages[dynamicBlockIndex].Content = dynamicBlock;
             }
 
             toolInsertPos = Math.Max(0, Math.Min(toolInsertPos, messages.Count));
@@ -770,8 +771,9 @@ namespace DeepSeek_v4_for_VisualStudio.Services.Agents
         /// 
         /// ── 消息结构（v1.1.12）──
         ///   messages[0] = 稳定 system（SharedImmutablePrefix + fixedPrompt）
-        ///   messages[1] = 可选 dynamicBlock（压缩摘要 + 记忆）
-        ///   messages[2..N] = 对话历史（来自 ContextManager，起始位置固定）
+        ///   messages[1] = 可选用户记忆（会话级固定前缀）
+        ///   messages[2] = 可选 dynamicBlock（压缩摘要）
+        ///   messages[3..N] = 对话历史（来自 ContextManager，起始位置固定）
         ///   messages[N+1] = 当前用户消息
         ///   [插入点] = 当前用户消息后（工具循环插入 assistant/tool）
         ///   最后一条 = Agent 专属行为指令

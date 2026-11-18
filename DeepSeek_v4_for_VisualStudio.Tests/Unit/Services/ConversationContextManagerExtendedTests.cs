@@ -1228,6 +1228,91 @@ public class ConversationContextManagerExtendedTests
     }
 
     [Fact]
+    public void MemoryContext_IsInjectedOnlyOncePerConversation()
+    {
+        const string memory = "## 用户记忆\n- 偏好直接写入文件";
+        _manager.SetSolutionPath(@"C:\Projects\MyApp\MyApp.sln");
+        _manager.SetMemoryContext(memory);
+
+        _manager.AddUserMessage("Q1");
+        _manager.PersistCurrentVolatileSnapshot().Should().BeTrue();
+        _manager.AddAssistantMessage("A1");
+        _manager.AddUserMessage("Q2");
+        _manager.PersistCurrentVolatileSnapshot().Should().BeTrue();
+
+        var messages = _manager.BuildApiMessages();
+
+        _manager.BuildVolatileContextBlock().Should().NotContain("## 用户记忆");
+        messages[1].Role.Should().Be("system");
+        messages[1].Content.Should().Be(memory);
+        messages.Count(message =>
+                message.Role == "system"
+                && message.Content?.Contains("## 用户记忆", StringComparison.Ordinal) == true)
+            .Should().Be(1, "同一会话只应保留首次固化的完整用户记忆");
+    }
+
+    [Fact]
+    public void MemoryContext_IsFrozenForTheConversation()
+    {
+        _manager.SetMemoryContext("## 用户记忆\n- first");
+        _manager.SetMemoryContext("## 用户记忆\n- second");
+        _manager.AddUserMessage("Q1");
+
+        var messages = _manager.BuildApiMessages();
+
+        messages[1].Content.Should().Be("## 用户记忆\n- first");
+    }
+
+    [Fact]
+    public void MemoryContext_RestoredFromHistory_IsNotInjectedAgain()
+    {
+        const string memory = "## 用户记忆\n- 偏好简洁回答";
+        _manager.SetSolutionPath(@"C:\Projects\MyApp\MyApp.sln");
+        _manager.SetMemoryContext(memory);
+        _manager.AddUserMessage("Q1");
+        _manager.PersistCurrentVolatileSnapshot();
+        _manager.AddAssistantMessage("A1");
+
+        var restored = new ConversationContextManager();
+        restored.RestoreFullContext(_manager.GetFullContext());
+        restored.SetSolutionPath(@"C:\Projects\MyApp\MyApp.sln");
+        restored.SetMemoryContext(memory);
+        restored.AddUserMessage("Q2");
+
+        restored.BuildVolatileContextBlock().Should().NotContain("## 用户记忆");
+        restored.BuildApiMessages().Count(message =>
+                message.Role == "system"
+                && message.Content?.Contains("## 用户记忆", StringComparison.Ordinal) == true)
+            .Should().Be(1);
+    }
+
+    [Fact]
+    public void MemoryContext_LegacyVolatileSnapshots_AreMigratedToStablePrefix()
+    {
+        const string memory = "## 用户记忆\n- 旧版重复内容";
+        _manager.RestoreFullContext(new List<ChatApiMessage>
+        {
+            new() { Role = "system", Content = memory + "\n\n[IDE Context] Old" },
+            new() { Role = "user", Content = Prefixed("Q1") },
+            new() { Role = "assistant", Content = "A1" },
+        });
+        _manager.SetMemoryContext(memory);
+        _manager.AddUserMessage("Q2");
+
+        var messages = _manager.BuildApiMessages();
+
+        messages[1].Content.Should().Be(memory);
+        messages.Count(message =>
+                message.Role == "system"
+                && message.Content?.Contains("## 用户记忆", StringComparison.Ordinal) == true)
+            .Should().Be(1);
+        messages.Should().Contain(message =>
+            message.Role == "system"
+            && message.Content != null
+            && message.Content.Contains("[IDE Context] Old", StringComparison.Ordinal));
+    }
+
+    [Fact]
     public void PersistCurrentVolatileSnapshot_PreservesPreviousSnapshotsInHistory()
     {
         _manager.SetSolutionPath(@"C:\Projects\MyApp\MyApp.sln");

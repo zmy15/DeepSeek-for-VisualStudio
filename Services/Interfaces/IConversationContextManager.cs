@@ -17,6 +17,7 @@ namespace DeepSeek_v4_for_VisualStudio.Services
         bool IsEmpty { get; }
         double UsageRatio { get; }
         double UsagePercent { get; }
+        bool HasMemoryContext { get; }
 
         // ── 缓存友好窗口（v1.1.10）──
         /// <summary>缓存窗口最大 token 数（0 = 禁用）</summary>

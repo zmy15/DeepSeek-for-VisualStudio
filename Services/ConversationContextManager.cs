@@ -333,13 +333,64 @@ namespace DeepSeek_v4_for_VisualStudio.Services
         }
 
         /// <summary>
-        /// <summary>
         /// 设置记忆上下文（注入为 system 消息）。
         /// 会话初始化时由 ChatControl 调用，包含用户记忆。
         /// </summary>
         public void SetMemoryContext(string? memoryContext)
         {
-            _memoryContext = memoryContext;
+            // 用户记忆是会话级稳定前缀：同一会话内只接受第一次非空快照。
+            // 后续记忆文件即使更新，也不能改动已固定的前缀，否则会让整段缓存失效。
+            if (!string.IsNullOrWhiteSpace(_memoryContext))
+                return;
+
+            if (string.IsNullOrWhiteSpace(memoryContext))
+                return;
+
+            _memoryContext = memoryContext.Trim();
+
+            // 迁移旧版本行为：记忆曾被写进每轮 volatile 快照。
+            // 恢复历史后把旧记忆段剥离，避免与新固定前缀重复。
+            RemoveLegacyMemorySnapshots(_memoryContext);
+        }
+
+        /// <summary>当前会话是否拥有固定的用户记忆前缀。</summary>
+        public bool HasMemoryContext => !string.IsNullOrWhiteSpace(_memoryContext);
+
+        /// <summary>
+        /// 从旧版本的易变快照中剥离用户记忆段。
+        /// 旧实现会在每轮把完整记忆固化进历史，迁移后统一改由固定前缀承载。
+        /// </summary>
+        /// <param name="memoryContext">当前会话固定的用户记忆文本。</param>
+        private void RemoveLegacyMemorySnapshots(string memoryContext)
+        {
+            if (string.IsNullOrWhiteSpace(memoryContext) || _entries.Count == 0)
+                return;
+
+            bool changed = false;
+            for (int i = _entries.Count - 1; i >= 0; i--)
+            {
+                var entry = _entries[i];
+                if (!string.Equals(entry.Role, "system", StringComparison.Ordinal)
+                    || string.IsNullOrEmpty(entry.Content)
+                    || !entry.Content!.Contains(memoryContext, StringComparison.Ordinal))
+                {
+                    continue;
+                }
+
+                string cleaned = entry.Content.Replace(memoryContext, string.Empty).Trim();
+                while (cleaned.Contains("\n\n\n", StringComparison.Ordinal))
+                    cleaned = cleaned.Replace("\n\n\n", "\n\n");
+
+                if (string.IsNullOrWhiteSpace(cleaned))
+                    _entries.RemoveAt(i);
+                else
+                    entry.Content = cleaned;
+
+                changed = true;
+            }
+
+            if (changed)
+                _estimatedTokens = RecalculateEstimatedTokens();
         }
 
         /// <summary>
@@ -1010,10 +1061,18 @@ namespace DeepSeek_v4_for_VisualStudio.Services
         /// 这类内容每轮由 <see cref="PersistCurrentVolatileSnapshot"/> 重新固化，
         /// 若把已固化的那份再参与重放，同一块会在历史里叠成两份。
         /// </summary>
-        private static bool IsVolatileSnapshotContent(string? content)
+        private bool IsVolatileSnapshotContent(string? content)
         {
             if (string.IsNullOrWhiteSpace(content))
                 return false;
+
+            // 用户记忆本身也可能成为独立的 volatile 快照（无解决方案/IDE 时），
+            // 必须能识别它，避免对账时把同一份记忆再次写回历史。
+            if (!string.IsNullOrWhiteSpace(_memoryContext)
+                && content.Contains(_memoryContext.Trim(), StringComparison.Ordinal))
+            {
+                return true;
+            }
 
             // 易变块以「[当前解决方案: 」或「[Git Context]」开头（见 BuildVolatileContextBlock 的拼装顺序）
             string solutionLabel = LocalizationService.Instance["system.contextSolutionLabel"];
@@ -1387,11 +1446,15 @@ namespace DeepSeek_v4_for_VisualStudio.Services
             if (!string.IsNullOrWhiteSpace(stableSystemPrompt))
                 messages.Add(new ChatApiMessage { Role = "system", Content = stableSystemPrompt });
 
-            // ── [1] 动态上下文块（仅在非空时注入）──
+            // ── [1] 用户记忆：会话级固定前缀，单次会话内逐字节不变 ──
+            if (!string.IsNullOrWhiteSpace(_memoryContext))
+                messages.Add(new ChatApiMessage { Role = "system", Content = _memoryContext });
+
+            // ── [2] 动态上下文块（仅在非空时注入）──
             if (!string.IsNullOrWhiteSpace(dynamicBlock))
                 messages.Add(new ChatApiMessage { Role = "system", Content = dynamicBlock });
 
-            // ── [2..] 对话历史 ──
+            // ── [3..] 对话历史 ──
             int entryLimit = entryLimitOverride ?? _cacheSnapshotEntryIndex ?? _entries.Count;
             for (int i = startEntryIdx; i < _entries.Count && i < entryLimit; i++)
             {
@@ -1476,10 +1539,6 @@ namespace DeepSeek_v4_for_VisualStudio.Services
 
             if (!string.IsNullOrWhiteSpace(_ideContext))
                 parts.Add(_ideContext!);
-
-            // 记忆属于会随用户偏好和项目知识更新的易变上下文，放到尾部。
-            if (!string.IsNullOrWhiteSpace(_memoryContext))
-                parts.Add(_memoryContext!);
 
             // ── 活跃文件 Working Set ──
             if (_activeFileTracker != null)
