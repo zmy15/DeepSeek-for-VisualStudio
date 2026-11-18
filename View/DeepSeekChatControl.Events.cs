@@ -2053,7 +2053,8 @@ namespace DeepSeek_v4_for_VisualStudio.View
                 var dialog = new QuickSettingsDialog(
                     options,
                     OpenAdvancedSettingsPage,
-                    OpenMcpConfiguration)
+                    OpenMcpConfiguration,
+                    OpenModelSettings)
                 {
                     Owner = Window.GetWindow(this),
                 };
@@ -2075,6 +2076,28 @@ namespace DeepSeek_v4_for_VisualStudio.View
             catch (Exception ex)
             {
                 Logger.Error($"[Quick Settings] 打开高级设置失败: {ex.Message}", ex);
+            }
+        }
+
+        private bool OpenModelSettings(Window owner)
+        {
+            if (_options == null)
+                return false;
+
+            try
+            {
+                if (!ModelCatalogEditor.ShowEditor(_options, owner))
+                    return false;
+
+                _options.SaveSettingsToStorage();
+                _options.ApplyRuntimeHotUpdates();
+                UnifiedSettingsSync.PushFromPage(_options);
+                return true;
+            }
+            catch (Exception ex)
+            {
+                Logger.Error($"[Quick Settings] 打开模型设置失败: {ex.Message}", ex);
+                return false;
             }
         }
 

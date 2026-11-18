@@ -328,6 +328,7 @@
                                 <Grid.ColumnDefinitions>
                                     <ColumnDefinition Width="112"/>
                                     <ColumnDefinition Width="*"/>
+                                    <ColumnDefinition Width="Auto"/>
                                 </Grid.ColumnDefinitions>
                                 <TextBlock x:Name="ModelLabel"
                                            Text="Model"
@@ -335,6 +336,12 @@
                                 <ComboBox Grid.Column="1"
                                           x:Name="ModelComboBox"
                                           SelectionChanged="ModelComboBox_SelectionChanged"/>
+                                <Button Grid.Column="2"
+                                        x:Name="OpenModelSettingsButton"
+                                        Content="Model Settings..."
+                                        Padding="10,4"
+                                        Margin="8,0,0,0"
+                                        Click="OpenModelSettingsButton_Click"/>
                             </Grid>
                             <Grid Margin="0,10,0,0">
                                 <Grid.ColumnDefinitions>

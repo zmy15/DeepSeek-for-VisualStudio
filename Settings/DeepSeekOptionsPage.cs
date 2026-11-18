@@ -1046,6 +1046,7 @@ namespace DeepSeek_v4_for_VisualStudio.Settings
         [LocalizedCategory("settings.category.model")]
         [LocalizedDisplayName("settings.apiKey.displayName")]
         [LocalizedDescription("settings.apiKey.description")]
+        [Browsable(false)] // 统一在「05. 模型设置」的端点管理中维护。
         [PasswordPropertyText(true)]
         [DesignerSerializationVisibility(DesignerSerializationVisibility.Visible)] // Fix for WFO1000
         public string ApiKey { get; set; } = string.Empty;
@@ -1057,6 +1058,7 @@ namespace DeepSeek_v4_for_VisualStudio.Settings
         [LocalizedCategory("settings.category.model")]
         [LocalizedDisplayName("settings.customApiKey.displayName")]
         [LocalizedDescription("settings.customApiKey.description")]
+        [Browsable(false)] // 统一在「05. 模型设置」的端点管理中维护。
         [PasswordPropertyText(true)]
         [DesignerSerializationVisibility(DesignerSerializationVisibility.Visible)] // Fix for WFO1000
         public string CustomApiKey { get; set; } = string.Empty;
@@ -1069,6 +1071,7 @@ namespace DeepSeek_v4_for_VisualStudio.Settings
         [LocalizedCategory("settings.category.model")]
         [LocalizedDisplayName("settings.apiBaseUrl.displayName")]
         [LocalizedDescription("settings.apiBaseUrl.description")]
+        [Browsable(false)] // 统一在「05. 模型设置」的端点管理中维护。
         [DesignerSerializationVisibility(DesignerSerializationVisibility.Visible)] // Fix for WFO1000
         public string ApiBaseUrl { get; set; } = string.Empty;
 
@@ -1157,6 +1160,7 @@ namespace DeepSeek_v4_for_VisualStudio.Settings
         [LocalizedCategory("settings.category.model")]
         [LocalizedDisplayName("settings.testConnection.displayName")]
         [LocalizedDescription("settings.testConnection.description")]
+        [Browsable(false)] // 测试入口并入统一端点管理，不再单独占用属性网格行。
         [Editor(typeof(TestConnectionEditor), typeof(UITypeEditor))]
         [DesignerSerializationVisibility(DesignerSerializationVisibility.Hidden)]
         public string TestConnection

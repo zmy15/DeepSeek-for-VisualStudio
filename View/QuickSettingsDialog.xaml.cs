@@ -20,16 +20,19 @@ namespace DeepSeek_v4_for_VisualStudio.View
         private readonly DeepSeekOptionsPage _options;
         private readonly Action _openAdvancedSettings;
         private readonly Action<Window> _openMcpSettings;
+        private readonly Func<Window, bool> _openModelSettings;
         private bool _isLoading;
 
         public QuickSettingsDialog(
             DeepSeekOptionsPage options,
             Action openAdvancedSettings,
-            Action<Window> openMcpSettings)
+            Action<Window> openMcpSettings,
+            Func<Window, bool> openModelSettings)
         {
             _options = options ?? throw new ArgumentNullException(nameof(options));
             _openAdvancedSettings = openAdvancedSettings ?? throw new ArgumentNullException(nameof(openAdvancedSettings));
             _openMcpSettings = openMcpSettings ?? throw new ArgumentNullException(nameof(openMcpSettings));
+            _openModelSettings = openModelSettings ?? throw new ArgumentNullException(nameof(openModelSettings));
 
             InitializeComponent();
 
@@ -57,6 +60,7 @@ namespace DeepSeek_v4_for_VisualStudio.View
             ModelSectionLabel.Text = L["settings.quick.model"];
             ModelHintLabel.Text = L["settings.quick.modelHint"];
             ModelLabel.Text = L["settings.quick.modelLabel"];
+            OpenModelSettingsButton.Content = L["settings.quick.openModelSettings"];
             ThinkingCheckBox.Content = L["settings.quick.thinking"];
             ReasoningLabel.Text = L["settings.quick.reasoningLabel"];
 
@@ -97,23 +101,12 @@ namespace DeepSeek_v4_for_VisualStudio.View
             {
                 var values = QuickSettingsValues.Capture(_options);
 
-                ApiKeyPasswordBox.Password = values.ApiKey;
-                UpdateApiKeyStatus();
-
-                var modelChoices = BuildModelChoices(values.ModelChoice);
-                ModelComboBox.ItemsSource = modelChoices;
-                ModelComboBox.DisplayMemberPath = nameof(ModelChoiceItem.Display);
-                ModelComboBox.SelectedItem = modelChoices.FirstOrDefault(choice =>
-                    string.Equals(choice.Display, values.ModelChoice, StringComparison.OrdinalIgnoreCase))
-                    ?? modelChoices.FirstOrDefault();
-
-                var efforts = ResolveEffortLevels(
-                    ModelComboBox.SelectedItem as ModelChoiceItem,
-                    values.ReasoningEffort);
-                EffortComboBox.ItemsSource = efforts;
-                EffortComboBox.SelectedItem = efforts.FirstOrDefault(level =>
-                    string.Equals(level, values.ReasoningEffort, StringComparison.OrdinalIgnoreCase))
-                    ?? efforts.FirstOrDefault();
+                RefreshModelConfiguration(
+                    values.ApiKey,
+                    values.ModelChoice,
+                    values.ReasoningEffort,
+                    values.OcrEngine,
+                    values.OfficialOcrPurpose);
 
                 ThinkingCheckBox.IsChecked = values.IsThinkingEnabled;
                 WebSearchCheckBox.IsChecked = values.EnableWebSearch;
@@ -133,13 +126,53 @@ namespace DeepSeek_v4_for_VisualStudio.View
                 AutoCompleteCheckBox.IsChecked = values.AutoCompleteEnabled;
                 DiffMarkersCheckBox.IsChecked = values.ShowDiffMarkersInEditor;
                 UpdateSearchProviderAvailability();
-                RefreshOcrControls(
-                    values.OcrEngine,
-                    values.OfficialOcrPurpose);
             }
             finally
             {
                 _isLoading = false;
+            }
+        }
+
+        private void RefreshModelConfiguration(
+            string apiKey,
+            string modelChoice,
+            string reasoningEffort,
+            string ocrEngine,
+            string officialOcrPurpose)
+        {
+            bool wasLoading = _isLoading;
+            _isLoading = true;
+            try
+            {
+                ApiKeyPasswordBox.Password = apiKey;
+                UpdateApiKeyStatus();
+
+                var modelChoices = BuildModelChoices(modelChoice);
+                ModelComboBox.ItemsSource = modelChoices;
+                ModelComboBox.DisplayMemberPath = nameof(ModelChoiceItem.Display);
+                ModelComboBox.SelectedItem = modelChoices.FirstOrDefault(choice =>
+                    string.Equals(
+                        choice.Display,
+                        modelChoice,
+                        StringComparison.OrdinalIgnoreCase))
+                    ?? modelChoices.FirstOrDefault();
+
+                var efforts = ResolveEffortLevels(
+                    ModelComboBox.SelectedItem as ModelChoiceItem,
+                    reasoningEffort);
+                EffortComboBox.ItemsSource = efforts;
+                EffortComboBox.SelectedItem = efforts.FirstOrDefault(level =>
+                    string.Equals(
+                        level,
+                        reasoningEffort,
+                        StringComparison.OrdinalIgnoreCase))
+                    ?? efforts.FirstOrDefault();
+
+                RefreshOcrControls(ocrEngine, officialOcrPurpose);
+            }
+            finally
+            {
+                _isLoading = wasLoading;
             }
         }
 
@@ -478,6 +511,20 @@ namespace DeepSeek_v4_for_VisualStudio.View
 
         private void OpenMcpSettingsButton_Click(object sender, RoutedEventArgs e)
             => _openMcpSettings(this);
+
+        private void OpenModelSettingsButton_Click(object sender, RoutedEventArgs e)
+        {
+            if (!_openModelSettings(this))
+                return;
+
+            var values = QuickSettingsValues.Capture(_options);
+            RefreshModelConfiguration(
+                values.ApiKey,
+                values.ModelChoice,
+                values.ReasoningEffort,
+                values.OcrEngine,
+                values.OfficialOcrPurpose);
+        }
 
         private void GetApiKeyButton_Click(object sender, RoutedEventArgs e)
         {
