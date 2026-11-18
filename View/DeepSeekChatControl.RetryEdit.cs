@@ -610,6 +610,20 @@ namespace DeepSeek_v4_for_VisualStudio.View
                     // ── 计划已写入 PlanJson：刷新文件改动列表 ──
                     RefreshChangeSummary();
                 }
+                else if (ShouldFinalizeHandoffContent(agentResult))
+                {
+                    // 链式 Handoff 的最后一棒可能是不带 Plan 的 Ask 总结。
+                    // 这里必须和普通 Agent 回答一样完成消息收尾，
+                    // 否则模型虽然生成了总结，气泡和会话树仍会停留在空白流式态。
+                    string finalReasoning = _streamingReasoning.ToString();
+                    string cacheFooter = BuildCacheFooterAndPersist(_agentStreamingMsgIndex);
+                    FinalizeAgentMessage(
+                        _agentStreamingMsgIndex,
+                        agentResult.Content!,
+                        finalReasoning,
+                        cacheFooter);
+                    StatusLabel.Text = LocalizationService.Instance["status.ready"];
+                }
                 else
                 {
                     StatusLabel.Text = LocalizationService.Instance["status.ready"];
@@ -683,6 +697,15 @@ namespace DeepSeek_v4_for_VisualStudio.View
                 catch { }
             }
         }
+
+        /// <summary>
+        /// 判断 Handoff 链的最终结果是否需要写入流式消息。
+        /// 终态 Ask 总结通常没有 Plan，但有正文，仍必须完成消息收尾。
+        /// </summary>
+        /// <param name="result">链式 Handoff 的最终 Agent 结果。</param>
+        /// <returns>需要写入最终正文时返回 true。</returns>
+        internal static bool ShouldFinalizeHandoffContent(AgentResult? result)
+            => result?.Success == true && !string.IsNullOrWhiteSpace(result.Content);
 
         /// <summary>
         /// 关闭任务面板：清除对应消息的 PlanJson，防止重启后重新显示已关闭的面板。

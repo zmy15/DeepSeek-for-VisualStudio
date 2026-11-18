@@ -2236,7 +2236,7 @@ namespace DeepSeek_v4_for_VisualStudio.Services.Agents
             // 只有真实触发且失败的验证才进入 Build 修复。
             // 未调用验证工具、测试无有效结论但 AI 未选择构建，均不算失败。
             bool testsFailed = didAttemptTests && lastTestsPassed == false;
-            bool buildFailed = didAttemptBuild && lastBuildSucceeded != true;
+            bool buildFailed = didAttemptBuild && lastBuildSucceeded == false;
             return testsFailed || buildFailed;
         }
 
