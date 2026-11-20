@@ -25,6 +25,7 @@ namespace DeepSeek_v4_for_VisualStudio.View
                 List<ChatMessage> visibleMessages;
                 List<ChatApiMessage> apiHistory;
                 AgentTurnMetrics? metrics;
+                string? sessionTelemetry;
                 string? contextDebug;
                 int lastAssistantIndex;
 
@@ -55,6 +56,9 @@ namespace DeepSeek_v4_for_VisualStudio.View
                         }
                     }
                     metrics = assistantMessageIndex == lastAssistantIndex ? _latestTurnMetrics : null;
+                    sessionTelemetry = assistantMessageIndex == lastAssistantIndex
+                        ? _latestCompletedTelemetryJson
+                        : null;
                     contextDebug = BuildContextDebugJson();
                 }
 
@@ -80,6 +84,7 @@ namespace DeepSeek_v4_for_VisualStudio.View
                         AssistantMessageIndex = assistantMessageIndex,
                         ApiHistory = apiHistory,
                         LatestExecutionMetrics = metrics,
+                        SessionTelemetryJson = sessionTelemetry,
                         Model = GetEffectiveModel(),
                         SolutionPath = _solutionPath,
                         ContextDebugJson = contextDebug,

@@ -4,8 +4,10 @@
 from __future__ import annotations
 
 import argparse
+import hashlib
 import json
 import os
+import re
 import sys
 import time
 from datetime import datetime, timezone
@@ -19,6 +21,9 @@ HERE = Path(__file__).resolve().parent
 DEFAULT_CASES = HERE / "cases.v1.json"
 DEFAULT_RUBRIC = HERE / "rubrics.v1.json"
 DEFAULT_PROMPT = HERE / "judge-prompt.md"
+DEFAULT_GENERAL_CASE = HERE / "general-case.json"
+DEFAULT_GENERAL_RUBRIC = HERE / "general-rubric.v1.json"
+DEFAULT_GENERAL_PROMPT = HERE / "general-prompt.md"
 
 EXPECTED_DIMENSIONS = (
     "instruction_following",
@@ -30,6 +35,43 @@ EXPECTED_DIMENSIONS = (
     "communication_ux",
     "efficiency_cost",
 )
+
+GENERAL_STAGES = (
+    "context",
+    "planning_handoff",
+    "execution",
+    "verification",
+    "completion",
+    "cost_cache",
+)
+
+CONTEXT_TOOLS = {
+    "read_file",
+    "file_search",
+    "grep_search",
+    "symbol_search",
+    "list_dir",
+    "get_file_symbols",
+    "get_file_comments",
+    "web_search",
+    "fetch_webpage",
+    "capture_window",
+    "capture_webpage",
+}
+
+EDIT_TOOLS = {
+    "apply_patch",
+    "create_file",
+    "replace_string_in_file",
+    "multi_replace_string_in_file",
+    "delete_file",
+    "create_directory",
+}
+
+VERIFY_TOOLS = {
+    "build_solution",
+    "run_tests",
+}
 
 
 class JudgeError(RuntimeError):
@@ -108,17 +150,31 @@ def validate_case_set(cases_doc: dict[str, Any], rubric: dict[str, Any]) -> list
         if count != 3:
             errors.append(f"dimension '{dimension}' must have 3 cases, got {count}")
 
+    errors.extend(validate_rubric(rubric))
+    return errors
+
+
+def validate_rubric(
+    rubric: dict[str, Any],
+    expected_dimensions: tuple[str, ...] | None = EXPECTED_DIMENSIONS,
+) -> list[str]:
+    errors: list[str] = []
     rubric_dimensions = list(rubric.get("dimensions") or [])
-    if len(rubric_dimensions) != 8:
-        errors.append(f"expected 8 rubric dimensions, got {len(rubric_dimensions)}")
+    if not rubric_dimensions:
+        errors.append("rubric must define dimensions")
 
     rubric_by_id = {
         str(item.get("id") or ""): item
         for item in rubric_dimensions
         if isinstance(item, dict)
     }
+    dimensions_to_check = (
+        list(expected_dimensions)
+        if expected_dimensions is not None
+        else list(rubric_by_id.keys())
+    )
     weight_sum = 0.0
-    for dimension in EXPECTED_DIMENSIONS:
+    for dimension in dimensions_to_check:
         item = rubric_by_id.get(dimension)
         if item is None:
             errors.append(f"rubric is missing dimension '{dimension}'")
@@ -143,6 +199,27 @@ def validate_case_set(cases_doc: dict[str, Any], rubric: dict[str, Any]) -> list
     if not rubric.get("critical_failures"):
         errors.append("rubric must define at least one critical failure")
 
+    return errors
+
+
+def validate_case(
+    case: dict[str, Any],
+    valid_dimensions: tuple[str, ...] | None = EXPECTED_DIMENSIONS,
+) -> list[str]:
+    errors: list[str] = []
+    if not str(case.get("id") or "").strip():
+        errors.append("case id is required")
+    dimension = str(case.get("dimension") or "").strip()
+    allowed = tuple(valid_dimensions) if valid_dimensions is not None else ()
+    if allowed and dimension not in allowed:
+        errors.append(f"case dimension must be one of: {', '.join(allowed)}")
+    if not str(case.get("user_prompt") or "").strip():
+        errors.append("case user_prompt is required")
+    checks = case.get("checks") or {}
+    must = list(checks.get("must") or [])
+    must_not = list(checks.get("must_not") or [])
+    if not must and not must_not:
+        errors.append("case must define checks.must or checks.must_not")
     return errors
 
 
@@ -172,11 +249,535 @@ def find_case(cases_doc: dict[str, Any], case_id: str) -> dict[str, Any]:
     raise JudgeError(f"Unknown case_id '{case_id}'. Available cases: {available}")
 
 
+def analyze_turn_flow(exported_turn: dict[str, Any]) -> dict[str, Any]:
+    conversation = exported_turn.get("conversation") or {}
+    trace = list(conversation.get("tool_trace") or [])
+    metrics = exported_turn.get("metrics") or {}
+    session_telemetry = exported_turn.get("session_telemetry") or {}
+    source = exported_turn.get("source") or {}
+    assistant = (exported_turn.get("turn") or {}).get("assistant") or {}
+
+    stage_events: dict[str, list[dict[str, Any]]] = {
+        stage: [] for stage in GENERAL_STAGES
+    }
+    edit_seen = False
+    signatures: dict[str, list[dict[str, Any]]] = {}
+    tool_counts: dict[str, int] = {}
+    failures: list[dict[str, Any]] = []
+    edit_events: list[dict[str, Any]] = []
+
+    for index, item in enumerate(trace):
+        if not isinstance(item, dict):
+            continue
+        tool_name = str(item.get("tool_name") or "")
+        arguments = item.get("arguments")
+        args = parse_tool_arguments(arguments)
+        result = item.get("result")
+        classification = str(item.get("result_classification") or "Unknown")
+        stage = classify_stage(tool_name, args, edit_seen)
+        if stage == "execution" and tool_name in EDIT_TOOLS:
+            edit_seen = True
+
+        argument_summary = summarize_arguments(tool_name, args, arguments)
+        event = {
+            "index": index,
+            "tool": tool_name,
+            "stage": stage,
+            "result_classification": classification,
+            "argument_summary": argument_summary,
+            "result_preview": preview_text(result, 600),
+        }
+        stage_events[stage].append(event)
+        tool_counts[tool_name] = tool_counts.get(tool_name, 0) + 1
+        if classification != "Success":
+            failures.append(event)
+
+        if tool_name in EDIT_TOOLS:
+            edit_events.append(event)
+
+        signature_key = canonical_signature(tool_name, args)
+        signature = signatures.setdefault(signature_key, [])
+        signature.append(
+            {
+                "index": index,
+                "tool": tool_name,
+                "argument_summary": argument_summary,
+                "result_hash": short_hash(str(result or "")),
+                "result_classification": classification,
+            }
+        )
+
+    repeated_signatures = []
+    loops = []
+    for entries in signatures.values():
+        if len(entries) < 2:
+            continue
+        result_hashes = {entry["result_hash"] for entry in entries}
+        repeated = {
+            "tool": entries[0]["tool"],
+            "count": len(entries),
+            "argument_summary": entries[0]["argument_summary"],
+            "indices": [entry["index"] for entry in entries],
+            "same_result": len(result_hashes) == 1,
+            "result_classifications": sorted(
+                {entry["result_classification"] for entry in entries}
+            ),
+        }
+        repeated_signatures.append(repeated)
+        if len(entries) >= 2 and len(result_hashes) == 1:
+            loops.append({**repeated, "kind": "identical_call_and_result"})
+        elif len(entries) >= 4:
+            loops.append({**repeated, "kind": "repeated_call_signature"})
+
+    handoffs = analyze_handoffs(trace)
+    permissions = analyze_permissions(trace, source)
+    cost_cache = analyze_cost_cache(
+        metrics,
+        session_telemetry,
+        conversation,
+        len(trace),
+    )
+
+    stage_events["completion"] = [
+        {
+            "final_answer_present": bool(str(assistant.get("content") or "").strip()),
+            "final_answer_chars": len(str(assistant.get("content") or "")),
+            "incomplete": bool(assistant.get("incomplete")),
+            "tool_call_count": len(trace),
+        }
+    ]
+    stage_events["cost_cache"] = [cost_cache]
+
+    verification_successes = sum(
+        1
+        for event in stage_events["verification"]
+        if event["result_classification"] == "Success"
+    )
+    completion = {
+        "status": "incomplete" if assistant.get("incomplete") else "reported_complete",
+        "final_answer_present": bool(str(assistant.get("content") or "").strip()),
+        "incomplete": bool(assistant.get("incomplete")),
+        "edit_calls": len(edit_events),
+        "verification_calls": len(stage_events["verification"]),
+        "verification_successes": verification_successes,
+        "handoff_count": len(handoffs),
+        "last_verification": (
+            stage_events["verification"][-1]
+            if stage_events["verification"]
+            else None
+        ),
+    }
+
+    return {
+        "schema": "deepseek-vs.flow-analysis/1",
+        "summary": {
+            "tool_calls": len(trace),
+            "tool_counts": sorted(
+                (
+                    {"tool": tool, "count": count}
+                    for tool, count in tool_counts.items()
+                ),
+                key=lambda item: (-item["count"], item["tool"]),
+            ),
+            "failure_count": len(failures),
+            "handoff_count": len(handoffs),
+            "edit_calls": len(edit_events),
+            "verification_calls": len(stage_events["verification"]),
+            "repeated_signature_count": len(repeated_signatures),
+            "loop_suspect_count": len(loops),
+        },
+        "stages": {
+            stage: {
+                "event_count": len(events),
+                "events": events,
+            }
+            for stage, events in stage_events.items()
+        },
+        "tools": {
+            "failures": failures,
+            "missing_results": [
+                {
+                    "index": index,
+                    "tool": str(item.get("tool_name") or ""),
+                }
+                for index, item in enumerate(trace)
+                if isinstance(item, dict) and item.get("result") is None
+            ],
+            "repeated_signatures": repeated_signatures,
+        },
+        "handoffs": handoffs,
+        "permissions": permissions,
+        "loops": {
+            "suspects": loops,
+            "has_suspected_loop": bool(loops),
+        },
+        "edits": {
+            "calls": edit_events,
+            "unique_targets": unique_edit_targets(trace),
+        },
+        "cost": cost_cache["cost"],
+        "cache": cost_cache["cache"],
+        "completion": completion,
+    }
+
+
+def parse_tool_arguments(value: Any) -> dict[str, Any]:
+    if isinstance(value, dict):
+        return value
+    if not isinstance(value, str) or not value.strip():
+        return {}
+    try:
+        parsed = json.loads(value)
+        return parsed if isinstance(parsed, dict) else {}
+    except json.JSONDecodeError:
+        return {}
+
+
+def classify_stage(
+    tool_name: str,
+    args: dict[str, Any],
+    edit_seen: bool,
+) -> str:
+    if tool_name == "request_handoff":
+        return "planning_handoff"
+    if tool_name == "run_in_terminal":
+        command = str(args.get("command") or "").lower()
+        if any(marker in command for marker in ("dotnet build", "msbuild", "dotnet test", "vstest", "cmake --build")):
+            return "verification"
+        return "execution"
+    if tool_name in VERIFY_TOOLS:
+        return "verification"
+    if tool_name == "get_errors" and edit_seen:
+        return "verification"
+    if tool_name in CONTEXT_TOOLS or tool_name == "get_errors":
+        return "context"
+    if tool_name in EDIT_TOOLS:
+        return "execution"
+    return "execution"
+
+
+def summarize_arguments(
+    tool_name: str,
+    args: dict[str, Any],
+    raw: Any,
+) -> str:
+    preferred_keys = (
+        "filePath",
+        "path",
+        "oldPath",
+        "newPath",
+        "query",
+        "command",
+        "targetAgent",
+        "startLine",
+        "endLine",
+        "includeSelected",
+    )
+    picked = {
+        key: args.get(key)
+        for key in preferred_keys
+        if key in args and args.get(key) is not None
+    }
+    if picked:
+        return preview_text(json.dumps(picked, ensure_ascii=False), 500)
+    if tool_name == "request_handoff":
+        return preview_text(
+            json.dumps(
+                {
+                    "targetAgent": args.get("targetAgent"),
+                    "taskDescriptionChars": len(str(args.get("taskDescription") or "")),
+                    "editSteps": len(args.get("editSteps") or []),
+                },
+                ensure_ascii=False,
+            ),
+            500,
+        )
+    return preview_text(str(raw or ""), 300)
+
+
+def canonical_signature(tool_name: str, args: dict[str, Any]) -> str:
+    canonical = json.dumps(args, ensure_ascii=False, sort_keys=True, separators=(",", ":"))
+    return short_hash(tool_name + "\n" + canonical)
+
+
+def short_hash(value: str) -> str:
+    return hashlib.sha256(value.encode("utf-8")).hexdigest()[:16]
+
+
+def preview_text(value: Any, limit: int) -> str:
+    text = str(value or "")
+    return text if len(text) <= limit else text[:limit] + "...[truncated]"
+
+
+def analyze_handoffs(trace: list[dict[str, Any]]) -> list[dict[str, Any]]:
+    handoffs: list[dict[str, Any]] = []
+    for index, item in enumerate(trace):
+        if not isinstance(item, dict) or str(item.get("tool_name") or "") != "request_handoff":
+            continue
+        args = parse_tool_arguments(item.get("arguments"))
+        target = str(args.get("targetAgent") or "")
+        reason = str(args.get("reason") or "")
+        task_description = str(args.get("taskDescription") or "")
+        edit_steps = list(args.get("editSteps") or [])
+        follow_up_tools: list[str] = []
+        for later in trace[index + 1 :]:
+            if not isinstance(later, dict):
+                continue
+            later_name = str(later.get("tool_name") or "")
+            if later_name == "request_handoff":
+                break
+            follow_up_tools.append(later_name)
+        compatible = handoff_follow_up_compatible(target, follow_up_tools)
+        handoffs.append(
+            {
+                "index": index,
+                "target_agent": target,
+                "reason": preview_text(reason, 500),
+                "task_description_chars": len(task_description),
+                "edit_steps": len(edit_steps),
+                "handoff_result": preview_text(item.get("result"), 500),
+                "follow_up_tools": follow_up_tools,
+                "follow_up_compatible": compatible,
+                "context_sufficient": bool(reason.strip() and task_description.strip()),
+            }
+        )
+    return handoffs
+
+
+def handoff_follow_up_compatible(target: str, tools: list[str]) -> bool:
+    normalized = target.strip().lower()
+    if not tools:
+        return False
+    if normalized == "edit":
+        return any(tool in EDIT_TOOLS for tool in tools)
+    if normalized in {"build", "verify"}:
+        return any(tool in VERIFY_TOOLS for tool in tools)
+    if normalized in {"explore", "ask"}:
+        return any(tool in CONTEXT_TOOLS for tool in tools)
+    if normalized == "plan":
+        return True
+    return True
+
+
+def analyze_permissions(
+    trace: list[dict[str, Any]],
+    source: dict[str, Any],
+) -> dict[str, Any]:
+    solution_path = str(source.get("solution_path") or "")
+    workspace_root = str(Path(solution_path).parent) if solution_path else ""
+    outside_writes: list[dict[str, Any]] = []
+    dangerous_commands: list[dict[str, Any]] = []
+    blocked: list[dict[str, Any]] = []
+
+    dangerous_patterns = (
+        r"remove-item\b.*-recurse",
+        r"\brm\s+-rf\b",
+        r"\bdel\s+/s\b",
+        r"git\s+reset\s+--hard",
+        r"git\s+clean\s+-[a-z]*f",
+        r"\bformat\b",
+        r"\bdiskpart\b",
+        r"reg\s+delete\b",
+        r"\bshutdown\b",
+    )
+
+    for index, item in enumerate(trace):
+        if not isinstance(item, dict):
+            continue
+        tool_name = str(item.get("tool_name") or "")
+        args = parse_tool_arguments(item.get("arguments"))
+        classification = str(item.get("result_classification") or "")
+        if classification == "Blocked":
+            blocked.append({"index": index, "tool": tool_name})
+
+        if tool_name == "run_in_terminal":
+            command = str(args.get("command") or "")
+            lowered = command.lower()
+            for pattern in dangerous_patterns:
+                if re.search(pattern, lowered, flags=re.IGNORECASE):
+                    dangerous_commands.append(
+                        {
+                            "index": index,
+                            "command": preview_text(command, 500),
+                            "pattern": pattern,
+                        }
+                    )
+                    break
+
+        if tool_name in EDIT_TOOLS:
+            for path in extract_paths(args):
+                if workspace_root and not is_within_workspace(path, workspace_root):
+                    outside_writes.append(
+                        {
+                            "index": index,
+                            "tool": tool_name,
+                            "path": path,
+                        }
+                    )
+
+    return {
+        "workspace_root": workspace_root,
+        "outside_workspace_writes": outside_writes,
+        "dangerous_commands": dangerous_commands,
+        "blocked_calls": blocked,
+        "approval_evidence": "not_exported",
+        "has_permission_risk": bool(outside_writes or dangerous_commands),
+    }
+
+
+def extract_paths(value: Any) -> list[str]:
+    paths: list[str] = []
+
+    def visit(node: Any, key: str = "") -> None:
+        if isinstance(node, dict):
+            for child_key, child in node.items():
+                visit(child, str(child_key))
+            return
+        if isinstance(node, list):
+            for child in node:
+                visit(child, key)
+            return
+        if not isinstance(node, str):
+            return
+        lower_key = key.lower()
+        if "path" in lower_key or re.match(r"^[a-zA-Z]:[\\/]", node) or node.startswith("\\\\"):
+            paths.append(node)
+
+    visit(value)
+    return list(dict.fromkeys(paths))
+
+
+def is_within_workspace(path: str, workspace_root: str) -> bool:
+    try:
+        candidate = Path(path).resolve()
+        root = Path(workspace_root).resolve()
+        candidate.relative_to(root)
+        return True
+    except (ValueError, OSError):
+        return False
+
+
+def unique_edit_targets(trace: list[dict[str, Any]]) -> list[str]:
+    targets: set[str] = set()
+    for item in trace:
+        if not isinstance(item, dict) or str(item.get("tool_name") or "") not in EDIT_TOOLS:
+            continue
+        args = parse_tool_arguments(item.get("arguments"))
+        for path in extract_paths(args):
+            targets.add(path)
+    return sorted(targets)
+
+
+def analyze_cost_cache(
+    metrics: dict[str, Any],
+    session_telemetry: dict[str, Any],
+    conversation: dict[str, Any],
+    tool_call_count: int,
+) -> dict[str, Any]:
+    latest_input = int(metrics.get("input_tokens") or 0)
+    latest_output = int(metrics.get("output_tokens") or 0)
+    latest_cache_hit = int(metrics.get("cache_hit_tokens") or 0)
+    latest_cache_miss = int(metrics.get("cache_miss_tokens") or 0)
+
+    session_input = int(session_telemetry.get("input_tokens") or 0)
+    session_output = int(session_telemetry.get("output_tokens") or 0)
+    session_cache_rate = session_telemetry.get("cache_hit_rate")
+    session_cache_rate = (
+        float(session_cache_rate)
+        if session_cache_rate is not None
+        else None
+    )
+    has_session_metrics = bool(session_telemetry)
+
+    input_tokens = session_input if has_session_metrics else latest_input
+    output_tokens = session_output if has_session_metrics else latest_output
+    if has_session_metrics and session_cache_rate is not None:
+        cache_hit = round(input_tokens * session_cache_rate)
+        cache_miss = max(0, input_tokens - cache_hit)
+    else:
+        cache_hit = latest_cache_hit
+        cache_miss = latest_cache_miss
+    cache_total = cache_hit + cache_miss
+    cache_hit_rate = cache_hit / cache_total if cache_total else None
+    context_debug = conversation.get("context_debug") or {}
+    token_debug = context_debug.get("tokens") if isinstance(context_debug, dict) else None
+
+    return {
+        "cost": {
+            "metrics_scope": (
+                "full_agent_session" if has_session_metrics else metrics.get("scope")
+            ),
+            "input_tokens": input_tokens,
+            "output_tokens": output_tokens,
+            "total_tokens": input_tokens + output_tokens,
+            "tokens_per_tool_call": (
+                round((input_tokens + output_tokens) / tool_call_count, 2)
+                if tool_call_count
+                else None
+            ),
+            "ttft_ms": (
+                session_telemetry.get("first_turn_ttft_ms")
+                if has_session_metrics
+                else metrics.get("ttft_ms")
+            ),
+            "duration_ms": (
+                session_telemetry.get("duration_ms")
+                if has_session_metrics
+                else metrics.get("duration_ms")
+            ),
+            "stream_retries": metrics.get("stream_retries") or 0,
+            "context_estimate": token_debug,
+            "full_turn_metrics_available": has_session_metrics,
+            "latest_execution": {
+                "input_tokens": latest_input,
+                "output_tokens": latest_output,
+                "cache_hit_tokens": latest_cache_hit,
+                "cache_miss_tokens": latest_cache_miss,
+                "ttft_ms": metrics.get("ttft_ms"),
+                "duration_ms": metrics.get("duration_ms"),
+            },
+            "full_session": (
+                {
+                    "turn_count": session_telemetry.get("turn_count"),
+                    "tool_call_count": session_telemetry.get("tool_call_count"),
+                    "input_tokens": session_input,
+                    "output_tokens": session_output,
+                    "duration_ms": session_telemetry.get("duration_ms"),
+                    "first_turn_ttft_ms": session_telemetry.get("first_turn_ttft_ms"),
+                    "cache_hit_rate": session_cache_rate,
+                }
+                if has_session_metrics
+                else None
+            ),
+        },
+        "cache": {
+            "hit_tokens": cache_hit,
+            "miss_tokens": cache_miss,
+            "hit_rate": round(cache_hit_rate, 4) if cache_hit_rate is not None else None,
+            "quality": cache_quality(cache_hit_rate),
+            "metrics_scope": (
+                "full_agent_session" if has_session_metrics else metrics.get("scope")
+            ),
+        },
+    }
+
+
+def cache_quality(rate: float | None) -> str:
+    if rate is None:
+        return "unknown"
+    if rate >= 0.8:
+        return "high"
+    if rate >= 0.5:
+        return "medium"
+    return "low"
+
+
 def build_messages(
     system_prompt: str,
     case: dict[str, Any],
     rubric: dict[str, Any],
     exported_turn: dict[str, Any],
+    flow_analysis: dict[str, Any],
 ) -> list[dict[str, str]]:
     system = (
         system_prompt.strip()
@@ -194,6 +795,8 @@ def build_messages(
         + json.dumps(case, ensure_ascii=False, separators=(",", ":"))
         + "\n\nEXPORTED_TURN_JSON:\n"
         + json.dumps(exported_turn, ensure_ascii=False, separators=(",", ":"))
+        + "\n\nFLOW_ANALYSIS_JSON:\n"
+        + json.dumps(flow_analysis, ensure_ascii=False, separators=(",", ":"))
         + "\n\nReturn one JSON object only."
     )
     return [
@@ -260,6 +863,7 @@ def normalize_judge_result(
     raw: dict[str, Any],
     case_id: str,
     rubric: dict[str, Any],
+    require_stage_findings: bool = False,
 ) -> dict[str, Any]:
     errors: list[str] = []
     if str(raw.get("case_id") or "") != case_id:
@@ -269,7 +873,12 @@ def normalize_judge_result(
     if model_outcome not in {"pass", "partial", "fail"}:
         errors.append("overall_outcome must be pass, partial, or fail")
 
-    expected = {str(item.get("id")) for item in rubric.get("dimensions") or []}
+    expected_order = [
+        str(item.get("id"))
+        for item in rubric.get("dimensions") or []
+        if isinstance(item, dict) and item.get("id")
+    ]
+    expected = set(expected_order)
     scores_by_id: dict[str, dict[str, Any]] = {}
     for index, score_item in enumerate(raw.get("scores") or []):
         if not isinstance(score_item, dict):
@@ -304,6 +913,16 @@ def normalize_judge_result(
         errors.append(f"missing score dimensions: {', '.join(missing)}")
 
     critical_failures = normalize_critical_failures(raw.get("critical_failures"))
+    stage_findings = normalize_stage_findings(raw.get("stage_findings"))
+    if require_stage_findings:
+        found_stages = {item["stage"] for item in stage_findings}
+        missing_stages = [
+            stage for stage in GENERAL_STAGES if stage not in found_stages
+        ]
+        if missing_stages:
+            errors.append(
+                "missing stage_findings: " + ", ".join(missing_stages)
+            )
     if not isinstance(raw.get("evidence"), list):
         errors.append("evidence must be an array")
     if not str(raw.get("summary") or "").strip():
@@ -325,14 +944,57 @@ def normalize_judge_result(
                 "reason": str(scores_by_id[dimension].get("reason") or "").strip(),
                 "evidence": list(scores_by_id[dimension].get("evidence") or []),
             }
-            for dimension in EXPECTED_DIMENSIONS
+            for dimension in expected_order
             if dimension in scores_by_id
         ],
+        "stage_findings": stage_findings,
         "critical_failures": critical_failures,
         "evidence": list(raw.get("evidence") or []),
         "summary": str(raw.get("summary") or "").strip(),
         "recommended_actions": list(raw.get("recommended_actions") or []),
     }
+    return normalized
+
+
+def normalize_stage_findings(value: Any) -> list[dict[str, Any]]:
+    if value is None:
+        return []
+    if not isinstance(value, list):
+        raise JudgeResultError(["stage_findings must be an array"])
+
+    normalized: list[dict[str, Any]] = []
+    valid_statuses = {"good", "partial", "bad", "not_applicable"}
+    for index, item in enumerate(value):
+        if not isinstance(item, dict):
+            raise JudgeResultError([f"stage_findings[{index}] must be an object"])
+        stage = str(item.get("stage") or "").strip()
+        if stage not in GENERAL_STAGES:
+            raise JudgeResultError(
+                [f"stage_findings[{index}] has unknown stage '{stage}'"]
+            )
+        status = str(item.get("status") or "").strip().lower()
+        if status not in valid_statuses:
+            raise JudgeResultError(
+                [f"stage_findings[{index}] has invalid status '{status}'"]
+            )
+        findings = str(item.get("findings") or "").strip()
+        if not findings:
+            raise JudgeResultError(
+                [f"stage_findings[{index}] requires findings"]
+            )
+        evidence = item.get("evidence") or []
+        if not isinstance(evidence, list) or not evidence:
+            raise JudgeResultError(
+                [f"stage_findings[{index}] requires evidence"]
+            )
+        normalized.append(
+            {
+                "stage": stage,
+                "status": status,
+                "findings": findings,
+                "evidence": list(evidence),
+            }
+        )
     return normalized
 
 
@@ -416,7 +1078,11 @@ def compute_final_outcome(
         "applicable_weight": round(applicable_weight, 4),
         "missing_dimensions": [
             dimension
-            for dimension in EXPECTED_DIMENSIONS
+            for dimension in (
+                str(item.get("id"))
+                for item in rubric.get("dimensions") or []
+                if isinstance(item, dict) and item.get("id")
+            )
             if scores.get(dimension) is None
         ],
         "weak_dimensions": weak_dimensions,
@@ -446,7 +1112,7 @@ def resolve_base_url(cli_value: str | None) -> str:
 
 
 def resolve_model(cli_value: str | None) -> str:
-    return cli_value or os.getenv("JUDGE_MODEL") or "deepseek-v4-pro"
+    return cli_value or os.getenv("JUDGE_MODEL") or "deepseek-flash"
 
 
 def call_judge(
@@ -534,11 +1200,49 @@ def default_output_path(export_path: Path, case_id: str) -> Path:
 
 
 def run_score(args: argparse.Namespace) -> int:
-    cases_doc = read_json(Path(args.cases))
-    rubric = read_json(Path(args.rubric))
-    errors = validate_case_set(cases_doc, rubric)
-    if errors:
-        raise JudgeError("Invalid case set: " + "; ".join(errors))
+    general_mode = not args.case_id and not args.case_file
+    if general_mode:
+        case = read_json(DEFAULT_GENERAL_CASE)
+        rubric_path = Path(args.rubric) if args.rubric else DEFAULT_GENERAL_RUBRIC
+        rubric = read_json(rubric_path)
+        general_dimensions = tuple(
+            str(item.get("id"))
+            for item in rubric.get("dimensions") or []
+            if isinstance(item, dict) and item.get("id")
+        )
+        errors = validate_case(
+            case,
+            valid_dimensions=general_dimensions,
+        ) + validate_rubric(rubric, expected_dimensions=None)
+        case_id = str(case.get("id") or "").strip()
+        prompt_path = Path(args.prompt) if args.prompt else DEFAULT_GENERAL_PROMPT
+        case_mode = "general"
+        if errors:
+            raise JudgeError("Invalid general evaluation profile: " + "; ".join(errors))
+    elif args.case_file:
+        rubric_path = Path(args.rubric) if args.rubric else DEFAULT_RUBRIC
+        rubric = read_json(rubric_path)
+        case_doc = read_json(Path(args.case_file))
+        case = case_doc.get("case", case_doc) if isinstance(case_doc, dict) else None
+        if not isinstance(case, dict):
+            raise JudgeError("Custom case file must contain a JSON object")
+        errors = validate_case(case) + validate_rubric(rubric)
+        case_id = str(case.get("id") or "").strip()
+        prompt_path = Path(args.prompt) if args.prompt else DEFAULT_PROMPT
+        case_mode = "custom"
+        if errors:
+            raise JudgeError("Invalid custom case: " + "; ".join(errors))
+    else:
+        rubric_path = Path(args.rubric) if args.rubric else DEFAULT_RUBRIC
+        rubric = read_json(rubric_path)
+        cases_doc = read_json(Path(args.cases))
+        errors = validate_case_set(cases_doc, rubric)
+        if errors:
+            raise JudgeError("Invalid case set: " + "; ".join(errors))
+        case = find_case(cases_doc, args.case_id)
+        case_id = args.case_id
+        prompt_path = Path(args.prompt) if args.prompt else DEFAULT_PROMPT
+        case_mode = "benchmark"
 
     exported_turn = read_json(Path(args.export))
     if not isinstance(exported_turn, dict):
@@ -548,15 +1252,23 @@ def run_score(args: argparse.Namespace) -> int:
             "Unsupported export schema. Expected deepseek-vs.turn-evaluation/1."
         )
 
-    case = find_case(cases_doc, args.case_id)
-    system_prompt = Path(args.prompt).read_text(encoding="utf-8")
-    messages = build_messages(system_prompt, case, rubric, exported_turn)
+    flow_analysis = analyze_turn_flow(exported_turn)
+    system_prompt = prompt_path.read_text(encoding="utf-8")
+    messages = build_messages(
+        system_prompt,
+        case,
+        rubric,
+        exported_turn,
+        flow_analysis,
+    )
 
     if args.dry_run:
         request_chars = sum(len(message["content"]) for message in messages)
         print(
-            f"Dry run OK: case={args.case_id}, export={args.export}, "
-            f"messages={len(messages)}, request_chars={request_chars}"
+            f"Dry run OK: case={case_id}, export={args.export}, "
+            f"mode={case_mode}, messages={len(messages)}, "
+            f"request_chars={request_chars}, "
+            f"flow_tools={len(flow_analysis['summary']['tool_counts'])}"
         )
         return 0
 
@@ -579,13 +1291,19 @@ def run_score(args: argparse.Namespace) -> int:
     duration_ms = round((time.monotonic() - started) * 1000)
 
     raw_result = extract_json_object(raw_content)
-    normalized = normalize_judge_result(raw_result, args.case_id, rubric)
+    normalized = normalize_judge_result(
+        raw_result,
+        case_id,
+        rubric,
+        require_stage_findings=general_mode,
+    )
     computed = compute_final_outcome(normalized, rubric)
 
     output = {
         "schema": "deepseek-vs.judge-run/1",
         "created_at_utc": datetime.now(timezone.utc).isoformat(),
-        "case_id": args.case_id,
+        "case_mode": case_mode,
+        "case_id": case_id,
         "export_id": exported_turn.get("export_id"),
         "source_export": str(Path(args.export).resolve()),
         "judge": {
@@ -603,21 +1321,56 @@ def run_score(args: argparse.Namespace) -> int:
             "usage": response_usage(response),
             "raw_content": raw_content,
         },
+        "flow_analysis": flow_analysis,
         "result": normalized,
         "computed": computed,
     }
 
     output_path = Path(args.output) if args.output else default_output_path(
-        Path(args.export), args.case_id
+        Path(args.export), case_id
     )
     write_json(output_path, output)
 
-    print(f"Case: {args.case_id}")
+    print(f"Case: {case_id}")
     print(f"Model outcome: {normalized['overall_outcome']}")
     print(f"Final outcome: {computed['outcome']} ({computed['rule']})")
     weighted = computed["weighted_score"]
     print(f"Weighted score: {weighted if weighted is not None else 'n/a'}")
     print(f"Critical failures: {len(normalized['critical_failures'])}")
+    print(f"Output: {output_path.resolve()}")
+    return 0
+
+
+def run_analyze(args: argparse.Namespace) -> int:
+    export_path = Path(args.export)
+    exported_turn = read_json(export_path)
+    if not isinstance(exported_turn, dict):
+        raise JudgeError("Exported turn JSON root must be an object")
+    if exported_turn.get("schema") != "deepseek-vs.turn-evaluation/1":
+        raise JudgeError(
+            "Unsupported export schema. Expected deepseek-vs.turn-evaluation/1."
+        )
+
+    flow = analyze_turn_flow(exported_turn)
+    output_path = (
+        Path(args.output)
+        if args.output
+        else export_path.with_name(export_path.stem + ".flow.json")
+    )
+    write_json(output_path, flow)
+
+    summary = flow["summary"]
+    print(f"Tool calls: {summary['tool_calls']}")
+    print(f"Failures: {summary['failure_count']}")
+    print(f"Handoffs: {summary['handoff_count']}")
+    print(f"Edit calls: {summary['edit_calls']}")
+    print(f"Verification calls: {summary['verification_calls']}")
+    print(f"Loop suspects: {summary['loop_suspect_count']}")
+    cache = flow["cache"]
+    print(
+        f"Cache hit rate: "
+        f"{cache['hit_rate'] if cache['hit_rate'] is not None else 'n/a'}"
+    )
     print(f"Output: {output_path.resolve()}")
     return 0
 
@@ -633,14 +1386,30 @@ def build_parser() -> argparse.ArgumentParser:
     validate_parser.add_argument("--rubric", default=str(DEFAULT_RUBRIC))
     validate_parser.set_defaults(func=run_validate)
 
+    analyze_parser = subparsers.add_parser(
+        "analyze",
+        help="Split one exported turn into deterministic flow evidence",
+    )
+    analyze_parser.add_argument("--export", required=True)
+    analyze_parser.add_argument("--output", help="Flow analysis JSON path")
+    analyze_parser.set_defaults(func=run_analyze)
+
     score_parser = subparsers.add_parser("score", help="Run LLM-as-a-Judge for one exported turn")
     score_parser.add_argument("--export", required=True, help="Exported turn-evaluation JSON")
-    score_parser.add_argument("--case-id", required=True, help="Case id from cases.v1.json")
+    case_source = score_parser.add_mutually_exclusive_group(required=False)
+    case_source.add_argument("--case-id", help="Case id from cases.v1.json")
+    case_source.add_argument(
+        "--case-file",
+        help="Custom case JSON for a real task; may contain the case object directly",
+    )
     score_parser.add_argument("--cases", default=str(DEFAULT_CASES))
-    score_parser.add_argument("--rubric", default=str(DEFAULT_RUBRIC))
-    score_parser.add_argument("--prompt", default=str(DEFAULT_PROMPT))
+    score_parser.add_argument("--rubric", help="Override rubric JSON")
+    score_parser.add_argument("--prompt", help="Override system prompt Markdown")
     score_parser.add_argument("--output", help="Judge result JSON path")
-    score_parser.add_argument("--model", help="Judge model; defaults to JUDGE_MODEL")
+    score_parser.add_argument(
+        "--model",
+        help="Judge model; defaults to JUDGE_MODEL or deepseek-flash",
+    )
     score_parser.add_argument("--base-url", help="OpenAI-compatible base URL")
     score_parser.add_argument(
         "--api-key-env",

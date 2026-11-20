@@ -34,6 +34,15 @@ communication_ux       沟通与交互
 efficiency_cost        效率与成本
 ```
 
+默认通用流程评分使用 12 个维度，额外包含：
+
+```text
+task_completion        任务完成情况
+handoff_correctness    Agent 移交是否正确
+loop_control           是否原地打转
+cache_efficiency       Prompt Cache 命中质量
+```
+
 Judge 不只看最终回答，还会检查：
 
 - 实际 API 消息；
@@ -46,6 +55,9 @@ Judge 不只看最终回答，还会检查：
 
 | 文件 | 用途 |
 |---|---|
+| `general-case.json` | 默认通用总体 case，不要求任务匹配固定场景 |
+| `general-rubric.v1.json` | 通用流程 12 维评分标准 |
+| `general-prompt.md` | 分阶段流程 Judge 提示词 |
 | `cases.v1.json` | 24 个评测场景，八个维度各 3 个 |
 | `rubrics.v1.json` | 评分锚点、权重、硬失败和输出格式 |
 | `judge-prompt.md` | Judge 系统提示词 |
@@ -60,24 +72,20 @@ Judge 不只看最终回答，还会检查：
    .\benchmark\.venv\Scripts\python.exe .\benchmark\judge\judge.py validate
    ```
 
-2. 从 `cases.v1.json` 选择一个场景，按 `setup` 准备代码或直接使用现有工作区。
+2. 正常执行真实任务。等待回复完成后，点击回复下方的 **“导出评测”**。
 
-3. 在 Visual Studio 聊天窗中发送该场景的 `user_prompt`。
-
-4. 等待回复完成，点击回复下方的 **“导出评测”**。
-
-5. 选择 JSON 保存位置。默认目录：
+3. 选择 JSON 保存位置。默认目录：
 
    ```text
    %LocalAppData%\DeepSeekVS\evaluations\
    ```
 
-6. 配置 Judge 模型和 API Key：
+4. 配置 Judge 模型和 API Key：
 
    ```powershell
    $env:JUDGE_API_KEY = "<your-api-key>"
    $env:JUDGE_BASE_URL = "https://api.deepseek.com"
-   $env:JUDGE_MODEL = "deepseek-v4-pro"
+   $env:JUDGE_MODEL = "deepseek-flash"
    ```
 
    任何 OpenAI Chat Completions 兼容端点都可以：
@@ -87,18 +95,31 @@ Judge 不只看最终回答，还会检查：
    $env:JUDGE_MODEL = "<model-name>"
    ```
 
-7. 运行 Python Judge：
+5. 先单独检查流程拆分：
+
+   ```powershell
+   .\benchmark\.venv\Scripts\python.exe .\benchmark\judge\judge.py analyze `
+     --export "$env:LOCALAPPDATA\DeepSeekVS\evaluations\<export>.json"
+   ```
+
+   会输出同目录下的 `<export>.flow.json`，包含：
+
+   ```text
+   context / planning_handoff / execution / verification / completion / cost_cache
+   tools / handoffs / permissions / loops / edits / cost / cache
+   ```
+
+6. 运行默认通用 Judge：
 
    ```powershell
    .\benchmark\.venv\Scripts\python.exe .\benchmark\judge\judge.py score `
-     --export "$env:LOCALAPPDATA\DeepSeekVS\evaluations\<export>.json" `
-     --case-id cg-001
+     --export "$env:LOCALAPPDATA\DeepSeekVS\evaluations\<export>.json"
    ```
 
    默认输出：
 
    ```text
-   与导出文件同目录的 judge-result_{case_id}_{export}.json
+   与导出文件同目录的 judge-result_general-exported-turn_{export}.json
    ```
 
    也可以指定输出位置：
@@ -106,17 +127,48 @@ Judge 不只看最终回答，还会检查：
    ```powershell
    .\benchmark\.venv\Scripts\python.exe .\benchmark\judge\judge.py score `
      --export ".\turn.json" `
-     --case-id cg-001 `
      --output ".\judge-result.json"
    ```
 
-8. 不调用模型、只检查输入和请求大小：
+7. 不调用模型、只检查输入和请求大小：
 
    ```powershell
    .\benchmark\.venv\Scripts\python.exe .\benchmark\judge\judge.py score `
      --export ".\turn.json" `
-     --case-id cg-001 `
      --dry-run
+   ```
+
+8. 如果需要标准 benchmark，可以继续指定固定 case：
+
+   ```powershell
+   .\benchmark\.venv\Scripts\python.exe .\benchmark\judge\judge.py score `
+     --export ".\turn.json" `
+     --case-id cg-001
+   ```
+
+9. 如果真实任务有明确验收点，也可以使用自定义 case：
+
+   ```powershell
+   .\benchmark\.venv\Scripts\python.exe .\benchmark\judge\judge.py score `
+     --export ".\turn.json" `
+     --case-file ".\benchmark\judge\custom-cases\winui-exp2-improvements.json"
+   ```
+
+   自定义 case 至少包含：
+
+   ```json
+   {
+     "id": "real-task-id",
+     "dimension": "planning_execution",
+     "title": "Task title",
+     "scenario": "Task context",
+     "setup": "Initial workspace state",
+     "user_prompt": "Original user request",
+     "checks": {
+       "must": ["Required outcome"],
+       "must_not": ["Forbidden outcome"]
+     }
+   }
    ```
 
 ## 导出数据结构

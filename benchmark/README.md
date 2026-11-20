@@ -4,6 +4,9 @@
 
 主要文件：
 
+- `judge/general-case.json`：默认通用总体 case。
+- `judge/general-rubric.v1.json`：12 维完整流程 rubric。
+- `judge/general-prompt.md`：分阶段流程 Judge 提示词。
 - `judge/cases.v1.json`：24 个按八个质量维度组织的评测场景。
 - `judge/rubrics.v1.json`：1-5 分 rubric、硬失败和输出契约。
 - `judge/judge.py`：Python 校验与 LLM Judge 运行器。
@@ -18,3 +21,10 @@
 ```
 
 完整规程见 [judge/README.md](judge/README.md)。
+
+默认评测命令：
+
+```powershell
+.\benchmark\.venv\Scripts\python.exe .\benchmark\judge\judge.py score `
+  --export "$env:LOCALAPPDATA\DeepSeekVS\evaluations\<export>.json"
+```

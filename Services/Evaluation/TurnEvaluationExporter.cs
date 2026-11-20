@@ -30,6 +30,7 @@ namespace DeepSeek_v4_for_VisualStudio.Services.Evaluation
             public int AssistantMessageIndex { get; set; } = -1;
             public IReadOnlyList<ChatApiMessage> ApiHistory { get; set; } = Array.Empty<ChatApiMessage>();
             public AgentTurnMetrics? LatestExecutionMetrics { get; set; }
+            public string? SessionTelemetryJson { get; set; }
             public string? Model { get; set; }
             public string? SolutionPath { get; set; }
             public string? ContextDebugJson { get; set; }
@@ -112,6 +113,7 @@ namespace DeepSeek_v4_for_VisualStudio.Services.Evaluation
                     ContextDebug = ParseJson(request.ContextDebugJson),
                 },
                 Metrics = ToMetrics(request.LatestExecutionMetrics),
+                SessionTelemetry = ParseJson(request.SessionTelemetryJson),
             };
 
             return document;

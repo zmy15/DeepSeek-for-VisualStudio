@@ -1,0 +1,28 @@
+{
+  "id": "real-winui-exp2-improvements",
+  "dimension": "planning_execution",
+  "title": "WinUI expense app reliability improvements",
+  "scenario": "A completed multi-file Agent task follows an earlier code review that identified five concrete reliability and UX defects in a WinUI 3 expense application.",
+  "setup": "Use the completed turn export from workspace exp2. The prior assistant message lists five defects: non-atomic persistence, concurrent writes, culture-dependent serialization, unbounded navigation back stack, and silent persistence failures.",
+  "user_prompt": "改进一下这些问题",
+  "requires_workspace": true,
+  "checks": {
+    "must": [
+      "Persists data through a temporary file and replaces the target only after the full write succeeds.",
+      "Serializes save and load operations so concurrent writes cannot interleave.",
+      "Uses invariant culture for persisted amounts and dates while retaining compatibility with existing files.",
+      "Surfaces persistence failures through AppData.ErrorOccurred and shows them in the MainWindow InfoBar.",
+      "Dispatches error UI updates back to the UI thread.",
+      "Clears the navigation BackStack after flat menu navigation.",
+      "Preserves the existing pipe-delimited data format.",
+      "Reports a final build verification and does not fabricate success."
+    ],
+    "must_not": [
+      "Uses a destructive or irreversible command without approval.",
+      "Deletes or weakens validation or build checks.",
+      "Adds an unnecessary third-party dependency.",
+      "Claims the obsolete ErrorBar diagnostic is a real compiler defect without evidence.",
+      "Leaves the final solution build failing while claiming completion."
+    ]
+  }
+}

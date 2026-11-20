@@ -487,6 +487,7 @@ namespace DeepSeek_v4_for_VisualStudio.View
         private Services.IdeContext.IdeContextTracker? _ideContextTracker;
         private readonly Services.IdeContext.GitContextProvider _gitContextProvider = new();
         private Models.AgentTurnMetrics? _latestTurnMetrics;
+        private string? _latestCompletedTelemetryJson;
 
         /// <summary>
         /// 构建会话开始时的上下文构成快照（P2 Context Debugger 数据面）。
@@ -769,6 +770,7 @@ namespace DeepSeek_v4_for_VisualStudio.View
             // ── P0 Telemetry：会话指标采集器（设置开关控制，创建失败静默降级）──
             Services.Telemetry.AgentMetricsCollector? telemetry = null;
             _latestTurnMetrics = null;
+            _latestCompletedTelemetryJson = null;
             bool collectMetrics = _options?.EnableTelemetryExport != false
                 || _options?.ShowContextStats == true;
             if (collectMetrics)
@@ -1401,7 +1403,17 @@ namespace DeepSeek_v4_for_VisualStudio.View
                 StopConversationElapsedTimer();
                 _activePlan = null;
                 if (telemetry != null)
+                {
+                    try
+                    {
+                        _latestCompletedTelemetryJson = telemetry.BuildJson();
+                    }
+                    catch (Exception tex)
+                    {
+                        Logger.Warn($"[Telemetry] 完整会话快照导出失败: {tex.Message}");
+                    }
                     telemetry.TurnMetricsUpdated -= OnTelemetryTurnMetricsUpdated;
+                }
 
                 // ── P1-A：会话结束后清除 IDE 快照，避免过期上下文泄漏到非 Agent 的聊天轮次 ──
                 try { _contextManager.SetIdeContext(null); }

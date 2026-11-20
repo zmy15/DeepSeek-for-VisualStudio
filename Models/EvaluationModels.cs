@@ -32,6 +32,9 @@ namespace DeepSeek_v4_for_VisualStudio.Models
         [JsonPropertyName("metrics")]
         public EvaluationMetrics? Metrics { get; set; }
 
+        [JsonPropertyName("session_telemetry")]
+        public JsonElement? SessionTelemetry { get; set; }
+
         [JsonPropertyName("judge_contract")]
         public EvaluationJudgeContract JudgeContract { get; set; } = new();
     }

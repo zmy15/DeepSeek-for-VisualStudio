@@ -83,6 +83,9 @@ namespace DeepSeek_v4_for_VisualStudio.Tests.Unit.Services.Evaluation
                 AssistantMessageIndex = 1,
                 ApiHistory = apiHistory,
                 LatestExecutionMetrics = metrics,
+                SessionTelemetryJson =
+                    "{\"turn_count\":2,\"tool_call_count\":3,\"input_tokens\":250," +
+                    "\"output_tokens\":50,\"cache_hit_rate\":0.8}",
                 Model = "test-model",
                 SolutionPath = @"C:\work\Sample.sln",
                 ContextDebugJson = "{\"tokens\":{\"estimated\":100}}",
@@ -99,6 +102,8 @@ namespace DeepSeek_v4_for_VisualStudio.Tests.Unit.Services.Evaluation
             document.Conversation.ContextDebug.Should().NotBeNull();
             document.Metrics.Should().NotBeNull();
             document.Metrics!.TtftMs.Should().Be(300);
+            document.SessionTelemetry.Should().NotBeNull();
+            document.SessionTelemetry!.Value.GetProperty("turn_count").GetInt32().Should().Be(2);
             document.Source.WorkspaceName.Should().Be("Sample");
         }
 
