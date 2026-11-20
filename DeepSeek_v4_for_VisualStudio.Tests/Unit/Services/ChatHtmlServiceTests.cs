@@ -226,12 +226,30 @@ public class ChatHtmlServiceTests
             Content = "最终答复",
         };
 
-        string result = ChatHtmlService.BuildAssistantMessageHtml(message, 1);
+        string result = ChatHtmlService.BuildAssistantMessageHtml(
+            message,
+            1,
+            showEvaluationExportButton: true);
 
         result.Should().Contain("read_file");
         result.Should().Contain("最终答复");
         result.Should().Contain("export-eval-btn-1");
         result.Should().Contain("window.__exportEvaluation(1)");
+    }
+
+    [Fact]
+    public void BuildAssistantMessageHtml_EvaluationExport_DefaultsToHidden()
+    {
+        var message = new ChatMessage
+        {
+            Role = "assistant",
+            Content = "最终答复",
+        };
+
+        string result = ChatHtmlService.BuildAssistantMessageHtml(message, 1);
+
+        result.Should().NotContain("export-eval-btn-1");
+        result.Should().NotContain("window.__exportEvaluation(1)");
     }
 
     [Fact]
@@ -242,12 +260,14 @@ public class ChatHtmlServiceTests
             "最终答复",
             string.Empty,
             extraFooterHtml: null,
-            timelineContent: "**工具调用**：read_file");
+            timelineContent: "**工具调用**：read_file",
+            showEvaluationExportButton: true);
 
         json.Should().Contain("read_file");
         json.Should().Contain("最终答复");
         json.Should().Contain("\"exportLabel\"");
         json.Should().Contain("\"exportTitle\"");
+        json.Should().Contain("\"exportEnabled\":true");
     }
 
     [Fact]

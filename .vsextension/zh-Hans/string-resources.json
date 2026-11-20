@@ -7,6 +7,8 @@
   "DeepSeek.Chat.settings.apiBaseUrl.displayName": "API 端点 (Base URL)",
   "DeepSeek.Chat.settings.apiDebugDump.description": "仅供开发者使用。开启后把每次 API 调用的完整请求体与完整响应流写入 %LocalAppData%\\DeepSeekVS\\api-dump\\，一次调用对应一对请求 / 响应文件，用于离线分析缓存命中、工具调用与消息清洗结果。转储内容包含完整 prompt 与代码，单次可达数 MB，非排查问题请保持关闭。超过 7 天的转储会自动清理。",
   "DeepSeek.Chat.settings.apiDebugDump.displayName": "开发者：转储完整 API 报文",
+  "DeepSeek.Chat.settings.enableEvaluationExport.description": "仅供开发者使用。开启后，已完成的 Agent 回复下方会显示“导出评测”，可导出包含 prompt、源码、工具参数与结果、移交和遥测的完整 turn JSON。默认关闭。",
+  "DeepSeek.Chat.settings.enableEvaluationExport.displayName": "开发者：导出测评结果",
   "DeepSeek.Chat.settings.apiKey.displayName": "DeepSeek API 密钥",
   "DeepSeek.Chat.settings.customApiKey.displayName": "API 密钥 (自定义端点)",
   "DeepSeek.Chat.settings.customModelPicker.displayName": "从端点添加模型",

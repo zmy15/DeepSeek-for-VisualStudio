@@ -1054,7 +1054,7 @@ window._showCopyFeedback=function(msgIndex){
                             else{var mb=document.getElementById('msg-body-'+msg.i);
                                 if(mb)mb.parentNode.insertBefore(copyBtn,mb.nextSibling);}
                         }
-                        if(msgDiv2&&!document.getElementById('export-eval-btn-'+msg.i)){
+                        if(msg.exportEnabled&&msgDiv2&&!document.getElementById('export-eval-btn-'+msg.i)){
                             var exportBtn=document.createElement('button');
                             exportBtn.id='export-eval-btn-'+msg.i;
                             exportBtn.className='msg-action-btn export-eval-btn';

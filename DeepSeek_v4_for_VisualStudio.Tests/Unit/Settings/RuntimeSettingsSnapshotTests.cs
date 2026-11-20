@@ -139,6 +139,25 @@ public class RuntimeSettingsSnapshotTests
         changes.LayoutChanged.Should().BeFalse();
     }
 
+    [Fact]
+    public void EvaluationExportChange_RefreshesOnlyChatRendering()
+    {
+        var previous = CreateSnapshot();
+        var current = previous with { EnableEvaluationExport = true };
+
+        var changes = RuntimeSettingsChangeSet.Between(previous, current);
+
+        changes.DeveloperChanged.Should().BeTrue();
+        changes.HasChanges.Should().BeTrue();
+        changes.EndpointChanged.Should().BeFalse();
+        changes.ModelControlsChanged.Should().BeFalse();
+        changes.ThinkingChanged.Should().BeFalse();
+        changes.ApprovalChanged.Should().BeFalse();
+        changes.OcrChanged.Should().BeFalse();
+        changes.WebSearchChanged.Should().BeFalse();
+        changes.LayoutChanged.Should().BeFalse();
+    }
+
     private static RuntimeSettingsSnapshot CreateSnapshot()
         => new(
             ApiKey: "official-key",

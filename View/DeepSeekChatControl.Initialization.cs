@@ -298,7 +298,8 @@ namespace DeepSeek_v4_for_VisualStudio.View
                     $"endpoint={changes.EndpointChanged}, modelUi={changes.ModelControlsChanged}, " +
                     $"context={changes.ContextChanged}, thinking={changes.ThinkingChanged}, approval={changes.ApprovalChanged}, " +
                     $"autoSkillRouting={changes.AutoSkillRoutingChanged}, ocr={changes.OcrChanged}, " +
-                    $"webSearch={changes.WebSearchChanged}, layout={changes.LayoutChanged}");
+                    $"webSearch={changes.WebSearchChanged}, layout={changes.LayoutChanged}, " +
+                    $"developer={changes.DeveloperChanged}");
 
                 ExecuteWithoutCoreControlEvents(() => ApplyRuntimeSettingsChanges(changes));
                 _lastAppliedSettings = current;
@@ -348,6 +349,9 @@ namespace DeepSeek_v4_for_VisualStudio.View
                 ApplyBottomAreaScale();
                 ApplyPersistedWebView2Zoom();
             }
+
+            if (changes.DeveloperChanged)
+                RebuildMessagesHtml();
 
             if (changes.OcrChanged)
             {

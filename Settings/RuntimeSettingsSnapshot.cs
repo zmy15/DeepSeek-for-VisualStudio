@@ -31,6 +31,7 @@ namespace DeepSeek_v4_for_VisualStudio.Settings
         int InputBoxHeight,
         int BottomAreaScalePercent,
         int WebView2ZoomPercent,
+        bool EnableEvaluationExport = false,
         string CustomEndpointsData = "",
         string ActiveCustomEndpointId = "",
         string OfficialOcrPurpose = "")
@@ -66,6 +67,7 @@ namespace DeepSeek_v4_for_VisualStudio.Settings
                 options.InputBoxHeight,
                 options.BottomAreaScalePercent,
                 options.WebView2ZoomPercent,
+                options.EnableEvaluationExport,
                 options.CustomEndpointsData ?? string.Empty,
                 options.ActiveCustomEndpointId ?? string.Empty,
                 options.OfficialOcrPurpose ?? string.Empty);
@@ -85,7 +87,8 @@ namespace DeepSeek_v4_for_VisualStudio.Settings
         bool AutoSkillRoutingChanged,
         bool OcrChanged,
         bool WebSearchChanged,
-        bool LayoutChanged)
+        bool LayoutChanged,
+        bool DeveloperChanged)
     {
         public bool HasChanges =>
             EndpointChanged ||
@@ -97,7 +100,8 @@ namespace DeepSeek_v4_for_VisualStudio.Settings
             AutoSkillRoutingChanged ||
             OcrChanged ||
             WebSearchChanged ||
-            LayoutChanged;
+            LayoutChanged ||
+            DeveloperChanged;
 
         public static RuntimeSettingsChangeSet All { get; } = new(
             EndpointChanged: true,
@@ -109,7 +113,8 @@ namespace DeepSeek_v4_for_VisualStudio.Settings
             AutoSkillRoutingChanged: true,
             OcrChanged: true,
             WebSearchChanged: true,
-            LayoutChanged: true);
+            LayoutChanged: true,
+            DeveloperChanged: true);
 
         public static RuntimeSettingsChangeSet Between(
             RuntimeSettingsSnapshot previous,
@@ -156,7 +161,9 @@ namespace DeepSeek_v4_for_VisualStudio.Settings
                 LayoutChanged:
                     previous.InputBoxHeight != current.InputBoxHeight ||
                     previous.BottomAreaScalePercent != current.BottomAreaScalePercent ||
-                    previous.WebView2ZoomPercent != current.WebView2ZoomPercent);
+                    previous.WebView2ZoomPercent != current.WebView2ZoomPercent,
+                DeveloperChanged:
+                    previous.EnableEvaluationExport != current.EnableEvaluationExport);
         }
 
         private static bool Changed(string left, string right)

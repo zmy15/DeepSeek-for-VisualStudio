@@ -2275,7 +2275,8 @@ namespace DeepSeek_v4_for_VisualStudio.View
                 messageIndex: userIndex));
             _messagesHtml.Append(ChatHtmlService.BuildAssistantMessageHtml(
                 assistantMessage,
-                assistantIndex));
+                assistantIndex,
+                showEvaluationExportButton: IsEvaluationExportEnabled()));
             RefreshAppendQueuePanel();
             UpdateBrowser();
         }

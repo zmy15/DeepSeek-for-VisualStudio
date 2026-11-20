@@ -48,6 +48,7 @@ namespace DeepSeek_v4_for_VisualStudio.Settings
             (CategoryPrefix + "deepseekSearchProvider", p => p.SearchProvider, (p, v) => p.SearchProvider = (string?)v ?? DeepSeekOptionsPage.DefaultSearchProvider),
             (CategoryPrefix + "deepseekWebFetchMode", p => p.WebFetchMode, (p, v) => p.WebFetchMode = (string?)v ?? DeepSeekOptionsPage.DefaultWebFetchMode),
             (CategoryPrefix + "deepseekShowDiffMarkers", p => p.ShowDiffMarkersInEditor, (p, v) => p.ShowDiffMarkersInEditor = (bool)v!),
+            (CategoryPrefix + "deepseekEvaluationExport", p => p.EnableEvaluationExport, (p, v) => p.EnableEvaluationExport = (bool)v!),
             (CategoryPrefix + "deepseekApiDebugDump", p => p.EnableApiDebugDump, (p, v) => p.EnableApiDebugDump = (bool)v!),
             (CategoryPrefix + "deepseekOcrEngine",
                 p => p.UseDeepSeekOfficialOcr ? "Windows Built-in" : p.OcrEngine,

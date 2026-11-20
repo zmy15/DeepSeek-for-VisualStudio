@@ -16,10 +16,19 @@ namespace DeepSeek_v4_for_VisualStudio.View
     /// </summary>
     public partial class DeepSeekChatControl
     {
+        private bool IsEvaluationExportEnabled()
+            => _options?.EnableEvaluationExport == true;
+
         private void ExportTurnEvaluation(int assistantMessageIndex)
         {
             try
             {
+                if (!IsEvaluationExportEnabled())
+                {
+                    StatusLabel.Text = LocalizationService.Instance["evaluation.exportDisabled"];
+                    return;
+                }
+
                 ChatSession? session;
                 ConversationTree? tree;
                 List<ChatMessage> visibleMessages;

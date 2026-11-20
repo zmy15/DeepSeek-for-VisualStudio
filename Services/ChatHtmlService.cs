@@ -166,7 +166,9 @@ namespace DeepSeek_v4_for_VisualStudio.Services
         /// 构建初始完整 HTML 页面（用于首次 NavigateToString）。
         /// 包含所有消息 + 内嵌 JS 基础设施（增量追加、流式更新、自动滚动等）。
         /// </summary>
-        public static string BuildInitialPage(IReadOnlyList<ChatMessage> messages)
+        public static string BuildInitialPage(
+            IReadOnlyList<ChatMessage> messages,
+            bool showEvaluationExportButton = false)
         {
             var branchNavByAssistantIndex = BuildBranchNavByAssistantIndex(messages);
             var sb = new StringBuilder();
@@ -197,7 +199,12 @@ namespace DeepSeek_v4_for_VisualStudio.Services
                     string branchNavHtml = branchNavByAssistantIndex.TryGetValue(i, out var nav)
                         ? nav
                         : BuildBranchNavHtml(msg, i);
-                    AppendAssistantMessageHtml(sb, msg, i, branchNavHtml);
+                    AppendAssistantMessageHtml(
+                        sb,
+                        msg,
+                        i,
+                        branchNavHtml,
+                        showEvaluationExportButton);
                 }
             }
 
@@ -282,10 +289,17 @@ namespace DeepSeek_v4_for_VisualStudio.Services
         /// <summary>
         /// 构建单条 AI 消息的 HTML 片段（用于增量追加）。
         /// </summary>
-        public static string BuildAssistantMessageHtml(ChatMessage msg, int index)
+        public static string BuildAssistantMessageHtml(
+            ChatMessage msg,
+            int index,
+            bool showEvaluationExportButton = false)
         {
             var sb = new StringBuilder();
-            AppendAssistantMessageHtml(sb, msg, index);
+            AppendAssistantMessageHtml(
+                sb,
+                msg,
+                index,
+                showEvaluationExportButton: showEvaluationExportButton);
             return sb.ToString();
         }
 
@@ -351,7 +365,8 @@ namespace DeepSeek_v4_for_VisualStudio.Services
             string reasoningContent, string? extraFooterHtml = null,
             string? timelineContent = null,
             string? turnId = null, bool isProcessMessage = false,
-            int toolCallCount = 0)
+            int toolCallCount = 0,
+            bool showEvaluationExportButton = false)
         {
             string displayContent = BuildAssistantDisplayContent(timelineContent, fullContent);
 
@@ -421,6 +436,8 @@ namespace DeepSeek_v4_for_VisualStudio.Services
             AppendJsonString(sb, L["chat.html.exportEvaluationButton"]);
             sb.Append(",\"exportTitle\":");
             AppendJsonString(sb, L["chat.html.exportEvaluationButtonTitle"]);
+            sb.Append(",\"exportEnabled\":");
+            sb.Append(showEvaluationExportButton ? "true" : "false");
             sb.Append('}');
             return sb.ToString();
         }
@@ -1037,7 +1054,11 @@ namespace DeepSeek_v4_for_VisualStudio.Services
         }
 
         private static void AppendAssistantMessageHtml(
-            StringBuilder sb, ChatMessage msg, int idx, string branchNavHtml = "")
+            StringBuilder sb,
+            ChatMessage msg,
+            int idx,
+            string branchNavHtml = "",
+            bool showEvaluationExportButton = false)
         {
             // ── 过程内容（Agent 时间线）与最终总结分开渲染：
             //    时间线包进可折叠块，最终总结留在折叠块之外，实现「归档过程、只留结论」──
@@ -1097,7 +1118,7 @@ namespace DeepSeek_v4_for_VisualStudio.Services
                 ? $"<button id='copy-btn-{idx}' class='msg-action-btn copy-msg-btn' onclick='window.__copyMessage({idx})' title='{L["chat.html.copyButtonTitle"]}' data-copy-label='{EscapeHtml(L["chat.html.copyButton"])}' data-copied-label='{EscapeHtml(L["chat.html.copySuccessButton"])}'>{EscapeHtml(L["chat.html.copyButton"])}</button>"
                 : "";
 
-            string exportBtnHtml = !isStreaming
+            string exportBtnHtml = showEvaluationExportButton && !isStreaming
                 ? $"<button id='export-eval-btn-{idx}' class='msg-action-btn export-eval-btn' onclick='window.__exportEvaluation({idx})' title='{EscapeHtml(L["chat.html.exportEvaluationButtonTitle"])}'>{EscapeHtml(L["chat.html.exportEvaluationButton"])}</button>"
                 : "";
 
