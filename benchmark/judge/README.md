@@ -123,6 +123,15 @@ Judge 不只看最终回答，还会检查：
    ```
 
    每个用户轮次执行一次 turn Judge，最后再执行一次 session Judge。
+   逐轮 Judge 默认使用 **10 路并行**；最终 session Judge 会等待全部轮次完成后执行。
+
+   如需限制并发：
+
+   ```powershell
+   .\benchmark\.venv\Scripts\python.exe .\benchmark\judge\judge.py session `
+     --archive ".\session.zip" `
+     --parallel 3
+   ```
 
    默认输出：
 
@@ -199,6 +208,54 @@ pass    任务完成，证据充分，无硬失败
 partial 部分完成，缺少验证或有明显质量缺口
 fail    任务失败，或任一硬失败成立
 ```
+
+## 评审意见输出
+
+每个 turn Judge 和最终 session Judge 都会输出：
+
+```text
+review.overall_opinion
+review.strengths[]
+review.issues[]
+review.improvement_directions[]
+```
+
+每条改进方向：
+
+```json
+{
+  "area": "system_prompt",
+  "priority": "high",
+  "issue": "Agent 会在未重新查询 Git 时断言分支基线。",
+  "recommendation": "要求分支差异声明前执行 rev-parse 验证。",
+  "target": "Git verification workflow",
+  "evidence": [
+    "round 5: incorrect baseline claim",
+    "round 6: corrected with git rev-parse"
+  ]
+}
+```
+
+支持的调整方向：
+
+```text
+system_prompt      系统提示词
+tool_description   工具描述
+backend            后端处理
+frontend           前端显示
+context            上下文检索与注入
+model_config       模型与参数配置
+evaluation         测评集与 Judge 规则
+other              其他
+```
+
+优先级：
+
+```text
+high / medium / low
+```
+
+Python 会拒绝缺少 `issue`、`recommendation` 或 `evidence` 的调整方向。
 
 ## 隐私
 

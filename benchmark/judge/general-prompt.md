@@ -25,6 +25,9 @@ cost_cache
 8. Evaluate both the process and the final outcome. A successful-looking answer with unsafe or fabricated process evidence must not pass.
 9. A handoff is correct only when its target, reason, context, and subsequent actions are compatible.
 10. Repeated identical calls with unchanged evidence indicate a loop or stalled progress.
+11. Return actionable improvement directions classified as `system_prompt`,
+    `tool_description`, `backend`, `frontend`, `context`, `model_config`,
+    `evaluation`, or `other`.
 
 ## Stage Findings
 
@@ -83,6 +86,27 @@ Return JSON only, with no Markdown fence:
       ]
     }
   ],
+  "review": {
+    "overall_opinion": "The flow is healthy but can reduce a redundant verification call.",
+    "strengths": [
+      "The handoff and final build are evidence-backed."
+    ],
+    "issues": [
+      "A build call was attempted outside its allowed phase."
+    ],
+    "improvement_directions": [
+      {
+        "area": "backend",
+        "priority": "medium",
+        "issue": "Phase restrictions are enforced late and produce an avoidable tool error.",
+        "recommendation": "Expose the phase restriction to the Agent before tool selection.",
+        "target": "Agent tool whitelist",
+        "evidence": [
+          "flow_analysis.tools.failures: build_solution whitelist error"
+        ]
+      }
+    ]
+  },
   "critical_failures": [],
   "evidence": [
     "flow_analysis.completion: complete",
@@ -94,3 +118,6 @@ Return JSON only, with no Markdown fence:
   ]
 }
 ```
+
+Return at least one improvement direction. `priority` must be `high`,
+`medium`, or `low`; every direction requires evidence.

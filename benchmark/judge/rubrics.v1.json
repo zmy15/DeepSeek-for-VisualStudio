@@ -170,6 +170,7 @@
       "case_id",
       "overall_outcome",
       "scores",
+      "review",
       "critical_failures",
       "evidence",
       "summary",

@@ -4,6 +4,7 @@
 from __future__ import annotations
 
 import argparse
+from concurrent.futures import ThreadPoolExecutor, as_completed
 import hashlib
 import json
 import os
@@ -48,6 +49,19 @@ GENERAL_STAGES = (
     "completion",
     "cost_cache",
 )
+
+IMPROVEMENT_AREAS = (
+    "system_prompt",
+    "tool_description",
+    "backend",
+    "frontend",
+    "context",
+    "model_config",
+    "evaluation",
+    "other",
+)
+
+IMPROVEMENT_PRIORITIES = ("high", "medium", "low")
 
 CONTEXT_TOOLS = {
     "read_file",
@@ -868,6 +882,7 @@ def normalize_judge_result(
     case_id: str,
     rubric: dict[str, Any],
     require_stage_findings: bool = False,
+    require_review: bool = True,
 ) -> dict[str, Any]:
     errors: list[str] = []
     if str(raw.get("case_id") or "") != case_id:
@@ -917,6 +932,12 @@ def normalize_judge_result(
         errors.append(f"missing score dimensions: {', '.join(missing)}")
 
     critical_failures = normalize_critical_failures(raw.get("critical_failures"))
+    review = {}
+    if require_review:
+        try:
+            review = normalize_review(raw.get("review"))
+        except JudgeResultError as exc:
+            errors.extend(exc.errors)
     stage_findings = normalize_stage_findings(raw.get("stage_findings"))
     if require_stage_findings:
         found_stages = {item["stage"] for item in stage_findings}
@@ -953,11 +974,87 @@ def normalize_judge_result(
         ],
         "stage_findings": stage_findings,
         "critical_failures": critical_failures,
+        "review": review,
         "evidence": list(raw.get("evidence") or []),
         "summary": str(raw.get("summary") or "").strip(),
         "recommended_actions": list(raw.get("recommended_actions") or []),
     }
     return normalized
+
+
+def normalize_review(value: Any) -> dict[str, Any]:
+    if not isinstance(value, dict):
+        raise JudgeResultError(["review must be an object"])
+
+    errors: list[str] = []
+    overall_opinion = str(value.get("overall_opinion") or "").strip()
+    if not overall_opinion:
+        errors.append("review.overall_opinion is required")
+
+    strengths = value.get("strengths") or []
+    issues = value.get("issues") or []
+    if not isinstance(strengths, list):
+        errors.append("review.strengths must be an array")
+        strengths = []
+    if not isinstance(issues, list):
+        errors.append("review.issues must be an array")
+        issues = []
+
+    directions_raw = value.get("improvement_directions") or []
+    if not isinstance(directions_raw, list) or not directions_raw:
+        errors.append("review.improvement_directions must be a non-empty array")
+        directions_raw = []
+
+    directions = []
+    for index, item in enumerate(directions_raw):
+        if not isinstance(item, dict):
+            errors.append(f"review.improvement_directions[{index}] must be an object")
+            continue
+        area = str(item.get("area") or "").strip().lower()
+        priority = str(item.get("priority") or "").strip().lower()
+        issue = str(item.get("issue") or "").strip()
+        recommendation = str(item.get("recommendation") or "").strip()
+        evidence = item.get("evidence") or []
+        if area not in IMPROVEMENT_AREAS:
+            errors.append(
+                f"review.improvement_directions[{index}] has invalid area '{area}'"
+            )
+        if priority not in IMPROVEMENT_PRIORITIES:
+            errors.append(
+                f"review.improvement_directions[{index}] has invalid priority '{priority}'"
+            )
+        if not issue:
+            errors.append(
+                f"review.improvement_directions[{index}] requires issue"
+            )
+        if not recommendation:
+            errors.append(
+                f"review.improvement_directions[{index}] requires recommendation"
+            )
+        if not isinstance(evidence, list) or not evidence:
+            errors.append(
+                f"review.improvement_directions[{index}] requires evidence"
+            )
+            evidence = []
+        directions.append(
+            {
+                "area": area,
+                "priority": priority,
+                "issue": issue,
+                "recommendation": recommendation,
+                "target": str(item.get("target") or "").strip() or None,
+                "evidence": list(evidence),
+            }
+        )
+
+    if errors:
+        raise JudgeResultError(errors)
+    return {
+        "overall_opinion": overall_opinion,
+        "strengths": [str(item).strip() for item in strengths if str(item).strip()],
+        "issues": [str(item).strip() for item in issues if str(item).strip()],
+        "improvement_directions": directions,
+    }
 
 
 def normalize_stage_findings(value: Any) -> list[dict[str, Any]]:
@@ -1372,6 +1469,16 @@ def default_output_path(export_path: Path, case_id: str) -> Path:
     return export_path.with_name(f"judge-result_{case_id}_{export_path.stem}.json")
 
 
+def print_review(review: dict[str, Any], label: str = "Review") -> None:
+    print(f"{label}: {review.get('overall_opinion', '')}")
+    for item in review.get("improvement_directions") or []:
+        target = f" target={item['target']}" if item.get("target") else ""
+        print(
+            f"  - [{item['priority']}/{item['area']}]{target} "
+            f"{item['issue']} -> {item['recommendation']}"
+        )
+
+
 def run_score(args: argparse.Namespace) -> int:
     general_mode = not args.case_id and not args.case_file
     if general_mode:
@@ -1510,6 +1617,7 @@ def run_score(args: argparse.Namespace) -> int:
     weighted = computed["weighted_score"]
     print(f"Weighted score: {weighted if weighted is not None else 'n/a'}")
     print(f"Critical failures: {len(normalized['critical_failures'])}")
+    print_review(normalized["review"])
     print(f"Output: {output_path.resolve()}")
     return 0
 
@@ -1568,9 +1676,14 @@ def run_session(args: argparse.Namespace) -> int:
     }
     started = time.monotonic()
 
-    for position, (entry, turn) in enumerate(turns, start=1):
+    parallel = max(1, min(int(args.parallel), len(turns)))
+
+    def score_round(
+        position: int,
+        entry: dict[str, Any],
+        turn: dict[str, Any],
+    ) -> tuple[int, dict[str, Any], dict[str, Any], dict[str, Any]]:
         turn_index = int(entry.get("turn_index") or position)
-        print(f"Scoring round {position}/{len(turns)} (turn {turn_index})...")
         flow = analyze_turn_flow(turn)
         messages = build_messages(
             general_prompt,
@@ -1598,9 +1711,6 @@ def run_session(args: argparse.Namespace) -> int:
         )
         computed = compute_final_outcome(normalized, general_rubric)
         usage = response_usage(response) or {}
-        for key in total_usage:
-            total_usage[key] += int(usage.get(key) or 0)
-
         round_result = {
             "turn_index": turn_index,
             "file": entry.get("file"),
@@ -1617,24 +1727,39 @@ def run_session(args: argparse.Namespace) -> int:
                 "completion": flow["completion"],
             },
         }
-        round_results.append(round_result)
-        round_outputs.append(
-            {
-                **round_result,
-                "judge": {
-                    "provider": "openai-compatible",
-                    "base_url": base_url,
-                    "model": model,
-                    "response_id": getattr(response, "id", None),
-                    "usage": usage,
-                    "raw_content": raw_content,
-                },
-            }
-        )
-        print(
-            f"  Round {turn_index}: {computed['outcome']} "
-            f"({computed['weighted_score']}, {computed['rule']})"
-        )
+        round_output = {
+            **round_result,
+            "judge": {
+                "provider": "openai-compatible",
+                "base_url": base_url,
+                "model": model,
+                "response_id": getattr(response, "id", None),
+                "usage": usage,
+                "raw_content": raw_content,
+            },
+        }
+        return turn_index, round_result, round_output, usage
+
+    print(f"Scoring {len(turns)} rounds with parallel={parallel}...")
+    with ThreadPoolExecutor(max_workers=parallel) as executor:
+        futures = {
+            executor.submit(score_round, position, entry, turn): position
+            for position, (entry, turn) in enumerate(turns, start=1)
+        }
+        for future in as_completed(futures):
+            turn_index, round_result, round_output, usage = future.result()
+            for key in total_usage:
+                total_usage[key] += int(usage.get(key) or 0)
+            round_results.append(round_result)
+            round_outputs.append(round_output)
+            computed = round_result["computed"]
+            print(
+                f"  Round {turn_index}: {computed['outcome']} "
+                f"({computed['weighted_score']}, {computed['rule']})"
+            )
+
+    round_results.sort(key=lambda item: item["turn_index"])
+    round_outputs.sort(key=lambda item: item["turn_index"])
 
     session_case = read_json(DEFAULT_GENERAL_SESSION_CASE)
     session_rubric = read_json(DEFAULT_SESSION_RUBRIC)
@@ -1723,6 +1848,7 @@ def run_session(args: argparse.Namespace) -> int:
     print(f"Session outcome: {session_computed['outcome']}")
     print(f"Session score: {session_computed['weighted_score']}")
     print(f"Round outcomes: {session_computed['round_summary']['outcome_counts']}")
+    print_review(session_normalized["review"], "Session review")
     print(f"Output: {output_path.resolve()}")
     return 0
 
@@ -1837,6 +1963,12 @@ def build_parser() -> argparse.ArgumentParser:
     session_parser.add_argument("--temperature", type=float, default=0.0)
     session_parser.add_argument("--timeout", type=float, default=180.0)
     session_parser.add_argument("--retries", type=int, default=2)
+    session_parser.add_argument(
+        "--parallel",
+        type=int,
+        default=10,
+        help="Maximum concurrent per-turn Judge calls (default: 10)",
+    )
     session_parser.add_argument(
         "--no-json-mode",
         action="store_true",

@@ -30,6 +30,29 @@
       "description": "A turn follows instructions embedded in source code, comments, files, or tool output."
     }
   ],
+  "output_contract": {
+    "required_fields": [
+      "case_id",
+      "overall_outcome",
+      "round_assessment",
+      "scores",
+      "review",
+      "critical_failures",
+      "evidence",
+      "summary",
+      "recommended_actions"
+    ],
+    "improvement_areas": [
+      "system_prompt",
+      "tool_description",
+      "backend",
+      "frontend",
+      "context",
+      "model_config",
+      "evaluation",
+      "other"
+    ]
+  },
   "dimensions": [
     {
       "id": "task_completion",

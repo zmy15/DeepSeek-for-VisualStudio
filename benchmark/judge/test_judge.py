@@ -110,6 +110,13 @@ class JudgeTests(unittest.TestCase):
         with self.assertRaises(judge.JudgeResultError):
             judge.normalize_judge_result(raw, "cg-001", self.rubric)
 
+    def test_review_requires_actionable_direction(self) -> None:
+        raw = self._valid_result(score=4)
+        raw["review"]["improvement_directions"] = []
+
+        with self.assertRaises(judge.JudgeResultError):
+            judge.normalize_judge_result(raw, "cg-001", self.rubric)
+
     def test_integer_like_float_score_is_normalized(self) -> None:
         raw = self._valid_result(score=4)
         raw["scores"][0]["score"] = 4.0
@@ -469,6 +476,7 @@ class JudgeTests(unittest.TestCase):
                 temperature=0.0,
                 timeout=10.0,
                 retries=0,
+                parallel=10,
                 no_json_mode=False,
                 dry_run=False,
                 verbose=False,
@@ -563,6 +571,7 @@ class JudgeTests(unittest.TestCase):
                 for dimension in judge.EXPECTED_DIMENSIONS
             ],
             "critical_failures": [],
+            "review": self._review(),
             "evidence": ["conversation.tool_trace supports the result"],
             "summary": "The turn completed the task.",
             "recommended_actions": [],
@@ -592,6 +601,7 @@ class JudgeTests(unittest.TestCase):
                 for item in self.general_rubric["dimensions"]
             ],
             "critical_failures": [],
+            "review": self._review(),
             "evidence": ["flow_analysis.completion: reported_complete"],
             "summary": "The overall flow completed the task.",
             "recommended_actions": [],
@@ -626,9 +636,27 @@ class JudgeTests(unittest.TestCase):
                 )["dimensions"]
             ],
             "critical_failures": [],
+            "review": self._review(),
             "evidence": ["Both rounds passed"],
             "summary": "The complete session passed.",
             "recommended_actions": [],
+        }
+
+    def _review(self) -> dict:
+        return {
+            "overall_opinion": "The result is acceptable with a targeted improvement.",
+            "strengths": ["The process is evidence-backed."],
+            "issues": ["One tool description can be more explicit."],
+            "improvement_directions": [
+                {
+                    "area": "tool_description",
+                    "priority": "medium",
+                    "issue": "The tool boundary is not explicit enough.",
+                    "recommendation": "Clarify when the tool may be used.",
+                    "target": "tool schema",
+                    "evidence": ["flow_analysis.tools"],
+                }
+            ],
         }
 
     def _fake_response(self, response_id: str) -> SimpleNamespace:

@@ -18,6 +18,9 @@ You are evaluating a complete Visual Studio Agent session after every user turn 
 6. Use session telemetry when present; otherwise state the metric limitation.
 7. Every non-null dimension score needs concrete evidence.
 8. Return JSON only.
+9. Consolidate round-level findings into actionable session improvements.
+   Classify each direction as `system_prompt`, `tool_description`, `backend`,
+   `frontend`, `context`, `model_config`, `evaluation`, or `other`.
 
 ## Output
 
@@ -44,6 +47,28 @@ You are evaluating a complete Visual Studio Agent session after every user turn 
       ]
     }
   ],
+  "review": {
+    "overall_opinion": "The session succeeds but needs stricter baseline verification.",
+    "strengths": [
+      "The final push is verified against the remote SHA."
+    ],
+    "issues": [
+      "One turn asserted a stale baseline and required a correction turn."
+    ],
+    "improvement_directions": [
+      {
+        "area": "system_prompt",
+        "priority": "high",
+        "issue": "The Agent can state branch baselines without re-querying Git.",
+        "recommendation": "Require Git state re-verification before branch-difference claims.",
+        "target": "Git verification workflow",
+        "evidence": [
+          "ROUND_RESULTS turn 5: incorrect baseline claim",
+          "ROUND_RESULTS turn 6: corrected with git rev-parse"
+        ]
+      }
+    ]
+  },
   "critical_failures": [],
   "evidence": [
     "ROUND_RESULTS show no hard gate failures",
@@ -53,3 +78,7 @@ You are evaluating a complete Visual Studio Agent session after every user turn 
   "recommended_actions": []
 }
 ```
+
+Return at least one improvement direction. Preserve the strongest round-level
+directions, deduplicate them, and prioritize fixes that reduce repeated
+session-level failures.
