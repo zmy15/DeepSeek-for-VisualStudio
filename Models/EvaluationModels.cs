@@ -345,4 +345,61 @@ namespace DeepSeek_v4_for_VisualStudio.Models
         [JsonPropertyName("output_schema")]
         public string OutputSchema { get; set; } = "deepseek-vs.judge-output/1";
     }
+
+    /// <summary>
+    /// Manifest stored at the root of a session evaluation ZIP archive.
+    /// </summary>
+    public sealed class SessionEvaluationManifest
+    {
+        [JsonPropertyName("schema")]
+        public string Schema { get; set; } = "deepseek-vs.session-evaluation/1";
+
+        [JsonPropertyName("export_id")]
+        public string ExportId { get; set; } = Guid.NewGuid().ToString("N");
+
+        [JsonPropertyName("exported_at_utc")]
+        public DateTimeOffset ExportedAtUtc { get; set; } = DateTimeOffset.UtcNow;
+
+        [JsonPropertyName("source")]
+        public EvaluationExportSource Source { get; set; } = new();
+
+        [JsonPropertyName("turn_count")]
+        public int TurnCount { get; set; }
+
+        [JsonPropertyName("turns")]
+        public List<SessionEvaluationTurnEntry> Turns { get; set; } = new();
+
+        [JsonPropertyName("session_telemetry")]
+        public JsonElement? SessionTelemetry { get; set; }
+    }
+
+    public sealed class SessionEvaluationTurnEntry
+    {
+        [JsonPropertyName("turn_index")]
+        public int TurnIndex { get; set; }
+
+        [JsonPropertyName("turn_id")]
+        public string? TurnId { get; set; }
+
+        [JsonPropertyName("file")]
+        public string File { get; set; } = string.Empty;
+
+        [JsonPropertyName("user_prompt")]
+        public string UserPrompt { get; set; } = string.Empty;
+
+        [JsonPropertyName("assistant_preview")]
+        public string AssistantPreview { get; set; } = string.Empty;
+
+        [JsonPropertyName("agent_type")]
+        public string? AgentType { get; set; }
+
+        [JsonPropertyName("incomplete")]
+        public bool Incomplete { get; set; }
+
+        [JsonPropertyName("tool_call_count")]
+        public int ToolCallCount { get; set; }
+
+        [JsonPropertyName("changed_file_count")]
+        public int ChangedFileCount { get; set; }
+    }
 }

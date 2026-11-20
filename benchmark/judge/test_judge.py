@@ -7,7 +7,9 @@ import sys
 import tempfile
 import threading
 import unittest
+import zipfile
 from pathlib import Path
+from types import SimpleNamespace
 from unittest.mock import patch
 
 HERE = Path(__file__).resolve().parent
@@ -32,8 +34,7 @@ class JudgeTests(unittest.TestCase):
         self.assertEqual(judge.validate_case_set(self.cases, self.rubric), [])
 
     def test_custom_case_is_valid(self) -> None:
-        path = HERE / "custom-cases" / "winui-exp2-improvements.json"
-        case = json.loads(path.read_text(encoding="utf-8"))
+        case = dict(self.cases["cases"][0])
         self.assertEqual(judge.validate_case(case), [])
         self.assertEqual(judge.validate_rubric(self.rubric), [])
 
@@ -158,6 +159,9 @@ class JudgeTests(unittest.TestCase):
     def test_cli_accepts_custom_case_file(self) -> None:
         with tempfile.TemporaryDirectory() as tmp:
             export_path = Path(tmp) / "export.json"
+            case_path = Path(tmp) / "case.json"
+            custom_case = dict(self.cases["cases"][0])
+            case_path.write_text(json.dumps(custom_case), encoding="utf-8")
             export_path.write_text(
                 json.dumps(
                     {
@@ -177,7 +181,7 @@ class JudgeTests(unittest.TestCase):
                     "--export",
                     str(export_path),
                     "--case-file",
-                    str(HERE / "custom-cases" / "winui-exp2-improvements.json"),
+                    str(case_path),
                     "--dry-run",
                 ],
                 capture_output=True,
@@ -185,7 +189,7 @@ class JudgeTests(unittest.TestCase):
             )
 
             self.assertEqual(result.returncode, 0, result.stderr)
-            self.assertIn(b"real-winui-exp2-improvements", result.stdout)
+            self.assertIn(str(custom_case["id"]).encode("utf-8"), result.stdout)
 
     def test_cli_defaults_to_general_profile(self) -> None:
         with tempfile.TemporaryDirectory() as tmp:
@@ -383,6 +387,106 @@ class JudgeTests(unittest.TestCase):
         self.assertEqual(result["cache"]["hit_rate"], 0.75)
         self.assertTrue(result["cost"]["full_turn_metrics_available"])
 
+    def test_load_session_archive_reads_manifest_and_turns(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            archive_path = Path(tmp) / "session.zip"
+            self._write_session_archive(archive_path)
+
+            manifest, turns = judge.load_session_archive(archive_path)
+
+            self.assertEqual(manifest["turn_count"], 2)
+            self.assertEqual([entry["turn_index"] for entry, _ in turns], [1, 2])
+
+    def test_session_cli_dry_run_validates_all_turns(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            archive_path = Path(tmp) / "session.zip"
+            self._write_session_archive(archive_path)
+            result = subprocess.run(
+                [
+                    sys.executable,
+                    str(HERE / "judge.py"),
+                    "session",
+                    "--archive",
+                    str(archive_path),
+                    "--dry-run",
+                ],
+                capture_output=True,
+                check=False,
+            )
+
+            self.assertEqual(result.returncode, 0, result.stderr)
+            self.assertIn(b"Session dry run OK: 2 rounds", result.stdout)
+
+    def test_session_outcome_preserves_round_critical_failure(self) -> None:
+        session_computed = {
+            "outcome": "pass",
+            "rule": "weighted_pass",
+            "weighted_score": 4.5,
+        }
+        round_results = [
+            {
+                "turn_index": 1,
+                "result": {
+                    "critical_failures": [
+                        {"id": "test_bypass", "detail": "deleted a test"}
+                    ]
+                },
+                "computed": {"outcome": "fail", "weighted_score": 2.0},
+            },
+            {
+                "turn_index": 2,
+                "result": {"critical_failures": []},
+                "computed": {"outcome": "pass", "weighted_score": 5.0},
+            },
+        ]
+
+        computed = judge.compute_session_outcome(session_computed, round_results)
+
+        self.assertEqual(computed["outcome"], "fail")
+        self.assertEqual(computed["rule"], "round_critical_failure")
+        self.assertEqual(computed["round_summary"]["critical_turns"][0]["turn_index"], 1)
+
+    def test_session_orchestration_runs_each_round_and_final_synthesis(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            archive_path = Path(tmp) / "session.zip"
+            output_path = Path(tmp) / "session-result.json"
+            self._write_session_archive(archive_path)
+
+            responses = [
+                (json.dumps(self._general_result(4)), self._fake_response("turn-1")),
+                (json.dumps(self._general_result(5)), self._fake_response("turn-2")),
+                (
+                    json.dumps(self._session_result()),
+                    self._fake_response("session"),
+                ),
+            ]
+            args = SimpleNamespace(
+                archive=str(archive_path),
+                output=str(output_path),
+                model="mock-judge",
+                base_url="http://mock",
+                api_key_env="JUDGE_API_KEY",
+                temperature=0.0,
+                timeout=10.0,
+                retries=0,
+                no_json_mode=False,
+                dry_run=False,
+                verbose=False,
+            )
+
+            with patch.object(judge, "call_judge", side_effect=responses) as call_mock, \
+                    patch.object(judge, "resolve_api_key", return_value="test-key"), \
+                    patch.object(judge, "resolve_base_url", return_value="http://mock"), \
+                    patch.object(judge, "resolve_model", return_value="mock-judge"):
+                self.assertEqual(judge.run_session(args), 0)
+
+            self.assertEqual(call_mock.call_count, 3)
+            output = json.loads(output_path.read_text(encoding="utf-8"))
+            self.assertEqual(output["schema"], "deepseek-vs.session-judge-run/1")
+            self.assertEqual(len(output["rounds"]), 2)
+            self.assertEqual(len(output["session_result"]["round_assessment"]), 2)
+            self.assertIn(output["computed"]["outcome"], {"pass", "partial", "fail"})
+
     def test_call_judge_uses_openai_compatible_chat_endpoint(self) -> None:
         payload = self._valid_result(score=5)
 
@@ -492,6 +596,104 @@ class JudgeTests(unittest.TestCase):
             "summary": "The overall flow completed the task.",
             "recommended_actions": [],
         }
+
+    def _session_result(self) -> dict:
+        return {
+            "schema": "deepseek-vs.session-judge-output/1",
+            "case_id": "general-exported-session",
+            "overall_outcome": "pass",
+            "round_assessment": [
+                {
+                    "turn_index": 1,
+                    "status": "good",
+                    "summary": "First turn established context.",
+                },
+                {
+                    "turn_index": 2,
+                    "status": "good",
+                    "summary": "Second turn completed the task.",
+                },
+            ],
+            "scores": [
+                {
+                    "dimension": item["id"],
+                    "score": 5,
+                    "reason": f"{item['id']} is supported.",
+                    "evidence": [f"round_results supports {item['id']}"],
+                }
+                for item in json.loads(
+                    (HERE / "session-rubric.v1.json").read_text(encoding="utf-8")
+                )["dimensions"]
+            ],
+            "critical_failures": [],
+            "evidence": ["Both rounds passed"],
+            "summary": "The complete session passed.",
+            "recommended_actions": [],
+        }
+
+    def _fake_response(self, response_id: str) -> SimpleNamespace:
+        return SimpleNamespace(
+            id=response_id,
+            choices=[SimpleNamespace(finish_reason="stop")],
+            usage={
+                "prompt_tokens": 100,
+                "completion_tokens": 20,
+                "total_tokens": 120,
+            },
+        )
+
+    def _write_session_archive(self, path: Path) -> None:
+        manifest = {
+            "schema": "deepseek-vs.session-evaluation/1",
+            "export_id": "session-test",
+            "turn_count": 2,
+            "source": {"session_id": "session-1", "model": "test"},
+            "turns": [
+                {
+                    "turn_index": 1,
+                    "turn_id": "turn-1",
+                    "file": "turns/turn-001.json",
+                    "user_prompt": "first",
+                },
+                {
+                    "turn_index": 2,
+                    "turn_id": "turn-2",
+                    "file": "turns/turn-002.json",
+                    "user_prompt": "second",
+                },
+            ],
+            "session_telemetry": {
+                "turn_count": 2,
+                "cache_hit_rate": 0.8,
+                "input_tokens": 1000,
+            },
+        }
+        turns = [
+            {
+                "schema": "deepseek-vs.turn-evaluation/1",
+                "export_id": "turn-1",
+                "turn": {
+                    "turn_index": 1,
+                    "user": {"content": "first"},
+                    "assistant": {"content": "first response"},
+                },
+                "conversation": {"tool_trace": []},
+            },
+            {
+                "schema": "deepseek-vs.turn-evaluation/1",
+                "export_id": "turn-2",
+                "turn": {
+                    "turn_index": 2,
+                    "user": {"content": "second"},
+                    "assistant": {"content": "second response"},
+                },
+                "conversation": {"tool_trace": []},
+            },
+        ]
+        with zipfile.ZipFile(path, "w", zipfile.ZIP_DEFLATED) as archive:
+            archive.writestr("manifest.json", json.dumps(manifest))
+            archive.writestr("turns/turn-001.json", json.dumps(turns[0]))
+            archive.writestr("turns/turn-002.json", json.dumps(turns[1]))
 
 
 if __name__ == "__main__":

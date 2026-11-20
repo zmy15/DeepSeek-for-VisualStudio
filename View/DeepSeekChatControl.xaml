@@ -339,20 +339,36 @@
                                                Foreground="#888888"
                                                FontSize="10" />
                                 </StackPanel>
-                                <Button Grid.Column="1"
-                                        Content="&#xE74D;"
-                                        FontFamily="{StaticResource IconFontFamily}"
-                                        FontSize="11"
-                                        Foreground="#888888"
-                                        Background="Transparent"
-                                        BorderThickness="0"
-                                        Cursor="Hand"
-                                        Padding="4,2"
-                                        ToolTip="删除此对话"
-                                        Loaded="HistoryDeleteButton_Loaded"
-                                        Visibility="{Binding DeleteVisibility}"
-                                        Tag="{Binding Id}"
-                                        Click="DeleteHistoryItem_Click" />
+                                <StackPanel Grid.Column="1"
+                                            Orientation="Horizontal"
+                                            VerticalAlignment="Center">
+                                    <Button Content="&#xE74E;"
+                                            FontFamily="{StaticResource IconFontFamily}"
+                                            FontSize="11"
+                                            Foreground="#D7BA7D"
+                                            Background="Transparent"
+                                            BorderThickness="0"
+                                            Cursor="Hand"
+                                            Padding="4,2"
+                                            ToolTip="导出此会话评测"
+                                            Loaded="HistoryExportButton_Loaded"
+                                            Visibility="{Binding ExportVisibility}"
+                                            Tag="{Binding Id}"
+                                            Click="ExportHistoryItem_Click" />
+                                    <Button Content="&#xE74D;"
+                                            FontFamily="{StaticResource IconFontFamily}"
+                                            FontSize="11"
+                                            Foreground="#888888"
+                                            Background="Transparent"
+                                            BorderThickness="0"
+                                            Cursor="Hand"
+                                            Padding="4,2"
+                                            ToolTip="删除此对话"
+                                            Loaded="HistoryDeleteButton_Loaded"
+                                            Visibility="{Binding DeleteVisibility}"
+                                            Tag="{Binding Id}"
+                                            Click="DeleteHistoryItem_Click" />
+                                </StackPanel>
                             </Grid>
                         </DataTemplate>
                     </ListBox.ItemTemplate>

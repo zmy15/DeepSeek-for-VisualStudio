@@ -1042,8 +1042,7 @@ namespace DeepSeek_v4_for_VisualStudio.View
                 };
                 _messagesHtml.Append(ChatHtmlService.BuildAssistantMessageHtml(
                     tempMsg,
-                    _messages.Count - 1,
-                    showEvaluationExportButton: IsEvaluationExportEnabled()));
+                    _messages.Count - 1));
             }
         }
 
@@ -1486,10 +1485,7 @@ namespace DeepSeek_v4_for_VisualStudio.View
                 }
                 else
                 {
-                    sb.Append(ChatHtmlService.BuildAssistantMessageHtml(
-                        msg,
-                        i,
-                        showEvaluationExportButton: IsEvaluationExportEnabled()));
+                    sb.Append(ChatHtmlService.BuildAssistantMessageHtml(msg, i));
                 }
             }
         }
@@ -1640,8 +1636,7 @@ namespace DeepSeek_v4_for_VisualStudio.View
                     timelineContent,
                     turnId,
                     isProcessMessage,
-                    toolCallCount,
-                    showEvaluationExportButton: IsEvaluationExportEnabled());
+                    toolCallCount);
                 ChatWebView.CoreWebView2.PostWebMessageAsString(json);
             }
             catch (Exception ex)

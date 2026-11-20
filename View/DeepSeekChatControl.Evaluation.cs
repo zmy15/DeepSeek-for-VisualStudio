@@ -7,19 +7,20 @@ using System;
 using System.Collections.Generic;
 using System.IO;
 using System.Linq;
+using System.Text.Json;
 using System.Windows;
 
 namespace DeepSeek_v4_for_VisualStudio.View
 {
     /// <summary>
-    /// Export one visible user/assistant turn as a self-contained LLM-as-a-Judge record.
+    /// Export the complete active session as a ZIP of per-turn Judge records.
     /// </summary>
     public partial class DeepSeekChatControl
     {
         private bool IsEvaluationExportEnabled()
             => _options?.EnableEvaluationExport == true;
 
-        private void ExportTurnEvaluation(int assistantMessageIndex)
+        private void ExportSessionEvaluation(string sessionId)
         {
             try
             {
@@ -29,83 +30,58 @@ namespace DeepSeek_v4_for_VisualStudio.View
                     return;
                 }
 
-                ChatSession? session;
-                ConversationTree? tree;
-                List<ChatMessage> visibleMessages;
-                List<ChatApiMessage> apiHistory;
-                AgentTurnMetrics? metrics;
-                string? sessionTelemetry;
-                string? contextDebug;
-                int lastAssistantIndex;
+                SessionEvaluationExporter.Request? request = null;
 
                 lock (_lock)
                 {
-                    if (assistantMessageIndex < 0 || assistantMessageIndex >= _messages.Count)
-                        return;
-
-                    ChatMessage assistant = _messages[assistantMessageIndex];
-                    if (!string.Equals(assistant.Role, "assistant", StringComparison.OrdinalIgnoreCase)
-                        || assistant.IsStreaming)
+                    if (_activeSession != null
+                        && string.Equals(_activeSession.Id, sessionId, StringComparison.Ordinal))
                     {
-                        StatusLabel.Text = LocalizationService.Instance["evaluation.turnNotReady"];
-                        return;
-                    }
-
-                    session = _activeSession;
-                    tree = _tree;
-                    visibleMessages = new List<ChatMessage>(_messages);
-                    apiHistory = _contextManager.GetFullContext();
-                    lastAssistantIndex = -1;
-                    for (int i = visibleMessages.Count - 1; i >= 0; i--)
-                    {
-                        if (string.Equals(visibleMessages[i].Role, "assistant", StringComparison.OrdinalIgnoreCase))
+                        if (!_messages.Any(message =>
+                                string.Equals(message.Role, "assistant", StringComparison.OrdinalIgnoreCase)
+                                && !message.IsStreaming))
                         {
-                            lastAssistantIndex = i;
-                            break;
+                            StatusLabel.Text = LocalizationService.Instance["evaluation.sessionNotReady"];
+                            return;
                         }
+
+                        request = new SessionEvaluationExporter.Request
+                        {
+                            Session = _activeSession,
+                            Tree = _tree,
+                            VisibleMessages = new List<ChatMessage>(_messages),
+                            ApiHistory = _contextManager.GetFullContext(),
+                            LatestExecutionMetrics = _latestTurnMetrics,
+                            SessionTelemetryJson = _latestCompletedTelemetryJson,
+                            Model = GetEffectiveModel(),
+                            SolutionPath = _solutionPath,
+                            ContextDebugJson = BuildContextDebugJson(),
+                        };
                     }
-                    metrics = assistantMessageIndex == lastAssistantIndex ? _latestTurnMetrics : null;
-                    sessionTelemetry = assistantMessageIndex == lastAssistantIndex
-                        ? _latestCompletedTelemetryJson
-                        : null;
-                    contextDebug = BuildContextDebugJson();
                 }
 
-                if (session == null)
+                if (request == null)
                 {
-                    StatusLabel.Text = LocalizationService.Instance["evaluation.exportFailed"];
-                    return;
-                }
-
-                int turnIndex = 0;
-                for (int i = 0; i <= assistantMessageIndex && i < visibleMessages.Count; i++)
-                {
-                    if (string.Equals(visibleMessages[i].Role, "user", StringComparison.OrdinalIgnoreCase))
-                        turnIndex++;
-                }
-
-                TurnEvaluationExport document = TurnEvaluationExporter.Build(
-                    new TurnEvaluationExporter.Request
+                    ChatSession? storedSession = _sessionsContainer?.Sessions
+                        .FirstOrDefault(item => string.Equals(item.Id, sessionId, StringComparison.Ordinal));
+                    if (storedSession == null)
                     {
-                        Session = session,
-                        Tree = tree,
-                        VisibleMessages = visibleMessages,
-                        AssistantMessageIndex = assistantMessageIndex,
-                        ApiHistory = apiHistory,
-                        LatestExecutionMetrics = metrics,
-                        SessionTelemetryJson = sessionTelemetry,
-                        Model = GetEffectiveModel(),
-                        SolutionPath = _solutionPath,
-                        ContextDebugJson = contextDebug,
-                    });
+                        StatusLabel.Text = LocalizationService.Instance["evaluation.exportFailed"];
+                        return;
+                    }
+                    request = BuildStoredSessionExportRequest(storedSession);
+                }
+
+                SessionEvaluationExporter.BuildResult archive =
+                    SessionEvaluationExporter.Build(request);
 
                 Directory.CreateDirectory(StoragePaths.EvaluationsDirectory);
                 var dialog = new SaveFileDialog
                 {
                     AddExtension = true,
-                    DefaultExt = ".json",
-                    Filter = "JSON (*.json)|*.json|All files (*.*)|*.*",
-                    FileName = TurnEvaluationExporter.BuildDefaultFileName(session, Math.Max(1, turnIndex)),
+                    DefaultExt = ".zip",
+                    Filter = "Judge session ZIP (*.zip)|*.zip|All files (*.*)|*.*",
+                    FileName = SessionEvaluationExporter.BuildDefaultFileName(request.Session),
                     InitialDirectory = StoragePaths.EvaluationsDirectory,
                     Title = LocalizationService.Instance["evaluation.saveDialogTitle"],
                     OverwritePrompt = true,
@@ -114,11 +90,11 @@ namespace DeepSeek_v4_for_VisualStudio.View
                 if (dialog.ShowDialog(Window.GetWindow(this)) != true)
                     return;
 
-                string path = TurnEvaluationExporter.Write(document, dialog.FileName);
+                string path = SessionEvaluationExporter.WriteArchive(archive, dialog.FileName);
                 StatusLabel.Text = string.Format(
                     LocalizationService.Instance["evaluation.exportSucceeded"],
                     path);
-                Logger.Info($"[JudgeExport] Turn exported: {path}");
+                Logger.Info($"[JudgeExport] Session exported: {path} ({archive.Manifest.TurnCount} turns)");
             }
             catch (Exception ex)
             {
@@ -127,6 +103,70 @@ namespace DeepSeek_v4_for_VisualStudio.View
                     ex.Message);
                 Logger.Error($"[JudgeExport] Export failed: {ex.Message}", ex);
             }
+        }
+
+        private SessionEvaluationExporter.Request BuildStoredSessionExportRequest(
+            ChatSession session)
+        {
+            ConversationTree? tree = null;
+            List<ChatMessage> visibleMessages;
+
+            if (!string.IsNullOrWhiteSpace(session.TreeDataJson))
+            {
+                try
+                {
+                    TreePersistenceData? data = JsonSerializer.Deserialize<TreePersistenceData>(
+                        session.TreeDataJson!,
+                        new JsonSerializerOptions { PropertyNameCaseInsensitive = true });
+                    if (data != null)
+                    {
+                        tree = ConversationTree.Deserialize(data);
+                        visibleMessages = tree.GetActiveMessages();
+                    }
+                    else
+                    {
+                        visibleMessages = BuildVisibleMessagesFromApiHistory(session.ApiHistory);
+                    }
+                }
+                catch (Exception ex)
+                {
+                    Logger.Warn($"[JudgeExport] 历史会话树解析失败，回退 ApiHistory: {ex.Message}");
+                    visibleMessages = BuildVisibleMessagesFromApiHistory(session.ApiHistory);
+                }
+            }
+            else
+            {
+                visibleMessages = BuildVisibleMessagesFromApiHistory(session.ApiHistory);
+            }
+
+            return new SessionEvaluationExporter.Request
+            {
+                Session = session,
+                Tree = tree,
+                VisibleMessages = visibleMessages,
+                ApiHistory = session.ApiHistory?.ToList() ?? new List<ChatApiMessage>(),
+                LatestExecutionMetrics = null,
+                SessionTelemetryJson = null,
+                Model = GetEffectiveModel(),
+                SolutionPath = _solutionPath,
+                ContextDebugJson = null,
+            };
+        }
+
+        private static List<ChatMessage> BuildVisibleMessagesFromApiHistory(
+            IEnumerable<ChatApiMessage>? history)
+        {
+            return (history ?? Enumerable.Empty<ChatApiMessage>())
+                .Where(message =>
+                    string.Equals(message.Role, "user", StringComparison.OrdinalIgnoreCase)
+                    || string.Equals(message.Role, "assistant", StringComparison.OrdinalIgnoreCase))
+                .Select(message => new ChatMessage
+                {
+                    Role = message.Role,
+                    Content = message.Content ?? string.Empty,
+                    ReasoningContent = message.ReasoningContent ?? string.Empty,
+                })
+                .ToList();
         }
     }
 }

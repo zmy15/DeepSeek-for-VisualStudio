@@ -7,6 +7,9 @@
 - `judge/general-case.json`：默认通用总体 case。
 - `judge/general-rubric.v1.json`：12 维完整流程 rubric。
 - `judge/general-prompt.md`：分阶段流程 Judge 提示词。
+- `judge/general-session-case.json`：多轮会话综合 case。
+- `judge/session-rubric.v1.json`：会话整体评分标准。
+- `judge/session-prompt.md`：会话综合 Judge 提示词。
 - `judge/cases.v1.json`：24 个按八个质量维度组织的评测场景。
 - `judge/rubrics.v1.json`：1-5 分 rubric、硬失败和输出契约。
 - `judge/judge.py`：Python 校验与 LLM Judge 运行器。
@@ -14,7 +17,7 @@
 - `judge/README.md`：从运行 Agent 到导出 JSON、再到 Judge 评分的完整流程。
 - `test_judge.py`：不调用模型的 Python 单元测试。
 
-聊天界面中的每条已完成助手回复提供 **“导出评测”** 按钮。导出文件默认位于：
+聊天窗口顶部会话工具栏提供 **“导出会话评测”** 图标。导出 ZIP 默认位于：
 
 ```text
 %LocalAppData%\DeepSeekVS\evaluations\
@@ -25,6 +28,6 @@
 默认评测命令：
 
 ```powershell
-.\benchmark\.venv\Scripts\python.exe .\benchmark\judge\judge.py score `
-  --export "$env:LOCALAPPDATA\DeepSeekVS\evaluations\<export>.json"
+.\benchmark\.venv\Scripts\python.exe .\benchmark\judge\judge.py session `
+  --archive "$env:LOCALAPPDATA\DeepSeekVS\evaluations\<session>.zip"
 ```

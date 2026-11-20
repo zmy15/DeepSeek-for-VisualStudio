@@ -351,7 +351,7 @@ namespace DeepSeek_v4_for_VisualStudio.View
             }
 
             if (changes.DeveloperChanged)
-                RebuildMessagesHtml();
+                RefreshHistoryUI();
 
             if (changes.OcrChanged)
             {

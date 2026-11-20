@@ -58,6 +58,9 @@ Judge 不只看最终回答，还会检查：
 | `general-case.json` | 默认通用总体 case，不要求任务匹配固定场景 |
 | `general-rubric.v1.json` | 通用流程 12 维评分标准 |
 | `general-prompt.md` | 分阶段流程 Judge 提示词 |
+| `general-session-case.json` | 多轮会话综合 case |
+| `session-rubric.v1.json` | 会话整体评分标准 |
+| `session-prompt.md` | 会话综合 Judge 提示词 |
 | `cases.v1.json` | 24 个评测场景，八个维度各 3 个 |
 | `rubrics.v1.json` | 评分锚点、权重、硬失败和输出格式 |
 | `judge-prompt.md` | Judge 系统提示词 |
@@ -72,13 +75,16 @@ Judge 不只看最终回答，还会检查：
    .\benchmark\.venv\Scripts\python.exe .\benchmark\judge\judge.py validate
    ```
 
-2. 正常执行真实任务。等待回复完成后，点击回复下方的 **“导出评测”**。
+2. 在
+   `工具 → 选项 → DeepSeek Chat → 开发者调试`
+   中启用 **“开发者：导出会话测评”**。
 
-   该按钮默认隐藏。请先在
-   `工具 → 选项 → DeepSeek Chat → 开发者调试` 中启用
-   **“开发者：导出测评结果”**。
+   该开关默认关闭。
 
-3. 选择 JSON 保存位置。默认目录：
+3. 正常完成整个会话，然后点击顶部会话工具栏中的
+   **“导出会话评测”保存图标**。
+
+   导出的不是单轮 JSON，而是包含整个活跃分支的 ZIP 包。默认目录：
 
    ```text
    %LocalAppData%\DeepSeekVS\evaluations\
@@ -99,42 +105,40 @@ Judge 不只看最终回答，还会检查：
    $env:JUDGE_MODEL = "<model-name>"
    ```
 
-5. 先单独检查流程拆分：
+5. 先检查会话拆分：
 
    ```powershell
-   .\benchmark\.venv\Scripts\python.exe .\benchmark\judge\judge.py analyze `
-     --export "$env:LOCALAPPDATA\DeepSeekVS\evaluations\<export>.json"
+   .\benchmark\.venv\Scripts\python.exe .\benchmark\judge\judge.py session `
+     --archive "$env:LOCALAPPDATA\DeepSeekVS\evaluations\<session>.zip" `
+     --dry-run
    ```
 
-   会输出同目录下的 `<export>.flow.json`，包含：
-
-   ```text
-   context / planning_handoff / execution / verification / completion / cost_cache
-   tools / handoffs / permissions / loops / edits / cost / cache
-   ```
-
-6. 运行默认通用 Judge：
+6. 正式执行逐轮评分和会话综合评分：
 
    ```powershell
-   .\benchmark\.venv\Scripts\python.exe .\benchmark\judge\judge.py score `
-     --export "$env:LOCALAPPDATA\DeepSeekVS\evaluations\<export>.json"
+   .\benchmark\.venv\Scripts\python.exe .\benchmark\judge\judge.py session `
+     --archive "$env:LOCALAPPDATA\DeepSeekVS\evaluations\<session>.zip" `
+     --model deepseek-flash `
+     --verbose
    ```
+
+   每个用户轮次执行一次 turn Judge，最后再执行一次 session Judge。
 
    默认输出：
 
    ```text
-   与导出文件同目录的 judge-result_general-exported-turn_{export}.json
+   与 ZIP 同目录的 <session>.judge.json
    ```
 
    也可以指定输出位置：
 
    ```powershell
-   .\benchmark\.venv\Scripts\python.exe .\benchmark\judge\judge.py score `
-     --export ".\turn.json" `
-     --output ".\judge-result.json"
+   .\benchmark\.venv\Scripts\python.exe .\benchmark\judge\judge.py session `
+     --archive ".\session.zip" `
+     --output ".\session-judge-result.json"
    ```
 
-7. 不调用模型、只检查输入和请求大小：
+7. 如果单独检查一个已解压的 turn，仍可使用单轮模式：
 
    ```powershell
    .\benchmark\.venv\Scripts\python.exe .\benchmark\judge\judge.py score `
@@ -142,70 +146,39 @@ Judge 不只看最终回答，还会检查：
      --dry-run
    ```
 
-8. 如果需要标准 benchmark，可以继续指定固定 case：
-
-   ```powershell
-   .\benchmark\.venv\Scripts\python.exe .\benchmark\judge\judge.py score `
-     --export ".\turn.json" `
-     --case-id cg-001
-   ```
-
-9. 如果真实任务有明确验收点，也可以使用自定义 case：
-
-   ```powershell
-   .\benchmark\.venv\Scripts\python.exe .\benchmark\judge\judge.py score `
-     --export ".\turn.json" `
-     --case-file ".\benchmark\judge\custom-cases\winui-exp2-improvements.json"
-   ```
-
-   自定义 case 至少包含：
-
-   ```json
-   {
-     "id": "real-task-id",
-     "dimension": "planning_execution",
-     "title": "Task title",
-     "scenario": "Task context",
-     "setup": "Initial workspace state",
-     "user_prompt": "Original user request",
-     "checks": {
-       "must": ["Required outcome"],
-       "must_not": ["Forbidden outcome"]
-     }
-   }
-   ```
-
 ## 导出数据结构
 
+会话 ZIP：
+
 ```text
-schema
-export_id
-exported_at_utc
-source
-turn
-conversation
-  full_api_history
-  before_turn
-  turn_messages
-  tool_trace
-  context_debug
-metrics
-judge_contract
+session.zip
+├── manifest.json
+└── turns
+    ├── turn-001.json
+    ├── turn-002.json
+    └── ...
 ```
 
-`turn` 包含：
+`manifest.json` 包含：
 
 ```text
-用户原始内容、附件、图片名
-assistant 最终回答、时间线、推理、计划、Handoff
-分支信息
-文件变更
+session schema
+session source
+turn_count
+turn list and file names
+full session telemetry
 ```
 
-`tool_trace` 将 assistant 的 `tool_calls` 与对应 `tool` 返回值配对，并标记为：
+每个 `turn-NNN.json` 包含：
 
 ```text
-Success / ToolError / Timeout / Blocked
+当前用户轮次
+assistant 最终回答、时间线、推理、计划和 Handoff
+full_api_history / before_turn / turn_messages
+tool_trace
+context_debug
+latest execution metrics
+judge contract
 ```
 
 ## 判定约束
