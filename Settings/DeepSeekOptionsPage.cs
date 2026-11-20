@@ -1861,7 +1861,7 @@ namespace DeepSeek_v4_for_VisualStudio.Settings
         public override bool GetStandardValuesSupported(ITypeDescriptorContext? context) => true;
         public override StandardValuesCollection GetStandardValues(ITypeDescriptorContext? context)
         {
-            var values = new List<string> { "Windows Built-in", "PaddleOCR-Sharp" };
+            var values = new List<string> { "Windows Built-in" };
             var page = context?.Instance as DeepSeekOptionsPage
                 ?? DeepSeekOptionsPage.Instance;
             if (page != null &&
