@@ -173,9 +173,16 @@ session.zip
 ```text
 session schema
 session source
-turn_count
+turn_count (user turns)
 turn list and file names
-full session telemetry
+full session telemetry:
+  turn_count / user_turn_count
+  model_turn_count
+  tool_call_count
+  input_tokens / output_tokens
+  cache_hit_rate
+  duration_ms
+  per-user-turn runs[]
 ```
 
 每个 `turn-NNN.json` 包含：

@@ -377,6 +377,8 @@ class JudgeTests(unittest.TestCase):
             },
             {
                 "turn_count": 3,
+                "user_turn_count": 3,
+                "model_turn_count": 5,
                 "tool_call_count": 12,
                 "input_tokens": 2000,
                 "output_tokens": 200,
@@ -393,6 +395,8 @@ class JudgeTests(unittest.TestCase):
         self.assertEqual(result["cache"]["hit_tokens"], 1500)
         self.assertEqual(result["cache"]["hit_rate"], 0.75)
         self.assertTrue(result["cost"]["full_turn_metrics_available"])
+        self.assertEqual(result["cost"]["full_session"]["user_turn_count"], 3)
+        self.assertEqual(result["cost"]["full_session"]["model_turn_count"], 5)
 
     def test_load_session_archive_reads_manifest_and_turns(self) -> None:
         with tempfile.TemporaryDirectory() as tmp:

@@ -324,4 +324,79 @@ namespace DeepSeek_v4_for_VisualStudio.Models
             return JsonSerializer.Serialize(this, options);
         }
     }
+
+    /// <summary>
+    /// Persistent telemetry aggregate for all completed user turns in one ChatSession.
+    /// Unlike a single <see cref="AgentSessionMetrics"/> snapshot, this spans the entire conversation.
+    /// </summary>
+    public sealed class SessionEvaluationTelemetry
+    {
+        [JsonPropertyName("schema")]
+        public string Schema { get; set; } = "deepseek-vs.session-telemetry/1";
+
+        [JsonPropertyName("updated_at")]
+        public DateTime UpdatedAt { get; set; } = DateTime.Now;
+
+        /// <summary>Number of completed user turns represented by this aggregate.</summary>
+        [JsonPropertyName("turn_count")]
+        public int TurnCount => Runs.Count;
+
+        [JsonPropertyName("user_turn_count")]
+        public int UserTurnCount => Runs.Count;
+
+        /// <summary>Total model tool-loop turns across all user turns.</summary>
+        [JsonPropertyName("model_turn_count")]
+        public int ModelTurnCount => Runs.Sum(run => run.TurnCount);
+
+        [JsonPropertyName("tool_call_count")]
+        public int ToolCallCount => Runs.Sum(run => run.ToolCallCount);
+
+        [JsonPropertyName("input_tokens")]
+        public int InputTokens => Runs.Sum(run => run.InputTokens);
+
+        [JsonPropertyName("output_tokens")]
+        public int OutputTokens => Runs.Sum(run => run.OutputTokens);
+
+        [JsonPropertyName("cache_hit_rate")]
+        public double? CacheHitRate
+        {
+            get
+            {
+                long hit = Runs.Sum(run => run.Turns.Sum(turn => (long)turn.CacheHitTokens));
+                long miss = Runs.Sum(run => run.Turns.Sum(turn => (long)turn.CacheMissTokens));
+                return hit + miss > 0 ? (double)hit / (hit + miss) : null;
+            }
+        }
+
+        [JsonPropertyName("duration_ms")]
+        public long DurationMs => Runs.Sum(run => run.DurationMs);
+
+        [JsonPropertyName("first_turn_ttft_ms")]
+        public long? FirstTurnTtftMs
+            => Runs.Select(run => run.FirstTurnTtftMs)
+                .FirstOrDefault(value => value.HasValue);
+
+        [JsonPropertyName("stream_retries")]
+        public int StreamRetries
+            => Runs.Sum(run => run.Turns.Sum(turn => turn.StreamRetries));
+
+        /// <summary>One raw collector snapshot per completed user turn.</summary>
+        [JsonPropertyName("runs")]
+        public List<AgentSessionMetrics> Runs { get; set; } = new();
+
+        public bool TryAddRun(AgentSessionMetrics? run)
+        {
+            if (run == null) return false;
+            if (!string.IsNullOrEmpty(run.SessionId)
+                && Runs.Any(existing =>
+                    string.Equals(existing.SessionId, run.SessionId, StringComparison.Ordinal)))
+            {
+                return false;
+            }
+
+            Runs.Add(run);
+            UpdatedAt = DateTime.Now;
+            return true;
+        }
+    }
 }

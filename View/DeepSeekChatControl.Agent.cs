@@ -1407,6 +1407,9 @@ namespace DeepSeek_v4_for_VisualStudio.View
                     try
                     {
                         _latestCompletedTelemetryJson = telemetry.BuildJson();
+                        RecordSessionEvaluationTelemetry(
+                            workflowSession,
+                            _latestCompletedTelemetryJson);
                     }
                     catch (Exception tex)
                     {
@@ -1503,6 +1506,42 @@ namespace DeepSeek_v4_for_VisualStudio.View
             // ── 一次回答结束后根据需要自动记录 memory（与 Handoff 路径共用）──
             if (!parallelMemoryExtractionStarted)
                 TryScheduleAutoMemoryRecord();
+        }
+
+        /// <summary>
+        /// Merge one completed user-turn telemetry snapshot into the persistent chat-session aggregate.
+        /// </summary>
+        private void RecordSessionEvaluationTelemetry(
+            ChatSession? targetSession,
+            string? telemetryJson)
+        {
+            if (targetSession == null || string.IsNullOrWhiteSpace(telemetryJson))
+                return;
+
+            try
+            {
+                AgentSessionMetrics? run = JsonSerializer.Deserialize<AgentSessionMetrics>(
+                    telemetryJson,
+                    new JsonSerializerOptions { PropertyNameCaseInsensitive = true });
+                if (run == null) return;
+
+                lock (_lock)
+                {
+                    targetSession.EvaluationTelemetry ??= new SessionEvaluationTelemetry();
+                    if (targetSession.EvaluationTelemetry.TryAddRun(run))
+                    {
+                        Logger.Info(
+                            $"[Telemetry] 会话累计遥测已更新: " +
+                            $"userTurns={targetSession.EvaluationTelemetry.TurnCount}, " +
+                            $"modelTurns={targetSession.EvaluationTelemetry.ModelTurnCount}, " +
+                            $"tools={targetSession.EvaluationTelemetry.ToolCallCount}");
+                    }
+                }
+            }
+            catch (Exception ex)
+            {
+                Logger.Warn($"[Telemetry] 累计会话遥测合并失败: {ex.Message}");
+            }
         }
 
         /// <summary>

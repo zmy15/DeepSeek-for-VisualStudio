@@ -52,7 +52,9 @@ namespace DeepSeek_v4_for_VisualStudio.View
                             VisibleMessages = new List<ChatMessage>(_messages),
                             ApiHistory = _contextManager.GetFullContext(),
                             LatestExecutionMetrics = _latestTurnMetrics,
-                            SessionTelemetryJson = _latestCompletedTelemetryJson,
+                            SessionTelemetryJson = SerializeSessionTelemetry(
+                                _activeSession,
+                                _messages),
                             Model = GetEffectiveModel(),
                             SolutionPath = _solutionPath,
                             ContextDebugJson = BuildContextDebugJson(),
@@ -146,7 +148,7 @@ namespace DeepSeek_v4_for_VisualStudio.View
                 VisibleMessages = visibleMessages,
                 ApiHistory = session.ApiHistory?.ToList() ?? new List<ChatApiMessage>(),
                 LatestExecutionMetrics = null,
-                SessionTelemetryJson = null,
+                SessionTelemetryJson = SerializeSessionTelemetry(session, visibleMessages),
                 Model = GetEffectiveModel(),
                 SolutionPath = _solutionPath,
                 ContextDebugJson = null,
@@ -167,6 +169,59 @@ namespace DeepSeek_v4_for_VisualStudio.View
                     ReasoningContent = message.ReasoningContent ?? string.Empty,
                 })
                 .ToList();
+        }
+
+        private static string? SerializeSessionTelemetry(
+            ChatSession? session,
+            IReadOnlyList<ChatMessage> visibleMessages)
+        {
+            if (session == null) return null;
+            var options = new JsonSerializerOptions
+            {
+                DefaultIgnoreCondition =
+                    System.Text.Json.Serialization.JsonIgnoreCondition.WhenWritingNull,
+            };
+            if (session.EvaluationTelemetry != null)
+            {
+                return JsonSerializer.Serialize(
+                    session.EvaluationTelemetry,
+                    options);
+            }
+
+            int userTurnCount = visibleMessages.Count(message =>
+                string.Equals(message.Role, "user", StringComparison.OrdinalIgnoreCase));
+            long cacheHit = Math.Max(0, session.CumulativeCacheHitTokens);
+            long cacheMiss = Math.Max(0, session.CumulativeCacheMissTokens);
+            long cacheTotal = cacheHit + cacheMiss;
+            if (userTurnCount == 0
+                && session.CumulativePromptTokens == 0
+                && session.CumulativeCompletionTokens == 0
+                && cacheTotal == 0)
+            {
+                return null;
+            }
+
+            var legacy = new
+            {
+                schema = "deepseek-vs.session-telemetry/1",
+                source = "legacy_cumulative",
+                turn_count = userTurnCount,
+                user_turn_count = userTurnCount,
+                model_turn_count = (int?)null,
+                tool_call_count = (int?)null,
+                input_tokens = session.CumulativePromptTokens,
+                output_tokens = session.CumulativeCompletionTokens,
+                cache_hit_tokens = cacheHit,
+                cache_miss_tokens = cacheMiss,
+                cache_hit_rate = cacheTotal > 0 ? (double?)cacheHit / cacheTotal : null,
+                duration_ms = (long?)null,
+                first_turn_ttft_ms = (long?)null,
+                stream_retries = (int?)null,
+                runs = Array.Empty<object>(),
+            };
+            return JsonSerializer.Serialize(
+                legacy,
+                options);
         }
     }
 }

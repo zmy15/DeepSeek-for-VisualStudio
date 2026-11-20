@@ -699,6 +699,10 @@ def analyze_cost_cache(
 
     session_input = int(session_telemetry.get("input_tokens") or 0)
     session_output = int(session_telemetry.get("output_tokens") or 0)
+    session_user_turns = session_telemetry.get("user_turn_count")
+    if session_user_turns is None:
+        session_user_turns = session_telemetry.get("turn_count")
+    session_model_turns = session_telemetry.get("model_turn_count")
     session_cache_rate = session_telemetry.get("cache_hit_rate")
     session_cache_rate = (
         float(session_cache_rate)
@@ -756,7 +760,9 @@ def analyze_cost_cache(
             },
             "full_session": (
                 {
-                    "turn_count": session_telemetry.get("turn_count"),
+                    "turn_count": session_user_turns,
+                    "user_turn_count": session_user_turns,
+                    "model_turn_count": session_model_turns,
                     "tool_call_count": session_telemetry.get("tool_call_count"),
                     "input_tokens": session_input,
                     "output_tokens": session_output,
