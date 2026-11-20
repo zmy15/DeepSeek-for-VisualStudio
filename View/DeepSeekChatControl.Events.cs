@@ -2975,6 +2975,13 @@ namespace DeepSeek_v4_for_VisualStudio.View
                             ? svgProp.GetString() ?? string.Empty : string.Empty;
                         SaveDiagramToFileAs(svg);
                     }
+                    else if (type == "exportEvaluation")
+                    {
+                        int msgIndex = obj.TryGetProperty("messageIndex", out var exportIdxProp)
+                            ? exportIdxProp.GetInt32() : -1;
+                        if (msgIndex >= 0)
+                            ExportTurnEvaluation(msgIndex);
+                    }
                     else if (type == "retryMessage")
                     {
                         int msgIndex = obj.TryGetProperty("messageIndex", out var retryIdxProp)

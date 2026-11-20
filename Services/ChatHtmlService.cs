@@ -417,6 +417,10 @@ namespace DeepSeek_v4_for_VisualStudio.Services
             AppendJsonString(sb, L["chat.html.copyButtonTitle"]);
             sb.Append(",\"copyFeedback\":");
             AppendJsonString(sb, L["chat.html.copySuccessButton"]);
+            sb.Append(",\"exportLabel\":");
+            AppendJsonString(sb, L["chat.html.exportEvaluationButton"]);
+            sb.Append(",\"exportTitle\":");
+            AppendJsonString(sb, L["chat.html.exportEvaluationButtonTitle"]);
             sb.Append('}');
             return sb.ToString();
         }
@@ -1093,6 +1097,10 @@ namespace DeepSeek_v4_for_VisualStudio.Services
                 ? $"<button id='copy-btn-{idx}' class='msg-action-btn copy-msg-btn' onclick='window.__copyMessage({idx})' title='{L["chat.html.copyButtonTitle"]}' data-copy-label='{EscapeHtml(L["chat.html.copyButton"])}' data-copied-label='{EscapeHtml(L["chat.html.copySuccessButton"])}'>{EscapeHtml(L["chat.html.copyButton"])}</button>"
                 : "";
 
+            string exportBtnHtml = !isStreaming
+                ? $"<button id='export-eval-btn-{idx}' class='msg-action-btn export-eval-btn' onclick='window.__exportEvaluation({idx})' title='{EscapeHtml(L["chat.html.exportEvaluationButtonTitle"])}'>{EscapeHtml(L["chat.html.exportEvaluationButton"])}</button>"
+                : "";
+
             // ── 分支导航随助手消息的操作行渲染（与复制/重试按钮同一行）──
 
             // Copilot Chat 风格：左对齐，AI 标签
@@ -1111,12 +1119,13 @@ namespace DeepSeek_v4_for_VisualStudio.Services
                 sb.Append(msg.CacheFooterHtml);
             }
             // ── 统一 action 行：flex 容器保证重来/复制按钮水平对齐、尺寸一致 ──
-            if (retryBtnHtml.Length > 0 || copyBtnHtml.Length > 0 || branchNavHtml.Length > 0)
+            if (retryBtnHtml.Length > 0 || copyBtnHtml.Length > 0 || exportBtnHtml.Length > 0 || branchNavHtml.Length > 0)
             {
                 sb.Append("<div class='msg-actions-row'>");
                 sb.Append(branchNavHtml);
                 sb.Append(retryBtnHtml);
                 sb.Append(copyBtnHtml);
+                sb.Append(exportBtnHtml);
                 sb.Append("</div>");
             }
             sb.Append("</div>");  // closes msg-bubble

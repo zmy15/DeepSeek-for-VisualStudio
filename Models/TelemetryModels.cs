@@ -231,7 +231,7 @@ namespace DeepSeek_v4_for_VisualStudio.Models
         [JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)]
         public string? TaskCategory { get; set; }
 
-        /// <summary>Benchmark 任务 ID（对应 benchmark/tasks.json 的 id）</summary>
+        /// <summary>可选评测用例 ID（例如 benchmark/judge/cases.v1.json 中的 id）</summary>
         [JsonPropertyName("task_id")]
         [JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)]
         public string? TaskId { get; set; }

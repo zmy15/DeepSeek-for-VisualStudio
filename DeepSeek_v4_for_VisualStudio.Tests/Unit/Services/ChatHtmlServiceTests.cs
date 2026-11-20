@@ -230,6 +230,8 @@ public class ChatHtmlServiceTests
 
         result.Should().Contain("read_file");
         result.Should().Contain("最终答复");
+        result.Should().Contain("export-eval-btn-1");
+        result.Should().Contain("window.__exportEvaluation(1)");
     }
 
     [Fact]
@@ -244,6 +246,8 @@ public class ChatHtmlServiceTests
 
         json.Should().Contain("read_file");
         json.Should().Contain("最终答复");
+        json.Should().Contain("\"exportLabel\"");
+        json.Should().Contain("\"exportTitle\"");
     }
 
     [Fact]

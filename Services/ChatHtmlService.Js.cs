@@ -482,7 +482,9 @@ window.__appendMessageHtml=function(html){
                     "retryTitle:" + EscapeJsString(L["chat.html.retryButtonTitle"]) + "," +
                     "copy:" + EscapeJsString(L["chat.html.copyButton"]) + "," +
                     "copyTitle:" + EscapeJsString(L["chat.html.copyButtonTitle"]) + "," +
-                    "copied:" + EscapeJsString(L["chat.html.copySuccessButton"]) +
+                    "copied:" + EscapeJsString(L["chat.html.copySuccessButton"]) + "," +
+                    "exportEvaluation:" + EscapeJsString(L["chat.html.exportEvaluationButton"]) + "," +
+                    "exportEvaluationTitle:" + EscapeJsString(L["chat.html.exportEvaluationButtonTitle"]) +
                 "};";
 
             return markdownFailText + @"
@@ -815,6 +817,9 @@ window.__copyMessage=function(msgIndex){
     }
     if(ok)window._showCopyFeedback(msgIndex);
 };
+window.__exportEvaluation=function(msgIndex){
+    window.__sendToHost({type:'exportEvaluation',messageIndex:msgIndex});
+};
 window._showCopyFeedback=function(msgIndex){
     var btn=document.getElementById('copy-btn-'+msgIndex);
     if(!btn)return;
@@ -1048,6 +1053,18 @@ window._showCopyFeedback=function(msgIndex){
                             if(row2)row2.appendChild(copyBtn);
                             else{var mb=document.getElementById('msg-body-'+msg.i);
                                 if(mb)mb.parentNode.insertBefore(copyBtn,mb.nextSibling);}
+                        }
+                        if(msgDiv2&&!document.getElementById('export-eval-btn-'+msg.i)){
+                            var exportBtn=document.createElement('button');
+                            exportBtn.id='export-eval-btn-'+msg.i;
+                            exportBtn.className='msg-action-btn export-eval-btn';
+                            exportBtn.textContent=msg.exportLabel||__actLabels.exportEvaluation;
+                            exportBtn.title=msg.exportTitle||__actLabels.exportEvaluationTitle;
+                            exportBtn.onclick=function(){window.__exportEvaluation(msg.i);};
+                            var row3=document.querySelector('#msg-'+msg.i+' .msg-actions-row');
+                            if(row3)row3.appendChild(exportBtn);
+                            else{var mb2=document.getElementById('msg-body-'+msg.i);
+                                if(mb2)mb2.parentNode.insertBefore(exportBtn,mb2.nextSibling);}
                         }
                     } catch(btnErr) {
                         console.error('[DeepSeek] streamEnd button injection error:', btnErr);
