@@ -834,6 +834,7 @@ namespace DeepSeek_v4_for_VisualStudio.View
             public string LastActiveText { get; set; } = string.Empty;
             public bool IsCurrent { get; set; }
             public string DeleteVisibility => IsCurrent ? "Collapsed" : "Visible";
+            public string ExportVisibility { get; set; } = "Collapsed";
         }
 
         /// <summary>
@@ -883,6 +884,7 @@ namespace DeepSeek_v4_for_VisualStudio.View
                         Title = GetSessionDisplayTitle(s),
                         LastActiveText = FormatRelativeTime(s.LastActiveAt),
                         IsCurrent = _activeSession != null && s.Id == _activeSession.Id,
+                        ExportVisibility = IsEvaluationExportEnabled() ? "Visible" : "Collapsed",
                     })
                     .ToList();
 
@@ -916,6 +918,19 @@ namespace DeepSeek_v4_for_VisualStudio.View
         {
             if (sender is System.Windows.Controls.Button btn)
                 btn.ToolTip = LocalizationService.Instance["input.deleteSessionItemTip"];
+        }
+
+        private void HistoryExportButton_Loaded(object sender, RoutedEventArgs e)
+        {
+            if (sender is System.Windows.Controls.Button btn)
+                btn.ToolTip = LocalizationService.Instance["input.exportSessionItemTip"];
+        }
+
+        private void ExportHistoryItem_Click(object sender, RoutedEventArgs e)
+        {
+            if ((sender is System.Windows.Controls.Button btn ? btn.Tag as string : null) is not string id)
+                return;
+            ExportSessionEvaluation(id);
         }
 
         private void HistoryListBox_SelectionChanged(object sender, SelectionChangedEventArgs e)

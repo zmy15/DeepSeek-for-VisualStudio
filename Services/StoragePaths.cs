@@ -31,6 +31,9 @@ namespace DeepSeek_v4_for_VisualStudio.Services
         /// <summary>计划 Markdown 保存目录。</summary>
         public static string PlansDirectory => Path.Combine(RootDirectory, "plans");
 
+        /// <summary>LLM-as-a-Judge turn export directory.</summary>
+        public static string EvaluationsDirectory => Path.Combine(RootDirectory, "evaluations");
+
         /// <summary>
         /// 解决方案标识：未保存时为 <c>_unsaved</c>，否则为 <c>proj_{sha256前16位}</c>。
         /// </summary>

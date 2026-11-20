@@ -1269,6 +1269,7 @@ namespace DeepSeek_v4_for_VisualStudio.Settings
             InputBoxHeight = DefaultInputBoxHeight;
             BottomAreaScalePercent = DefaultBottomAreaScalePercent;
             WebView2ZoomPercent = DefaultWebView2ZoomPercent;
+            EnableEvaluationExport = false;
             RestoreDefaultSettingsTrigger = false;
         }
 
@@ -1728,6 +1729,23 @@ namespace DeepSeek_v4_for_VisualStudio.Settings
         // ═══════════════════════════════════════════════
         //  开发者调试设置
         // ═══════════════════════════════════════════════
+
+        private bool _enableEvaluationExport;
+
+        /// <summary>
+        /// 开发者调试：允许在已完成的助手回复上导出完整 turn 评测数据。
+        /// 导出内容包含 prompt、代码、工具参数和结果，默认关闭。
+        /// </summary>
+        [LocalizedCategory("settings.category.developer")]
+        [LocalizedDisplayName("settings.enableEvaluationExport.displayName")]
+        [LocalizedDescription("settings.enableEvaluationExport.description")]
+        [DefaultValue(false)]
+        [DesignerSerializationVisibility(DesignerSerializationVisibility.Visible)]
+        public bool EnableEvaluationExport
+        {
+            get => _enableEvaluationExport;
+            set => _enableEvaluationExport = value;
+        }
 
         private bool _enableApiDebugDump;
 

@@ -229,6 +229,17 @@ namespace DeepSeek_v4_for_VisualStudio
         /// 工具调用与消息清洗结果。默认关闭——报文含完整 prompt / 代码且体积可达数 MB。
         /// </summary>
         [VisualStudioContribution]
+        internal static Setting.Boolean EvaluationExport { get; } =
+            new(
+                "deepseekEvaluationExport",
+                "%DeepSeek.Chat.settings.enableEvaluationExport.displayName%",
+                GeneralCategory,
+                defaultValue: false)
+            {
+                Description = "%DeepSeek.Chat.settings.enableEvaluationExport.description%",
+            };
+
+        [VisualStudioContribution]
         internal static Setting.Boolean ApiDebugDump { get; } =
             new("deepseekApiDebugDump", "%DeepSeek.Chat.settings.apiDebugDump.displayName%", GeneralCategory, defaultValue: false)
             {

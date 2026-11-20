@@ -487,6 +487,7 @@ namespace DeepSeek_v4_for_VisualStudio.View
         private Services.IdeContext.IdeContextTracker? _ideContextTracker;
         private readonly Services.IdeContext.GitContextProvider _gitContextProvider = new();
         private Models.AgentTurnMetrics? _latestTurnMetrics;
+        private string? _latestCompletedTelemetryJson;
 
         /// <summary>
         /// 构建会话开始时的上下文构成快照（P2 Context Debugger 数据面）。
@@ -769,6 +770,7 @@ namespace DeepSeek_v4_for_VisualStudio.View
             // ── P0 Telemetry：会话指标采集器（设置开关控制，创建失败静默降级）──
             Services.Telemetry.AgentMetricsCollector? telemetry = null;
             _latestTurnMetrics = null;
+            _latestCompletedTelemetryJson = null;
             bool collectMetrics = _options?.EnableTelemetryExport != false
                 || _options?.ShowContextStats == true;
             if (collectMetrics)
@@ -1401,7 +1403,20 @@ namespace DeepSeek_v4_for_VisualStudio.View
                 StopConversationElapsedTimer();
                 _activePlan = null;
                 if (telemetry != null)
+                {
+                    try
+                    {
+                        _latestCompletedTelemetryJson = telemetry.BuildJson();
+                        RecordSessionEvaluationTelemetry(
+                            workflowSession,
+                            _latestCompletedTelemetryJson);
+                    }
+                    catch (Exception tex)
+                    {
+                        Logger.Warn($"[Telemetry] 完整会话快照导出失败: {tex.Message}");
+                    }
                     telemetry.TurnMetricsUpdated -= OnTelemetryTurnMetricsUpdated;
+                }
 
                 // ── P1-A：会话结束后清除 IDE 快照，避免过期上下文泄漏到非 Agent 的聊天轮次 ──
                 try { _contextManager.SetIdeContext(null); }
@@ -1491,6 +1506,42 @@ namespace DeepSeek_v4_for_VisualStudio.View
             // ── 一次回答结束后根据需要自动记录 memory（与 Handoff 路径共用）──
             if (!parallelMemoryExtractionStarted)
                 TryScheduleAutoMemoryRecord();
+        }
+
+        /// <summary>
+        /// Merge one completed user-turn telemetry snapshot into the persistent chat-session aggregate.
+        /// </summary>
+        private void RecordSessionEvaluationTelemetry(
+            ChatSession? targetSession,
+            string? telemetryJson)
+        {
+            if (targetSession == null || string.IsNullOrWhiteSpace(telemetryJson))
+                return;
+
+            try
+            {
+                AgentSessionMetrics? run = JsonSerializer.Deserialize<AgentSessionMetrics>(
+                    telemetryJson,
+                    new JsonSerializerOptions { PropertyNameCaseInsensitive = true });
+                if (run == null) return;
+
+                lock (_lock)
+                {
+                    targetSession.EvaluationTelemetry ??= new SessionEvaluationTelemetry();
+                    if (targetSession.EvaluationTelemetry.TryAddRun(run))
+                    {
+                        Logger.Info(
+                            $"[Telemetry] 会话累计遥测已更新: " +
+                            $"userTurns={targetSession.EvaluationTelemetry.TurnCount}, " +
+                            $"modelTurns={targetSession.EvaluationTelemetry.ModelTurnCount}, " +
+                            $"tools={targetSession.EvaluationTelemetry.ToolCallCount}");
+                    }
+                }
+            }
+            catch (Exception ex)
+            {
+                Logger.Warn($"[Telemetry] 累计会话遥测合并失败: {ex.Message}");
+            }
         }
 
         /// <summary>

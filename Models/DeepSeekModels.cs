@@ -891,6 +891,13 @@ namespace DeepSeek_v4_for_VisualStudio.Models
         [DataMember]
         public List<CompressedTurnSummary> CompressedSummaries { get; set; } = new();
 
+        /// <summary>
+        /// Complete telemetry aggregate across all user turns in this chat session.
+        /// Null for conversations created before aggregate telemetry was introduced.
+        /// </summary>
+        [DataMember]
+        public SessionEvaluationTelemetry? EvaluationTelemetry { get; set; }
+
         [DataMember]
         public DateTime CreatedAt { get; set; } = DateTime.Now;
 

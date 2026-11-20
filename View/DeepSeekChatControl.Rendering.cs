@@ -1040,7 +1040,9 @@ namespace DeepSeek_v4_for_VisualStudio.View
                     IsStreaming = false,
                     IsHtml = isHtml,
                 };
-                _messagesHtml.Append(ChatHtmlService.BuildAssistantMessageHtml(tempMsg, _messages.Count - 1));
+                _messagesHtml.Append(ChatHtmlService.BuildAssistantMessageHtml(
+                    tempMsg,
+                    _messages.Count - 1));
             }
         }
 

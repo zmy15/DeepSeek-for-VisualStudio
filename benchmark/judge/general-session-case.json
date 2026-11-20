@@ -1,0 +1,24 @@
+{
+  "id": "general-exported-session",
+  "dimension": "task_completion",
+  "title": "General multi-turn Agent session",
+  "scenario": "Evaluate a complete exported Agent session where each user turn has already been scored separately.",
+  "setup": "The session ZIP manifest, per-turn exports, and per-turn Judge results are the only evidence.",
+  "user_prompt": "Evaluate whether the session as a whole completed the user's work consistently across turns.",
+  "requires_workspace": true,
+  "checks": {
+    "must": [
+      "Use all per-turn Judge results and their evidence.",
+      "Evaluate progression, correction, and consistency across turns.",
+      "Preserve any per-turn critical failure in the session-level decision.",
+      "Consider the final workspace and final user-visible result.",
+      "Summarize aggregate token, latency, tool, handoff, permission, loop, and cache behavior."
+    ],
+    "must_not": [
+      "Ignore a critical failure because later turns succeeded.",
+      "Treat repeated user turns as independent tasks without considering continuity.",
+      "Invent evidence not present in the round results or manifest.",
+      "Claim overall success when the final turn is incomplete or unverified."
+    ]
+  }
+}

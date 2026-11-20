@@ -59,7 +59,7 @@ DeepSeek-v4-for-VisualStudio/
 ├── Resources/Locales/                       # en.json, zh-CN.json
 ├── .vsextension/                            # Extensibility metadata localization
 ├── docs/                                    # Design & analysis documents
-├── benchmark/                               # Benchmark protocol and sample tasks
+├── benchmark/                               # LLM-as-a-Judge cases and rubric
 └── tools/                                   # Build & lint scripts
 ```
 
@@ -317,7 +317,7 @@ accepts and formats, <kbd>Esc</kbd> dismisses, <kbd>Enter</kbd> restarts the tim
 | [`Settings-UnifiedIntegration-Feasibility.md`](Settings-UnifiedIntegration-Feasibility.md) | Unified settings bridge |
 | [`VsToolApiIntegration-Analysis.md`](VsToolApiIntegration-Analysis.md) | VS tool API integration |
 | [`RunTests-Tool-Implementation-Report.md`](RunTests-Tool-Implementation-Report.md) | `run_tests` tool design |
-| [`../benchmark/README.md`](../benchmark/README.md) | Benchmark protocol |
+| [`../benchmark/README.md`](../benchmark/README.md) | LLM Judge evaluation |
 
 ---
 
@@ -370,7 +370,7 @@ DeepSeek-v4-for-VisualStudio/
 ├── Resources/Locales/                       # en.json、zh-CN.json
 ├── .vsextension/                            # Extensibility 元数据本地化
 ├── docs/                                    # 设计与分析文档
-├── benchmark/                               # 基准测试规程与样例任务
+├── benchmark/                               # LLM-as-a-Judge 用例与 rubric
 └── tools/                                   # 构建与检查脚本
 ```
 
@@ -605,4 +605,4 @@ MEF 导出的 `IVsTextViewCreationListener`（内容类型 `code`，可编辑角
 | [`Settings-UnifiedIntegration-Feasibility.md`](Settings-UnifiedIntegration-Feasibility.md) | 统一设置桥接 |
 | [`VsToolApiIntegration-Analysis.md`](VsToolApiIntegration-Analysis.md) | VS 工具 API 集成 |
 | [`RunTests-Tool-Implementation-Report.md`](RunTests-Tool-Implementation-Report.md) | `run_tests` 工具设计 |
-| [`../benchmark/README.md`](../benchmark/README.md) | 基准测试规程 |
+| [`../benchmark/README.md`](../benchmark/README.md) | LLM Judge 评测规程 |
