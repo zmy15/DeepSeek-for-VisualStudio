@@ -22,6 +22,10 @@
 回归测评默认 Agent 与 Judge 均使用 `deepseek-flash`，包含 16 个 case、32 个连续提问，八个现有维度各覆盖一个常规任务和一个条件/边界任务。完整流程见
 [regression/README.md](regression/README.md)。
 
+C++ 方向另外提供 `LineController` CMake fixture：8 个 case 覆盖八个现有维度，
+支持 CMake/Ninja 构建与 CTest，参考答案见
+`regression/line-controller-reference-answers.v1.json`。
+
 聊天窗口顶部会话工具栏提供 **“导出会话评测”** 图标。导出 ZIP 默认位于：
 
 ```text

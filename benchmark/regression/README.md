@@ -29,6 +29,17 @@ efficiency_cost
 [reference-answers.v1.json](reference-answers.v1.json)。参考答案会随 case
 一起传入 Judge，不用模型自行猜测“什么算正确”。
 
+另外提供 C++/CMake 回归集：
+
+- `fixtures/LineController/`：无第三方依赖的 C++20 示例项目。
+- `line-controller.v1.json`：8 个 case，八个维度各 1 个，覆盖常规与条件边界。
+- `line-controller-reference-answers.v1.json`：对应参考正确答案。
+
+```powershell
+.\benchmark\.venv\Scripts\python.exe .\benchmark\regression\regression.py validate `
+  --suite .\benchmark\regression\line-controller.v1.json
+```
+
 示例项目位于 `fixtures/OrderDesk/`，不依赖 NuGet 包：
 
 ```powershell
@@ -115,6 +126,7 @@ runner 会：
 - 自动跟进 `AutoSend` Handoff；
 - 自动批准工作区内 `file_write`，拒绝删除、终端和联网权限；
 - 调用现有 `IBuildService`/`ITestService` 的本地 `dotnet` 实现；
+- 识别 `CMakeLists.txt` 时自动使用 CMake/Ninja 和 CTest；
 - 将完整轮次、工具轨迹和指标导出成现有 Judge 可读取的 session ZIP。
 
 ## 3. 评分并汇总 baseline

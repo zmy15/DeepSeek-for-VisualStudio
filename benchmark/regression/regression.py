@@ -208,6 +208,20 @@ def load_reference_answers(
     return reference_doc, answers
 
 
+def resolve_reference_answers_path(
+    args: argparse.Namespace,
+    suite: dict[str, Any],
+    suite_path: Path,
+) -> Path:
+    cli_value = getattr(args, "reference_answers", None)
+    if cli_value:
+        return Path(cli_value)
+    suite_value = str(suite.get("reference_answers") or "").strip()
+    if suite_value:
+        return _resolve_inside(suite_path.parent, suite_value)
+    return DEFAULT_REFERENCE_ANSWERS
+
+
 def validate_suite(
     suite: dict[str, Any],
     base_dir: Path = HERE,
@@ -249,6 +263,16 @@ def validate_suite(
         errors.append("suite must define at least one case")
 
     seen_ids: set[str] = set()
+    policy = suite.get("coverage_policy") or {}
+    minimum_cases = int(policy.get("minimum_cases_per_dimension", 2))
+    require_per_dimension = bool(
+        policy.get("require_regular_and_boundary_per_dimension", True)
+    )
+    require_suite_coverage = bool(
+        policy.get("require_regular_and_boundary_in_suite", True)
+    )
+    require_conditional = bool(policy.get("require_conditional", True))
+
     coverage = {
         dimension: {"regular": 0, "boundary": 0}
         for dimension in DIMENSIONS
@@ -316,14 +340,21 @@ def validate_suite(
     for dimension in DIMENSIONS:
         regular = coverage[dimension]["regular"]
         boundary = coverage[dimension]["boundary"]
-        if regular < 1:
+        if require_per_dimension and regular < 1:
             errors.append(f"dimension '{dimension}' needs at least one regular case")
-        if boundary < 1:
+        if require_per_dimension and boundary < 1:
             errors.append(f"dimension '{dimension}' needs at least one boundary case")
-        if regular + boundary < 2:
-            errors.append(f"dimension '{dimension}' needs at least two cases")
+        if regular + boundary < minimum_cases:
+            errors.append(
+                f"dimension '{dimension}' needs at least {minimum_cases} cases"
+            )
 
-    if conditional_count < 1:
+    if require_suite_coverage and (
+        sum(item["regular"] for item in coverage.values()) < 1
+        or sum(item["boundary"] for item in coverage.values()) < 1
+    ):
+        errors.append("suite must include at least one regular and one boundary case")
+    if require_conditional and conditional_count < 1:
         errors.append("suite must include at least one case tagged 'conditional'")
 
     return errors
@@ -420,9 +451,7 @@ def render_case_guide(
 def run_prepare(args: argparse.Namespace) -> int:
     suite_path = Path(args.suite)
     suite = _load_suite(suite_path)
-    reference_path = Path(
-        getattr(args, "reference_answers", DEFAULT_REFERENCE_ANSWERS)
-    )
+    reference_path = resolve_reference_answers_path(args, suite, suite_path)
     _, references = load_reference_answers(suite, reference_path)
     case = find_case(suite, args.case)
 
@@ -720,9 +749,7 @@ def _judge_command(
 def run_score(args: argparse.Namespace) -> int:
     suite_path = Path(args.suite)
     suite = _load_suite(suite_path)
-    reference_path = Path(
-        getattr(args, "reference_answers", DEFAULT_REFERENCE_ANSWERS)
-    )
+    reference_path = resolve_reference_answers_path(args, suite, suite_path)
     _, references = load_reference_answers(suite, reference_path)
     archives_dir = Path(args.archives)
     results_dir = Path(args.results)
@@ -1062,7 +1089,7 @@ def run_validate(args: argparse.Namespace) -> int:
         raise RegressionError("Suite root must be a JSON object")
     errors = validate_suite(suite, suite_path.parent)
     reference_doc = read_json(
-        Path(getattr(args, "reference_answers", DEFAULT_REFERENCE_ANSWERS))
+        resolve_reference_answers_path(args, suite, suite_path)
     )
     if isinstance(reference_doc, dict):
         errors.extend(validate_reference_answers(suite, reference_doc))
@@ -1097,7 +1124,7 @@ def build_parser() -> argparse.ArgumentParser:
     validate_parser.add_argument("--suite", default=str(DEFAULT_SUITE))
     validate_parser.add_argument(
         "--reference-answers",
-        default=str(DEFAULT_REFERENCE_ANSWERS),
+        default=None,
     )
     validate_parser.set_defaults(func=run_validate)
 
@@ -1108,7 +1135,7 @@ def build_parser() -> argparse.ArgumentParser:
     prepare_parser.add_argument("--suite", default=str(DEFAULT_SUITE))
     prepare_parser.add_argument(
         "--reference-answers",
-        default=str(DEFAULT_REFERENCE_ANSWERS),
+        default=None,
     )
     prepare_parser.add_argument("--case", required=True)
     prepare_parser.add_argument("--output", required=True)
@@ -1135,7 +1162,7 @@ def build_parser() -> argparse.ArgumentParser:
     score_parser.add_argument("--suite", default=str(DEFAULT_SUITE))
     score_parser.add_argument(
         "--reference-answers",
-        default=str(DEFAULT_REFERENCE_ANSWERS),
+        default=None,
     )
     score_parser.add_argument("--archives", required=True)
     score_parser.add_argument("--results", required=True)

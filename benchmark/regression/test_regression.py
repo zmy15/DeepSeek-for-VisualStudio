@@ -25,6 +25,14 @@ class RegressionTests(unittest.TestCase):
         cls.references = json.loads(
             (HERE / "reference-answers.v1.json").read_text(encoding="utf-8")
         )
+        cls.cpp_suite = json.loads(
+            (HERE / "line-controller.v1.json").read_text(encoding="utf-8")
+        )
+        cls.cpp_references = json.loads(
+            (HERE / "line-controller-reference-answers.v1.json").read_text(
+                encoding="utf-8"
+            )
+        )
 
     def test_suite_is_valid(self) -> None:
         self.assertEqual(regression.validate_suite(self.suite, HERE), [])
@@ -34,6 +42,37 @@ class RegressionTests(unittest.TestCase):
             regression.validate_reference_answers(self.suite, self.references),
             [],
         )
+
+    def test_cpp_suite_and_reference_answers_are_valid(self) -> None:
+        self.assertEqual(
+            regression.validate_suite(self.cpp_suite, HERE),
+            [],
+        )
+        self.assertEqual(
+            regression.validate_reference_answers(
+                self.cpp_suite,
+                self.cpp_references,
+            ),
+            [],
+        )
+
+    def test_cpp_prepare_uses_cmake_and_external_metadata(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            output = Path(tmp) / "line-controller"
+            args = SimpleNamespace(
+                suite=str(HERE / "line-controller.v1.json"),
+                case="cpp-cq-regular",
+                output=str(output),
+            )
+            with contextlib.redirect_stdout(io.StringIO()):
+                self.assertEqual(regression.run_prepare(args), 0)
+
+            metadata_dir = output.parent / f"{output.name}.benchmark-meta"
+            self.assertTrue((output / "CMakeLists.txt").is_file())
+            self.assertTrue((metadata_dir / "case.json").is_file())
+            self.assertFalse((output / "_benchmark").exists())
+            guide = (metadata_dir / "README.md").read_text(encoding="utf-8")
+            self.assertIn("std::numeric_limits<int>::max()", guide)
 
     def test_suite_defaults_to_deepseek_flash(self) -> None:
         defaults = self.suite["defaults"]

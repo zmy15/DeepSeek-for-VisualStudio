@@ -318,6 +318,7 @@ __pycache__/
 *.pyc
 benchmark/.venv/
 benchmark/regression/artifacts/
+benchmark/regression/fixtures/*/build/
 
 # Cake - Uncomment if you are using it
 # tools/**

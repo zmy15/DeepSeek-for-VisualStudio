@@ -105,8 +105,8 @@ namespace BenchmarkRunner
                 baseUrl: options.BaseUrl);
             apiService.ConfigureThinking(false);
 
-            var buildService = new DotNetBuildService(caseDir);
-            var testService = new ConsoleTestService(caseDir);
+            var buildService = new WorkspaceBuildService(caseDir);
+            var testService = new WorkspaceTestService(caseDir);
             var builtInTools = new BuiltInToolService(
                 mcpManager: null,
                 webSearchService: null,
@@ -463,6 +463,7 @@ namespace BenchmarkRunner
             string[] allowedPrefixes =
             {
                 "dotnet build", "dotnet run", "dotnet test",
+                "cmake -s", "cmake --build", "ctest ",
                 "git status", "git diff",
                 "get-childitem", "test-path", "rg ", "findstr ", "where.exe ",
             };
@@ -560,6 +561,7 @@ namespace BenchmarkRunner
             string[] candidates = Directory
                 .GetFiles(caseDir, "*.slnx", SearchOption.TopDirectoryOnly)
                 .Concat(Directory.GetFiles(caseDir, "*.sln", SearchOption.TopDirectoryOnly))
+                .Concat(Directory.GetFiles(caseDir, "CMakeLists.txt", SearchOption.TopDirectoryOnly))
                 .ToArray();
             if (candidates.Length != 1)
             {
@@ -607,13 +609,15 @@ namespace BenchmarkRunner
             writer.Write(content);
         }
 
-        private sealed class DotNetBuildService : IBuildService
+        private sealed class WorkspaceBuildService : IBuildService
         {
             private readonly string _workspaceRoot;
+            private readonly bool _isCmake;
 
-            public DotNetBuildService(string workspaceRoot)
+            public WorkspaceBuildService(string workspaceRoot)
             {
                 _workspaceRoot = workspaceRoot;
+                _isCmake = File.Exists(Path.Combine(workspaceRoot, "CMakeLists.txt"));
             }
 
             public async Task<string> BuildAsync(
@@ -621,6 +625,36 @@ namespace BenchmarkRunner
                 CancellationToken ct)
             {
                 string target = solutionPath ?? _workspaceRoot;
+                if (_isCmake
+                    || string.Equals(
+                        Path.GetFileName(target),
+                        "CMakeLists.txt",
+                        StringComparison.OrdinalIgnoreCase))
+                {
+                    string buildDir = Path.Combine(_workspaceRoot, "build");
+                    ProcessResult configure = await ProcessRunner.RunAsync(
+                        "cmake",
+                        $"-S \"{_workspaceRoot}\" -B \"{buildDir}\" -G Ninja -DCMAKE_BUILD_TYPE=Debug",
+                        _workspaceRoot,
+                        ct);
+                    if (configure.ExitCode != 0)
+                    {
+                        return "Error: CMake configure FAILED."
+                            + Environment.NewLine
+                            + configure.Output;
+                    }
+
+                    ProcessResult build = await ProcessRunner.RunAsync(
+                        "cmake",
+                        $"--build \"{buildDir}\"",
+                        _workspaceRoot,
+                        ct);
+                    string cmakeSummary = build.ExitCode == 0
+                        ? "Build succeeded."
+                        : "Error: Build FAILED.";
+                    return cmakeSummary + Environment.NewLine + build.Output;
+                }
+
                 ProcessResult result = await ProcessRunner.RunAsync(
                     "dotnet",
                     $"build \"{target}\" --nologo",
@@ -643,32 +677,36 @@ namespace BenchmarkRunner
             }
         }
 
-        private sealed class ConsoleTestService : ITestService
+        private sealed class WorkspaceTestService : ITestService
         {
             private readonly string _workspaceRoot;
-            private readonly string _testProject;
+            private readonly bool _isCmake;
+            private readonly string? _dotNetTestProject;
 
-            public ConsoleTestService(string workspaceRoot)
+            public WorkspaceTestService(string workspaceRoot)
             {
                 _workspaceRoot = workspaceRoot;
-                _testProject = Directory
+                _isCmake = File.Exists(Path.Combine(workspaceRoot, "CMakeLists.txt"));
+                _dotNetTestProject = Directory
                     .GetFiles(workspaceRoot, "*.csproj", SearchOption.AllDirectories)
                     .FirstOrDefault(path =>
                         path.Replace('\\', '/').EndsWith(
                             "tests/OrderDesk.Tests/OrderDesk.Tests.csproj",
-                            StringComparison.OrdinalIgnoreCase))
-                    ?? throw new InvalidOperationException(
-                        "OrderDesk console test project was not found.");
+                            StringComparison.OrdinalIgnoreCase));
             }
 
             public IReadOnlyList<string> FindTestProjects(string? solutionPath)
             {
-                return new[] { _testProject };
+                return _dotNetTestProject == null
+                    ? Array.Empty<string>()
+                    : new[] { _dotNetTestProject };
             }
 
             public IReadOnlyList<string> FindCppTestProjects(string? solutionPath)
             {
-                return Array.Empty<string>();
+                return _isCmake
+                    ? new[] { _workspaceRoot }
+                    : Array.Empty<string>();
             }
 
             public async Task<TestRunResult> RunTestsAsync(
@@ -678,8 +716,58 @@ namespace BenchmarkRunner
                 string? configuration,
                 CancellationToken ct)
             {
+                if (_isCmake)
+                {
+                    string buildDir = Path.Combine(_workspaceRoot, "build");
+                    ProcessResult ctest = await ProcessRunner.RunAsync(
+                        "ctest",
+                        $"--test-dir \"{buildDir}\" -C Debug --output-on-failure",
+                        _workspaceRoot,
+                        ct);
+                    var cppResult = new TestRunResult
+                    {
+                        Error = TestRunErrorKind.None,
+                        Kind = TestProjectKind.Cpp,
+                        ProjectPath = _workspaceRoot,
+                        Filter = filter ?? string.Empty,
+                        Total = 1,
+                        Passed = ctest.ExitCode == 0 ? 1 : 0,
+                        Failed = ctest.ExitCode == 0 ? 0 : 1,
+                        OutputTail = ctest.Output,
+                    };
+                    System.Text.RegularExpressions.Match ctestCount =
+                        System.Text.RegularExpressions.Regex.Match(
+                            ctest.Output,
+                            @"out of\s+(\d+)",
+                            System.Text.RegularExpressions.RegexOptions.IgnoreCase);
+                    if (ctestCount.Success)
+                    {
+                        cppResult.Total = int.Parse(ctestCount.Groups[1].Value);
+                        cppResult.Failed = ctest.ExitCode == 0 ? 0 : 1;
+                        cppResult.Passed = cppResult.Total - cppResult.Failed;
+                    }
+                    if (ctest.ExitCode != 0)
+                    {
+                        cppResult.FailedTests.Add(new FailedTestInfo
+                        {
+                            Name = "line_controller_tests",
+                            Message = ctest.Output,
+                        });
+                    }
+                    return cppResult;
+                }
+
+                if (_dotNetTestProject == null)
+                {
+                    return new TestRunResult
+                    {
+                        Error = TestRunErrorKind.NoTestProject,
+                        Kind = TestProjectKind.DotNet,
+                    };
+                }
+
                 string project = string.IsNullOrWhiteSpace(projectPath)
-                    ? _testProject
+                    ? _dotNetTestProject
                     : projectPath!;
                 ProcessResult process = await ProcessRunner.RunAsync(
                     "dotnet",

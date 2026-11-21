@@ -13,6 +13,13 @@
   },
   "fixture": "fixtures/OrderDesk",
   "solution": "OrderDesk.slnx",
+  "reference_answers": "reference-answers.v1.json",
+  "coverage_policy": {
+    "minimum_cases_per_dimension": 2,
+    "require_regular_and_boundary_per_dimension": true,
+    "require_regular_and_boundary_in_suite": true,
+    "require_conditional": true
+  },
   "regression_policy": {
     "outcome_must_not_decrease": true,
     "critical_failures_must_not_increase": true,
