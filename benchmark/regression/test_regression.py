@@ -1,0 +1,280 @@
+from __future__ import annotations
+
+import contextlib
+import io
+import json
+import sys
+import tempfile
+import unittest
+from pathlib import Path
+from types import SimpleNamespace
+from unittest.mock import patch
+
+HERE = Path(__file__).resolve().parent
+sys.path.insert(0, str(HERE))
+
+import regression
+
+
+class RegressionTests(unittest.TestCase):
+    @classmethod
+    def setUpClass(cls) -> None:
+        cls.suite = json.loads(
+            (HERE / "orderdesk.v1.json").read_text(encoding="utf-8")
+        )
+        cls.references = json.loads(
+            (HERE / "reference-answers.v1.json").read_text(encoding="utf-8")
+        )
+
+    def test_suite_is_valid(self) -> None:
+        self.assertEqual(regression.validate_suite(self.suite, HERE), [])
+
+    def test_reference_answers_are_valid(self) -> None:
+        self.assertEqual(
+            regression.validate_reference_answers(self.suite, self.references),
+            [],
+        )
+
+    def test_suite_defaults_to_deepseek_flash(self) -> None:
+        defaults = self.suite["defaults"]
+        self.assertEqual(defaults["agent_model"], "deepseek-flash")
+        self.assertEqual(defaults["judge_model"], "deepseek-flash")
+
+    def test_suite_covers_every_dimension_with_regular_and_boundary_cases(self) -> None:
+        cases = self.suite["cases"]
+        for dimension in regression.DIMENSIONS:
+            dimension_cases = [
+                case for case in cases if case["dimension"] == dimension
+            ]
+            self.assertGreaterEqual(len(dimension_cases), 2, dimension)
+            self.assertTrue(
+                any(case["kind"] == "regular" for case in dimension_cases),
+                dimension,
+            )
+            self.assertTrue(
+                any(case["kind"] == "boundary" for case in dimension_cases),
+                dimension,
+            )
+
+    def test_judge_case_preserves_per_turn_checks(self) -> None:
+        case = next(
+            item for item in self.suite["cases"] if item["id"] == "rgr-if-boundary"
+        )
+        reference = next(
+            item
+            for item in self.references["answers"]
+            if item["case_id"] == "rgr-if-boundary"
+        )
+        judge_case = regression.build_judge_case(self.suite, case, reference)
+
+        self.assertEqual(judge_case["id"], "rgr-if-boundary")
+        self.assertEqual(len(judge_case["turns"]), 2)
+        self.assertIn(
+            "引用 CalculateTotal",
+            judge_case["turns"][0]["checks"]["must"][0],
+        )
+        self.assertNotIn(
+            "表格",
+            " ".join(judge_case["turns"][0]["checks"]["must"]),
+        )
+        self.assertIn("90", judge_case["reference_answer"]["golden_answer"])
+
+    def test_prepare_copies_fixture_and_writes_prompts(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            output = Path(tmp) / "case-workspace"
+            args = SimpleNamespace(
+                suite=str(HERE / "orderdesk.v1.json"),
+                case="rgr-cq-regular",
+                output=str(output),
+            )
+            with contextlib.redirect_stdout(io.StringIO()):
+                self.assertEqual(regression.run_prepare(args), 0)
+
+            self.assertTrue((output / "OrderDesk.slnx").is_file())
+            self.assertTrue(
+                (output / "src" / "OrderDesk.Core" / "PricingPolicy.cs").is_file()
+            )
+            self.assertFalse((output / "src" / "OrderDesk.Core" / "bin").exists())
+            self.assertFalse((output / "src" / "OrderDesk.Core" / "obj").exists())
+            metadata_dir = output.parent / f"{output.name}.benchmark-meta"
+            guide = (metadata_dir / "README.md").read_text(
+                encoding="utf-8"
+            )
+            self.assertIn("deepseek-flash", guide)
+            self.assertIn("修复 CustomerFormatter.FormatName", guide)
+            self.assertIn("Reference Answer", guide)
+            metadata = json.loads(
+                (metadata_dir / "case.json").read_text(encoding="utf-8")
+            )
+            self.assertEqual(metadata["case"]["id"], "rgr-cq-regular")
+            self.assertFalse((output / "_benchmark").exists())
+
+    def test_score_dry_run_uses_flash_model_for_every_archive(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            archives_dir = Path(tmp) / "archives"
+            results_dir = Path(tmp) / "results"
+            archives_dir.mkdir()
+            for case in self.suite["cases"]:
+                (archives_dir / f"{case['id']}.zip").write_bytes(b"placeholder")
+
+            args = SimpleNamespace(
+                suite=str(HERE / "orderdesk.v1.json"),
+                archives=str(archives_dir),
+                results=str(results_dir),
+                model="deepseek-flash",
+                base_url=None,
+                api_key_env="JUDGE_API_KEY",
+                parallel=10,
+                no_json_mode=False,
+                dry_run=True,
+                verbose=False,
+                allow_model_mismatch=False,
+            )
+            completed = SimpleNamespace(returncode=0)
+            with patch.object(
+                regression.subprocess,
+                "run",
+                return_value=completed,
+            ) as run_mock, contextlib.redirect_stdout(io.StringIO()):
+                self.assertEqual(regression.run_score(args), 0)
+
+            self.assertEqual(run_mock.call_count, len(self.suite["cases"]))
+            expected_case_files = {
+                f"{case['id']}.case.json" for case in self.suite["cases"]
+            }
+            actual_case_files: set[str] = set()
+            for call in run_mock.call_args_list:
+                command = call.args[0]
+                self.assertIn("--model", command)
+                self.assertEqual(
+                    command[command.index("--model") + 1],
+                    "deepseek-flash",
+                )
+                case_path = Path(command[command.index("--case-file") + 1])
+                self.assertTrue(case_path.is_file())
+                actual_case_files.add(case_path.name)
+                self.assertIn("--dry-run", command)
+            self.assertEqual(actual_case_files, expected_case_files)
+
+    def test_collect_aggregates_judge_results(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            results_dir = Path(tmp)
+            self._write_results(results_dir, score=4)
+
+            run = regression.collect_results(self.suite, results_dir)
+
+            self.assertEqual(run["schema"], "deepseek-vs.regression-run/1")
+            self.assertEqual(run["summary"]["case_count"], len(self.suite["cases"]))
+            self.assertEqual(run["summary"]["outcome_counts"]["pass"], 16)
+            self.assertEqual(run["summary"]["average_score"], 4.0)
+            self.assertEqual(run["agent_models"], ["deepseek-flash"])
+            self.assertEqual(run["judge_models"], ["deepseek-flash"])
+
+    def test_collect_rejects_model_mismatch(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            results_dir = Path(tmp)
+            self._write_results(results_dir, score=4, agent_model="other-model")
+
+            with self.assertRaises(regression.RegressionError):
+                regression.collect_results(self.suite, results_dir)
+
+    def test_compare_passes_identical_runs(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            results_dir = Path(tmp)
+            self._write_results(results_dir, score=4)
+            run = regression.collect_results(self.suite, results_dir)
+
+            comparison = regression.compare_runs(run, run)
+
+            self.assertFalse(comparison["regression"])
+            self.assertEqual(comparison["failure_count"], 0)
+            self.assertEqual(comparison["summary"]["average_score_delta"], 0.0)
+
+    def test_compare_detects_outcome_and_score_regression(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            baseline_dir = Path(tmp) / "baseline"
+            candidate_dir = Path(tmp) / "candidate"
+            baseline_dir.mkdir()
+            candidate_dir.mkdir()
+            self._write_results(baseline_dir, score=5)
+            self._write_results(candidate_dir, score=3)
+            baseline = regression.collect_results(self.suite, baseline_dir)
+            candidate = regression.collect_results(
+                self.suite,
+                candidate_dir,
+                allow_model_mismatch=True,
+            )
+            candidate["cases"][0]["outcome"] = "fail"
+
+            comparison = regression.compare_runs(baseline, candidate)
+
+            self.assertTrue(comparison["regression"])
+            rules = {item["rule"] for item in comparison["failures"]}
+            self.assertIn("outcome_regression", rules)
+            self.assertIn("average_score_regression", rules)
+
+    def _write_results(
+        self,
+        results_dir: Path,
+        score: int,
+        agent_model: str = "deepseek-flash",
+    ) -> None:
+        for case in self.suite["cases"]:
+            rounds = []
+            for turn in case["turns"]:
+                rounds.append(
+                    {
+                        "turn_index": turn["turn"],
+                        "result": {"critical_failures": []},
+                        "computed": {
+                            "outcome": "pass",
+                            "weighted_score": score,
+                        },
+                    }
+                )
+            result = {
+                "schema": "deepseek-vs.session-judge-run/1",
+                "case_id": case["id"],
+                "manifest": {
+                    "source": {
+                        "model": agent_model,
+                    }
+                },
+                "rounds": rounds,
+                "session_result": {
+                    "critical_failures": [],
+                    "scores": [
+                        {
+                            "dimension": dimension,
+                            "score": score,
+                        }
+                        for dimension in (
+                            "task_completion",
+                            "cross_turn_consistency",
+                            "instruction_following",
+                            "context_continuity",
+                            "tool_handoff_quality",
+                            "safety_permission",
+                            "loop_control",
+                            "efficiency_cache",
+                            "final_communication",
+                        )
+                    ],
+                },
+                "computed": {
+                    "outcome": "pass",
+                    "weighted_score": score,
+                },
+                "judge": {
+                    "model": "deepseek-flash",
+                },
+            }
+            path = results_dir / f"{case['id']}.judge.json"
+            path.write_text(
+                json.dumps(result, ensure_ascii=False),
+                encoding="utf-8",
+            )
+
+
+if __name__ == "__main__":
+    unittest.main()

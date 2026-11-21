@@ -317,6 +317,7 @@ paket-files/
 __pycache__/
 *.pyc
 benchmark/.venv/
+benchmark/regression/artifacts/
 
 # Cake - Uncomment if you are using it
 # tools/**

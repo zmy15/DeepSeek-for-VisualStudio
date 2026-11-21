@@ -16,6 +16,11 @@
 - `judge/judge-prompt.md`：Python 调用 Judge 模型时使用的系统提示词。
 - `judge/README.md`：从运行 Agent 到导出 JSON、再到 Judge 评分的完整流程。
 - `test_judge.py`：不调用模型的 Python 单元测试。
+- `regression/`：带示例项目、多轮提问、baseline/candidate 对比的回归测评。
+- `headless/`：直接调用现有 Agent/API/工具服务、无需 Visual Studio UI 的 runner。
+
+回归测评默认 Agent 与 Judge 均使用 `deepseek-flash`，包含 16 个 case、32 个连续提问，八个现有维度各覆盖一个常规任务和一个条件/边界任务。完整流程见
+[regression/README.md](regression/README.md)。
 
 聊天窗口顶部会话工具栏提供 **“导出会话评测”** 图标。导出 ZIP 默认位于：
 
@@ -30,4 +35,12 @@
 ```powershell
 .\benchmark\.venv\Scripts\python.exe .\benchmark\judge\judge.py session `
   --archive "$env:LOCALAPPDATA\DeepSeekVS\evaluations\<session>.zip"
+```
+
+回归对比命令：
+
+```powershell
+.\benchmark\.venv\Scripts\python.exe .\benchmark\regression\regression.py compare `
+  --baseline .\benchmark\regression\artifacts\baseline\results\regression-run.json `
+  --candidate .\benchmark\regression\artifacts\candidate\results\regression-run.json
 ```
