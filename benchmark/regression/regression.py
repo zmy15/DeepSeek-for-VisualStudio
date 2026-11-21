@@ -467,7 +467,7 @@ def run_prepare(args: argparse.Namespace) -> int:
         fixture_dir,
         output_dir,
         dirs_exist_ok=True,
-        ignore=shutil.ignore_patterns("bin", "obj", ".vs", "TestResults"),
+        ignore=shutil.ignore_patterns("bin", "obj", ".vs", "TestResults", "build"),
     )
     metadata_dir = (
         Path(args.metadata_dir).resolve()

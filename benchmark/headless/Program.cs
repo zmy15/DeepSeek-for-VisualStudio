@@ -719,6 +719,30 @@ namespace BenchmarkRunner
                 if (_isCmake)
                 {
                     string buildDir = Path.Combine(_workspaceRoot, "build");
+                    ProcessResult configure = await ProcessRunner.RunAsync(
+                        "cmake",
+                        $"-S \"{_workspaceRoot}\" -B \"{buildDir}\" -G Ninja -DCMAKE_BUILD_TYPE=Debug",
+                        _workspaceRoot,
+                        ct);
+                    ProcessResult build = configure.ExitCode == 0
+                        ? await ProcessRunner.RunAsync(
+                            "cmake",
+                            $"--build \"{buildDir}\"",
+                            _workspaceRoot,
+                            ct)
+                        : new ProcessResult { ExitCode = 1 };
+                    if (configure.ExitCode != 0 || build.ExitCode != 0)
+                    {
+                        return new TestRunResult
+                        {
+                            Error = TestRunErrorKind.BuildFailed,
+                            Kind = TestProjectKind.Cpp,
+                            ProjectPath = _workspaceRoot,
+                            Filter = filter ?? string.Empty,
+                            OutputTail = configure.Output + Environment.NewLine + build.Output,
+                        };
+                    }
+
                     ProcessResult ctest = await ProcessRunner.RunAsync(
                         "ctest",
                         $"--test-dir \"{buildDir}\" -C Debug --output-on-failure",
@@ -730,7 +754,7 @@ namespace BenchmarkRunner
                         Kind = TestProjectKind.Cpp,
                         ProjectPath = _workspaceRoot,
                         Filter = filter ?? string.Empty,
-                        Total = 1,
+                        Total = 0,
                         Passed = ctest.ExitCode == 0 ? 1 : 0,
                         Failed = ctest.ExitCode == 0 ? 0 : 1,
                         OutputTail = ctest.Output,
@@ -745,6 +769,12 @@ namespace BenchmarkRunner
                         cppResult.Total = int.Parse(ctestCount.Groups[1].Value);
                         cppResult.Failed = ctest.ExitCode == 0 ? 0 : 1;
                         cppResult.Passed = cppResult.Total - cppResult.Failed;
+                    }
+                    else
+                    {
+                        cppResult.Error = TestRunErrorKind.NoResultProduced;
+                        cppResult.Passed = 0;
+                        cppResult.Failed = 0;
                     }
                     if (ctest.ExitCode != 0)
                     {

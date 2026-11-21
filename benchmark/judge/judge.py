@@ -62,6 +62,11 @@ IMPROVEMENT_AREAS = (
 )
 
 IMPROVEMENT_PRIORITIES = ("high", "medium", "low")
+IMPROVEMENT_AREA_ALIASES = {
+    "efficiency": "other",
+    "performance": "other",
+    "verification": "system_prompt",
+}
 
 CONTEXT_TOOLS = {
     "read_file",
@@ -911,6 +916,14 @@ def normalize_judge_result(
         errors.append(f"case_id must be '{case_id}'")
 
     model_outcome = str(raw.get("overall_outcome") or "").lower()
+    model_outcome = {
+        "success": "pass",
+        "succeeded": "pass",
+        "completed": "pass",
+        "warning": "partial",
+        "failed": "fail",
+        "failure": "fail",
+    }.get(model_outcome, model_outcome)
     if model_outcome not in {"pass", "partial", "fail"}:
         errors.append("overall_outcome must be pass, partial, or fail")
 
@@ -1048,6 +1061,7 @@ def normalize_review(value: Any) -> dict[str, Any]:
             errors.append(f"review.improvement_directions[{index}] must be an object")
             continue
         area = str(item.get("area") or "").strip().lower()
+        area = IMPROVEMENT_AREA_ALIASES.get(area, area)
         priority = str(item.get("priority") or "").strip().lower()
         issue = str(item.get("issue") or "").strip()
         recommendation = str(item.get("recommendation") or "").strip()
