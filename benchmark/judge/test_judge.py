@@ -70,6 +70,14 @@ class JudgeTests(unittest.TestCase):
         )
         self.assertEqual(parsed["summary"], "ok")
 
+    def test_extract_json_object_repairs_only_trailing_closers(self) -> None:
+        parsed = judge.extract_json_object(
+            '{"case_id":"cg-001","scores":[],"recommended_actions":["fix"'
+        )
+
+        self.assertEqual(parsed["case_id"], "cg-001")
+        self.assertEqual(parsed["recommended_actions"], ["fix"])
+
     def test_normalize_and_compute_pass(self) -> None:
         raw = self._valid_result(score=5)
         normalized = judge.normalize_judge_result(raw, "cg-001", self.rubric)
@@ -428,6 +436,73 @@ class JudgeTests(unittest.TestCase):
             self.assertEqual(result.returncode, 0, result.stderr)
             self.assertIn(b"Session dry run OK: 2 rounds", result.stdout)
 
+    def test_session_cli_accepts_custom_case_file(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            archive_path = Path(tmp) / "session.zip"
+            case_path = Path(tmp) / "case.json"
+            self._write_session_archive(archive_path)
+            case_path.write_text(
+                json.dumps(
+                    {
+                        "id": "custom-session",
+                        "dimension": "task_completion",
+                        "title": "Custom regression",
+                        "scenario": "Validate the exact regression checks.",
+                        "setup": "Isolated workspace.",
+                        "user_prompt": "Complete both turns.",
+                        "requires_workspace": True,
+                        "checks": {
+                            "must": ["Preserve the boundary behavior."],
+                            "must_not": ["Weaken tests."],
+                        },
+                    }
+                ),
+                encoding="utf-8",
+            )
+            result = subprocess.run(
+                [
+                    sys.executable,
+                    str(HERE / "judge.py"),
+                    "session",
+                    "--archive",
+                    str(archive_path),
+                    "--case-file",
+                    str(case_path),
+                    "--dry-run",
+                ],
+                capture_output=True,
+                check=False,
+            )
+
+            self.assertEqual(result.returncode, 0, result.stderr)
+            self.assertIn(b"Session dry run OK: 2 rounds", result.stdout)
+
+    def test_custom_session_turn_case_uses_only_that_turn_checks(self) -> None:
+        session_case = {
+            "id": "custom-session",
+            "scenario": "Shared scenario.",
+            "checks": {"must": ["Session-level check."]},
+            "turns": [
+                {
+                    "turn": 1,
+                    "user_prompt": "First prompt.",
+                    "checks": {"must": ["First check."]},
+                },
+                {
+                    "turn": 2,
+                    "user_prompt": "Second prompt.",
+                    "checks": {"must": ["Second check."]},
+                },
+            ],
+        }
+
+        mapping = judge.build_turn_case_map(session_case)
+
+        self.assertEqual(mapping[1]["user_prompt"], "First prompt.")
+        self.assertEqual(mapping[1]["checks"]["must"], ["First check."])
+        self.assertEqual(mapping[2]["checks"]["must"], ["Second check."])
+        self.assertNotIn("turns", mapping[1])
+
     def test_session_outcome_preserves_round_critical_failure(self) -> None:
         session_computed = {
             "outcome": "pass",
@@ -456,6 +531,14 @@ class JudgeTests(unittest.TestCase):
         self.assertEqual(computed["outcome"], "fail")
         self.assertEqual(computed["rule"], "round_critical_failure")
         self.assertEqual(computed["round_summary"]["critical_turns"][0]["turn_index"], 1)
+
+    def test_round_assessment_maps_mixed_to_partial(self) -> None:
+        result = judge.normalize_round_assessment(
+            [{"turn_index": 1, "status": "mixed", "summary": "Partly complete."}],
+            [1],
+        )
+
+        self.assertEqual(result[0]["status"], "partial")
 
     def test_session_orchestration_runs_each_round_and_final_synthesis(self) -> None:
         with tempfile.TemporaryDirectory() as tmp:
@@ -498,6 +581,66 @@ class JudgeTests(unittest.TestCase):
             self.assertEqual(len(output["rounds"]), 2)
             self.assertEqual(len(output["session_result"]["round_assessment"]), 2)
             self.assertIn(output["computed"]["outcome"], {"pass", "partial", "fail"})
+
+    def test_session_orchestration_accepts_case_specific_checks(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            archive_path = Path(tmp) / "session.zip"
+            output_path = Path(tmp) / "session-result.json"
+            case_path = Path(tmp) / "custom-case.json"
+            self._write_session_archive(archive_path)
+            case_path.write_text(
+                json.dumps(
+                    {
+                        "id": "custom-session",
+                        "dimension": "task_completion",
+                        "title": "Custom regression",
+                        "scenario": "Validate exact boundary behavior.",
+                        "setup": "Isolated workspace.",
+                        "user_prompt": "Complete both turns.",
+                        "requires_workspace": True,
+                        "checks": {
+                            "must": ["Preserve exact boundary behavior."],
+                            "must_not": ["Weaken tests."],
+                        },
+                    }
+                ),
+                encoding="utf-8",
+            )
+            general_result = self._general_result(4)
+            general_result["case_id"] = "custom-session"
+            session_result = self._session_result()
+            session_result["case_id"] = "custom-session"
+            responses = [
+                (json.dumps(general_result), self._fake_response("turn-1")),
+                (json.dumps(general_result), self._fake_response("turn-2")),
+                (json.dumps(session_result), self._fake_response("session")),
+            ]
+            args = SimpleNamespace(
+                archive=str(archive_path),
+                output=str(output_path),
+                case_file=str(case_path),
+                model="mock-judge",
+                base_url="http://mock",
+                api_key_env="JUDGE_API_KEY",
+                temperature=0.0,
+                timeout=10.0,
+                retries=0,
+                parallel=2,
+                no_json_mode=False,
+                dry_run=False,
+                verbose=False,
+            )
+
+            with patch.object(judge, "call_judge", side_effect=responses), \
+                    patch.object(judge, "resolve_api_key", return_value="test-key"), \
+                    patch.object(judge, "resolve_base_url", return_value="http://mock"), \
+                    patch.object(judge, "resolve_model", return_value="mock-judge"):
+                self.assertEqual(judge.run_session(args), 0)
+
+            output = json.loads(output_path.read_text(encoding="utf-8"))
+            self.assertEqual(output["case_mode"], "session-custom")
+            self.assertEqual(output["case_id"], "custom-session")
+            self.assertEqual(output["rounds"][0]["result"]["case_id"], "custom-session")
 
     def test_call_judge_uses_openai_compatible_chat_endpoint(self) -> None:
         payload = self._valid_result(score=5)

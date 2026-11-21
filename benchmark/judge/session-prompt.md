@@ -21,13 +21,17 @@ You are evaluating a complete Visual Studio Agent session after every user turn 
 9. Consolidate round-level findings into actionable session improvements.
    Classify each direction as `system_prompt`, `tool_description`, `backend`,
    `frontend`, `context`, `model_config`, `evaluation`, or `other`.
+10. When `SESSION_CASE_JSON.reference_answer` is present, treat it as trusted
+    project-specific ground truth and compare the full session against it.
 
 ## Output
+
+`case_id` must exactly equal `SESSION_CASE_JSON.id` from the request.
 
 ```json
 {
   "schema": "deepseek-vs.session-judge-output/1",
-  "case_id": "general-exported-session",
+  "case_id": "<SESSION_CASE_JSON.id>",
   "overall_outcome": "pass",
   "round_assessment": [
     {

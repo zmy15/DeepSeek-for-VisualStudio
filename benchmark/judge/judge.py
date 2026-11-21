@@ -850,7 +850,7 @@ def extract_json_object(text: str) -> dict[str, Any]:
     if start < 0:
         raise JudgeResultError(["model response does not contain a JSON object"])
 
-    depth = 0
+    stack: list[str] = []
     in_string = False
     escaped = False
     for index in range(start, len(candidate)):
@@ -867,10 +867,13 @@ def extract_json_object(text: str) -> dict[str, Any]:
         if char == '"':
             in_string = True
         elif char == "{":
-            depth += 1
+            stack.append("{")
+        elif char == "[":
+            stack.append("[")
         elif char == "}":
-            depth -= 1
-            if depth == 0:
+            if stack and stack[-1] == "{":
+                stack.pop()
+            if not stack:
                 fragment = candidate[start : index + 1]
                 try:
                     value = json.loads(fragment)
@@ -879,6 +882,19 @@ def extract_json_object(text: str) -> dict[str, Any]:
                 if not isinstance(value, dict):
                     raise JudgeResultError(["model JSON root must be an object"])
                 return value
+        elif char == "]":
+            if stack and stack[-1] == "[":
+                stack.pop()
+
+    if stack and not in_string:
+        fragment = candidate[start:]
+        closers = "".join("]" if item == "[" else "}" for item in reversed(stack))
+        try:
+            value = json.loads(fragment + closers)
+        except json.JSONDecodeError:
+            value = None
+        if isinstance(value, dict):
+            return value
 
     raise JudgeResultError(["model response contains an incomplete JSON object"])
 
@@ -954,12 +970,27 @@ def normalize_judge_result(
             errors.append(
                 "missing stage_findings: " + ", ".join(missing_stages)
             )
-    if not isinstance(raw.get("evidence"), list):
-        errors.append("evidence must be an array")
-    if not str(raw.get("summary") or "").strip():
-        errors.append("summary is required")
-    if not isinstance(raw.get("recommended_actions"), list):
-        errors.append("recommended_actions must be an array")
+    evidence_raw = raw.get("evidence")
+    if not isinstance(evidence_raw, list) or not evidence_raw:
+        evidence_raw = [
+            str(item)
+            for score_item in scores_by_id.values()
+            for item in (score_item.get("evidence") or [])
+        ]
+    summary_raw = str(raw.get("summary") or "").strip()
+    if not summary_raw:
+        summary_raw = str((review or {}).get("overall_opinion") or "").strip()
+    actions_raw = raw.get("recommended_actions")
+    if not isinstance(actions_raw, list):
+        actions_raw = [
+            str(item.get("recommendation") or "").strip()
+            for item in (review or {}).get("improvement_directions") or []
+            if str(item.get("recommendation") or "").strip()
+        ]
+    if not isinstance(evidence_raw, list) or not evidence_raw:
+        errors.append("evidence must be a non-empty array or derivable from score evidence")
+    if not summary_raw:
+        errors.append("summary is required or derivable from review.overall_opinion")
 
     if errors:
         raise JudgeResultError(errors)
@@ -981,9 +1012,9 @@ def normalize_judge_result(
         "stage_findings": stage_findings,
         "critical_failures": critical_failures,
         "review": review,
-        "evidence": list(raw.get("evidence") or []),
-        "summary": str(raw.get("summary") or "").strip(),
-        "recommended_actions": list(raw.get("recommended_actions") or []),
+        "evidence": list(evidence_raw),
+        "summary": summary_raw,
+        "recommended_actions": list(actions_raw),
     }
     return normalized
 
@@ -1244,7 +1275,9 @@ def call_judge(
         "model": model,
         "messages": messages,
         "temperature": temperature,
+        "max_tokens": 16384,
     }
+    original_messages = list(messages)
     if json_mode:
         request_options["response_format"] = {"type": "json_object"}
 
@@ -1265,6 +1298,33 @@ def call_judge(
             content = message.content
             if content is None:
                 raise JudgeError("Judge response has no text content")
+            if not str(content).strip():
+                raise JudgeError("Judge response has empty text content")
+            if json_mode:
+                try:
+                    extract_json_object(str(content))
+                except JudgeResultError as exc:
+                    if attempt <= retries:
+                        if verbose:
+                            print(
+                                "Judge returned incomplete JSON; requesting a complete response.",
+                                file=sys.stderr,
+                            )
+                        request_options["messages"] = original_messages + [
+                            {
+                                "role": "user",
+                                "content": (
+                                    "Your previous response was incomplete. "
+                                    "Return the complete JSON object only, with every "
+                                    "required closing bracket and top-level field."
+                                ),
+                            }
+                        ]
+                        continue
+                    raise JudgeError(
+                        "Judge response contains incomplete JSON after retries: "
+                        + "; ".join(exc.errors)
+                    ) from exc
             return str(content), response
         except Exception as exc:
             status = getattr(exc, "status_code", None)
@@ -1382,6 +1442,25 @@ def build_session_messages(
     ]
 
 
+def build_turn_case_map(session_case: dict[str, Any]) -> dict[int, dict[str, Any]]:
+    mapping: dict[int, dict[str, Any]] = {}
+    for index, item in enumerate(session_case.get("turns") or [], start=1):
+        if not isinstance(item, dict):
+            continue
+        try:
+            turn_index = int(item.get("turn") or index)
+        except (TypeError, ValueError):
+            continue
+        turn_case = dict(session_case)
+        turn_case.pop("turns", None)
+        turn_case["user_prompt"] = str(item.get("user_prompt") or "").strip()
+        turn_case["checks"] = item.get("checks") or {}
+        if item.get("expected"):
+            turn_case["expected"] = item["expected"]
+        mapping[turn_index] = turn_case
+    return mapping
+
+
 def normalize_round_assessment(
     value: Any,
     expected_turns: list[int],
@@ -1391,6 +1470,7 @@ def normalize_round_assessment(
     normalized: list[dict[str, Any]] = []
     seen: set[int] = set()
     valid_statuses = {"good", "partial", "bad", "not_applicable"}
+    status_aliases = {"mixed": "partial", "fail": "bad", "failed": "bad"}
     for index, item in enumerate(value):
         if not isinstance(item, dict):
             raise JudgeResultError([f"round_assessment[{index}] must be an object"])
@@ -1406,6 +1486,7 @@ def normalize_round_assessment(
             )
         seen.add(turn_index)
         status = str(item.get("status") or "").strip().lower()
+        status = status_aliases.get(status, status)
         if status not in valid_statuses:
             raise JudgeResultError(
                 [f"round_assessment[{index}] has invalid status '{status}'"]
@@ -1631,7 +1712,6 @@ def run_score(args: argparse.Namespace) -> int:
 def run_session(args: argparse.Namespace) -> int:
     archive_path = Path(args.archive)
     manifest, turns = load_session_archive(archive_path)
-    general_case = read_json(DEFAULT_GENERAL_CASE)
     general_rubric = read_json(DEFAULT_GENERAL_RUBRIC)
     general_prompt = DEFAULT_GENERAL_PROMPT.read_text(encoding="utf-8")
 
@@ -1640,20 +1720,32 @@ def run_session(args: argparse.Namespace) -> int:
         for item in general_rubric.get("dimensions") or []
         if isinstance(item, dict) and item.get("id")
     )
+    custom_case_path = getattr(args, "case_file", None)
+    if custom_case_path:
+        case_doc = read_json(Path(custom_case_path))
+        turn_case = case_doc.get("case", case_doc) if isinstance(case_doc, dict) else None
+        if not isinstance(turn_case, dict):
+            raise JudgeError("Custom session case file must contain a JSON object")
+    else:
+        turn_case = read_json(DEFAULT_GENERAL_CASE)
     errors = validate_case(
-        general_case,
+        turn_case,
         valid_dimensions=general_dimensions,
     ) + validate_rubric(general_rubric, expected_dimensions=None)
     if errors:
-        raise JudgeError("Invalid general turn profile: " + "; ".join(errors))
+        raise JudgeError("Invalid turn profile: " + "; ".join(errors))
+    turn_case_id = str(turn_case.get("id") or "").strip()
+    turn_cases = build_turn_case_map(turn_case) if custom_case_path else {}
 
     if args.dry_run:
         total_chars = 0
         for entry, turn in turns:
+            turn_index = int(entry.get("turn_index") or 1)
+            case_for_turn = turn_cases.get(turn_index, turn_case)
             flow = analyze_turn_flow(turn)
             messages = build_messages(
                 general_prompt,
-                general_case,
+                case_for_turn,
                 general_rubric,
                 turn,
                 flow,
@@ -1690,10 +1782,11 @@ def run_session(args: argparse.Namespace) -> int:
         turn: dict[str, Any],
     ) -> tuple[int, dict[str, Any], dict[str, Any], dict[str, Any]]:
         turn_index = int(entry.get("turn_index") or position)
+        case_for_turn = turn_cases.get(turn_index, turn_case)
         flow = analyze_turn_flow(turn)
         messages = build_messages(
             general_prompt,
-            general_case,
+            case_for_turn,
             general_rubric,
             turn,
             flow,
@@ -1709,12 +1802,27 @@ def run_session(args: argparse.Namespace) -> int:
             json_mode=not args.no_json_mode,
             verbose=args.verbose,
         )
-        normalized = normalize_judge_result(
-            extract_json_object(raw_content),
-            str(general_case["id"]),
-            general_rubric,
-            require_stage_findings=True,
-        )
+        try:
+            raw_result = extract_json_object(raw_content)
+        except JudgeResultError:
+            debug_path = archive_path.with_name(
+                f"{archive_path.stem}.turn-{turn_index:03}.raw.txt"
+            )
+            debug_path.write_text(raw_content, encoding="utf-8")
+            raise
+        try:
+            normalized = normalize_judge_result(
+                raw_result,
+                turn_case_id,
+                general_rubric,
+                require_stage_findings=True,
+            )
+        except JudgeResultError:
+            debug_path = archive_path.with_name(
+                f"{archive_path.stem}.turn-{turn_index:03}.normalize.raw.txt"
+            )
+            debug_path.write_text(raw_content, encoding="utf-8")
+            raise
         computed = compute_final_outcome(normalized, general_rubric)
         usage = response_usage(response) or {}
         round_result = {
@@ -1767,7 +1875,11 @@ def run_session(args: argparse.Namespace) -> int:
     round_results.sort(key=lambda item: item["turn_index"])
     round_outputs.sort(key=lambda item: item["turn_index"])
 
-    session_case = read_json(DEFAULT_GENERAL_SESSION_CASE)
+    session_case = (
+        turn_case
+        if custom_case_path
+        else read_json(DEFAULT_GENERAL_SESSION_CASE)
+    )
     session_rubric = read_json(DEFAULT_SESSION_RUBRIC)
     session_prompt = DEFAULT_SESSION_PROMPT.read_text(encoding="utf-8")
     session_dimensions = tuple(
@@ -1801,13 +1913,25 @@ def run_session(args: argparse.Namespace) -> int:
         json_mode=not args.no_json_mode,
         verbose=args.verbose,
     )
-    raw_session_result = extract_json_object(raw_session_content)
-    session_normalized = normalize_judge_result(
-        raw_session_result,
-        str(session_case["id"]),
-        session_rubric,
-        require_stage_findings=False,
-    )
+    try:
+        raw_session_result = extract_json_object(raw_session_content)
+    except JudgeResultError:
+        debug_path = archive_path.with_name(f"{archive_path.stem}.session.raw.txt")
+        debug_path.write_text(raw_session_content, encoding="utf-8")
+        raise
+    try:
+        session_normalized = normalize_judge_result(
+            raw_session_result,
+            str(session_case["id"]),
+            session_rubric,
+            require_stage_findings=False,
+        )
+    except JudgeResultError:
+        debug_path = archive_path.with_name(
+            f"{archive_path.stem}.session.normalize.raw.txt"
+        )
+        debug_path.write_text(raw_session_content, encoding="utf-8")
+        raise
     turn_indices = [int(item["turn_index"]) for item in round_results]
     session_normalized["round_assessment"] = normalize_round_assessment(
         raw_session_result.get("round_assessment"),
@@ -1823,8 +1947,8 @@ def run_session(args: argparse.Namespace) -> int:
     output = {
         "schema": "deepseek-vs.session-judge-run/1",
         "created_at_utc": datetime.now(timezone.utc).isoformat(),
-        "case_mode": "session",
-        "case_id": session_case["id"],
+        "case_mode": "session-custom" if custom_case_path else "session",
+        "case_id": str(session_case["id"]),
         "archive": str(archive_path.resolve()),
         "manifest": manifest,
         "rounds": round_outputs,
@@ -1956,6 +2080,10 @@ def build_parser() -> argparse.ArgumentParser:
     )
     session_parser.add_argument("--archive", required=True, help="Session evaluation ZIP")
     session_parser.add_argument("--output", help="Session Judge result JSON path")
+    session_parser.add_argument(
+        "--case-file",
+        help="Optional case JSON with turn/session-specific scenario and checks",
+    )
     session_parser.add_argument(
         "--model",
         help="Judge model; defaults to JUDGE_MODEL or deepseek-flash",

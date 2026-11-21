@@ -125,6 +125,16 @@ Judge 不只看最终回答，还会检查：
    每个用户轮次执行一次 turn Judge，最后再执行一次 session Judge。
    逐轮 Judge 默认使用 **10 路并行**；最终 session Judge 会等待全部轮次完成后执行。
 
+   如果固定测评集提供了 case 专属场景和验收点，可传入：
+
+   ```powershell
+   .\benchmark\.venv\Scripts\python.exe .\benchmark\judge\judge.py session `
+     --archive ".\session.zip" `
+     --case-file ".\benchmark\regression\artifacts\baseline\results\rgr-if-regular.case.json"
+   ```
+
+   不传 `--case-file` 时仍使用通用会话 case，行为与之前一致。
+
    如需限制并发：
 
    ```powershell
