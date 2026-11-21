@@ -18,6 +18,7 @@
 - `test_judge.py`：不调用模型的 Python 单元测试。
 - `regression/`：带示例项目、多轮提问、baseline/candidate 对比的回归测评。
 - `headless/`：直接调用现有 Agent/API/工具服务、无需 Visual Studio UI 的 runner。
+- `OPTIMIZATION.md`：测评 token、缓存命中和重复执行的成本优化说明。
 
 回归测评默认 Agent 与 Judge 均使用 `deepseek-flash`，包含 16 个 case、32 个连续提问，八个现有维度各覆盖一个常规任务和一个条件/边界任务。完整流程见
 [regression/README.md](regression/README.md)。

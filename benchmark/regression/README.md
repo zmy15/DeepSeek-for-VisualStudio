@@ -61,6 +61,30 @@ Judge model: deepseek-flash
 每个 case 会生成 `<case-id>.case.json`，并通过现有 session Judge 的
 `--case-file` 传入场景、逐轮验收点和禁止项。Judge 不只看通用流程，还会检查该题的业务边界。
 
+成本优化默认值：
+
+- Agent 和 Judge 使用稳定前缀，逐轮 Judge 默认串行，以便后一轮复用前缀缓存；
+- `score` 默认先用 2 个极小请求预热 turn/session 两类 Judge 前缀；
+- Judge 默认使用 `thinking=low`（`reasoning_effort=low`）；
+- Judge 单次输出限制为 `6144` tokens；
+- 发给 Judge 的 turn/session 证据会去掉重复的 `full_api_history`、`before_turn`
+  和 `turn_messages`，只保留当前轮、工具轨迹、指标和压缩后的 session 轮次；
+- `regression-run.json` 会分别汇总 Agent 与 Judge 的 token 和缓存命中率。
+- Judge 结果按 archive/case/rubric/脚本/模型内容哈希缓存，默认目录为
+  `benchmark/regression/artifacts/judge-cache/`。
+
+如端点不支持额外的 warmup 成本，可关闭：
+
+```powershell
+--no-cache-warmup
+```
+
+需要最低成本时可完全关闭 Judge thinking：
+
+```powershell
+--no-thinking
+```
+
 Judge API 仍使用现有的环境变量：
 
 ```powershell

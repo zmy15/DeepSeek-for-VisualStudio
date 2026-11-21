@@ -5,6 +5,7 @@ from __future__ import annotations
 
 import argparse
 from collections import Counter
+import hashlib
 import json
 import shutil
 import subprocess
@@ -16,6 +17,7 @@ from typing import Any
 HERE = Path(__file__).resolve().parent
 DEFAULT_SUITE = HERE / "orderdesk.v1.json"
 DEFAULT_REFERENCE_ANSWERS = HERE / "reference-answers.v1.json"
+DEFAULT_JUDGE_CACHE = HERE / "artifacts" / "judge-cache"
 JUDGE_SCRIPT = HERE.parent / "judge" / "judge.py"
 
 DEFAULT_AGENT_MODEL = "deepseek-flash"
@@ -522,6 +524,35 @@ def _critical_ids(session_result: dict[str, Any], rounds: list[dict[str, Any]]) 
     return sorted(ids)
 
 
+def _sum_usage(usages: list[dict[str, Any]]) -> dict[str, Any]:
+    prompt = 0
+    completion = 0
+    hit = 0
+    miss = 0
+    for usage in usages:
+        if not isinstance(usage, dict):
+            continue
+        prompt += int(usage.get("prompt_tokens") or 0)
+        completion += int(usage.get("completion_tokens") or 0)
+        raw_hit = int(usage.get("prompt_cache_hit_tokens") or 0)
+        details = usage.get("prompt_tokens_details") or {}
+        details_hit = (
+            int(details.get("cached_tokens") or 0)
+            if isinstance(details, dict)
+            else 0
+        )
+        hit += raw_hit if raw_hit > 0 else details_hit
+        miss += int(usage.get("prompt_cache_miss_tokens") or 0)
+    total_cacheable = hit + miss
+    return {
+        "prompt_tokens": prompt,
+        "completion_tokens": completion,
+        "cache_hit_tokens": hit,
+        "cache_miss_tokens": miss,
+        "cache_hit_rate": round(hit / total_cacheable, 4) if total_cacheable else None,
+    }
+
+
 def extract_case_result(
     suite: dict[str, Any],
     case: dict[str, Any],
@@ -544,6 +575,7 @@ def extract_case_result(
     manifest = result_doc.get("manifest") or {}
     source = manifest.get("source") or {}
     judge = result_doc.get("judge") or {}
+    telemetry = manifest.get("session_telemetry") or {}
 
     round_results = []
     for index, item in enumerate(rounds, start=1):
@@ -577,6 +609,21 @@ def extract_case_result(
         "rounds": round_results,
         "agent_model": source.get("model"),
         "judge_model": judge.get("model"),
+        "agent_usage": {
+            "prompt_tokens": int(telemetry.get("input_tokens") or 0),
+            "completion_tokens": int(telemetry.get("output_tokens") or 0),
+            "cache_hit_tokens": int(telemetry.get("cache_hit_tokens") or 0),
+            "cache_miss_tokens": int(telemetry.get("cache_miss_tokens") or 0),
+            "cache_hit_rate": telemetry.get("cache_hit_rate"),
+            "duration_ms": telemetry.get("duration_ms"),
+        },
+        "judge_usage": _sum_usage(
+            [
+                item.get("judge", {}).get("usage") or {}
+                for item in rounds
+            ]
+            + [judge.get("usage") or {}]
+        ),
         "source_result": str(source_path.resolve()),
     }
 
@@ -612,6 +659,38 @@ def _summary(cases: list[dict[str, Any]]) -> dict[str, Any]:
         for dimension, values in session_dimension_values.items()
         if values
     }
+    agent_prompt = sum(
+        int((case.get("agent_usage") or {}).get("prompt_tokens") or 0)
+        for case in cases
+    )
+    agent_completion = sum(
+        int((case.get("agent_usage") or {}).get("completion_tokens") or 0)
+        for case in cases
+    )
+    agent_hit = sum(
+        int((case.get("agent_usage") or {}).get("cache_hit_tokens") or 0)
+        for case in cases
+    )
+    agent_miss = sum(
+        int((case.get("agent_usage") or {}).get("cache_miss_tokens") or 0)
+        for case in cases
+    )
+    judge_prompt = sum(
+        int((case.get("judge_usage") or {}).get("prompt_tokens") or 0)
+        for case in cases
+    )
+    judge_completion = sum(
+        int((case.get("judge_usage") or {}).get("completion_tokens") or 0)
+        for case in cases
+    )
+    judge_hit = sum(
+        int((case.get("judge_usage") or {}).get("cache_hit_tokens") or 0)
+        for case in cases
+    )
+    judge_miss = sum(
+        int((case.get("judge_usage") or {}).get("cache_miss_tokens") or 0)
+        for case in cases
+    )
 
     return {
         "case_count": len(cases),
@@ -633,6 +712,28 @@ def _summary(cases: list[dict[str, Any]]) -> dict[str, Any]:
         "critical_failure_count": sum(
             len(case.get("critical_failures") or []) for case in cases
         ),
+        "agent_usage": {
+            "prompt_tokens": agent_prompt,
+            "completion_tokens": agent_completion,
+            "cache_hit_tokens": agent_hit,
+            "cache_miss_tokens": agent_miss,
+            "cache_hit_rate": (
+                round(agent_hit / (agent_hit + agent_miss), 4)
+                if agent_hit + agent_miss
+                else None
+            ),
+        },
+        "judge_usage": {
+            "prompt_tokens": judge_prompt,
+            "completion_tokens": judge_completion,
+            "cache_hit_tokens": judge_hit,
+            "cache_miss_tokens": judge_miss,
+            "cache_hit_rate": (
+                round(judge_hit / (judge_hit + judge_miss), 4)
+                if judge_hit + judge_miss
+                else None
+            ),
+        },
     }
 
 
@@ -737,6 +838,15 @@ def _judge_command(
         command.extend(["--base-url", args.base_url])
     if args.api_key_env:
         command.extend(["--api-key-env", args.api_key_env])
+    command.extend(["--max-tokens", str(getattr(args, "max_tokens", 6144))])
+    if not getattr(args, "thinking_enabled", True):
+        command.append("--no-thinking")
+    command.extend(
+        [
+            "--thinking-effort",
+            getattr(args, "thinking_effort", "low"),
+        ]
+    )
     if args.no_json_mode:
         command.append("--no-json-mode")
     if args.verbose:
@@ -744,6 +854,69 @@ def _judge_command(
     if args.dry_run:
         command.append("--dry-run")
     return command
+
+
+def judge_cache_key(
+    archive: Path,
+    case_path: Path,
+    model: str,
+    thinking_enabled: bool = True,
+    thinking_effort: str = "low",
+    max_tokens: int = 6144,
+    temperature: float = 0.0,
+) -> str:
+    digest = hashlib.sha256()
+    for path in (
+        archive,
+        case_path,
+        JUDGE_SCRIPT,
+        HERE.parent / "judge" / "general-prompt.md",
+        HERE.parent / "judge" / "general-rubric.v1.json",
+        HERE.parent / "judge" / "session-prompt.md",
+        HERE.parent / "judge" / "session-rubric.v1.json",
+    ):
+        digest.update(path.name.encode("utf-8"))
+        digest.update(path.read_bytes())
+    digest.update(model.encode("utf-8"))
+    digest.update(str(thinking_enabled).encode("utf-8"))
+    digest.update(str(thinking_effort).encode("utf-8"))
+    digest.update(str(max_tokens).encode("utf-8"))
+    digest.update(str(temperature).encode("utf-8"))
+    return digest.hexdigest()
+
+
+def run_judge_cache_warmup(args: argparse.Namespace) -> None:
+    warmup_command = [
+        sys.executable,
+        str(JUDGE_SCRIPT),
+        "warmup",
+        "--calls",
+        "2",
+        "--model",
+        args.model,
+        "--max-tokens",
+        "32",
+    ]
+    if args.base_url:
+        warmup_command.extend(["--base-url", args.base_url])
+    if args.api_key_env:
+        warmup_command.extend(["--api-key-env", args.api_key_env])
+    if not getattr(args, "thinking_enabled", True):
+        warmup_command.append("--no-thinking")
+    warmup_command.extend(
+        [
+            "--thinking-effort",
+            getattr(args, "thinking_effort", "low"),
+        ]
+    )
+    print("Priming Judge prefix cache...")
+    warmup = subprocess.run(
+        warmup_command,
+        cwd=str(HERE.parent.parent),
+        check=False,
+    )
+    if warmup.returncode != 0:
+        print("Warning: Judge cache warmup failed; continuing with cold requests.")
 
 
 def run_score(args: argparse.Namespace) -> int:
@@ -754,6 +927,9 @@ def run_score(args: argparse.Namespace) -> int:
     archives_dir = Path(args.archives)
     results_dir = Path(args.results)
     results_dir.mkdir(parents=True, exist_ok=True)
+    cache_dir = Path(
+        getattr(args, "judge_cache_dir", None) or DEFAULT_JUDGE_CACHE
+    )
 
     missing = [
         str(case["id"])
@@ -763,6 +939,7 @@ def run_score(args: argparse.Namespace) -> int:
     if missing:
         raise RegressionError("Missing session archives: " + ", ".join(missing))
 
+    warmup_done = False
     for case in suite.get("cases") or []:
         case_id = str(case["id"])
         archive = archives_dir / f"{case_id}.zip"
@@ -775,6 +952,30 @@ def run_score(args: argparse.Namespace) -> int:
             case_path,
             build_judge_case(suite, case, references.get(case_id)),
         )
+        cache_path = None
+        if getattr(args, "judge_cache", True) and not args.dry_run:
+            key = judge_cache_key(
+                archive,
+                case_path,
+                args.model,
+                thinking_enabled=getattr(args, "thinking_enabled", True),
+                thinking_effort=getattr(args, "thinking_effort", "low"),
+                max_tokens=getattr(args, "max_tokens", 6144),
+                temperature=0.0,
+            )
+            cache_path = cache_dir / f"{key}.json"
+            if cache_path.is_file():
+                output.parent.mkdir(parents=True, exist_ok=True)
+                shutil.copyfile(cache_path, output)
+                print(f"Cached {case_id}")
+                continue
+        if (
+            getattr(args, "cache_warmup", True)
+            and not args.dry_run
+            and not warmup_done
+        ):
+            run_judge_cache_warmup(args)
+            warmup_done = True
         print(f"Scoring {case_id}...")
         completed = subprocess.run(
             _judge_command(args, archive, output, case_path),
@@ -785,6 +986,9 @@ def run_score(args: argparse.Namespace) -> int:
             raise RegressionError(
                 f"Judge failed for {case_id} with exit code {completed.returncode}"
             )
+        if cache_path is not None and output.is_file():
+            cache_path.parent.mkdir(parents=True, exist_ok=True)
+            shutil.copyfile(output, cache_path)
 
     if args.dry_run:
         print(f"Session scoring dry run passed for {len(suite['cases'])} cases")
@@ -1169,7 +1373,35 @@ def build_parser() -> argparse.ArgumentParser:
     score_parser.add_argument("--model", default=DEFAULT_JUDGE_MODEL)
     score_parser.add_argument("--base-url")
     score_parser.add_argument("--api-key-env", default="JUDGE_API_KEY")
-    score_parser.add_argument("--parallel", type=int, default=10)
+    score_parser.add_argument("--parallel", type=int, default=1)
+    score_parser.add_argument("--max-tokens", type=int, default=6144)
+    score_parser.add_argument(
+        "--no-thinking",
+        dest="thinking_enabled",
+        action="store_false",
+    )
+    score_parser.add_argument(
+        "--thinking-effort",
+        choices=("low", "high", "max"),
+        default="low",
+    )
+    score_parser.add_argument(
+        "--no-cache-warmup",
+        dest="cache_warmup",
+        action="store_false",
+        help="Skip the two-call Judge prefix warmup",
+    )
+    score_parser.add_argument(
+        "--judge-cache-dir",
+        default=str(DEFAULT_JUDGE_CACHE),
+        help="Content-addressed Judge result cache directory",
+    )
+    score_parser.add_argument(
+        "--no-judge-cache",
+        dest="judge_cache",
+        action="store_false",
+        help="Disable reuse of content-addressed Judge results",
+    )
     score_parser.add_argument("--no-json-mode", action="store_true")
     score_parser.add_argument("--dry-run", action="store_true")
     score_parser.add_argument("--skip-existing", action="store_true")

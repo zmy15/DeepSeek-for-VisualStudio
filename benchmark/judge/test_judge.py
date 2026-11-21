@@ -1,7 +1,9 @@
 from __future__ import annotations
 
+import contextlib
 import json
 import http.server
+import io
 import subprocess
 import sys
 import tempfile
@@ -57,6 +59,45 @@ class JudgeTests(unittest.TestCase):
     def test_default_judge_model_is_deepseek_flash(self) -> None:
         with patch.dict("os.environ", {"JUDGE_MODEL": ""}, clear=False):
             self.assertEqual(judge.resolve_model(None), "deepseek-flash")
+
+    def test_warmup_primes_turn_and_session_prefixes(self) -> None:
+        args = SimpleNamespace(
+            calls=2,
+            model="deepseek-flash",
+            base_url="http://mock",
+            api_key_env="JUDGE_API_KEY",
+            timeout=10.0,
+            retries=0,
+            max_tokens=32,
+            thinking_enabled=True,
+            thinking_effort="low",
+            verbose=False,
+        )
+        with patch.object(
+            judge,
+            "call_judge",
+            return_value=("{}", self._fake_response("warmup")),
+        ) as call_mock, patch.object(
+            judge,
+            "resolve_api_key",
+            return_value="test-key",
+        ), patch.object(
+            judge,
+            "resolve_base_url",
+            return_value="http://mock",
+        ), patch.object(
+            judge,
+            "resolve_model",
+            return_value="deepseek-flash",
+        ), contextlib.redirect_stdout(io.StringIO()):
+            self.assertEqual(judge.run_warmup(args), 0)
+
+        self.assertEqual(call_mock.call_count, 4)
+        systems = {
+            call.kwargs["messages"][0]["content"]
+            for call in call_mock.call_args_list
+        }
+        self.assertEqual(len(systems), 2)
 
     def test_extract_json_object_accepts_fenced_response(self) -> None:
         parsed = judge.extract_json_object(
@@ -352,6 +393,64 @@ class JudgeTests(unittest.TestCase):
         self.assertEqual(flow["cache"]["hit_rate"], 0.8)
         self.assertEqual(flow["cache"]["quality"], "high")
 
+    def test_compact_turn_omits_redundant_histories(self) -> None:
+        turn = {
+            "schema": "deepseek-vs.turn-evaluation/1",
+            "turn": {"assistant": {"content": "done"}},
+            "conversation": {
+                "full_api_history": [{"role": "user", "content": "x" * 100}],
+                "before_turn": [{"role": "user", "content": "before"}],
+                "turn_messages": [{"role": "user", "content": "current"}],
+                "tool_trace": [
+                    {
+                        "tool_name": "read_file",
+                        "arguments": "{}",
+                        "result": "y" * 10000,
+                        "result_classification": "Success",
+                    }
+                ],
+            },
+            "metrics": {"input_tokens": 10},
+        }
+
+        compacted = judge.compact_turn_for_judge(turn)
+
+        self.assertNotIn("full_api_history", compacted["conversation"])
+        self.assertNotIn("before_turn", compacted["conversation"])
+        self.assertNotIn("turn_messages", compacted["conversation"])
+        self.assertLessEqual(len(compacted["conversation"]["tool_trace"][0]["result"]), 5000)
+
+    def test_deepseek_judge_request_defaults_to_low_thinking(self) -> None:
+        options = judge.build_judge_request_options(
+            model="deepseek-flash",
+            messages=[{"role": "user", "content": "test"}],
+            temperature=0.0,
+            max_tokens=6144,
+            json_mode=True,
+            base_url="https://api.deepseek.com",
+            thinking_enabled=True,
+            thinking_effort="low",
+        )
+
+        self.assertEqual(options["max_tokens"], 6144)
+        self.assertEqual(options["response_format"]["type"], "json_object")
+        self.assertEqual(options["extra_body"]["thinking"]["type"], "enabled")
+        self.assertEqual(options["reasoning_effort"], "low")
+
+    def test_deepseek_judge_request_can_disable_thinking(self) -> None:
+        options = judge.build_judge_request_options(
+            model="deepseek-flash",
+            messages=[{"role": "user", "content": "test"}],
+            temperature=0.0,
+            max_tokens=6144,
+            json_mode=True,
+            base_url="https://api.deepseek.com",
+            thinking_enabled=False,
+        )
+
+        self.assertEqual(options["extra_body"]["thinking"]["type"], "disabled")
+        self.assertNotIn("reasoning_effort", options)
+
     def test_general_result_requires_all_flow_stages(self) -> None:
         raw = self._general_result(score=4)
         normalized = judge.normalize_judge_result(
@@ -644,11 +743,12 @@ class JudgeTests(unittest.TestCase):
 
     def test_call_judge_uses_openai_compatible_chat_endpoint(self) -> None:
         payload = self._valid_result(score=5)
+        captured_request: dict = {}
 
         class Handler(http.server.BaseHTTPRequestHandler):
             def do_POST(self) -> None:
                 length = int(self.headers.get("Content-Length", "0"))
-                _ = self.rfile.read(length)
+                captured_request.update(json.loads(self.rfile.read(length)))
                 content = json.dumps(payload, ensure_ascii=False)
                 body = json.dumps(
                     {
@@ -702,6 +802,7 @@ class JudgeTests(unittest.TestCase):
         self.assertEqual(response.id, "chatcmpl-mock")
         self.assertEqual(judge.extract_json_object(content)["case_id"], "cg-001")
         self.assertEqual(judge.response_usage(response)["total_tokens"], 30)
+        self.assertEqual(captured_request["max_tokens"], judge.DEFAULT_JUDGE_MAX_TOKENS)
 
     def _valid_result(self, score: int) -> dict:
         return {

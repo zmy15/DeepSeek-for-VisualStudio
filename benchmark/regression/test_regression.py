@@ -195,6 +195,46 @@ class RegressionTests(unittest.TestCase):
                 self.assertIn("--dry-run", command)
             self.assertEqual(actual_case_files, expected_case_files)
 
+    def test_judge_cache_key_tracks_archive_case_and_model(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            archive = Path(tmp) / "case.zip"
+            case_file = Path(tmp) / "case.json"
+            archive.write_bytes(b"archive-v1")
+            case_file.write_text('{"id":"case"}', encoding="utf-8")
+
+            first = regression.judge_cache_key(
+                archive,
+                case_file,
+                "deepseek-flash",
+            )
+            second = regression.judge_cache_key(
+                archive,
+                case_file,
+                "deepseek-flash",
+            )
+            other_model = regression.judge_cache_key(
+                archive,
+                case_file,
+                "other-model",
+            )
+            other_effort = regression.judge_cache_key(
+                archive,
+                case_file,
+                "deepseek-flash",
+                thinking_effort="high",
+            )
+            archive.write_bytes(b"archive-v2")
+            changed_archive = regression.judge_cache_key(
+                archive,
+                case_file,
+                "deepseek-flash",
+            )
+
+            self.assertEqual(first, second)
+            self.assertNotEqual(first, other_model)
+            self.assertNotEqual(first, other_effort)
+            self.assertNotEqual(first, changed_archive)
+
     def test_collect_aggregates_judge_results(self) -> None:
         with tempfile.TemporaryDirectory() as tmp:
             results_dir = Path(tmp)
@@ -208,6 +248,11 @@ class RegressionTests(unittest.TestCase):
             self.assertEqual(run["summary"]["average_score"], 4.0)
             self.assertEqual(run["agent_models"], ["deepseek-flash"])
             self.assertEqual(run["judge_models"], ["deepseek-flash"])
+            self.assertGreater(run["summary"]["judge_usage"]["prompt_tokens"], 0)
+            self.assertEqual(
+                run["summary"]["judge_usage"]["cache_hit_rate"],
+                0.6,
+            )
 
     def test_collect_rejects_model_mismatch(self) -> None:
         with tempfile.TemporaryDirectory() as tmp:
@@ -269,6 +314,14 @@ class RegressionTests(unittest.TestCase):
                             "outcome": "pass",
                             "weighted_score": score,
                         },
+                        "judge": {
+                            "usage": {
+                                "prompt_tokens": 100,
+                                "completion_tokens": 20,
+                                "prompt_cache_hit_tokens": 60,
+                                "prompt_cache_miss_tokens": 40,
+                            }
+                        },
                     }
                 )
             result = {
@@ -306,6 +359,12 @@ class RegressionTests(unittest.TestCase):
                 },
                 "judge": {
                     "model": "deepseek-flash",
+                    "usage": {
+                        "prompt_tokens": 100,
+                        "completion_tokens": 20,
+                        "prompt_cache_hit_tokens": 60,
+                        "prompt_cache_miss_tokens": 40,
+                    },
                 },
             }
             path = results_dir / f"{case['id']}.judge.json"
