@@ -21,15 +21,19 @@ You are evaluating one exported Visual Studio Agent turn.
 9. Provide actionable improvement directions. Classify each direction as
    `system_prompt`, `tool_description`, `backend`, `frontend`, `context`,
    `model_config`, `evaluation`, or `other`.
+10. When `CASE_JSON.reference_answer` is present, use it as trusted
+    project-specific ground truth for required facts and allowed changes.
 
 ## Output
 
 Return JSON only, with no Markdown fence:
 
+`case_id` must exactly equal `CASE_JSON.id` from the request.
+
 ```json
 {
   "schema": "deepseek-vs.judge-output/1",
-  "case_id": "cg-001",
+  "case_id": "<CASE_JSON.id>",
   "overall_outcome": "pass",
   "scores": [
     {

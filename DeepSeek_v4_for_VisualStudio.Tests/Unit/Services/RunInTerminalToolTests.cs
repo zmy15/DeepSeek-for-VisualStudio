@@ -192,11 +192,19 @@ public class RunInTerminalToolTests
         result.Should().NotContain("terminal output");
     }
 
-    [Fact]
-    public async Task ExecuteAsync_StillBlocksBuildCommands()
+    [Theory]
+    [InlineData("dotnet build MyApp.csproj")]
+    [InlineData("cmake --build out/build/x64-debug")]
+    [InlineData("cmake -S . -B out/build/x64-debug")]
+    [InlineData("cmake --preset x64-debug")]
+    public async Task ExecuteAsync_StillBlocksBuildCommands(string command)
     {
         var tool = new RunInTerminalTool();
-        var args = ParseArgs("{\"command\":\"dotnet build MyApp.csproj\",\"explanation\":\"test\"}");
+        var args = ParseArgs(JsonSerializer.Serialize(new Dictionary<string, string>
+        {
+            ["command"] = command,
+            ["explanation"] = "test",
+        }));
 
         var result = await tool.ExecuteAsync(args, null);
 
@@ -207,6 +215,9 @@ public class RunInTerminalToolTests
     [InlineData("dotnet build MyApp.csproj", true)]
     [InlineData("msbuild My.sln", true)]
     [InlineData("npm run build", true)]
+    [InlineData("cmake --build out/build/x64-debug", true)]
+    [InlineData("cmake -S . -B out/build/x64-debug", true)]
+    [InlineData("cmake --preset x64-debug", true)]
     // 包安装不归 build_solution 管：不再硬拦截，改由审批模式确认。
     [InlineData("pip install numpy", false)]
     [InlineData("pip3 install -r requirements.txt", false)]
@@ -223,7 +234,6 @@ public class RunInTerminalToolTests
     [InlineData("ctest -R Suite.Name", true)]
     [InlineData("& \"D:\\Cmake\\bin\\ctest.exe\" -C Debug", true)]
     [InlineData("cd out/build/x64-debug; ctest --test-dir .", true)]
-    [InlineData("cmake --build out/build/x64-debug", false)]
     [InlineData("Get-Content ctest_failed.log", false)]
     [InlineData("Select-String -Path ctest_full.log -Pattern failed", false)]
     public async Task ExecuteAsync_CtestCommandRedirectsToRunTests(string command, bool expectTestBlock)

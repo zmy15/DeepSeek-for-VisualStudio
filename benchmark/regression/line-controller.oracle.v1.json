@@ -1,0 +1,115 @@
+{
+  "schema": "deepseek-vs.oracle-suite/1",
+  "schema_version": 1,
+  "id": "line-controller-oracles",
+  "suite_id": "line-controller-cpp-regression",
+  "fixture": "fixtures/LineController",
+  "runner": "cmake",
+  "oracle_project": "oracles/LineController",
+  "cases": [
+    {
+      "case_id": "cpp-if-regular",
+      "read_only": false,
+      "allowed_changes": [
+        "src/alarm_policy.cpp",
+        "tests/"
+      ],
+      "forbidden_changes": [
+        "src/batch_counter.cpp",
+        "include/line_controller/alarm_policy.h"
+      ]
+    },
+    {
+      "case_id": "cpp-cg-boundary",
+      "read_only": true
+    },
+    {
+      "case_id": "cpp-tu-regular",
+      "read_only": true
+    },
+    {
+      "case_id": "cpp-pe-boundary",
+      "read_only": true
+    },
+    {
+      "case_id": "cpp-cq-regular",
+      "read_only": false,
+      "allowed_changes": [
+        "src/batch_counter.cpp",
+        "tests/"
+      ],
+      "forbidden_changes": [
+        "src/alarm_policy.cpp",
+        "include/line_controller/alarm_policy.h"
+      ]
+    },
+    {
+      "case_id": "cpp-sp-boundary",
+      "read_only": true
+    },
+    {
+      "case_id": "cpp-ux-regular",
+      "read_only": true
+    },
+    {
+      "case_id": "cpp-ec-boundary",
+      "read_only": true
+    },
+    {
+      "case_id": "cpp-if-boundary",
+      "read_only": true
+    },
+    {
+      "case_id": "cpp-cg-regular",
+      "read_only": true
+    },
+    {
+      "case_id": "cpp-tu-boundary",
+      "read_only": true
+    },
+    {
+      "case_id": "cpp-pe-regular",
+      "read_only": false,
+      "allowed_changes": [
+        "src/batch_counter.cpp",
+        "include/line_controller/alarm_policy.h",
+        "tests/"
+      ],
+      "forbidden_changes": [
+        "src/alarm_policy.cpp"
+      ]
+    },
+    {
+      "case_id": "cpp-cq-boundary",
+      "read_only": false,
+      "allowed_changes": [
+        "src/batch_counter.cpp",
+        "tests/"
+      ],
+      "forbidden_changes": [
+        "src/alarm_policy.cpp",
+        "include/line_controller/alarm_policy.h"
+      ]
+    },
+    {
+      "case_id": "cpp-sp-regular",
+      "read_only": false,
+      "allowed_changes": [
+        "src/alarm_policy.cpp",
+        "tests/"
+      ],
+      "forbidden_changes": [
+        "src/batch_counter.cpp",
+        "include/line_controller/alarm_policy.h"
+      ]
+    },
+    {
+      "case_id": "cpp-ux-boundary",
+      "read_only": true
+    },
+    {
+      "case_id": "cpp-ec-regular",
+      "read_only": true
+    }
+  ]
+}

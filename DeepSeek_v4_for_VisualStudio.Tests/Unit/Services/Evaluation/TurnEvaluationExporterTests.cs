@@ -136,6 +136,86 @@ namespace DeepSeek_v4_for_VisualStudio.Tests.Unit.Services.Evaluation
         }
 
         [Fact]
+        public void Build_ToolTraceIncludesEditAndBuildBeforeAskSummaryHandoff()
+        {
+            var (tree, messages) = BuildConversation();
+            var apiHistory = new List<ChatApiMessage>
+            {
+                new() { Role = "user", Content = "Current user requirement: implement paging and verify" },
+                new()
+                {
+                    Role = "assistant",
+                    Content = "Edit the paging implementation.",
+                    ToolCalls = new List<ToolCall>
+                    {
+                        new()
+                        {
+                            Id = "call_edit",
+                            Function = new ToolCallFunction
+                            {
+                                Name = "replace_string_in_file",
+                                Arguments = "{}",
+                            },
+                        },
+                    },
+                },
+                new()
+                {
+                    Role = "tool",
+                    ToolCallId = "call_edit",
+                    Name = "replace_string_in_file",
+                    Content = "Edit applied.",
+                },
+                new()
+                {
+                    Role = "assistant",
+                    Content = "Build and test.",
+                    ToolCalls = new List<ToolCall>
+                    {
+                        new()
+                        {
+                            Id = "call_tests",
+                            Function = new ToolCallFunction
+                            {
+                                Name = "run_tests",
+                                Arguments = "{}",
+                            },
+                        },
+                    },
+                },
+                new()
+                {
+                    Role = "tool",
+                    ToolCallId = "call_tests",
+                    Name = "run_tests",
+                    Content = "10/10 passed",
+                },
+                new()
+                {
+                    Role = "assistant",
+                    Content = "Implemented paging and verified all 10 tests.",
+                },
+            };
+
+            var document = TurnEvaluationExporter.Build(new TurnEvaluationExporter.Request
+            {
+                Session = new ChatSession { Id = "session-handoff" },
+                Tree = tree,
+                VisibleMessages = messages,
+                AssistantMessageIndex = 1,
+                ApiHistory = apiHistory,
+                Model = "test-model",
+            });
+
+            document.Conversation.ToolTrace.Should().HaveCount(2);
+            document.Conversation.ToolTrace.Select(item => item.ToolName)
+                .Should().Equal("replace_string_in_file", "run_tests");
+            document.Conversation.ToolTrace.Should()
+                .OnlyContain(item => item.ResultClassification == "Success");
+            document.Conversation.ToolTrace[1].Result.Should().Be("10/10 passed");
+        }
+
+        [Fact]
         public void SerializeAndWrite_UseStableSnakeCaseSchemaWithoutBom()
         {
             var (tree, messages) = BuildConversation();

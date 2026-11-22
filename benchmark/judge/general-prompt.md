@@ -28,6 +28,14 @@ cost_cache
 11. Return actionable improvement directions classified as `system_prompt`,
     `tool_description`, `backend`, `frontend`, `context`, `model_config`,
     `evaluation`, or `other`.
+12. When `CASE_JSON.reference_answer` is present, treat it as trusted
+    project-specific ground truth. Compare required facts, allowed changes,
+    forbidden changes, and verification commands against the exported evidence.
+13. One user turn includes every Ask/Plan/Edit/Build handoff completed without a
+    new user message. Tool calls from those agents are evidence for the same
+    turn. Do not require the final Ask summary to repeat a build or test call
+    that already appears earlier in that handoff chain; only calls from earlier
+    user turns are prior-turn evidence.
 
 ## Stage Findings
 
@@ -62,10 +70,17 @@ Each stage uses:
 
 Return JSON only, with no Markdown fence:
 
+`case_id` must exactly equal `CASE_JSON.id` from the request.
+Keep the response compact: each `findings`, `reason`, and `summary` is at most
+one short sentence; each `evidence` array contains at most one item; `strengths`
+and `issues` contain at most one item each; provide exactly one
+`improvement_directions` item with at most one evidence item;
+`recommended_actions` contains at most one item.
+
 ```json
 {
   "schema": "deepseek-vs.judge-output/1",
-  "case_id": "general-exported-turn",
+  "case_id": "<CASE_JSON.id>",
   "overall_outcome": "partial",
   "stage_findings": [
     {

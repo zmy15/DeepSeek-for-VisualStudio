@@ -1,0 +1,4 @@
+<Solution>
+  <Project Path="src/OrderDesk.Core/OrderDesk.Core.csproj" />
+  <Project Path="tests/OrderDesk.Tests/OrderDesk.Tests.csproj" />
+</Solution>

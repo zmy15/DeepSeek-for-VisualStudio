@@ -1,0 +1,10 @@
+{
+  "id": "edit-direct",
+  "description": "Edit Agent starts directly without an Ask/Plan handoff.",
+  "initial_agent": "Edit",
+  "auto_follow_handoffs": true,
+  "max_handoff_depth": 4,
+  "pre_classified_task_size": "Medium",
+  "thinking_enabled": false,
+  "thinking_effort": "high"
+}

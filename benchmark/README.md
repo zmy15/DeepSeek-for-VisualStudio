@@ -16,6 +16,31 @@
 - `judge/judge-prompt.md`：Python 调用 Judge 模型时使用的系统提示词。
 - `judge/README.md`：从运行 Agent 到导出 JSON、再到 Judge 评分的完整流程。
 - `test_judge.py`：不调用模型的 Python 单元测试。
+- `regression/`：带示例项目、多轮提问、baseline/candidate 对比的回归测评。
+- `headless/`：直接调用现有 Agent/API/工具服务、无需 Visual Studio UI 的 runner。
+- `OPTIMIZATION.md`：测评 token、缓存命中和重复执行的成本优化说明。
+
+回归测评默认 Agent 与 Judge 均使用 `deepseek-flash`，包含 16 个 case、32 个连续提问，八个现有维度各覆盖一个常规任务和一个条件/边界任务。完整流程见
+[regression/README.md](regression/README.md)。
+
+新增能力：
+
+- 隐藏 oracle 独立验证与最终工作区快照：[regression/VERIFICATION.md](regression/VERIFICATION.md)
+- 多次运行、pass@k、方差与稳定性报告：[regression/STABILITY.md](regression/STABILITY.md)
+- Harness 配置对照与固定模型比较：[regression/HARNESS_COMPARISON.md](regression/HARNESS_COMPARISON.md)
+- 动态多轮用户模拟与 Runner 文件职责：[headless/README.md](headless/README.md)
+
+动态欠定义意图套件：
+
+```powershell
+.\benchmark\.venv\Scripts\python.exe .\benchmark\regression\regression.py validate `
+  --suite .\benchmark\regression\underspecified.v1.json
+```
+
+C++ 方向另外提供 `LineController` CMake fixture：16 个 case 覆盖八个现有维度，
+每个维度一个 regular 和一个 boundary，
+支持 CMake/Ninja 构建与 CTest，参考答案见
+`regression/line-controller-reference-answers.v1.json`。
 
 聊天窗口顶部会话工具栏提供 **“导出会话评测”** 图标。导出 ZIP 默认位于：
 
@@ -30,4 +55,12 @@
 ```powershell
 .\benchmark\.venv\Scripts\python.exe .\benchmark\judge\judge.py session `
   --archive "$env:LOCALAPPDATA\DeepSeekVS\evaluations\<session>.zip"
+```
+
+回归对比命令：
+
+```powershell
+.\benchmark\.venv\Scripts\python.exe .\benchmark\regression\regression.py compare `
+  --baseline .\benchmark\regression\artifacts\baseline\results\regression-run.json `
+  --candidate .\benchmark\regression\artifacts\candidate\results\regression-run.json
 ```

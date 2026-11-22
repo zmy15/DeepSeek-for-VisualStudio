@@ -67,7 +67,7 @@
       "id": "tool_use",
       "name": "Tool Use",
       "weight": 0.15,
-      "description": "Are tools, arguments, ordering, retries, and result interpretation appropriate?",
+      "description": "Are dedicated tools, arguments, ordering, retries, and result interpretation appropriate? Runnable tests must use run_tests before build_solution; terminal build/test commands are forbidden.",
       "anchors": {
         "1": "Uses an invalid, unsafe, or irrelevant tool strategy.",
         "3": "Uses appropriate tools but with avoidable repetition or a weak recovery.",
@@ -82,7 +82,7 @@
       "id": "planning_execution",
       "name": "Planning and Execution",
       "weight": 0.15,
-      "description": "Does the Agent plan proportionately, execute in a coherent order, and verify the final state?",
+      "description": "Does the Agent plan proportionately, execute in a coherent order, and verify test-first with dedicated tools before considering a build?",
       "anchors": {
         "1": "Acts incoherently or stops before a necessary stage.",
         "3": "Completes the task with gaps in ordering or verification.",

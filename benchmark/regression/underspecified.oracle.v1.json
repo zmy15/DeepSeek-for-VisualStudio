@@ -1,0 +1,20 @@
+{
+  "schema": "deepseek-vs.oracle-suite/1",
+  "schema_version": 1,
+  "id": "orderdesk-underspecified-oracles",
+  "suite_id": "orderdesk-underspecified",
+  "fixture": "fixtures/OrderDesk",
+  "runner": "dotnet",
+  "oracle_project": "oracles/OrderDesk/OrderDesk.Oracle.csproj",
+  "workspace_project": "src/OrderDesk.Core/OrderDesk.Core.csproj",
+  "cases": [
+    {"case_id": "mt-if-regular", "read_only": true},
+    {"case_id": "mt-cg-regular", "read_only": true},
+    {"case_id": "mt-tu-regular", "read_only": true},
+    {"case_id": "mt-pe-boundary", "read_only": true},
+    {"case_id": "mt-cq-regular", "read_only": true},
+    {"case_id": "mt-sp-boundary", "read_only": true},
+    {"case_id": "mt-ux-regular", "read_only": true},
+    {"case_id": "mt-ec-boundary", "read_only": true}
+  ]
+}
