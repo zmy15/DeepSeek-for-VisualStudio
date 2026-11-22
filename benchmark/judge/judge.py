@@ -29,7 +29,7 @@ DEFAULT_GENERAL_PROMPT = HERE / "general-prompt.md"
 DEFAULT_GENERAL_SESSION_CASE = HERE / "general-session-case.json"
 DEFAULT_SESSION_RUBRIC = HERE / "session-rubric.v1.json"
 DEFAULT_SESSION_PROMPT = HERE / "session-prompt.md"
-DEFAULT_JUDGE_MAX_TOKENS = 6144
+DEFAULT_JUDGE_MAX_TOKENS: int | None = None
 DEFAULT_JUDGE_THINKING_EFFORT = "low"
 
 EXPECTED_DIMENSIONS = (
@@ -1343,7 +1343,7 @@ def build_judge_request_options(
     model: str,
     messages: list[dict[str, str]],
     temperature: float,
-    max_tokens: int,
+    max_tokens: int | None,
     json_mode: bool,
     base_url: str,
     thinking_enabled: bool,
@@ -1353,8 +1353,9 @@ def build_judge_request_options(
         "model": model,
         "messages": messages,
         "temperature": temperature,
-        "max_tokens": max_tokens,
     }
+    if max_tokens is not None:
+        options["max_tokens"] = max_tokens
     if json_mode:
         options["response_format"] = {"type": "json_object"}
     if "deepseek.com" in base_url.lower():
@@ -1378,7 +1379,7 @@ def call_judge(
     retries: int,
     json_mode: bool,
     verbose: bool,
-    max_tokens: int = DEFAULT_JUDGE_MAX_TOKENS,
+    max_tokens: int | None = DEFAULT_JUDGE_MAX_TOKENS,
     thinking_enabled: bool = True,
     thinking_effort: str = DEFAULT_JUDGE_THINKING_EFFORT,
 ) -> tuple[str, Any]:
@@ -2314,7 +2315,7 @@ def build_parser() -> argparse.ArgumentParser:
         "--max-tokens",
         type=int,
         default=DEFAULT_JUDGE_MAX_TOKENS,
-        help="Maximum Judge output tokens (default: 6144)",
+        help="Maximum Judge output tokens (default: provider/model limit)",
     )
     score_parser.add_argument(
         "--no-thinking",
@@ -2368,7 +2369,7 @@ def build_parser() -> argparse.ArgumentParser:
         "--max-tokens",
         type=int,
         default=DEFAULT_JUDGE_MAX_TOKENS,
-        help="Maximum Judge output tokens per call (default: 6144)",
+        help="Maximum Judge output tokens per call (default: provider/model limit)",
     )
     session_parser.add_argument(
         "--no-thinking",

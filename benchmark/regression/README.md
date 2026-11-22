@@ -66,7 +66,8 @@ Judge model: deepseek-flash
 - Agent 和 Judge 使用稳定前缀，逐轮 Judge 默认串行，以便后一轮复用前缀缓存；
 - `score` 默认先用 2 个极小请求预热 turn/session 两类 Judge 前缀；
 - Judge 默认使用 `thinking=low`（`reasoning_effort=low`）；
-- Judge 单次输出限制为 `6144` tokens；
+- Judge 默认不发送 `max_tokens`，以模型或端点的最大输出能力为准，避免评分
+  JSON 因固定输出上限被截断；模型或端点自身仍可能限制最大输出；
 - 发给 Judge 的 turn/session 证据会去掉重复的 `full_api_history`、`before_turn`
   和 `turn_messages`，只保留当前轮、工具轨迹、指标和压缩后的 session 轮次；
 - `regression-run.json` 会分别汇总 Agent 与 Judge 的 token 和缓存命中率。

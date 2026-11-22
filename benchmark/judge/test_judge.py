@@ -425,17 +425,30 @@ class JudgeTests(unittest.TestCase):
             model="deepseek-flash",
             messages=[{"role": "user", "content": "test"}],
             temperature=0.0,
-            max_tokens=6144,
+            max_tokens=None,
             json_mode=True,
             base_url="https://api.deepseek.com",
             thinking_enabled=True,
             thinking_effort="low",
         )
 
-        self.assertEqual(options["max_tokens"], 6144)
+        self.assertNotIn("max_tokens", options)
         self.assertEqual(options["response_format"]["type"], "json_object")
         self.assertEqual(options["extra_body"]["thinking"]["type"], "enabled")
         self.assertEqual(options["reasoning_effort"], "low")
+
+    def test_judge_request_can_set_explicit_output_limit(self) -> None:
+        options = judge.build_judge_request_options(
+            model="deepseek-flash",
+            messages=[{"role": "user", "content": "test"}],
+            temperature=0.0,
+            max_tokens=8192,
+            json_mode=True,
+            base_url="https://api.deepseek.com",
+            thinking_enabled=True,
+        )
+
+        self.assertEqual(options["max_tokens"], 8192)
 
     def test_deepseek_judge_request_can_disable_thinking(self) -> None:
         options = judge.build_judge_request_options(
@@ -824,7 +837,7 @@ class JudgeTests(unittest.TestCase):
         self.assertEqual(response.id, "chatcmpl-mock")
         self.assertEqual(judge.extract_json_object(content)["case_id"], "cg-001")
         self.assertEqual(judge.response_usage(response)["total_tokens"], 30)
-        self.assertEqual(captured_request["max_tokens"], judge.DEFAULT_JUDGE_MAX_TOKENS)
+        self.assertNotIn("max_tokens", captured_request)
 
     def _valid_result(self, score: int) -> dict:
         return {

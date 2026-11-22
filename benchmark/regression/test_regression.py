@@ -183,6 +183,26 @@ class RegressionTests(unittest.TestCase):
         self.assertTrue(
             any("must not run build" in item for item in judge_case["checks"]["must"])
         )
+        self.assertEqual(judge_case["regression_suite"]["verification"], [])
+
+    def test_read_only_cases_do_not_require_git_status(self) -> None:
+        for case in self.suite["cases"]:
+            if "read_only" not in set(case.get("tags") or []):
+                continue
+            self.assertNotIn("git status --short", case["verification"], case["id"])
+
+    def test_read_only_policy_filters_legacy_git_status_commands(self) -> None:
+        case = next(
+            item
+            for item in self.cpp_suite["cases"]
+            if item["id"] == "cpp-cg-boundary"
+        )
+        judge_case = regression.build_judge_case(self.cpp_suite, case)
+
+        self.assertNotIn(
+            "git status --short",
+            judge_case["regression_suite"]["verification"],
+        )
 
     def test_prepare_copies_fixture_and_writes_prompts(self) -> None:
         with tempfile.TemporaryDirectory() as tmp:
@@ -269,7 +289,39 @@ class RegressionTests(unittest.TestCase):
                 self.assertTrue(case_path.is_file())
                 actual_case_files.add(case_path.name)
                 self.assertIn("--dry-run", command)
+                self.assertNotIn("--max-tokens", command)
             self.assertEqual(actual_case_files, expected_case_files)
+
+    def test_judge_command_only_sets_explicit_max_tokens(self) -> None:
+        args = SimpleNamespace(
+            model="deepseek-flash",
+            parallel=1,
+            base_url=None,
+            api_key_env=None,
+            thinking_enabled=True,
+            thinking_effort="low",
+            no_json_mode=False,
+            verbose=False,
+            dry_run=False,
+            max_tokens=None,
+        )
+
+        command = regression._judge_command(
+            args,
+            Path("archive.zip"),
+            Path("result.json"),
+            Path("case.json"),
+        )
+        self.assertNotIn("--max-tokens", command)
+
+        args.max_tokens = 8192
+        command = regression._judge_command(
+            args,
+            Path("archive.zip"),
+            Path("result.json"),
+            Path("case.json"),
+        )
+        self.assertEqual(command[command.index("--max-tokens") + 1], "8192")
 
     def test_judge_cache_key_tracks_archive_case_and_model(self) -> None:
         with tempfile.TemporaryDirectory() as tmp:
@@ -299,6 +351,12 @@ class RegressionTests(unittest.TestCase):
                 "deepseek-flash",
                 thinking_effort="high",
             )
+            other_max_tokens = regression.judge_cache_key(
+                archive,
+                case_file,
+                "deepseek-flash",
+                max_tokens=8192,
+            )
             archive.write_bytes(b"archive-v2")
             changed_archive = regression.judge_cache_key(
                 archive,
@@ -309,6 +367,7 @@ class RegressionTests(unittest.TestCase):
             self.assertEqual(first, second)
             self.assertNotEqual(first, other_model)
             self.assertNotEqual(first, other_effort)
+            self.assertNotEqual(first, other_max_tokens)
             self.assertNotEqual(first, changed_archive)
 
     def test_collect_aggregates_judge_results(self) -> None:

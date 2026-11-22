@@ -66,7 +66,8 @@ case 的 reference answer 会随 case JSON 一起传给逐轮和 session Judge�
    `dotnet build/test`、`msbuild`、`vstest`、`ctest` 和
    CMake configure/build。
 5. 终端只用于脚本、依赖安装、环境查询和必要的只读检查。
-6. 只读 case 不运行构建或测试，使用 `git status --short` 证明工作区未修改。
+6. 只读 case 不运行构建或测试；工作区零修改由隐藏工作区快照校验，
+   Agent 不需要先执行 `git status --short` 才能宣称未修改。
 
 工具名在两种执行环境下保持一致，但后端不同：
 

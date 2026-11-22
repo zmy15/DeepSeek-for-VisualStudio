@@ -519,6 +519,110 @@ public class AskAgentTests
         context.ToolHistoryInsertIndex.Should().Be(5);
     }
 
+    [Fact]
+    public void BuildContextAwareMessages_SummaryOnlyHandoff_PreservesEditAndTestEvidence()
+    {
+        var context = new AgentContext
+        {
+            ContextManager = new ConversationContextManager(),
+            IsSummaryOnlyHandoff = true,
+            AllowForwardedMessageReuse = true,
+            ForwardedMessages = new List<ChatApiMessage>
+            {
+                new() { Role = "system", Content = "stable system" },
+                new() { Role = "user", Content = "[本轮用户需求] 实现分页并验证" },
+                new()
+                {
+                    Role = "assistant",
+                    Content = "修改分页实现",
+                    ToolCalls = new List<ToolCall>
+                    {
+                        new()
+                        {
+                            Id = "call_edit",
+                            Type = "function",
+                            Function = new ToolCallFunction
+                            {
+                                Name = "replace_string_in_file",
+                                Arguments = "{}",
+                            },
+                        },
+                    },
+                },
+                new()
+                {
+                    Role = "tool",
+                    ToolCallId = "call_edit",
+                    Name = "replace_string_in_file",
+                    Content = "编辑已应用",
+                },
+                new()
+                {
+                    Role = "assistant",
+                    Content = "运行测试",
+                    ToolCalls = new List<ToolCall>
+                    {
+                        new()
+                        {
+                            Id = "call_tests",
+                            Type = "function",
+                            Function = new ToolCallFunction
+                            {
+                                Name = "run_tests",
+                                Arguments = "{}",
+                            },
+                        },
+                    },
+                },
+                new()
+                {
+                    Role = "tool",
+                    ToolCallId = "call_tests",
+                    Name = "run_tests",
+                    Content = "10/10 passed",
+                },
+                new() { Role = "system", Content = "Build Agent prompt" },
+            },
+        };
+        var agent = new AskAgent(_apiService) { Context = context };
+
+        var method = typeof(BaseAgent).GetMethod(
+            "BuildContextAwareMessages",
+            System.Reflection.BindingFlags.Instance | System.Reflection.BindingFlags.NonPublic,
+            binder: null,
+            new[] { typeof(string), typeof(string), typeof(int), typeof(bool) },
+            modifiers: null);
+
+        var messages = (List<ChatApiMessage>)method!.Invoke(
+            agent,
+            new object[]
+            {
+                "Ask summary prompt",
+                "总结修改和验证结果",
+                int.MaxValue,
+                false,
+            })!;
+
+        messages.Should().Contain(
+            m => m.Role == "tool"
+                && m.ToolCallId == "call_edit"
+                && m.Content == "编辑已应用");
+        messages.Should().Contain(
+            m => m.Role == "tool"
+                && m.ToolCallId == "call_tests"
+                && m.Content == "10/10 passed");
+        messages.Should().NotContain(m => m.Content == "Build Agent prompt");
+
+        int editResult = messages.FindIndex(m => m.ToolCallId == "call_edit");
+        int testResult = messages.FindIndex(m => m.ToolCallId == "call_tests");
+        int summaryUser = messages.FindLastIndex(
+            m => m.Role == "user" && m.Content!.Contains("总结修改和验证结果"));
+
+        editResult.Should().BeGreaterThanOrEqualTo(0);
+        testResult.Should().BeGreaterThan(editResult);
+        summaryUser.Should().BeGreaterThan(testResult);
+    }
+
     /// <summary>
     /// 回归：@agent 显式路由等不经 AskAgent 的路径，其 BuildContextAwareMessages 调用
     /// 不传 persistVolatileToHistory（默认 false）。修复前易变上下文块只临时进入本次请求，

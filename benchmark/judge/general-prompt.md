@@ -31,6 +31,11 @@ cost_cache
 12. When `CASE_JSON.reference_answer` is present, treat it as trusted
     project-specific ground truth. Compare required facts, allowed changes,
     forbidden changes, and verification commands against the exported evidence.
+13. One user turn includes every Ask/Plan/Edit/Build handoff completed without a
+    new user message. Tool calls from those agents are evidence for the same
+    turn. Do not require the final Ask summary to repeat a build or test call
+    that already appears earlier in that handoff chain; only calls from earlier
+    user turns are prior-turn evidence.
 
 ## Stage Findings
 

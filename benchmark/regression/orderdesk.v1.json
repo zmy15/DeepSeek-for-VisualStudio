@@ -128,7 +128,7 @@
           "混淆原价与折后价"
         ]
       },
-      "verification": ["git status --short"]
+      "verification": []
     },
     {
       "id": "rgr-cg-regular",
@@ -177,7 +177,7 @@
           "编造符号或配置"
         ]
       },
-      "verification": ["git status --short"]
+      "verification": []
     },
     {
       "id": "rgr-cg-boundary",
@@ -226,7 +226,7 @@
           "忽略调用顺序"
         ]
       },
-      "verification": ["git status --short"]
+      "verification": []
     },
     {
       "id": "rgr-tu-regular",
@@ -277,7 +277,7 @@
           "修改工作区"
         ]
       },
-      "verification": ["run_tests", "git status --short"]
+      "verification": ["run_tests"]
     },
     {
       "id": "rgr-tu-boundary",
@@ -431,7 +431,7 @@
           "忽略 81 元兼容边界"
         ]
       },
-      "verification": ["git status --short"]
+      "verification": []
     },
     {
       "id": "rgr-cq-regular",
@@ -692,7 +692,7 @@
           "粘贴大段日志"
         ]
       },
-      "verification": ["git status --short"]
+      "verification": []
     },
     {
       "id": "rgr-ux-boundary",
@@ -743,7 +743,7 @@
           "修改代码"
         ]
       },
-      "verification": ["git status --short"]
+      "verification": []
     },
     {
       "id": "rgr-ec-regular",
@@ -848,7 +848,7 @@
           "无关扫描"
         ]
       },
-      "verification": ["git status --short"]
+      "verification": []
     }
   ]
 }

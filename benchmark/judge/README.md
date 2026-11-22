@@ -145,12 +145,20 @@ Judge 不只看最终回答，还会检查：
    ```
 
    Judge 默认使用低档位思考：`thinking=enabled`、`reasoning_effort=low`，
-   单次输出上限为 `6144` tokens。需要更强多步推理时提高档位：
+   并且默认不发送 `max_tokens`，以模型或端点的最大输出能力为准，避免评分
+   JSON 因固定输出上限被截断。需要更强多步推理时提高档位：
 
    ```powershell
    .\benchmark\.venv\Scripts\python.exe .\benchmark\judge\judge.py session `
      --archive ".\session.zip" `
-     --thinking-effort high `
+     --thinking-effort high
+   ```
+
+   如需主动限制单次输出，仍可显式指定：
+
+   ```powershell
+   .\benchmark\.venv\Scripts\python.exe .\benchmark\judge\judge.py session `
+     --archive ".\session.zip" `
      --max-tokens 8192
    ```
 

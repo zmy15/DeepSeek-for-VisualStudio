@@ -261,7 +261,12 @@ def build_parser() -> argparse.ArgumentParser:
     score_parser.add_argument("--base-url")
     score_parser.add_argument("--api-key-env", default="JUDGE_API_KEY")
     score_parser.add_argument("--parallel", type=int, default=1)
-    score_parser.add_argument("--max-tokens", type=int, default=6144)
+    score_parser.add_argument(
+        "--max-tokens",
+        type=int,
+        default=None,
+        help="Maximum Judge output tokens (default: provider/model limit)",
+    )
     score_parser.add_argument(
         "--no-thinking",
         dest="thinking_enabled",

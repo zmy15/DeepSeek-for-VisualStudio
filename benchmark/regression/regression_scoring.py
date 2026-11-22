@@ -52,7 +52,9 @@ def _judge_command(
         command.extend(["--base-url", args.base_url])
     if args.api_key_env:
         command.extend(["--api-key-env", args.api_key_env])
-    command.extend(["--max-tokens", str(getattr(args, "max_tokens", 6144))])
+    max_tokens = getattr(args, "max_tokens", None)
+    if max_tokens is not None:
+        command.extend(["--max-tokens", str(max_tokens)])
     if not getattr(args, "thinking_enabled", True):
         command.append("--no-thinking")
     command.extend(
@@ -76,7 +78,7 @@ def judge_cache_key(
     model: str,
     thinking_enabled: bool = True,
     thinking_effort: str = "low",
-    max_tokens: int = 6144,
+    max_tokens: int | None = None,
     temperature: float = 0.0,
 ) -> str:
     digest = hashlib.sha256()
@@ -94,7 +96,9 @@ def judge_cache_key(
     digest.update(model.encode("utf-8"))
     digest.update(str(thinking_enabled).encode("utf-8"))
     digest.update(str(thinking_effort).encode("utf-8"))
-    digest.update(str(max_tokens).encode("utf-8"))
+    digest.update(
+        ("unlimited" if max_tokens is None else str(max_tokens)).encode("utf-8")
+    )
     digest.update(str(temperature).encode("utf-8"))
     return digest.hexdigest()
 
@@ -208,7 +212,7 @@ def run_score(args: argparse.Namespace) -> int:
                 args.model,
                 thinking_enabled=getattr(args, "thinking_enabled", True),
                 thinking_effort=getattr(args, "thinking_effort", "low"),
-                max_tokens=getattr(args, "max_tokens", 6144),
+                max_tokens=getattr(args, "max_tokens", None),
                 temperature=0.0,
             )
             cache_path = cache_dir / f"{key}.json"

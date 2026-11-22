@@ -25,6 +25,20 @@ from regression_common import (
 )
 
 
+def _case_verification_commands(case: dict[str, Any]) -> list[str]:
+    commands = [str(command) for command in case.get("verification") or []]
+    read_only = "read_only" in {
+        str(tag) for tag in case.get("tags") or []
+    }
+    if read_only:
+        commands = [
+            command
+            for command in commands
+            if command.strip() != "git status --short"
+        ]
+    return commands
+
+
 def find_case(suite: dict[str, Any], case_id: str) -> dict[str, Any]:
     for case in suite.get("cases") or []:
         if str(case.get("id") or "") == case_id:
@@ -120,7 +134,7 @@ def build_judge_case(
             "version": suite.get("version"),
             "kind": case.get("kind"),
             "tags": case.get("tags") or [],
-            "verification": case.get("verification") or [],
+            "verification": _case_verification_commands(case),
         },
     }
 
@@ -137,7 +151,12 @@ def validate_reference_answers(
     if reference_doc.get("suite_id") != suite.get("id"):
         errors.append("reference answers suite_id must match the suite id")
 
-    case_ids = {str(case.get("id")) for case in suite.get("cases") or []}
+    cases_by_id = {
+        str(case.get("id")): case
+        for case in suite.get("cases") or []
+        if isinstance(case, dict) and case.get("id")
+    }
+    case_ids = set(cases_by_id)
     seen: set[str] = set()
     for index, answer in enumerate(reference_doc.get("answers") or []):
         prefix = f"answers[{index}]"
@@ -157,7 +176,11 @@ def validate_reference_answers(
             errors.append(f"{case_id or prefix} has no required_facts")
         if not answer.get("forbidden_changes"):
             errors.append(f"{case_id or prefix} has no forbidden_changes")
-        if not answer.get("verification"):
+        case = cases_by_id.get(case_id) or {}
+        read_only = "read_only" in {
+            str(tag) for tag in case.get("tags") or []
+        }
+        if not answer.get("verification") and not read_only:
             errors.append(f"{case_id or prefix} has no verification commands")
 
     missing = sorted(case_ids - seen)
@@ -316,7 +339,10 @@ def validate_suite(
         checks = case.get("checks") or {}
         if not checks.get("must") and not checks.get("must_not"):
             errors.append(f"{case_id or prefix} has no case-level checks")
-        if not case.get("verification"):
+        read_only = "read_only" in {
+            str(tag) for tag in case.get("tags") or []
+        }
+        if not case.get("verification") and not read_only:
             errors.append(f"{case_id or prefix} has no verification commands")
 
     for dimension in DIMENSIONS:
@@ -411,7 +437,7 @@ def render_case_guide(
             "",
         ]
     )
-    for command in case.get("verification") or []:
+    for command in _case_verification_commands(case):
         lines.extend(["```powershell", str(command), "```", ""])
 
     if reference_answer:

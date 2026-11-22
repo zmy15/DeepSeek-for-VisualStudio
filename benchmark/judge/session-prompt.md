@@ -23,6 +23,9 @@ You are evaluating a complete Visual Studio Agent session after every user turn 
    `frontend`, `context`, `model_config`, `evaluation`, or `other`.
 10. When `SESSION_CASE_JSON.reference_answer` is present, treat it as trusted
     project-specific ground truth and compare the full session against it.
+11. A round contains the complete handoff chain executed under one user
+    message. Attribute earlier Edit/Build tool evidence in that chain to the
+    same round rather than treating the final Ask summary as unsupported.
 
 ## Output
 

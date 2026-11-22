@@ -59,7 +59,7 @@
         "Any file modification",
         "Judging free shipping from the original 100 instead of the discounted 90"
       ],
-      "verification": ["git status --short"]
+      "verification": []
     },
     {
       "case_id": "rgr-cg-regular",
@@ -74,7 +74,7 @@
         "Code changes",
         "Claiming shipping is calculated before discount"
       ],
-      "verification": ["git status --short"]
+      "verification": []
     },
     {
       "case_id": "rgr-cg-boundary",
@@ -90,7 +90,7 @@
         "Code changes",
         "Answering free shipping from original amount 100"
       ],
-      "verification": ["git status --short"]
+      "verification": []
     },
     {
       "case_id": "rgr-tu-regular",
@@ -106,7 +106,7 @@
         "Inventing call sites",
         "Modifying code"
       ],
-      "verification": ["run_tests", "git status --short"]
+      "verification": ["run_tests"]
     },
     {
       "case_id": "rgr-tu-boundary",
@@ -158,7 +158,7 @@
         "Any code modification before confirmation",
         "Rounding each strategy separately without preserving the 81 result"
       ],
-      "verification": ["git status --short"]
+      "verification": []
     },
     {
       "case_id": "rgr-cq-regular",
@@ -250,7 +250,7 @@
         "Code changes",
         "Naming a test that does not exist"
       ],
-      "verification": ["git status --short"]
+      "verification": []
     },
     {
       "case_id": "rgr-ux-boundary",
@@ -267,7 +267,7 @@
         "A fourth or additional investigation step",
         "Claiming measured improvement"
       ],
-      "verification": ["git status --short"]
+      "verification": []
     },
     {
       "case_id": "rgr-ec-regular",
@@ -303,7 +303,7 @@
         "Repeated identical reads",
         "Claiming the original amount is passed to shipping"
       ],
-      "verification": ["git status --short"]
+      "verification": []
     }
   ]
 }
