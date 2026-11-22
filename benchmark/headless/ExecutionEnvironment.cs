@@ -10,8 +10,9 @@ namespace BenchmarkRunner
             {
                 ["agent_runtime"] = "production AgentFactory/BaseAgent",
                 ["api_runtime"] = "production DeepSeekApiService",
-                ["build_service"] = "headless WorkspaceBuildService",
-                ["test_service"] = "headless WorkspaceTestService",
+                ["build_service"] = "headless HeadlessBuildService (dotnet/cmake CLI)",
+                ["test_service"] = "headless HeadlessTestService (dotnet/ctest CLI)",
+                ["visual_studio_environment"] = "not used",
                 ["mcp"] = "disabled",
                 ["web_search"] = "disabled",
                 ["memory"] = "disabled",

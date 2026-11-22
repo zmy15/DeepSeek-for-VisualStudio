@@ -55,6 +55,29 @@ case 的 reference answer 会随 case JSON 一起传给逐轮和 session Judge�
 - 最终答案中的数值必须能从 fixture 代码或测试结果重新计算得到。
 - Judge 发现的 `reference_answer.forbidden_changes` 命中时，即使其他维度分高也不能判为完全正确。
 
+## 工具与验证标准
+
+代码修改类 case 统一采用以下顺序：
+
+1. 有可运行测试项目时，先运行 `run_tests` 建立基线或在修改后完成验证。
+2. `run_tests` 自带构建，测试通过后不再额外调用 `build_solution`。
+3. 只有工作区没有可运行测试项目时，才使用 `build_solution`。
+4. 禁止通过 `run_in_terminal` 执行任何构建或测试命令，包括
+   `dotnet build/test`、`msbuild`、`vstest`、`ctest` 和
+   CMake configure/build。
+5. 终端只用于脚本、依赖安装、环境查询和必要的只读检查。
+6. 只读 case 不运行构建或测试，使用 `git status --short` 证明工作区未修改。
+
+工具名在两种执行环境下保持一致，但后端不同：
+
+- VS 窗口中的 `build_solution` 使用 DTE / VS BuildService 和 VS 安装环境；
+- Headless 中的 `build_solution` 使用 `HeadlessBuildService`，只调用 `dotnet` / `cmake`；
+- VS 窗口中的 `run_tests` 使用产品 TestService；
+- Headless 中的 `run_tests` 使用 `HeadlessTestService`，只调用 `dotnet test/run` 或 `ctest`。
+
+因此基准答案评价的是 Agent 是否选择了正确工具和验证顺序，不应假定
+Headless 与 VS 使用完全相同的构建进程。
+
 ## C++ LineController
 
 C++ 套件使用 [line-controller-reference-answers.v1.json](line-controller-reference-answers.v1.json)

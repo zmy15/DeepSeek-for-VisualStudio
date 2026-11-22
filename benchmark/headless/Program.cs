@@ -28,6 +28,18 @@ namespace BenchmarkRunner
         {
             try
             {
+                if (args.Length > 0
+                    && string.Equals(
+                        args[0],
+                        "--self-test-toolchain",
+                        StringComparison.OrdinalIgnoreCase))
+                {
+                    return await HeadlessToolchainSelfTest.RunAsync(
+                        args.Length > 1
+                            ? args.Skip(1).ToArray()
+                            : Array.Empty<string>());
+                }
+
                 RegisterVisualStudioAssemblyResolver();
                 var options = RunnerOptions.Parse(args);
                 string apiKey = Environment.GetEnvironmentVariable("DEEPSEEK_API_KEY")
@@ -114,8 +126,8 @@ namespace BenchmarkRunner
                 harnessProfile.ThinkingEffort);
             apiService.PrefixCache = new PrefixCacheManager();
 
-            var buildService = new WorkspaceBuildService(caseDir);
-            var testService = new WorkspaceTestService(caseDir);
+            var buildService = new HeadlessBuildService(caseDir);
+            var testService = new HeadlessTestService(caseDir, buildService);
             var builtInTools = new BuiltInToolService(
                 mcpManager: null,
                 webSearchService: null,
@@ -578,9 +590,8 @@ namespace BenchmarkRunner
 
             string[] allowedPrefixes =
             {
-                "dotnet build", "dotnet run", "dotnet test",
-                "cmake -s", "cmake --build", "ctest ",
-                "git status", "git diff",
+                "git status", "git diff", "git log", "git show",
+                "git rev-parse", "git branch --show-current",
                 "get-childitem", "test-path", "rg ", "findstr ", "where.exe ",
             };
             return allowedPrefixes.Any(prefix =>
@@ -728,286 +739,6 @@ namespace BenchmarkRunner
             ZipArchiveEntry entry = archive.CreateEntry(name, CompressionLevel.Optimal);
             using StreamWriter writer = new(entry.Open(), new UTF8Encoding(false));
             writer.Write(content);
-        }
-
-        private sealed class WorkspaceBuildService : IBuildService
-        {
-            private readonly string _workspaceRoot;
-            private readonly bool _isCmake;
-
-            public WorkspaceBuildService(string workspaceRoot)
-            {
-                _workspaceRoot = workspaceRoot;
-                _isCmake = File.Exists(Path.Combine(workspaceRoot, "CMakeLists.txt"));
-            }
-
-            public async Task<string> BuildAsync(
-                string? solutionPath,
-                CancellationToken ct)
-            {
-                string target = solutionPath ?? _workspaceRoot;
-                if (_isCmake
-                    || string.Equals(
-                        Path.GetFileName(target),
-                        "CMakeLists.txt",
-                        StringComparison.OrdinalIgnoreCase))
-                {
-                    string buildDir = Path.Combine(_workspaceRoot, "build");
-                    ProcessResult configure = await ProcessRunner.RunAsync(
-                        "cmake",
-                        $"-S \"{_workspaceRoot}\" -B \"{buildDir}\" -G Ninja -DCMAKE_BUILD_TYPE=Debug",
-                        _workspaceRoot,
-                        ct);
-                    if (configure.ExitCode != 0)
-                    {
-                        return "Error: CMake configure FAILED."
-                            + Environment.NewLine
-                            + configure.Output;
-                    }
-
-                    ProcessResult build = await ProcessRunner.RunAsync(
-                        "cmake",
-                        $"--build \"{buildDir}\"",
-                        _workspaceRoot,
-                        ct);
-                    string cmakeSummary = build.ExitCode == 0
-                        ? "Build succeeded."
-                        : "Error: Build FAILED.";
-                    return cmakeSummary + Environment.NewLine + build.Output;
-                }
-
-                ProcessResult result = await ProcessRunner.RunAsync(
-                    "dotnet",
-                    $"build \"{target}\" --nologo",
-                    _workspaceRoot,
-                    ct);
-                string summary = result.ExitCode == 0
-                    ? "Build succeeded."
-                    : "Error: Build FAILED.";
-                return summary + Environment.NewLine + result.Output;
-            }
-
-            public Task<List<ErrorListItem>> GetSelectedErrorsAsync(CancellationToken ct)
-            {
-                return Task.FromResult(new List<ErrorListItem>());
-            }
-
-            public Task<List<ErrorListItem>> GetAllErrorsAsync(CancellationToken ct)
-            {
-                return Task.FromResult(new List<ErrorListItem>());
-            }
-        }
-
-        private sealed class WorkspaceTestService : ITestService
-        {
-            private readonly string _workspaceRoot;
-            private readonly bool _isCmake;
-            private readonly string? _dotNetTestProject;
-
-            public WorkspaceTestService(string workspaceRoot)
-            {
-                _workspaceRoot = workspaceRoot;
-                _isCmake = File.Exists(Path.Combine(workspaceRoot, "CMakeLists.txt"));
-                _dotNetTestProject = Directory
-                    .GetFiles(workspaceRoot, "*.csproj", SearchOption.AllDirectories)
-                    .FirstOrDefault(path =>
-                        path.Replace('\\', '/').EndsWith(
-                            "tests/OrderDesk.Tests/OrderDesk.Tests.csproj",
-                            StringComparison.OrdinalIgnoreCase));
-            }
-
-            public IReadOnlyList<string> FindTestProjects(string? solutionPath)
-            {
-                return _dotNetTestProject == null
-                    ? Array.Empty<string>()
-                    : new[] { _dotNetTestProject };
-            }
-
-            public IReadOnlyList<string> FindCppTestProjects(string? solutionPath)
-            {
-                return _isCmake
-                    ? new[] { _workspaceRoot }
-                    : Array.Empty<string>();
-            }
-
-            public async Task<TestRunResult> RunTestsAsync(
-                string? solutionPath,
-                string? projectPath,
-                string? filter,
-                string? configuration,
-                CancellationToken ct)
-            {
-                if (_isCmake)
-                {
-                    string buildDir = Path.Combine(_workspaceRoot, "build");
-                    ProcessResult configure = await ProcessRunner.RunAsync(
-                        "cmake",
-                        $"-S \"{_workspaceRoot}\" -B \"{buildDir}\" -G Ninja -DCMAKE_BUILD_TYPE=Debug",
-                        _workspaceRoot,
-                        ct);
-                    ProcessResult build = configure.ExitCode == 0
-                        ? await ProcessRunner.RunAsync(
-                            "cmake",
-                            $"--build \"{buildDir}\"",
-                            _workspaceRoot,
-                            ct)
-                        : new ProcessResult { ExitCode = 1 };
-                    if (configure.ExitCode != 0 || build.ExitCode != 0)
-                    {
-                        return new TestRunResult
-                        {
-                            Error = TestRunErrorKind.BuildFailed,
-                            Kind = TestProjectKind.Cpp,
-                            ProjectPath = _workspaceRoot,
-                            Filter = filter ?? string.Empty,
-                            OutputTail = configure.Output + Environment.NewLine + build.Output,
-                        };
-                    }
-
-                    ProcessResult ctest = await ProcessRunner.RunAsync(
-                        "ctest",
-                        $"--test-dir \"{buildDir}\" -C Debug --output-on-failure",
-                        _workspaceRoot,
-                        ct);
-                    var cppResult = new TestRunResult
-                    {
-                        Error = TestRunErrorKind.None,
-                        Kind = TestProjectKind.Cpp,
-                        ProjectPath = _workspaceRoot,
-                        Filter = filter ?? string.Empty,
-                        Total = 0,
-                        Passed = ctest.ExitCode == 0 ? 1 : 0,
-                        Failed = ctest.ExitCode == 0 ? 0 : 1,
-                        OutputTail = ctest.Output,
-                    };
-                    System.Text.RegularExpressions.Match ctestCount =
-                        System.Text.RegularExpressions.Regex.Match(
-                            ctest.Output,
-                            @"out of\s+(\d+)",
-                            System.Text.RegularExpressions.RegexOptions.IgnoreCase);
-                    if (ctestCount.Success)
-                    {
-                        cppResult.Total = int.Parse(ctestCount.Groups[1].Value);
-                        cppResult.Failed = ctest.ExitCode == 0 ? 0 : 1;
-                        cppResult.Passed = cppResult.Total - cppResult.Failed;
-                    }
-                    else
-                    {
-                        cppResult.Error = TestRunErrorKind.NoResultProduced;
-                        cppResult.Passed = 0;
-                        cppResult.Failed = 0;
-                    }
-                    if (ctest.ExitCode != 0)
-                    {
-                        cppResult.FailedTests.Add(new FailedTestInfo
-                        {
-                            Name = "line_controller_tests",
-                            Message = ctest.Output,
-                        });
-                    }
-                    return cppResult;
-                }
-
-                if (_dotNetTestProject == null)
-                {
-                    return new TestRunResult
-                    {
-                        Error = TestRunErrorKind.NoTestProject,
-                        Kind = TestProjectKind.DotNet,
-                    };
-                }
-
-                string project = string.IsNullOrWhiteSpace(projectPath)
-                    ? _dotNetTestProject
-                    : projectPath!;
-                ProcessResult process = await ProcessRunner.RunAsync(
-                    "dotnet",
-                    $"run --project \"{project}\"",
-                    _workspaceRoot,
-                    ct);
-                var result = new TestRunResult
-                {
-                    Error = TestRunErrorKind.None,
-                    Kind = TestProjectKind.DotNet,
-                    ProjectPath = project,
-                    Filter = filter ?? string.Empty,
-                    Total = 1,
-                    Passed = process.ExitCode == 0 ? 1 : 0,
-                    Failed = process.ExitCode == 0 ? 0 : 1,
-                    OutputTail = process.Output,
-                };
-                System.Text.RegularExpressions.Match countMatch =
-                    System.Text.RegularExpressions.Regex.Match(
-                        process.Output,
-                        @"(\d+)\s*/\s*(\d+)\s+checks passed",
-                        System.Text.RegularExpressions.RegexOptions.IgnoreCase);
-                if (countMatch.Success)
-                {
-                    result.Passed = int.Parse(countMatch.Groups[1].Value);
-                    result.Total = int.Parse(countMatch.Groups[2].Value);
-                    result.Failed = Math.Max(0, result.Total - result.Passed);
-                }
-                if (process.ExitCode != 0)
-                {
-                    result.FailedTests.Add(new FailedTestInfo
-                    {
-                        Name = "OrderDesk.Tests.Program",
-                        Message = process.Output,
-                    });
-                }
-                return result;
-            }
-        }
-
-        private sealed class ProcessResult
-        {
-            public int ExitCode { get; set; }
-
-            public string Output { get; set; } = string.Empty;
-        }
-
-        private static class ProcessRunner
-        {
-            public static async Task<ProcessResult> RunAsync(
-                string fileName,
-                string arguments,
-                string workingDirectory,
-                CancellationToken ct)
-            {
-                var startInfo = new ProcessStartInfo
-                {
-                    FileName = fileName,
-                    Arguments = arguments,
-                    WorkingDirectory = workingDirectory,
-                    UseShellExecute = false,
-                    RedirectStandardOutput = true,
-                    RedirectStandardError = true,
-                    CreateNoWindow = true,
-                };
-
-                using var process = new Process { StartInfo = startInfo };
-                if (!process.Start())
-                    throw new InvalidOperationException($"Failed to start {fileName}.");
-
-                Task<string> stdout = process.StandardOutput.ReadToEndAsync();
-                Task<string> stderr = process.StandardError.ReadToEndAsync();
-                while (!process.HasExited)
-                {
-                    if (ct.IsCancellationRequested)
-                    {
-                        try { process.Kill(); } catch { }
-                        ct.ThrowIfCancellationRequested();
-                    }
-                    await Task.Delay(100);
-                }
-
-                string output = (await stdout) + Environment.NewLine + (await stderr);
-                return new ProcessResult
-                {
-                    ExitCode = process.ExitCode,
-                    Output = output.Trim(),
-                };
-            }
         }
 
         private sealed class RunnerOptions

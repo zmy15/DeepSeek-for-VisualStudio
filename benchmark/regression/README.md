@@ -32,7 +32,7 @@ efficiency_cost
 另外提供 C++/CMake 回归集：
 
 - `fixtures/LineController/`：无第三方依赖的 C++20 示例项目。
-- `line-controller.v1.json`：8 个 case，八个维度各 1 个，覆盖常规与条件边界。
+- `line-controller.v1.json`：16 个 case，八个维度各有 regular 和 boundary。
 - `line-controller-reference-answers.v1.json`：对应参考正确答案。
 
 ```powershell

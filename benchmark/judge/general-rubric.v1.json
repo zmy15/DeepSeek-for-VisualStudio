@@ -94,7 +94,7 @@
       "id": "tool_use",
       "name": "Tool Use",
       "weight": 0.1,
-      "description": "Were tool selection, arguments, ordering, result interpretation, and recovery appropriate?",
+      "description": "Were dedicated tools, arguments, ordering, result interpretation, and recovery appropriate? run_tests must precede build_solution when tests exist; terminal build/test commands are forbidden.",
       "anchors": {
         "1": "Uses invalid, irrelevant, or unsafe tools or arguments.",
         "3": "Uses appropriate tools with avoidable repetition, weak recovery, or imprecise interpretation.",
@@ -119,7 +119,7 @@
       "id": "planning_execution",
       "name": "Planning and Execution",
       "weight": 0.09,
-      "description": "Was the workflow proportionate, coherent, ordered, and verified?",
+      "description": "Was the workflow proportionate, coherent, ordered, and verified test-first with dedicated tools?",
       "anchors": {
         "1": "Executes incoherently or omits essential stages.",
         "3": "Completes the task with sequencing or verification gaps.",

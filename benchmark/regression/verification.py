@@ -477,6 +477,7 @@ def _oracle_commands(
         "-G",
         "Ninja",
         f"-DWORKSPACE_ROOT={workspace}",
+        f"-DORACLE_CASE_ID={case_id}",
     ]
     build = ["cmake", "--build", str(build_dir)]
     executable = next(

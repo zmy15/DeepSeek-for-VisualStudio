@@ -21,8 +21,8 @@ Visual Studio process.
 | Area | Visual Studio | Headless |
 |---|---|---|
 | IDE context | active file, selection, diagnostics, cursor, working set | workspace/solution plus Git context |
-| Build | VS `BuildService` / DTE | `dotnet` or CMake workspace runner |
-| Tests | VS `TestService` | TRX-free workspace test runner |
+| Build | VS `BuildService` / DTE / VS installation environment | `HeadlessBuildService` using `dotnet build` or `cmake` only |
+| Tests | VS `TestService` | `HeadlessTestService` using `dotnet test/run` or `ctest` only |
 | MCP | user-configured MCP servers | disabled |
 | Web search | user setting | disabled |
 | Memory | user/session/repo memory | disabled |

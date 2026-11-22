@@ -37,7 +37,8 @@
   --suite .\benchmark\regression\underspecified.v1.json
 ```
 
-C++ 方向另外提供 `LineController` CMake fixture：8 个 case 覆盖八个现有维度，
+C++ 方向另外提供 `LineController` CMake fixture：16 个 case 覆盖八个现有维度，
+每个维度一个 regular 和一个 boundary，
 支持 CMake/Ninja 构建与 CTest，参考答案见
 `regression/line-controller-reference-answers.v1.json`。
 

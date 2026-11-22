@@ -10,6 +10,9 @@ The runner is split by responsibility:
 | `WorkspaceSnapshot.cs` | Final workspace snapshot embedded in the session ZIP |
 | `UserSimulation.cs` | Dynamic multi-turn user messages for underspecified cases |
 | `ExecutionEnvironment.cs` | Runtime parity inventory recorded in each archive |
+| `HeadlessBuildService.cs` | CLI-only dotnet/CMake build backend |
+| `HeadlessTestService.cs` | CLI-only dotnet/CTest test backend |
+| `ToolchainProcess.cs` | Shared process execution and timeout layer |
 
 Visual Studio and Headless share production Agent, API, prompt, handoff, tool
 registry, context manager, prefix-cache manager, and Git-context code. There
@@ -28,6 +31,19 @@ are still deliberate service substitutions; see [PARITY.md](PARITY.md).
 
 Every new archive contains `workspace/` files. They are used by the hidden
 oracle verifier; the transcript remains under `manifest.json` and `turns/`.
+
+The Headless build and test implementations do not access DTE, VS Shell,
+VS Error List, `BuildService`, or `TestService`. They invoke `dotnet`,
+`cmake`, and `ctest` directly. The tool names exposed to the Agent remain
+`build_solution` and `run_tests`, but their backend is CLI-only in Headless.
+
+Self-check without an API key:
+
+```powershell
+.\benchmark\headless\bin\Debug\net472\BenchmarkRunner.exe `
+  --self-test-toolchain `
+  --case-dir .\benchmark\regression\artifacts\baseline\rgr-if-regular
+```
 
 ## Dynamic multi-turn cases
 

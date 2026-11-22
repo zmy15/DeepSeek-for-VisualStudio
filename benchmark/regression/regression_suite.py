@@ -46,6 +46,7 @@ def build_judge_case(
     ]
     prompts: list[str] = []
     turns: list[dict[str, Any]] = []
+    read_only = "read_only" in {str(tag) for tag in case.get("tags") or []}
     for index, turn in enumerate(case.get("turns") or [], start=1):
         turn_number = int(turn.get("turn") or index)
         prompt = str(turn.get("prompt") or "").strip()
@@ -66,6 +67,22 @@ def build_judge_case(
             }
         )
 
+    if read_only:
+        must.append("Read-only tasks must not run build or test commands.")
+        must_not.append(
+            "Run run_tests, build_solution, or terminal build/test commands "
+            "for a read-only task."
+        )
+    else:
+        must.append(
+            "When runnable tests exist, run run_tests first after code changes; "
+            "use build_solution only when no test project is available."
+        )
+        must_not.append(
+            "Use run_in_terminal for build or test commands, including dotnet "
+            "build/test, msbuild, vstest, ctest, or cmake configure/build."
+        )
+
     return {
         "id": str(case["id"]),
         "dimension": "task_completion",
@@ -73,7 +90,8 @@ def build_judge_case(
         "scenario": case.get("scenario"),
         "setup": (
             f"Use the isolated {suite.get('fixture')} workspace. "
-            f"Verification commands: {', '.join(case.get('verification') or [])}"
+            "Independent oracle/reference verification is listed in regression_suite. "
+            "Agent verification must follow verification_policy."
         ),
         "user_prompt": "\n\n".join(prompts),
         "requires_workspace": True,
@@ -82,6 +100,19 @@ def build_judge_case(
             "must_not": must_not,
         },
         "turns": turns,
+        "verification_policy": {
+            "test_first": not read_only,
+            "preferred_test_tool": "run_tests",
+            "fallback_build_tool": "build_solution",
+            "test_pass_condition": "total > 0 and failed = 0",
+            "terminal_build_or_test": "forbidden",
+            "terminal_allowed_uses": [
+                "read-only inspection",
+                "scripts",
+                "dependency installation",
+                "environment queries",
+            ],
+        },
         "user_simulation": case.get("user_simulation"),
         "reference_answer": reference_answer,
         "regression_suite": {
@@ -369,7 +400,17 @@ def render_case_guide(
     lines.extend(
         f"- {item}" for item in (case.get("checks") or {}).get("must_not") or []
     )
-    lines.extend(["", "## Verification", ""])
+    lines.extend(
+        [
+            "",
+            "## Oracle Verification Reference",
+            "",
+            "The Agent must prefer `run_tests` over building when runnable tests exist.",
+            "Use `build_solution` only when no test project exists.",
+            "Never run build or test commands through `run_in_terminal`.",
+            "",
+        ]
+    )
     for command in case.get("verification") or []:
         lines.extend(["```powershell", str(command), "```", ""])
 

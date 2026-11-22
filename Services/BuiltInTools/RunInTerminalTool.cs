@@ -1403,9 +1403,16 @@ namespace DeepSeek_v4_for_VisualStudio.Services.BuiltInTools
                 normalized.Contains(" g++ ", StringComparison.OrdinalIgnoreCase))
                 return true;
 
-            //  cmake --build 不拦截：build_solution 对 CMake 项目底层用的就是 cmake --build，
-            // 且 build_solution 不支持 --target 参数，拦截会导致 AI 无法构建测试目标等非默认 target。
-            // 其余原生构建工具（make/ninja）仍拦截，引导使用 build_solution。
+            // CMake configure/build must also go through build_solution. The dedicated
+            // build service internally invokes the correct toolchain environment.
+            if (normalized.Contains("cmake --build", StringComparison.OrdinalIgnoreCase) ||
+                System.Text.RegularExpressions.Regex.IsMatch(
+                    normalized,
+                    @"(^|[\s""/\\;&|])cmake(\.exe)?""?.{0,160}(?:-S|-B|--preset|--build)(?=\s|$)",
+                    System.Text.RegularExpressions.RegexOptions.IgnoreCase))
+                return true;
+
+            // Other native build tools are blocked and redirected to build_solution.
             if (normalized.StartsWith("make ", StringComparison.OrdinalIgnoreCase) ||
                 normalized.StartsWith("ninja", StringComparison.OrdinalIgnoreCase) ||
                 normalized.Contains(" make ", StringComparison.OrdinalIgnoreCase))

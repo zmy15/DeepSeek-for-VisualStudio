@@ -55,6 +55,18 @@ class RegressionTests(unittest.TestCase):
             ),
             [],
         )
+        oracle_path = HERE / "line-controller.oracle.v1.json"
+        oracle_doc = json.loads(oracle_path.read_text(encoding="utf-8"))
+        import verification
+
+        self.assertEqual(
+            verification.validate_oracle_suite(
+                oracle_doc,
+                self.cpp_suite,
+                HERE,
+            ),
+            [],
+        )
 
     def test_underspecified_suite_is_valid_with_dynamic_user_simulation(self) -> None:
         suite = json.loads(
@@ -135,6 +147,42 @@ class RegressionTests(unittest.TestCase):
             " ".join(judge_case["turns"][0]["checks"]["must"]),
         )
         self.assertIn("90", judge_case["reference_answer"]["golden_answer"])
+
+    def test_judge_case_uses_test_first_dedicated_tool_policy(self) -> None:
+        case = next(
+            item for item in self.suite["cases"] if item["id"] == "rgr-cq-regular"
+        )
+        judge_case = regression.build_judge_case(self.suite, case)
+
+        self.assertTrue(judge_case["verification_policy"]["test_first"])
+        self.assertEqual(
+            judge_case["verification_policy"]["preferred_test_tool"],
+            "run_tests",
+        )
+        self.assertEqual(
+            judge_case["verification_policy"]["terminal_build_or_test"],
+            "forbidden",
+        )
+        self.assertTrue(
+            any("run_tests first" in item for item in judge_case["checks"]["must"])
+        )
+        self.assertTrue(
+            any(
+                "run_in_terminal" in item
+                for item in judge_case["checks"]["must_not"]
+            )
+        )
+
+    def test_read_only_judge_case_forbids_tests_and_builds(self) -> None:
+        case = next(
+            item for item in self.suite["cases"] if item["id"] == "rgr-cg-regular"
+        )
+        judge_case = regression.build_judge_case(self.suite, case)
+
+        self.assertFalse(judge_case["verification_policy"]["test_first"])
+        self.assertTrue(
+            any("must not run build" in item for item in judge_case["checks"]["must"])
+        )
 
     def test_prepare_copies_fixture_and_writes_prompts(self) -> None:
         with tempfile.TemporaryDirectory() as tmp:
