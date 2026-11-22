@@ -1,6 +1,7 @@
 using DeepSeek_v4_for_VisualStudio.Models;
 using DeepSeek_v4_for_VisualStudio.Services;
 using DeepSeek_v4_for_VisualStudio.Services.Agents;
+using DeepSeek_v4_for_VisualStudio.Services.IdeContext;
 using System;
 using System.Collections.Generic;
 using System.Diagnostics;
@@ -97,13 +98,21 @@ namespace BenchmarkRunner
             string caseId = GetRequiredString(caseElement, "id");
             JsonElement turns = caseElement.GetProperty("turns");
             string solutionPath = FindSolution(caseDir);
+            HarnessProfile harnessProfile = HarnessProfile.Load(options.HarnessProfilePath);
+            UserSimulationConfig userSimulation = UserSimulationConfig.FromCase(
+                caseElement,
+                options.MaxTurns);
+            WorkspaceSnapshot initialSnapshot = WorkspaceSnapshot.Capture(caseDir);
 
             using var apiService = new DeepSeekApiService(
                 apiKey,
                 options.Model,
                 requestTimeoutSeconds: 300,
                 baseUrl: options.BaseUrl);
-            apiService.ConfigureThinking(false);
+            apiService.ConfigureThinking(
+                harnessProfile.ThinkingEnabled,
+                harnessProfile.ThinkingEffort);
+            apiService.PrefixCache = new PrefixCacheManager();
 
             var buildService = new WorkspaceBuildService(caseDir);
             var testService = new WorkspaceTestService(caseDir);
@@ -117,20 +126,34 @@ namespace BenchmarkRunner
             {
                 ApiService = apiService,
             };
+            builtInTools.CurrentSolutionPath = solutionPath;
+            builtInTools.WebSearchEnabled = false;
 
             using var factory = new AgentFactory(apiService, builtInTools);
             BindAgentCallbacks(factory, caseDir);
+            using UserSimulator? userSimulator = userSimulation.Enabled
+                ? new UserSimulator(
+                    apiKey,
+                    options.UserSimModel ?? options.Model,
+                    options.BaseUrl)
+                : null;
 
             var contextManager = new ConversationContextManager
             {
                 CurrentModel = options.Model,
             };
             contextManager.SetSolutionPath(solutionPath);
-            contextManager.SetIdeContext(
+            var gitContextProvider = new GitContextProvider();
+            string? gitContext = gitContextProvider.BuildPromptBlock(
+                gitContextProvider.Capture(solutionPath));
+            string ideContext =
                 "[Headless benchmark]\n"
                 + $"Workspace: {caseDir}\n"
                 + $"Solution: {solutionPath}\n"
-                + "The filesystem is the source of truth. Use tools to inspect and modify it.");
+                + "The filesystem is the source of truth. Use tools to inspect and modify it.";
+            if (!string.IsNullOrWhiteSpace(gitContext))
+                ideContext += Environment.NewLine + Environment.NewLine + gitContext;
+            contextManager.SetIdeContext(ideContext);
 
             var turnDocuments = new List<Dictionary<string, object?>>();
             var manifestTurns = new List<Dictionary<string, object?>>();
@@ -138,15 +161,49 @@ namespace BenchmarkRunner
             long totalDurationMs = 0;
             AgentTaskPlan? carriedPlan = null;
             var sessionStarted = Stopwatch.StartNew();
+            List<(int Turn, string Prompt)> fixedTurns = turns
+                .EnumerateArray()
+                .Select((turnElement, index) => (
+                    turnElement.TryGetProperty("turn", out JsonElement turnNumber)
+                        ? turnNumber.GetInt32()
+                        : index + 1,
+                    turnElement.TryGetProperty("user_prompt", out _)
+                        ? GetRequiredString(turnElement, "user_prompt")
+                        : GetRequiredString(turnElement, "prompt")))
+                .ToList();
+            var simulatedHistory = new List<(string User, string Assistant)>();
+            int maxTurns = userSimulation.Enabled
+                ? userSimulation.MaxTurns
+                : fixedTurns.Count;
 
-            foreach (JsonElement turnElement in turns.EnumerateArray())
+            for (int turnPosition = 0; turnPosition < maxTurns; turnPosition++)
             {
-                int turnIndex = turnElement.TryGetProperty("turn", out JsonElement turnNumber)
-                    ? turnNumber.GetInt32()
-                    : turnDocuments.Count + 1;
-                string prompt = turnElement.TryGetProperty("user_prompt", out _)
-                    ? GetRequiredString(turnElement, "user_prompt")
-                    : GetRequiredString(turnElement, "prompt");
+                int turnIndex = userSimulation.Enabled
+                    ? turnPosition + 1
+                    : fixedTurns[turnPosition].Turn;
+                string? prompt;
+                if (userSimulation.Enabled && turnPosition > 0)
+                {
+                    if (userSimulator == null)
+                        throw new InvalidOperationException("User simulator was not initialized.");
+                    prompt = await userSimulator.NextMessageAsync(
+                        userSimulation,
+                        simulatedHistory,
+                        CancellationToken.None);
+                    if (string.IsNullOrWhiteSpace(prompt))
+                        break;
+                }
+                else
+                {
+                    prompt = turnPosition < fixedTurns.Count
+                        ? fixedTurns[turnPosition].Prompt
+                        : null;
+                }
+
+                if (string.IsNullOrWhiteSpace(prompt))
+                    break;
+                string turnPrompt = prompt!;
+
                 List<ChatApiMessage> beforeTurn = contextManager.GetFullContext();
                 long promptBefore = apiService.TotalPromptTokens;
                 long completionBefore = apiService.TotalCompletionTokens;
@@ -154,32 +211,41 @@ namespace BenchmarkRunner
                 long missBefore = apiService.TotalCacheMissTokens;
                 var turnStopwatch = Stopwatch.StartNew();
 
-                contextManager.AddUserMessage(prompt);
+                contextManager.AddUserMessage(turnPrompt);
                 var context = new AgentContext
                 {
                     SolutionPath = solutionPath,
                     ContextManager = contextManager,
-                    CurrentUserContent = prompt,
+                    CurrentUserContent = turnPrompt,
                     ConversationHistory = contextManager.GetConversationHistory(),
                     CancellationToken = CancellationToken.None,
-                    PreClassifiedTaskSize = TaskSize.Small,
+                    PreClassifiedTaskSize = harnessProfile.PreClassifiedTaskSize,
                     ActivePlan = carriedPlan,
                     ReadFileAsync = ReadFileAsync,
                 };
 
-                BaseAgent activeAgent = factory.GetAgent(AgentType.Ask);
+                BaseAgent activeAgent = factory.GetAgent(harnessProfile.InitialAgent);
                 activeAgent.Context = context;
-                Console.WriteLine($"[{caseId}] turn {turnIndex}: {prompt}");
-                AgentResult result = await activeAgent.ExecuteAsync(prompt, context);
-                result = await FollowAutoHandoffsAsync(
-                    activeAgent,
-                    result,
-                    context,
-                    factory,
-                    maxDepth: 10);
+                Console.WriteLine($"[{caseId}] turn {turnIndex}: {turnPrompt}");
+                AgentResult result = await activeAgent.ExecuteAsync(turnPrompt, context);
+                if (harnessProfile.AutoFollowHandoffs)
+                {
+                    result = await FollowAutoHandoffsAsync(
+                        activeAgent,
+                        result,
+                        context,
+                        factory,
+                        maxDepth: harnessProfile.MaxHandoffDepth);
+                }
+                else if (result.Handoff != null)
+                {
+                    Console.WriteLine(
+                        $"  handoff paused by profile: {result.Handoff.TargetAgent}");
+                }
 
                 turnStopwatch.Stop();
                 carriedPlan = result.Plan ?? context.ActivePlan;
+                simulatedHistory.Add((turnPrompt, result.Content ?? string.Empty));
                 List<ChatApiMessage> afterTurn = contextManager.GetFullContext();
                 List<ChatApiMessage> turnMessages = afterTurn
                     .Skip(beforeTurn.Count)
@@ -198,7 +264,7 @@ namespace BenchmarkRunner
                     ["turn_index"] = turnIndex,
                     ["turn_id"] = $"headless-{caseId}-{turnIndex:000}",
                     ["file"] = turnFileName,
-                    ["user_prompt"] = prompt,
+                    ["user_prompt"] = turnPrompt,
                 });
 
                 turnDocuments.Add(new Dictionary<string, object?>
@@ -206,13 +272,18 @@ namespace BenchmarkRunner
                     ["schema"] = "deepseek-vs.turn-evaluation/1",
                     ["export_id"] = $"headless-{caseId}-{turnIndex:000}",
                     ["exported_at_utc"] = DateTime.UtcNow.ToString("O"),
-                    ["source"] = BuildSource(caseDir, solutionPath, options.Model),
+                    ["source"] = BuildSource(
+                        caseDir,
+                        solutionPath,
+                        options.Model,
+                        harnessProfile),
                     ["turn"] = new Dictionary<string, object?>
                     {
                         ["turn_index"] = turnIndex,
+                        ["user_simulated"] = userSimulation.Enabled && turnIndex > 1,
                         ["user"] = new Dictionary<string, object?>
                         {
-                            ["content"] = prompt,
+                            ["content"] = turnPrompt,
                             ["attachments"] = Array.Empty<object>(),
                         },
                         ["assistant"] = new Dictionary<string, object?>
@@ -276,13 +347,43 @@ namespace BenchmarkRunner
             }
 
             sessionStarted.Stop();
+            WorkspaceSnapshot finalSnapshot = WorkspaceSnapshot.Capture(caseDir);
+            WorkspaceSnapshotDiff workspaceDiff = initialSnapshot.Diff(finalSnapshot);
             var manifest = new Dictionary<string, object?>
             {
                 ["schema"] = "deepseek-vs.session-evaluation/1",
                 ["export_id"] = $"headless-{caseId}-{DateTime.UtcNow:yyyyMMdd-HHmmss}",
                 ["exported_at_utc"] = DateTime.UtcNow.ToString("O"),
                 ["turn_count"] = turnDocuments.Count,
-                ["source"] = BuildSource(caseDir, solutionPath, options.Model),
+                ["source"] = BuildSource(
+                    caseDir,
+                    solutionPath,
+                    options.Model,
+                    harnessProfile),
+                ["harness_profile"] = new
+                {
+                    id = harnessProfile.Id,
+                    description = harnessProfile.Description,
+                    initial_agent = harnessProfile.InitialAgent.ToString(),
+                    auto_follow_handoffs = harnessProfile.AutoFollowHandoffs,
+                    max_handoff_depth = harnessProfile.MaxHandoffDepth,
+                    pre_classified_task_size = harnessProfile.PreClassifiedTaskSize.ToString(),
+                },
+                ["user_simulation"] = userSimulation.Enabled
+                    ? new
+                    {
+                        enabled = true,
+                        model = userSimulator?.Model,
+                        max_turns = userSimulation.MaxTurns,
+                    }
+                    : null,
+                ["workspace_snapshot"] = new
+                {
+                    schema = "deepseek-vs.workspace-snapshot/1",
+                    file_count = finalSnapshot.FileCount,
+                    changes = workspaceDiff,
+                },
+                ["execution_environment"] = ExecutionEnvironment.Describe(harnessProfile),
                 ["turns"] = manifestTurns,
                 ["session_telemetry"] = new Dictionary<string, object?>
                 {
@@ -296,11 +397,26 @@ namespace BenchmarkRunner
                     ["cache_miss_tokens"] = apiService.TotalCacheMissTokens,
                     ["cache_hit_rate"] = apiService.TotalCacheHitRate,
                     ["duration_ms"] = sessionStarted.ElapsedMilliseconds,
+                    ["user_simulation_usage"] = userSimulator == null
+                        ? null
+                        : new
+                        {
+                            prompt_tokens = userSimulator.PromptTokens,
+                            completion_tokens = userSimulator.CompletionTokens,
+                            cache_hit_tokens = userSimulator.CacheHitTokens,
+                            cache_miss_tokens = userSimulator.CacheMissTokens,
+                            cache_hit_rate = userSimulator.CacheHitRate,
+                        },
                 },
             };
 
             string archivePath = Path.GetFullPath(options.ArchivePath);
-            WriteSessionArchive(archivePath, manifest, turnDocuments);
+            WriteSessionArchive(
+                archivePath,
+                manifest,
+                turnDocuments,
+                finalSnapshot,
+                caseDir);
             if (!string.IsNullOrWhiteSpace(options.TranscriptPath))
             {
                 Directory.CreateDirectory(Path.GetDirectoryName(Path.GetFullPath(options.TranscriptPath))!);
@@ -536,7 +652,8 @@ namespace BenchmarkRunner
         private static Dictionary<string, object?> BuildSource(
             string caseDir,
             string solutionPath,
-            string model)
+            string model,
+            HarnessProfile harnessProfile)
         {
             return new Dictionary<string, object?>
             {
@@ -546,6 +663,7 @@ namespace BenchmarkRunner
                 ["model"] = model,
                 ["workspace_name"] = Path.GetFileName(caseDir),
                 ["solution_path"] = solutionPath,
+                ["harness_profile"] = harnessProfile.Id,
             };
         }
 
@@ -584,7 +702,9 @@ namespace BenchmarkRunner
         private static void WriteSessionArchive(
             string archivePath,
             Dictionary<string, object?> manifest,
-            List<Dictionary<string, object?>> turns)
+            List<Dictionary<string, object?>> turns,
+            WorkspaceSnapshot workspaceSnapshot,
+            string workspaceRoot)
         {
             Directory.CreateDirectory(Path.GetDirectoryName(archivePath)!);
             if (File.Exists(archivePath))
@@ -600,6 +720,7 @@ namespace BenchmarkRunner
                     $"turns/turn-{index + 1:000}.json",
                     JsonSerializer.Serialize(turns[index], JsonOptions));
             }
+            workspaceSnapshot.WriteToArchive(archive, workspaceRoot);
         }
 
         private static void WriteZipEntry(ZipArchive archive, string name, string content)
@@ -896,6 +1017,9 @@ namespace BenchmarkRunner
             public string? TranscriptPath { get; private set; }
             public string Model { get; private set; } = "deepseek-flash";
             public string BaseUrl { get; private set; } = "https://api.deepseek.com";
+            public string? HarnessProfilePath { get; private set; }
+            public string? UserSimModel { get; private set; }
+            public int? MaxTurns { get; private set; }
 
             public static RunnerOptions Parse(string[] args)
             {
@@ -922,6 +1046,9 @@ namespace BenchmarkRunner
                     TranscriptPath = GetValue(values, "transcript"),
                     Model = GetValue(values, "model") ?? "deepseek-flash",
                     BaseUrl = GetValue(values, "base-url") ?? "https://api.deepseek.com",
+                    HarnessProfilePath = GetValue(values, "harness-profile"),
+                    UserSimModel = GetValue(values, "user-sim-model"),
+                    MaxTurns = ParseOptionalInteger(values, "max-turns"),
                 };
             }
 
@@ -930,6 +1057,18 @@ namespace BenchmarkRunner
                 string key)
             {
                 return values.TryGetValue(key, out string? value) ? value : null;
+            }
+
+            private static int? ParseOptionalInteger(
+                Dictionary<string, string> values,
+                string key)
+            {
+                string? value = GetValue(values, key);
+                if (string.IsNullOrWhiteSpace(value))
+                    return null;
+                return int.TryParse(value, out int parsed)
+                    ? parsed
+                    : throw new ArgumentException($"--{key} must be an integer.");
             }
         }
     }

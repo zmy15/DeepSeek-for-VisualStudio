@@ -1,0 +1,10 @@
+{
+  "id": "ask-auto",
+  "description": "Ask Agent with automatic handoffs.",
+  "initial_agent": "Ask",
+  "auto_follow_handoffs": true,
+  "max_handoff_depth": 10,
+  "pre_classified_task_size": "Small",
+  "thinking_enabled": false,
+  "thinking_effort": "high"
+}

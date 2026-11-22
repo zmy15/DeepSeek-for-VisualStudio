@@ -14,6 +14,7 @@
   "fixture": "fixtures/LineController",
   "solution": "CMakeLists.txt",
   "reference_answers": "line-controller-reference-answers.v1.json",
+  "oracle_suite": "line-controller.oracle.v1.json",
   "coverage_policy": {
     "minimum_cases_per_dimension": 1,
     "require_regular_and_boundary_per_dimension": false,

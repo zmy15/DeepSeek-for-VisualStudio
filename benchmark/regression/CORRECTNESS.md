@@ -8,6 +8,15 @@
 4. **任务约束**：是否只改允许的文件、遵守输出格式、没有重复测试或无依据修改。
 5. **LLM 语义评分**：只有前四层都拿到证据后，Judge 才对 1-5 分和总体结果做综合判断。
 
+其中前四层现在由 `verification.py` 和隐藏 oracle 独立执行，不再只作为
+Judge 输入：
+
+- 从 session ZIP 的 `workspace/` 快照恢复最终工作区；
+- 与干净 fixture 做内容哈希比较；
+- 先检查只读 case 是否零修改，以及允许/禁止路径；
+- 代码 case 再运行 Agent workspace 之外的 dotnet/CMake oracle；
+- 独立验证失败会覆盖 Judge 的 `pass`，直接把 case 判为 `fail`。
+
 `reference-answers.v1.json` 是项目相关的参考正确答案。执行 `score` 时，每个
 case 的 reference answer 会随 case JSON 一起传给逐轮和 session Judge。
 

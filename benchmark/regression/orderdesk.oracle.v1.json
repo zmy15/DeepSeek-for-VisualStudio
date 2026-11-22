@@ -1,0 +1,130 @@
+{
+  "schema": "deepseek-vs.oracle-suite/1",
+  "schema_version": 1,
+  "id": "orderdesk-oracles",
+  "suite_id": "orderdesk-regression",
+  "fixture": "fixtures/OrderDesk",
+  "runner": "dotnet",
+  "oracle_project": "oracles/OrderDesk/OrderDesk.Oracle.csproj",
+  "workspace_project": "src/OrderDesk.Core/OrderDesk.Core.csproj",
+  "cases": [
+    {
+      "case_id": "rgr-if-regular",
+      "read_only": false,
+      "allowed_changes": [
+        "src/OrderDesk.Core/CustomerFormatter.cs",
+        "tests/OrderDesk.Tests/"
+      ],
+      "forbidden_changes": [
+        "src/OrderDesk.Core/OrderService.cs",
+        "src/OrderDesk.Core/PricingPolicy.cs",
+        "src/OrderDesk.Core/ShippingEstimator.cs"
+      ]
+    },
+    {
+      "case_id": "rgr-if-boundary",
+      "read_only": true
+    },
+    {
+      "case_id": "rgr-cg-regular",
+      "read_only": true
+    },
+    {
+      "case_id": "rgr-cg-boundary",
+      "read_only": true
+    },
+    {
+      "case_id": "rgr-tu-regular",
+      "read_only": true
+    },
+    {
+      "case_id": "rgr-tu-boundary",
+      "read_only": true
+    },
+    {
+      "case_id": "rgr-pe-regular",
+      "read_only": false,
+      "allowed_changes": [
+        "src/OrderDesk.Core/BulkOrderPlanner.cs",
+        "tests/OrderDesk.Tests/"
+      ],
+      "forbidden_changes": [
+        "src/OrderDesk.Core/OrderService.cs",
+        "src/OrderDesk.Core/PricingPolicy.cs",
+        "src/OrderDesk.Core/ShippingEstimator.cs"
+      ]
+    },
+    {
+      "case_id": "rgr-pe-boundary",
+      "read_only": true
+    },
+    {
+      "case_id": "rgr-cq-regular",
+      "read_only": false,
+      "allowed_changes": [
+        "src/OrderDesk.Core/CustomerFormatter.cs",
+        "tests/OrderDesk.Tests/"
+      ],
+      "forbidden_changes": [
+        "src/OrderDesk.Core/OrderService.cs",
+        "src/OrderDesk.Core/PricingPolicy.cs",
+        "src/OrderDesk.Core/ShippingEstimator.cs"
+      ]
+    },
+    {
+      "case_id": "rgr-cq-boundary",
+      "read_only": false,
+      "allowed_changes": [
+        "src/OrderDesk.Core/BulkOrderPlanner.cs",
+        "tests/OrderDesk.Tests/"
+      ],
+      "forbidden_changes": [
+        "src/OrderDesk.Core/OrderService.cs",
+        "src/OrderDesk.Core/PricingPolicy.cs",
+        "src/OrderDesk.Core/ShippingEstimator.cs"
+      ]
+    },
+    {
+      "case_id": "rgr-sp-regular",
+      "read_only": false,
+      "allowed_changes": [
+        "src/OrderDesk.Core/OrderService.cs",
+        "tests/OrderDesk.Tests/"
+      ],
+      "forbidden_changes": [
+        "src/OrderDesk.Core/CustomerFormatter.cs",
+        "src/OrderDesk.Core/PricingPolicy.cs",
+        "src/OrderDesk.Core/ShippingEstimator.cs"
+      ]
+    },
+    {
+      "case_id": "rgr-sp-boundary",
+      "read_only": true
+    },
+    {
+      "case_id": "rgr-ux-regular",
+      "read_only": true
+    },
+    {
+      "case_id": "rgr-ux-boundary",
+      "read_only": true
+    },
+    {
+      "case_id": "rgr-ec-regular",
+      "read_only": false,
+      "allowed_changes": [
+        "src/OrderDesk.Core/ShippingEstimator.cs",
+        "tests/OrderDesk.Tests/"
+      ],
+      "forbidden_changes": [
+        "src/OrderDesk.Core/OrderService.cs",
+        "src/OrderDesk.Core/PricingPolicy.cs",
+        "src/OrderDesk.Core/CustomerFormatter.cs"
+      ]
+    },
+    {
+      "case_id": "rgr-ec-boundary",
+      "read_only": true
+    }
+  ]
+}

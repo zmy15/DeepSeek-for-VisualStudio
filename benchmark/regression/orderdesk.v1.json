@@ -14,6 +14,7 @@
   "fixture": "fixtures/OrderDesk",
   "solution": "OrderDesk.slnx",
   "reference_answers": "reference-answers.v1.json",
+  "oracle_suite": "orderdesk.oracle.v1.json",
   "coverage_policy": {
     "minimum_cases_per_dimension": 2,
     "require_regular_and_boundary_per_dimension": true,

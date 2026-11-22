@@ -1160,7 +1160,20 @@ def normalize_stage_findings(value: Any) -> list[dict[str, Any]]:
         raise JudgeResultError(["stage_findings must be an array"])
 
     normalized: list[dict[str, Any]] = []
+    seen_stages: set[str] = set()
     valid_statuses = {"good", "partial", "bad", "not_applicable"}
+    status_aliases = {
+        "acceptable": "good",
+        "pass": "good",
+        "success": "good",
+        "warning": "partial",
+        "mixed": "partial",
+        "fail": "bad",
+        "failed": "bad",
+        "unacceptable": "bad",
+        "n/a": "not_applicable",
+        "not-applicable": "not_applicable",
+    }
     for index, item in enumerate(value):
         if not isinstance(item, dict):
             raise JudgeResultError([f"stage_findings[{index}] must be an object"])
@@ -1170,6 +1183,7 @@ def normalize_stage_findings(value: Any) -> list[dict[str, Any]]:
                 [f"stage_findings[{index}] has unknown stage '{stage}'"]
             )
         status = str(item.get("status") or "").strip().lower()
+        status = status_aliases.get(status, status)
         if status not in valid_statuses:
             raise JudgeResultError(
                 [f"stage_findings[{index}] has invalid status '{status}'"]
@@ -1190,6 +1204,18 @@ def normalize_stage_findings(value: Any) -> list[dict[str, Any]]:
                 "status": status,
                 "findings": findings,
                 "evidence": list(evidence),
+            }
+        )
+        seen_stages.add(stage)
+    for stage in GENERAL_STAGES:
+        if stage in seen_stages:
+            continue
+        normalized.append(
+            {
+                "stage": stage,
+                "status": "partial",
+                "findings": "The Judge omitted a dedicated finding for this stage.",
+                "evidence": ["derived: stage finding omitted by Judge"],
             }
         )
     return normalized
@@ -1614,7 +1640,18 @@ def normalize_round_assessment(
     normalized: list[dict[str, Any]] = []
     seen: set[int] = set()
     valid_statuses = {"good", "partial", "bad", "not_applicable"}
-    status_aliases = {"mixed": "partial", "fail": "bad", "failed": "bad"}
+    status_aliases = {
+        "acceptable": "good",
+        "pass": "good",
+        "success": "good",
+        "warning": "partial",
+        "mixed": "partial",
+        "fail": "bad",
+        "failed": "bad",
+        "unacceptable": "bad",
+        "n/a": "not_applicable",
+        "not-applicable": "not_applicable",
+    }
     for index, item in enumerate(value):
         if not isinstance(item, dict):
             raise JudgeResultError([f"round_assessment[{index}] must be an object"])

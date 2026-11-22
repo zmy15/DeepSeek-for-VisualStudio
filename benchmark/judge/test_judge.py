@@ -465,13 +465,19 @@ class JudgeTests(unittest.TestCase):
         self.assertEqual(computed["outcome"], "pass")
 
         raw["stage_findings"].pop()
-        with self.assertRaises(judge.JudgeResultError):
-            judge.normalize_judge_result(
-                raw,
-                "general-exported-turn",
-                self.general_rubric,
-                require_stage_findings=True,
-            )
+        repaired = judge.normalize_judge_result(
+            raw,
+            "general-exported-turn",
+            self.general_rubric,
+            require_stage_findings=True,
+        )
+        omitted = next(
+            item
+            for item in repaired["stage_findings"]
+            if item["stage"] == "cost_cache"
+        )
+        self.assertEqual(len(repaired["stage_findings"]), 6)
+        self.assertEqual(omitted["status"], "partial")
 
     def test_full_session_metrics_take_precedence_over_latest_execution(self) -> None:
         result = judge.analyze_cost_cache(
@@ -638,6 +644,14 @@ class JudgeTests(unittest.TestCase):
         )
 
         self.assertEqual(result[0]["status"], "partial")
+
+    def test_round_assessment_maps_acceptable_to_good(self) -> None:
+        result = judge.normalize_round_assessment(
+            [{"turn_index": 1, "status": "acceptable", "summary": "Complete."}],
+            [1],
+        )
+
+        self.assertEqual(result[0]["status"], "good")
 
     def test_session_orchestration_runs_each_round_and_final_synthesis(self) -> None:
         with tempfile.TemporaryDirectory() as tmp:

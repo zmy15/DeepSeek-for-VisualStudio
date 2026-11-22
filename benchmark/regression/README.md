@@ -249,3 +249,40 @@ benchmark\regression\artifacts\candidate\archives\<case-id>.zip
   -s .\benchmark\regression `
   -p "test_*.py"
 ```
+
+## 独立验证、稳定性与 Harness 对照
+
+新增能力拆分为独立模块：
+
+- [VERIFICATION.md](VERIFICATION.md)：隐藏 oracle、工作区快照和确定性失败门禁。
+- [STABILITY.md](STABILITY.md)：多次运行、`pass@k`、min/max/median/stdev。
+- [HARNESS_COMPARISON.md](HARNESS_COMPARISON.md)：固定模型比较不同 Harness profile。
+- [../headless/README.md](../headless/README.md)：动态用户模拟、Harness Profile 与 Runner 文件职责。
+
+动态欠定义意图 suite：
+
+```powershell
+.\benchmark\.venv\Scripts\python.exe .\benchmark\regression\regression.py validate `
+  --suite .\benchmark\regression\underspecified.v1.json
+```
+
+## Python 模块划分
+
+`regression.py` 只保留兼容入口和公开导出，具体职责拆分为：
+
+| 模块 | 职责 |
+|---|---|
+| `regression_common.py` | 常量、错误类型、JSON 与安全路径工具 |
+| `regression_suite.py` | suite/参考答案校验、case 构建与 prepare |
+| `regression_results.py` | Judge 结果提取、汇总与 collect |
+| `regression_scoring.py` | Judge 调用、缓存、warmup 与 score |
+| `regression_compare.py` | baseline/candidate 回归门禁 |
+| `regression_cli.py` | 子命令、参数解析与 CLI 输出 |
+| `verification.py` | 工作区快照、隐藏 oracle 与独立验证 |
+| `stability.py` | 重复运行、pass@k 与方差统计 |
+| `harness_compare.py` | 固定模型的 Harness profile 对照 |
+| `trials.py` | 多轮重复 trial 编排 |
+
+每个 prepare 出来的 case workspace 都会初始化独立 Git 仓库，并提交干净的
+fixture baseline。Build 产物通过 `.git/info/exclude` 排除，因此 Agent 的
+`git status`、`git diff` 和分支/HEAD 上下文与真实 VS 工作区更接近。

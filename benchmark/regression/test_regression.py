@@ -56,6 +56,23 @@ class RegressionTests(unittest.TestCase):
             [],
         )
 
+    def test_underspecified_suite_is_valid_with_dynamic_user_simulation(self) -> None:
+        suite = json.loads(
+            (HERE / "underspecified.v1.json").read_text(encoding="utf-8")
+        )
+        references = json.loads(
+            (HERE / "underspecified-reference-answers.v1.json").read_text(
+                encoding="utf-8"
+            )
+        )
+        self.assertEqual(regression.validate_suite(suite, HERE), [])
+        self.assertEqual(
+            regression.validate_reference_answers(suite, references),
+            [],
+        )
+        for case in suite["cases"]:
+            self.assertGreaterEqual(case["user_simulation"]["max_turns"], 4)
+
     def test_cpp_prepare_uses_cmake_and_external_metadata(self) -> None:
         with tempfile.TemporaryDirectory() as tmp:
             output = Path(tmp) / "line-controller"
@@ -69,6 +86,7 @@ class RegressionTests(unittest.TestCase):
 
             metadata_dir = output.parent / f"{output.name}.benchmark-meta"
             self.assertTrue((output / "CMakeLists.txt").is_file())
+            self.assertTrue((output / ".git").is_dir())
             self.assertTrue((metadata_dir / "case.json").is_file())
             self.assertFalse((output / "_benchmark").exists())
             guide = (metadata_dir / "README.md").read_text(encoding="utf-8")
@@ -135,6 +153,16 @@ class RegressionTests(unittest.TestCase):
             )
             self.assertFalse((output / "src" / "OrderDesk.Core" / "bin").exists())
             self.assertFalse((output / "src" / "OrderDesk.Core" / "obj").exists())
+            self.assertTrue((output / ".git").is_dir())
+            git_root = regression.subprocess.run(
+                ["git", "rev-parse", "--show-toplevel"],
+                cwd=str(output),
+                capture_output=True,
+                text=True,
+                encoding="utf-8",
+                check=True,
+            ).stdout.strip()
+            self.assertEqual(Path(git_root).resolve(), output.resolve())
             metadata_dir = output.parent / f"{output.name}.benchmark-meta"
             guide = (metadata_dir / "README.md").read_text(
                 encoding="utf-8"
@@ -296,6 +324,34 @@ class RegressionTests(unittest.TestCase):
             rules = {item["rule"] for item in comparison["failures"]}
             self.assertIn("outcome_regression", rules)
             self.assertIn("average_score_regression", rules)
+
+    def test_independent_verification_failure_overrides_judge_pass(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            results_dir = Path(tmp)
+            self._write_results(results_dir, score=5)
+            case_id = self.suite["cases"][0]["id"]
+            (results_dir / f"{case_id}.verification.json").write_text(
+                json.dumps(
+                    {
+                        "schema": "deepseek-vs.independent-verification/1",
+                        "case_id": case_id,
+                        "status": "fail",
+                        "checks": [],
+                    }
+                ),
+                encoding="utf-8",
+            )
+
+            run = regression.collect_results(self.suite, results_dir)
+
+        case = next(item for item in run["cases"] if item["id"] == case_id)
+        self.assertEqual(case["judge_outcome"], "pass")
+        self.assertEqual(case["outcome"], "fail")
+        self.assertIn(
+            "independent_verification_failure",
+            case["critical_failures"],
+        )
+        self.assertEqual(run["summary"]["verification_counts"]["fail"], 1)
 
     def _write_results(
         self,

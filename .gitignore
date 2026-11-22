@@ -319,6 +319,7 @@ __pycache__/
 benchmark/.venv/
 benchmark/regression/artifacts/
 benchmark/regression/fixtures/*/build/
+benchmark/regression/oracles/*/build*/
 
 # Cake - Uncomment if you are using it
 # tools/**

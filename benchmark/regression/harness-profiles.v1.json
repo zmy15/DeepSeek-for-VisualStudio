@@ -1,0 +1,10 @@
+{
+  "schema": "deepseek-vs.harness-profiles/1",
+  "schema_version": 1,
+  "profiles": [
+    "../headless/profiles/ask-auto.json",
+    "../headless/profiles/ask-no-handoff.json",
+    "../headless/profiles/edit-direct.json",
+    "../headless/profiles/ask-shallow-handoff.json"
+  ]
+}
