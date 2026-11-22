@@ -148,6 +148,8 @@ def run_score(args: argparse.Namespace) -> int:
     missing = [
         str(case["id"])
         for case in suite.get("cases") or []
+        if not getattr(args, "case", None)
+        or str(case["id"]) in set(args.case)
         if not (archives_dir / f"{case['id']}.zip").is_file()
     ]
     if missing:
@@ -172,6 +174,7 @@ def run_score(args: argparse.Namespace) -> int:
                     oracle_path,
                     archives_dir,
                     results_dir,
+                    case_ids=getattr(args, "case", None),
                     skip_existing=bool(getattr(args, "skip_existing", False)),
                     status_writer=print,
                 )
@@ -180,7 +183,12 @@ def run_score(args: argparse.Namespace) -> int:
                 raise RegressionError(str(exc)) from exc
 
     warmup_done = False
-    for case in suite.get("cases") or []:
+    suite_cases = [
+        case for case in suite.get("cases") or []
+        if not getattr(args, "case", None)
+        or str(case["id"]) in set(args.case)
+    ]
+    for case in suite_cases:
         case_id = str(case["id"])
         archive = archives_dir / f"{case_id}.zip"
         output = results_dir / f"{case_id}.judge.json"
@@ -231,13 +239,14 @@ def run_score(args: argparse.Namespace) -> int:
             shutil.copyfile(output, cache_path)
 
     if args.dry_run:
-        print(f"Session scoring dry run passed for {len(suite['cases'])} cases")
+        print(f"Session scoring dry run passed for {len(suite_cases)} cases")
         return 0
 
     output = collect_results(
         suite,
         results_dir,
         allow_model_mismatch=args.allow_model_mismatch,
+        case_ids=getattr(args, "case", None),
     )
     output_path = results_dir / "regression-run.json"
     write_json(output_path, output)

@@ -161,6 +161,8 @@ def _score_command(
         command.extend(["--base-url", str(args.judge_base_url)])
     if args.no_verify:
         command.append("--no-verify")
+    for case_id in args.case or []:
+        command.extend(["--case", str(case_id)])
     if args.no_thinking:
         command.append("--no-thinking")
     if args.thinking_effort:

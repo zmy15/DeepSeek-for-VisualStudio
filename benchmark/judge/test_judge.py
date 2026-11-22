@@ -653,6 +653,14 @@ class JudgeTests(unittest.TestCase):
 
         self.assertEqual(result[0]["status"], "good")
 
+    def test_round_assessment_maps_critical_to_bad(self) -> None:
+        result = judge.normalize_round_assessment(
+            [{"turn_index": 1, "status": "critical", "summary": "Critical failure."}],
+            [1],
+        )
+
+        self.assertEqual(result[0]["status"], "bad")
+
     def test_session_orchestration_runs_each_round_and_final_synthesis(self) -> None:
         with tempfile.TemporaryDirectory() as tmp:
             archive_path = Path(tmp) / "session.zip"

@@ -13,6 +13,7 @@ The runner is split by responsibility:
 | `HeadlessBuildService.cs` | CLI-only dotnet/CMake build backend |
 | `HeadlessTestService.cs` | CLI-only dotnet/CTest test backend |
 | `ToolchainProcess.cs` | Shared process execution and timeout layer |
+| `QuestionPolicy.cs` | Clarification handling without fabricated user answers |
 
 Visual Studio and Headless share production Agent, API, prompt, handoff, tool
 registry, context manager, prefix-cache manager, and Git-context code. There
@@ -44,6 +45,16 @@ Self-check without an API key:
   --self-test-toolchain `
   --case-dir .\benchmark\regression\artifacts\baseline\rgr-if-regular
 ```
+
+## Clarification requests
+
+Fixed-script cases never auto-select a question option. If the Agent calls
+`VisualStudio_askQuestions`, every answer is returned as `skipped=true`, and
+an automatic Edit/Build handoff is blocked for that turn.
+
+Dynamic cases with `user_simulation` use the separate simulator model to answer
+from the public objective and persona only. The transcript records the
+clarification policy summary under `turn.clarification`.
 
 ## Dynamic multi-turn cases
 

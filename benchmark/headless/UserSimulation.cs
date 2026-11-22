@@ -138,6 +138,48 @@ namespace BenchmarkRunner
             return ParseNextMessage(raw);
         }
 
+        public async Task<string?> AnswerQuestionsAsync(
+            UserSimulationConfig config,
+            IReadOnlyList<AgentQuestion> questions,
+            CancellationToken cancellationToken)
+        {
+            string questionJson = JsonSerializer.Serialize(
+                questions.Select(question => new
+                {
+                    header = question.Header,
+                    question = question.Question,
+                    options = question.Options?.Select(option => option.Label).ToArray(),
+                    multiSelect = question.MultiSelect,
+                    allowFreeformInput = question.AllowFreeformInput,
+                }));
+            var messages = new[]
+            {
+                new ChatApiMessage
+                {
+                    Role = "system",
+                    Content =
+                        "You answer clarification questions as the end user. "
+                        + "Do not solve the coding task or reveal evaluation details. "
+                        + "Return only a JSON array with exactly one object per question. "
+                        + "Each object must be "
+                        + "{\"selectedOptions\":string[],\"freeText\":string,\"skipped\":boolean}. "
+                        + "Use only option labels supplied by the Agent.",
+                },
+                new ChatApiMessage
+                {
+                    Role = "user",
+                    Content =
+                        "Objective:\n" + config.Objective
+                        + "\n\nPersona:\n"
+                        + (string.IsNullOrWhiteSpace(config.Persona)
+                            ? "A pragmatic developer."
+                            : config.Persona)
+                        + "\n\nQuestions:\n" + questionJson,
+                },
+            };
+            return await _apiService.CompleteAsync(messages, cancellationToken);
+        }
+
         public static string? ParseNextMessage(string raw)
         {
             string text = (raw ?? string.Empty).Trim();

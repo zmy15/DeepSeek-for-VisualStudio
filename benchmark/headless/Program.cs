@@ -142,13 +142,16 @@ namespace BenchmarkRunner
             builtInTools.WebSearchEnabled = false;
 
             using var factory = new AgentFactory(apiService, builtInTools);
-            BindAgentCallbacks(factory, caseDir);
             using UserSimulator? userSimulator = userSimulation.Enabled
                 ? new UserSimulator(
                     apiKey,
                     options.UserSimModel ?? options.Model,
                     options.BaseUrl)
                 : null;
+            var questionPolicy = new AgentQuestionPolicy(
+                userSimulation,
+                userSimulator);
+            BindAgentCallbacks(factory, caseDir, questionPolicy);
 
             var contextManager = new ConversationContextManager
             {
@@ -238,9 +241,18 @@ namespace BenchmarkRunner
 
                 BaseAgent activeAgent = factory.GetAgent(harnessProfile.InitialAgent);
                 activeAgent.Context = context;
+                questionPolicy.BeginTurn();
                 Console.WriteLine($"[{caseId}] turn {turnIndex}: {turnPrompt}");
                 AgentResult result = await activeAgent.ExecuteAsync(turnPrompt, context);
-                if (harnessProfile.AutoFollowHandoffs)
+                if (questionPolicy.ShouldBlockHandoff)
+                {
+                    if (result.Handoff != null)
+                    {
+                        Console.WriteLine(
+                            "  handoff blocked: clarification was not answered");
+                    }
+                }
+                else if (harnessProfile.AutoFollowHandoffs)
                 {
                     result = await FollowAutoHandoffsAsync(
                         activeAgent,
@@ -293,6 +305,7 @@ namespace BenchmarkRunner
                     {
                         ["turn_index"] = turnIndex,
                         ["user_simulated"] = userSimulation.Enabled && turnIndex > 1,
+                        ["clarification"] = questionPolicy.TurnSummary(),
                         ["user"] = new Dictionary<string, object?>
                         {
                             ["content"] = turnPrompt,
@@ -389,6 +402,13 @@ namespace BenchmarkRunner
                         max_turns = userSimulation.MaxTurns,
                     }
                     : null,
+                ["question_policy"] = new
+                {
+                    mode = userSimulation.Enabled
+                        ? "user_simulator"
+                        : "skip_unanswered",
+                    fixed_case_questions_are_never_invented = true,
+                },
                 ["workspace_snapshot"] = new
                 {
                     schema = "deepseek-vs.workspace-snapshot/1",
@@ -484,7 +504,10 @@ namespace BenchmarkRunner
             return result;
         }
 
-        private static void BindAgentCallbacks(AgentFactory factory, string workspaceRoot)
+        private static void BindAgentCallbacks(
+            AgentFactory factory,
+            string workspaceRoot,
+            AgentQuestionPolicy questionPolicy)
         {
             BaseAgent[] agents =
             {
@@ -508,32 +531,17 @@ namespace BenchmarkRunner
                 };
                 captured.QuestionsRequested += request =>
                 {
-                    Console.WriteLine($"  question auto-answer: {request.RequestId}");
+                    string answers = questionPolicy.Answer(request);
+                    var summary = questionPolicy.TurnSummary();
+                    Console.WriteLine(
+                        $"  question policy: requests={summary["requests"]} "
+                        + $"simulated={summary["simulated_answers"]} "
+                        + $"skipped={summary["skipped_answers"]}");
                     captured.RespondToQuestions(
                         request.RequestId,
-                        BuildQuestionAnswers(request));
+                        answers);
                 };
             }
-        }
-
-        private static string BuildQuestionAnswers(AgentQuestionRequest request)
-        {
-            var answers = new List<Dictionary<string, object?>>();
-            foreach (AgentQuestion question in request.Questions)
-            {
-                QuestionOption? firstOption = question.Options?.FirstOrDefault();
-                answers.Add(new Dictionary<string, object?>
-                {
-                    ["selectedOptions"] = firstOption == null
-                        ? Array.Empty<string>()
-                        : new[] { firstOption.Label },
-                    ["freeText"] = firstOption == null
-                        ? "按当前任务和已给出的约束继续执行。"
-                        : string.Empty,
-                    ["skipped"] = false,
-                });
-            }
-            return JsonSerializer.Serialize(answers, JsonOptions);
         }
 
         private static bool IsSafePermission(
@@ -646,6 +654,9 @@ namespace BenchmarkRunner
         private static string ClassifyToolResult(string result)
         {
             if (result.StartsWith("[BLOCKED]", StringComparison.OrdinalIgnoreCase))
+                return "Blocked";
+            if (result.StartsWith("用户跳过", StringComparison.OrdinalIgnoreCase)
+                || result.StartsWith("User skipped", StringComparison.OrdinalIgnoreCase))
                 return "Blocked";
             if (result.StartsWith("Timeout:", StringComparison.OrdinalIgnoreCase))
                 return "Timeout";

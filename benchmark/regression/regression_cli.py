@@ -242,6 +242,7 @@ def build_parser() -> argparse.ArgumentParser:
     collect_parser.add_argument("--results", required=True)
     collect_parser.add_argument("--output", required=True)
     collect_parser.add_argument("--allow-model-mismatch", action="store_true")
+    collect_parser.add_argument("--case", action="append")
     collect_parser.set_defaults(func=run_collect)
 
     score_parser = subparsers.add_parser(
@@ -255,6 +256,7 @@ def build_parser() -> argparse.ArgumentParser:
     )
     score_parser.add_argument("--archives", required=True)
     score_parser.add_argument("--results", required=True)
+    score_parser.add_argument("--case", action="append")
     score_parser.add_argument("--model", default=DEFAULT_JUDGE_MODEL)
     score_parser.add_argument("--base-url")
     score_parser.add_argument("--api-key-env", default="JUDGE_API_KEY")

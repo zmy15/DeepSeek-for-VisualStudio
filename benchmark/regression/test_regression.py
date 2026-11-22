@@ -338,6 +338,21 @@ class RegressionTests(unittest.TestCase):
             with self.assertRaises(regression.RegressionError):
                 regression.collect_results(self.suite, results_dir)
 
+    def test_collect_supports_case_subset(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            results_dir = Path(tmp)
+            self._write_results(results_dir, score=4)
+            selected = self.suite["cases"][0]["id"]
+
+            run = regression.collect_results(
+                self.suite,
+                results_dir,
+                case_ids=[selected],
+            )
+
+        self.assertEqual(run["summary"]["case_count"], 1)
+        self.assertEqual(run["cases"][0]["id"], selected)
+
     def test_compare_passes_identical_runs(self) -> None:
         with tempfile.TemporaryDirectory() as tmp:
             results_dir = Path(tmp)

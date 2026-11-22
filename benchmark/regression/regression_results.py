@@ -304,11 +304,17 @@ def collect_results(
     suite: dict[str, Any],
     results_dir: Path,
     allow_model_mismatch: bool = False,
+    case_ids: list[str] | None = None,
 ) -> dict[str, Any]:
     defaults = suite.get("defaults") or {}
     missing: list[str] = []
     cases: list[dict[str, Any]] = []
-    for case in suite.get("cases") or []:
+    selected = set(case_ids or [])
+    suite_cases = [
+        case for case in suite.get("cases") or []
+        if not selected or str(case.get("id")) in selected
+    ]
+    for case in suite_cases:
         case_id = str(case["id"])
         result_path = results_dir / f"{case_id}.judge.json"
         if not result_path.is_file():
@@ -364,6 +370,7 @@ def run_collect(args: argparse.Namespace) -> int:
         suite,
         Path(args.results),
         allow_model_mismatch=args.allow_model_mismatch,
+        case_ids=getattr(args, "case", None),
     )
     output_path = Path(args.output)
     write_json(output_path, output)

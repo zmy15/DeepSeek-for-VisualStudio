@@ -29,6 +29,7 @@ Visual Studio process.
 | Permissions | interactive UI approval | workspace allowlist policy |
 | Workflow | UI routing, chainback, plan panels, events | headless Agent/handoff loop |
 | Thinking | user setting | profile `thinking_enabled` and `thinking_effort` |
+| Clarifications | interactive user answer | fixed cases skip; simulated cases answer through `QuestionPolicy` |
 
 Every new archive records these fields under
 `manifest.execution_environment`. A result that requires MCP, memory, web
