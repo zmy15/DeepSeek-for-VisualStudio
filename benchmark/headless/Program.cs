@@ -31,6 +31,18 @@ namespace BenchmarkRunner
                 if (args.Length > 0
                     && string.Equals(
                         args[0],
+                        "--audit-tools",
+                        StringComparison.OrdinalIgnoreCase))
+                {
+                    return await HeadlessToolAudit.RunAsync(
+                        args.Length > 1
+                            ? args.Skip(1).ToArray()
+                            : Array.Empty<string>());
+                }
+
+                if (args.Length > 0
+                    && string.Equals(
+                        args[0],
                         "--self-test-toolchain",
                         StringComparison.OrdinalIgnoreCase))
                 {
@@ -128,6 +140,8 @@ namespace BenchmarkRunner
 
             var buildService = new HeadlessBuildService(caseDir);
             var testService = new HeadlessTestService(caseDir, buildService);
+            using HeadlessToolProxyHost proxyHost =
+                HeadlessToolProxyHost.Create(caseDir, buildService);
             var builtInTools = new BuiltInToolService(
                 mcpManager: null,
                 webSearchService: null,
@@ -141,7 +155,10 @@ namespace BenchmarkRunner
             builtInTools.CurrentSolutionPath = solutionPath;
             builtInTools.WebSearchEnabled = false;
 
-            using var factory = new AgentFactory(apiService, builtInTools);
+            using var factory = new AgentFactory(
+                apiService,
+                builtInTools,
+                proxyHost.Manager);
             using UserSimulator? userSimulator = userSimulation.Enabled
                 ? new UserSimulator(
                     apiKey,

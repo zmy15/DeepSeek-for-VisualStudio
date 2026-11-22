@@ -14,6 +14,14 @@ The runner is split by responsibility:
 | `HeadlessTestService.cs` | CLI-only dotnet/CTest test backend |
 | `ToolchainProcess.cs` | Shared process execution and timeout layer |
 | `QuestionPolicy.cs` | Clarification handling without fabricated user answers |
+| `HeadlessToolAudit.cs` | End-to-end smoke checks for registered built-in tools |
+| `ToolAuditWorkspace.cs` | Isolated workspace and fixtures for destructive checks |
+| `ToolAuditReport.cs` | Markdown/JSON tool compatibility report |
+| `HeadlessToolProxyClient.cs` | In-process MCP client used only by the benchmark |
+| `HeadlessToolRouter.cs` | Benchmark tool override plus production fallback |
+| `HeadlessToolBridge.cs` | Benchmark-owned tool dispatch |
+| `HeadlessFileToolBridge.cs` | Benchmark-owned file, patch, symbol, and error tools |
+| `HeadlessTerminalToolBridge.cs` | Benchmark-owned terminal execution and output |
 
 Visual Studio and Headless share production Agent, API, prompt, handoff, tool
 registry, context manager, prefix-cache manager, and Git-context code. There
@@ -38,6 +46,12 @@ VS Error List, `BuildService`, or `TestService`. They invoke `dotnet`,
 `cmake`, and `ctest` directly. The tool names exposed to the Agent remain
 `build_solution` and `run_tests`, but their backend is CLI-only in Headless.
 
+The extension source is not modified for benchmarking. Headless registers an
+in-process MCP tool proxy before execution. It overrides VS-coupled operations
+such as `get_errors`, symbol/comment tools, file editing, patches, terminal
+execution, and `fetch_webpage`; other tools continue through the production
+`BuiltInToolService`. Product schemas and Agent/loop behavior remain shared.
+
 Self-check without an API key:
 
 ```powershell
@@ -45,6 +59,21 @@ Self-check without an API key:
   --self-test-toolchain `
   --case-dir .\benchmark\regression\artifacts\baseline\rgr-if-regular
 ```
+
+Audit every built-in tool in an isolated copy:
+
+```powershell
+.\benchmark\headless\bin\Debug\net472\BenchmarkRunner.exe `
+  --audit-tools `
+  --case-dir .\benchmark\regression\artifacts\baseline\rgr-if-regular `
+  --output .\benchmark\regression\artifacts\tool-audit.json
+```
+
+The audit runs search, read, symbol/comment fallbacks, skills, Git, terminal,
+file edits, patches, build, tests, and an intentional compile failure followed
+by `get_errors`. It classifies each tool as `works`, `headless_adapted`,
+`requires_vs`, `requires_model`, `requires_desktop`, `disabled`, or `failed`.
+The source case is never modified; destructive checks run in a temporary copy.
 
 ## Clarification requests
 

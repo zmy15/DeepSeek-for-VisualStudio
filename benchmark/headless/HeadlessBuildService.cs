@@ -50,25 +50,35 @@ namespace BenchmarkRunner
             string? solutionPath,
             CancellationToken cancellationToken)
         {
+            BuildRunResult result;
             if (_isCmake)
-                return await BuildCmakeAsync(cancellationToken);
-
-            string target = string.IsNullOrWhiteSpace(solutionPath)
-                ? FindDotNetBuildTarget()
-                : Path.GetFullPath(solutionPath);
-            var result = await ToolchainProcess.RunAsync(
-                "dotnet",
-                $"build \"{target}\" --nologo",
-                _workspaceRoot,
-                cancellationToken);
-            return new BuildRunResult
             {
-                Success = result.ExitCode == 0,
-                Command = $"dotnet build \"{target}\" --nologo",
-                Output = (result.ExitCode == 0 ? "Build succeeded." : "Error: Build FAILED.")
-                    + Environment.NewLine
-                    + result.Output,
-            };
+                result = await BuildCmakeAsync(cancellationToken);
+            }
+            else
+            {
+                string target = string.IsNullOrWhiteSpace(solutionPath)
+                    ? FindDotNetBuildTarget()
+                    : Path.GetFullPath(solutionPath);
+                ToolchainResult process = await ToolchainProcess.RunAsync(
+                    "dotnet",
+                    $"build \"{target}\" --nologo",
+                    _workspaceRoot,
+                    cancellationToken);
+                result = new BuildRunResult
+                {
+                    Success = process.ExitCode == 0,
+                    Command = $"dotnet build \"{target}\" --nologo",
+                    Output = (process.ExitCode == 0 ? "Build succeeded." : "Error: Build FAILED.")
+                        + Environment.NewLine
+                        + process.Output,
+                };
+            }
+
+            // get_errors reads this snapshot. Test runs build through BuildCoreAsync
+            // as well, so refresh it here rather than only in BuildAsync.
+            _lastOutput = result.Output;
+            return result;
         }
 
         private async Task<BuildRunResult> BuildCmakeAsync(
@@ -140,27 +150,70 @@ namespace BenchmarkRunner
         private static List<ErrorListItem> ParseErrors(string output)
         {
             var errors = new List<ErrorListItem>();
+            string text = output ?? string.Empty;
+            var seen = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
+
+            // MSBuild/Roslyn: file(line,column): error CSxxxx: message
             foreach (Match match in Regex.Matches(
-                output ?? string.Empty,
-                @"^(?<file>[^\r\n:]+)\((?<line>\d+),(?<column>\d+)\):\s*error\s+(?<code>[^:]+):\s*(?<message>.+)$",
+                text,
+                @"^(?<file>[^\r\n]+?)\((?<line>\d+),(?<column>\d+)\):\s*error\s+(?<code>[^:\r\n]+):\s*(?<message>.+)$",
                 RegexOptions.Multiline | RegexOptions.IgnoreCase))
             {
-                errors.Add(
-                    new ErrorListItem
-                    {
-                        FileName = match.Groups["file"].Value.Trim(),
-                        Line = int.TryParse(match.Groups["line"].Value, out int line)
-                            ? line
-                            : 0,
-                        Column = int.TryParse(match.Groups["column"].Value, out int column)
-                            ? column
-                            : 0,
-                        ErrorCode = match.Groups["code"].Value.Trim(),
-                        Description = match.Groups["message"].Value.Trim(),
-                        Category = "error",
-                    });
+                AddError(
+                    errors,
+                    seen,
+                    match.Groups["file"].Value,
+                    match.Groups["line"].Value,
+                    match.Groups["column"].Value,
+                    match.Groups["code"].Value,
+                    match.Groups["message"].Value);
+            }
+
+            // GCC/Clang: file:line:column: error: message
+            foreach (Match match in Regex.Matches(
+                text,
+                @"^(?<file>(?:[A-Za-z]:[\\/])?(?:[^\r\n:]+?)):(?<line>\d+):(?<column>\d+):\s*(?:fatal\s+)?error:\s*(?<message>.+)$",
+                RegexOptions.Multiline | RegexOptions.IgnoreCase))
+            {
+                AddError(
+                    errors,
+                    seen,
+                    match.Groups["file"].Value,
+                    match.Groups["line"].Value,
+                    match.Groups["column"].Value,
+                    string.Empty,
+                    match.Groups["message"].Value);
             }
             return errors;
+        }
+
+        private static void AddError(
+            List<ErrorListItem> errors,
+            HashSet<string> seen,
+            string file,
+            string lineText,
+            string columnText,
+            string code,
+            string message)
+        {
+            int line = int.TryParse(lineText, out int parsedLine) ? parsedLine : 0;
+            int column = int.TryParse(columnText, out int parsedColumn) ? parsedColumn : 0;
+            string normalizedFile = file.Trim();
+            string normalizedMessage = message.Trim();
+            string key = $"{normalizedFile}|{line}|{column}|{code}|{normalizedMessage}";
+            if (!seen.Add(key))
+                return;
+
+            errors.Add(
+                new ErrorListItem
+                {
+                    FileName = normalizedFile,
+                    Line = line,
+                    Column = column,
+                    ErrorCode = string.IsNullOrWhiteSpace(code) ? null : code.Trim(),
+                    Description = normalizedMessage,
+                    Category = "error",
+                });
         }
     }
 
