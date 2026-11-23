@@ -39,6 +39,14 @@ namespace DeepSeek_v4_for_VisualStudio.CodeCompletion
         private readonly ConcurrentDictionary<string, string> cache = new();
         private readonly DispatcherTimer? typingTimer;
 
+        /// <summary>
+        /// 是否直接用纯文本花括号扫描取上下文（C/C++）。
+        /// C/C++ 的导航器由 VC 语言服务实现，代码不完整时会抛 COMException(E_FAIL)，
+        /// 只能退化成极短的窗口；直接走扫描器可稳定拿到"函数签名 → 右括号"的完整代码。
+        /// 其他语言仍优先用导航器，失败时同样降级到该扫描器（见 <see cref="GetCompletionContext"/>）。
+        /// </summary>
+        private readonly bool useTextBasedContext;
+
         private CancellationTokenSource? cancellationTokenSource;
         private bool showingAutoComplete;
         private bool suppressNextSuggestion;
@@ -58,6 +66,7 @@ namespace DeepSeek_v4_for_VisualStudio.CodeCompletion
             this.options = options;
             this.view = view;
             this.structureNavigator = structureNavigator;
+            this.useTextBasedContext = IsCppContentType(view);
 
             if (!options.AutoCompleteEnabled)
             {
@@ -132,8 +141,7 @@ namespace DeepSeek_v4_for_VisualStudio.CodeCompletion
                     filePath = textDocument.FilePath;
                 }
 
-                string codeUp = GetCodeUpToCurrentPosition(caretPosition);
-                string codeDown = GetCodeBelowCurrentPosition(caretPosition);
+                (string codeUp, string codeDown) = GetCompletionContext(caretPosition);
 
                 string codeUpNormalized = RemoveBlankLines(NormalizeLineBreaks(codeUp)).Trim();
                 string codeDownNormalized = RemoveBlankLines(NormalizeLineBreaks(codeDown)).Trim();
@@ -245,50 +253,96 @@ namespace DeepSeek_v4_for_VisualStudio.CodeCompletion
         }
 
         /// <summary>
-        /// 使用 <see cref="ITextStructureNavigator"/> 获取光标所在的结构块边界，
-        /// 提取从块起始到光标位置的代码作为 FIM prompt（前缀上下文）。
+        /// 判断视图内容类型是否为 C/C++（VS 中 "C/C++" 是独立内容类型，不继承 code）。
+        /// 内容类型读取失败时按非 C/C++ 处理，保持原有导航器路径。
         /// </summary>
-        private string GetCodeUpToCurrentPosition(int caretPosition)
+        private static bool IsCppContentType(IWpfTextView textView)
         {
-            ITextSnapshot snapshot = view.TextBuffer.CurrentSnapshot;
-            SnapshotSpan enclosingSpan = GetEnclosingStructureSpan(snapshot, caretPosition);
-            int contextStart = enclosingSpan.Start.Position;
-
-            if (contextStart >= caretPosition)
+            try
             {
-                contextStart = Math.Max(0, caretPosition - 500); // fallback: ~500 chars above
+                return textView.TextBuffer.ContentType.IsOfType(DeepSeekCompletionContentTypes.Cpp);
             }
-
-            return snapshot.GetText(contextStart, caretPosition - contextStart);
+            catch (Exception)
+            {
+                return false;
+            }
         }
 
         /// <summary>
-        /// 使用 <see cref="ITextStructureNavigator"/> 获取光标所在的结构块边界，
-        /// 提取从光标位置到块末尾的代码作为 FIM suffix（后缀上下文）。
+        /// 取光标处的 FIM 上下文（前缀 / 后缀）。
+        /// C/C++ 直接走纯文本扫描；其他语言优先用语言服务导航器，
+        /// 导航器失败（COMException / E_FAIL）时**降级**为同一套纯文本扫描，
+        /// 而不是退回"光标前后各 500 字符"的硬窗口。
         /// </summary>
-        private string GetCodeBelowCurrentPosition(int caretPosition)
+        private (string CodeUp, string CodeDown) GetCompletionContext(int caretPosition)
         {
             ITextSnapshot snapshot = view.TextBuffer.CurrentSnapshot;
-            SnapshotSpan enclosingSpan = GetEnclosingStructureSpan(snapshot, caretPosition);
-            int contextEnd = enclosingSpan.End.Position;
 
-            if (contextEnd <= caretPosition)
+            if (!useTextBasedContext &&
+                TryGetNavigatorContext(snapshot, caretPosition, out string navigatorUp, out string navigatorDown))
             {
-                contextEnd = Math.Min(snapshot.Length, caretPosition + 500); // fallback: ~500 chars below
+                return (navigatorUp, navigatorDown);
             }
 
-            return snapshot.GetText(caretPosition, contextEnd - caretPosition);
+            (int contextStart, int contextEnd) = GetTextBasedContextRange(snapshot, caretPosition);
+
+            return (snapshot.GetText(contextStart, caretPosition - contextStart),
+                    snapshot.GetText(caretPosition, contextEnd - caretPosition));
+        }
+
+        /// <summary>
+        /// 用语言服务导航器取上下文；失败时返回 <c>false</c>，由调用方降级到纯文本扫描。
+        /// </summary>
+        private bool TryGetNavigatorContext(
+            ITextSnapshot snapshot, int caretPosition, out string codeUp, out string codeDown)
+        {
+            codeUp = string.Empty;
+            codeDown = string.Empty;
+
+            SnapshotSpan enclosingSpan = GetEnclosingStructureSpan(snapshot, caretPosition, out bool degraded);
+
+            // 导航器抛异常，或没给出覆盖光标的结构块（空 span / 起点在光标之后）→ 视为失败
+            if (degraded || enclosingSpan.IsEmpty || enclosingSpan.Start.Position >= caretPosition)
+            {
+                return false;
+            }
+
+            int contextStart = enclosingSpan.Start.Position;
+            codeUp = snapshot.GetText(contextStart, caretPosition - contextStart);
+
+            int contextEnd = Math.Min(snapshot.Length, enclosingSpan.End.Position);
+            codeDown = contextEnd > caretPosition
+                ? snapshot.GetText(caretPosition, contextEnd - caretPosition)
+                : string.Empty;
+
+            return true;
+        }
+
+        /// <summary>
+        /// C/C++ 的上下文区间：用 <see cref="CppBlockContextScanner"/> 做纯文本花括号扫描，
+        /// 不调用语言服务，因此不会出现 E_FAIL 退化，能稳定拿到"函数签名 → 右括号"的完整代码。
+        /// </summary>
+        private (int Start, int End) GetTextBasedContextRange(ITextSnapshot snapshot, int caretPosition)
+        {
+            string text = snapshot.GetText();
+
+            return CppBlockContextScanner.GetContext(text, caretPosition);
         }
 
         /// <summary>
         /// 使用 <see cref="ITextStructureNavigator"/> 迭代获取光标所在的结构块。
         /// 从光标位置开始，逐层向外扩展到方法/类级别（最多 5 层），
         /// 为 FIM 补全提供足够的方法级上下文。
+        /// 注意：C/C++ 不走这条路径（VC 语言服务会抛 E_FAIL，见 <see cref="CppBlockContextScanner"/>）；
+        /// 其他语言一旦失败，<paramref name="degraded"/> 置为 <c>true</c> 且异常只记 Debug，
+        /// 由调用方降级为纯文本扫描，避免中断补全流程。
         /// </summary>
-        private SnapshotSpan GetEnclosingStructureSpan(ITextSnapshot snapshot, int caretPosition)
+        private SnapshotSpan GetEnclosingStructureSpan(
+            ITextSnapshot snapshot, int caretPosition, out bool degraded)
         {
             const int MaxNestingLevels = 5;
 
+            degraded = false;
             var currentSpan = new SnapshotSpan(snapshot, caretPosition, 0);
 
             for (int level = 0; level < MaxNestingLevels; level++)
@@ -305,15 +359,17 @@ namespace DeepSeek_v4_for_VisualStudio.CodeCompletion
                 }
                 catch (System.Runtime.InteropServices.COMException ex)
                 {
-                    // C++ 语言服务在代码语法不完整时可能抛出 COM 异常（E_FAIL），
-                    // 此时停止向外扩展，使用已获取的上下文即可。
-                    Logger.Info($"[补全] GetSpanOfEnclosing COM 异常 (level={level}): {ex.Message}");
+                    // C++ 语言服务在代码语法不完整时会抛 E_FAIL 等 COM 异常。
+                    // 这是可预期的降级信号，不是缺陷：日志降到 Debug，上下文改由纯文本扫描补齐。
+                    Logger.Debug($"[补全] GetSpanOfEnclosing COM 异常 (level={level})，降级为纯文本扫描: {ex.Message}");
+                    degraded = true;
                     break;
                 }
                 catch (Exception ex)
                 {
-                    // 其他异常也安全处理，不中断补全流程
-                    Logger.Info($"[补全] GetSpanOfEnclosing 异常 (level={level}): {ex.Message}");
+                    // 其他异常同样降级处理，不中断补全流程
+                    Logger.Debug($"[补全] GetSpanOfEnclosing 异常 (level={level})，降级为纯文本扫描: {ex.Message}");
+                    degraded = true;
                     break;
                 }
             }
