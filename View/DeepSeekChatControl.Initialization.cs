@@ -52,6 +52,7 @@ namespace DeepSeek_v4_for_VisualStudio.View
             SubscribeApiRequestCompletion(null);
             _apiService?.Dispose();
             _apiService = new DeepSeekApiService(config.ApiKey, config.Model,
+                requestTimeoutSeconds: _options.LlmTimeoutSeconds,
                 baseUrl: config.BaseUrl,
                 isVision: config.IsVision, isCustom: config.IsCustom);
             ConfigureOcrRuntimeFromSettings();
@@ -299,7 +300,8 @@ namespace DeepSeek_v4_for_VisualStudio.View
                     $"context={changes.ContextChanged}, thinking={changes.ThinkingChanged}, approval={changes.ApprovalChanged}, " +
                     $"autoSkillRouting={changes.AutoSkillRoutingChanged}, ocr={changes.OcrChanged}, " +
                     $"webSearch={changes.WebSearchChanged}, layout={changes.LayoutChanged}, " +
-                    $"developer={changes.DeveloperChanged}");
+                    $"developer={changes.DeveloperChanged}, compression={changes.CompressionChanged}, " +
+                    $"llmTimeout={changes.LlmTimeoutChanged}");
 
                 ExecuteWithoutCoreControlEvents(() => ApplyRuntimeSettingsChanges(changes));
                 _lastAppliedSettings = current;
@@ -320,6 +322,12 @@ namespace DeepSeek_v4_for_VisualStudio.View
 
             if (changes.ModelControlsChanged || changes.ContextChanged)
                 ApplyContextBudgetFromSettings();
+
+            if (changes.CompressionChanged)
+                InitializeContextServices();
+
+            if (changes.LlmTimeoutChanged)
+                _apiService?.UpdateRequestTimeout(_options?.LlmTimeoutSeconds ?? 300);
 
             if (changes.ThinkingChanged)
             {

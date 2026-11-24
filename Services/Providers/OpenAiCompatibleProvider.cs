@@ -261,9 +261,7 @@ namespace DeepSeek_v4_for_VisualStudio.Services.Providers
             };
 
             // ── LLM 请求超时可配置（P2，序号 22）；默认保持原行为 5 分钟 ──
-            int timeoutSeconds = requestTimeoutSeconds ?? 300;
-            if (timeoutSeconds < 30) timeoutSeconds = 30;       // 下限：避免误配导致请求必失败
-            if (timeoutSeconds > 3600) timeoutSeconds = 3600;   // 上限：1 小时
+            int timeoutSeconds = NormalizeRequestTimeoutSeconds(requestTimeoutSeconds);
 
             _httpClient = new HttpClient(handler)
             {
@@ -363,6 +361,27 @@ namespace DeepSeek_v4_for_VisualStudio.Services.Providers
         }
 
         public void UpdateModel(string model) => _model = model;
+
+        /// <summary>当前 LLM 请求超时，供运行时设置校验和测试读取。</summary>
+        internal TimeSpan RequestTimeout => _httpClient.Timeout;
+
+        /// <summary>
+        /// 运行时更新 LLM 请求超时。HttpClient 在后续请求中立即采用新值。
+        /// </summary>
+        public void UpdateRequestTimeout(int requestTimeoutSeconds)
+        {
+            int timeoutSeconds = NormalizeRequestTimeoutSeconds(requestTimeoutSeconds);
+            _httpClient.Timeout = TimeSpan.FromSeconds(timeoutSeconds);
+            Logger.Info($"[HTTP] {ProviderName} 请求超时已更新: {timeoutSeconds}s");
+        }
+
+        internal static int NormalizeRequestTimeoutSeconds(int? requestTimeoutSeconds)
+        {
+            int timeoutSeconds = requestTimeoutSeconds ?? 300;
+            if (timeoutSeconds < 30) return 30;     // 下限：避免误配导致请求必失败
+            if (timeoutSeconds > 3600) return 3600; // 上限：1 小时
+            return timeoutSeconds;
+        }
 
         /// <summary>
         /// 运行时一次性应用端点配置（Key/BaseUrl/Model/IsCustom/IsVision）。

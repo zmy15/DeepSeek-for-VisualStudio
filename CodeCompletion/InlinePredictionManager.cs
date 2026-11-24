@@ -233,7 +233,8 @@ namespace DeepSeek_v4_for_VisualStudio.CodeCompletion
         {
             try
             {
-                var config = DeepSeekEndpointResolver.Resolve(GetCurrentOptions());
+                DeepSeekOptionsPage currentOptions = GetCurrentOptions();
+                var config = DeepSeekEndpointResolver.Resolve(currentOptions);
                 if (config.IsCustom || string.IsNullOrEmpty(config.ApiKey))
                 {
                     return null;
@@ -242,6 +243,7 @@ namespace DeepSeek_v4_for_VisualStudio.CodeCompletion
                 using var apiService = new DeepSeekApiService(
                     config.ApiKey,
                     config.Model,
+                    requestTimeoutSeconds: currentOptions.LlmTimeoutSeconds,
                     baseUrl: config.BaseUrl,
                     isVision: config.IsVision,
                     isCustom: config.IsCustom);

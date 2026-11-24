@@ -108,6 +108,43 @@ public class RuntimeSettingsSnapshotTests
     }
 
     [Fact]
+    public void CompressionSettingsChange_RefreshesCompressionOnly()
+    {
+        var previous = CreateSnapshot();
+        var current = previous with
+        {
+            EnableAutoCompression = false,
+            CompressionThreshold = 70,
+            PreserveRecentTurns = 6,
+        };
+
+        var changes = RuntimeSettingsChangeSet.Between(previous, current);
+
+        changes.CompressionChanged.Should().BeTrue();
+        changes.HasChanges.Should().BeTrue();
+        changes.ContextChanged.Should().BeFalse();
+        changes.EndpointChanged.Should().BeFalse();
+        changes.ModelControlsChanged.Should().BeFalse();
+        changes.LayoutChanged.Should().BeFalse();
+    }
+
+    [Fact]
+    public void LlmTimeoutChange_RefreshesTimeoutOnly()
+    {
+        var previous = CreateSnapshot();
+        var current = previous with { LlmTimeoutSeconds = 120 };
+
+        var changes = RuntimeSettingsChangeSet.Between(previous, current);
+
+        changes.LlmTimeoutChanged.Should().BeTrue();
+        changes.HasChanges.Should().BeTrue();
+        changes.ContextChanged.Should().BeFalse();
+        changes.EndpointChanged.Should().BeFalse();
+        changes.ModelControlsChanged.Should().BeFalse();
+        changes.CompressionChanged.Should().BeFalse();
+    }
+
+    [Fact]
     public void SearchKeyChange_RefreshesWebSearchOnly()
     {
         var previous = CreateSnapshot();
