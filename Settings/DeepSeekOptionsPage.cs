@@ -79,6 +79,15 @@ namespace DeepSeek_v4_for_VisualStudio.Settings
 
             // Language affects resource loading before general subscribers refresh the UI.
             ApplyLanguageSetting();
+            NotifySettingsChanged();
+        }
+
+        /// <summary>
+        /// Raises the runtime settings change notification.
+        /// Keep publication in one place so every settings surface follows the same path.
+        /// </summary>
+        internal static void NotifySettingsChanged()
+        {
             SettingsChanged?.Invoke();
         }
 
@@ -745,7 +754,7 @@ namespace DeepSeek_v4_for_VisualStudio.Settings
                 // 规范 DialogPage 的过期实例），否则用户手动选择的语言会被静默丢弃、
                 // 回退到自动检测（中文），表现为"切换失效"。
                 ApplyLanguageSetting();
-                SettingsChanged?.Invoke();
+                NotifySettingsChanged();
 
                 // ── 旧页改动 → 推送到 Unified Settings（新版设置 UI 同步）──
                 UnifiedSettingsSync.PushFromPage(this);

@@ -37,7 +37,8 @@ namespace DeepSeek_v4_for_VisualStudio.CodeCompletion
         private readonly IWpfTextView view;
         private readonly ITextStructureNavigator structureNavigator;
         private readonly ConcurrentDictionary<string, string> cache = new();
-        private readonly DispatcherTimer? typingTimer;
+        private readonly DispatcherTimer typingTimer;
+        private readonly CompletionSettingsMonitor settingsMonitor;
 
         /// <summary>
         /// 是否直接用纯文本花括号扫描取上下文（C/C++）。
@@ -50,6 +51,9 @@ namespace DeepSeek_v4_for_VisualStudio.CodeCompletion
         private CancellationTokenSource? cancellationTokenSource;
         private bool showingAutoComplete;
         private bool suppressNextSuggestion;
+        private bool isCompletionEnabled;
+        private bool isViewClosed;
+        private bool completionRequestedWhileBusy;
 
         #endregion
 
@@ -68,19 +72,20 @@ namespace DeepSeek_v4_for_VisualStudio.CodeCompletion
             this.structureNavigator = structureNavigator;
             this.useTextBasedContext = IsCppContentType(view);
 
-            if (!options.AutoCompleteEnabled)
-            {
-                Logger.Info(LocalizationService.Instance["autocomplete.notEnabled"]);
-                return;
-            }
+            settingsMonitor = new CompletionSettingsMonitor(GetCurrentOptions);
+            settingsMonitor.Changed += OnCompletionSettingsChanged;
 
-            Logger.Info(string.Format(LocalizationService.Instance["autocomplete.initialized"], options.AutoCompleteDelay));
-            typingTimer = new DispatcherTimer { Interval = TimeSpan.FromMilliseconds(options.AutoCompleteDelay) };
+            typingTimer = new DispatcherTimer();
             typingTimer.Tick += TypingTimer_Tick;
 
             this.view.TextBuffer.Changed += TextBuffer_Changed;
             this.view.Caret.PositionChanged += Caret_PositionChanged;
             this.view.Closed += OnViewClosed;
+
+            ApplyCompletionSettings(
+                settingsMonitor.Current,
+                triggerWhenEnabled: false,
+                logStatus: true);
         }
 
         #endregion
@@ -92,7 +97,7 @@ namespace DeepSeek_v4_for_VisualStudio.CodeCompletion
         /// </summary>
         public void RestartTimer()
         {
-            if (typingTimer == null)
+            if (isViewClosed || !isCompletionEnabled)
             {
                 return;
             }
@@ -107,7 +112,7 @@ namespace DeepSeek_v4_for_VisualStudio.CodeCompletion
         /// </summary>
         public void NotifySuggestionAccepted()
         {
-            if (!options.AutoCompleteContinueAfterAccept)
+            if (!settingsMonitor.Current.ContinueAfterAccept)
             {
                 suppressNextSuggestion = true;
             }
@@ -121,6 +126,11 @@ namespace DeepSeek_v4_for_VisualStudio.CodeCompletion
         {
             try
             {
+                if (!isCompletionEnabled)
+                {
+                    return;
+                }
+
                 if (showingAutoComplete)
                 {
                     return;
@@ -168,6 +178,11 @@ namespace DeepSeek_v4_for_VisualStudio.CodeCompletion
                     return;
                 }
 
+                if (!isCompletionEnabled)
+                {
+                    return;
+                }
+
                 prediction = FormatPrediction(prediction!);
 
                 if (string.IsNullOrWhiteSpace(prediction))
@@ -179,6 +194,11 @@ namespace DeepSeek_v4_for_VisualStudio.CodeCompletion
 
                 Logger.Info(string.Format(LocalizationService.Instance["autocomplete.predictionDone"], prediction.Length, cache.Count));
                 await ThreadHelper.JoinableTaskFactory.SwitchToMainThreadAsync(cancellationTokenSource.Token);
+
+                if (!isCompletionEnabled)
+                {
+                    return;
+                }
 
                 DisplayPrediction(prediction);
             }
@@ -193,6 +213,11 @@ namespace DeepSeek_v4_for_VisualStudio.CodeCompletion
             finally
             {
                 showingAutoComplete = false;
+                if (completionRequestedWhileBusy)
+                {
+                    completionRequestedWhileBusy = false;
+                    RestartTimer();
+                }
             }
         }
 
@@ -208,7 +233,7 @@ namespace DeepSeek_v4_for_VisualStudio.CodeCompletion
         {
             try
             {
-                var config = DeepSeekEndpointResolver.Resolve(options);
+                var config = DeepSeekEndpointResolver.Resolve(GetCurrentOptions());
                 if (config.IsCustom || string.IsNullOrEmpty(config.ApiKey))
                 {
                     return null;
@@ -245,6 +270,11 @@ namespace DeepSeek_v4_for_VisualStudio.CodeCompletion
         /// </summary>
         private void DisplayPrediction(string prediction)
         {
+            if (!isCompletionEnabled)
+            {
+                return;
+            }
+
             if (view.Properties.TryGetProperty(GhostTextTagger.TaggerKey, out GhostTextTagger tagger))
             {
                 int caretPosition = view.Caret.Position.BufferPosition.Position;
@@ -438,6 +468,62 @@ namespace DeepSeek_v4_for_VisualStudio.CodeCompletion
 
         #region Private Methods - Event Handlers
 
+        private DeepSeekOptionsPage GetCurrentOptions()
+            => DeepSeekOptionsPage.Instance ?? options;
+
+        private void OnCompletionSettingsChanged(CompletionRuntimeSettings settings)
+        {
+            if (isViewClosed)
+            {
+                return;
+            }
+
+            ApplyCompletionSettings(
+                settings,
+                triggerWhenEnabled: true,
+                logStatus: false);
+        }
+
+        /// <summary>
+        /// Applies the latest completion settings to this live view.
+        /// The view is bound once, so enable/disable transitions must be handled here
+        /// rather than relying on a package or text-view restart.
+        /// </summary>
+        private void ApplyCompletionSettings(
+            CompletionRuntimeSettings settings,
+            bool triggerWhenEnabled,
+            bool logStatus)
+        {
+            bool wasEnabled = isCompletionEnabled;
+            isCompletionEnabled = settings.Enabled;
+            typingTimer.Interval = TimeSpan.FromMilliseconds(settings.DelayMilliseconds);
+
+            if (!settings.Enabled)
+            {
+                typingTimer.Stop();
+                cancellationTokenSource?.Cancel();
+                suppressNextSuggestion = false;
+                completionRequestedWhileBusy = false;
+
+                if (view.Properties.TryGetProperty(GhostTextTagger.TaggerKey, out GhostTextTagger tagger))
+                {
+                    tagger.ClearSuggestion();
+                }
+            }
+            else if (!wasEnabled && triggerWhenEnabled)
+            {
+                RestartTimer();
+            }
+
+            if (logStatus || wasEnabled != settings.Enabled)
+            {
+                string status = settings.Enabled
+                    ? LocalizationService.Instance["autocomplete.statusEnabled"]
+                    : LocalizationService.Instance["autocomplete.statusDisabled"];
+                Logger.Info(string.Format(LocalizationService.Instance["autocomplete.status"], status));
+            }
+        }
+
         /// <summary>
         /// 用户移动光标时清除当前幽灵文本，确保预测不会停留在错误位置。
         /// </summary>
@@ -459,14 +545,19 @@ namespace DeepSeek_v4_for_VisualStudio.CodeCompletion
                 tagger.ClearSuggestion();
             }
 
+            if (!isCompletionEnabled)
+            {
+                return;
+            }
+
             if (suppressNextSuggestion)
             {
                 suppressNextSuggestion = false;
                 return;
             }
 
-            typingTimer?.Stop();
-            typingTimer?.Start();
+            typingTimer.Stop();
+            typingTimer.Start();
         }
 
         /// <summary>
@@ -477,9 +568,18 @@ namespace DeepSeek_v4_for_VisualStudio.CodeCompletion
         {
             try
             {
-                typingTimer?.Stop();
+                typingTimer.Stop();
 
-                if (!showingAutoComplete)
+                if (!isCompletionEnabled)
+                {
+                    return;
+                }
+
+                if (showingAutoComplete)
+                {
+                    completionRequestedWhileBusy = true;
+                }
+                else
                 {
                     Logger.Info(LocalizationService.Instance["autocomplete.debounceTriggered"]);
                     await ShowAutocompleteAsync();
@@ -499,15 +599,17 @@ namespace DeepSeek_v4_for_VisualStudio.CodeCompletion
         {
             try
             {
+                isViewClosed = true;
+                settingsMonitor.Changed -= OnCompletionSettingsChanged;
+                settingsMonitor.Dispose();
+
                 view.TextBuffer.Changed -= TextBuffer_Changed;
                 view.Caret.PositionChanged -= Caret_PositionChanged;
                 view.Closed -= OnViewClosed;
 
-                if (typingTimer != null)
-                {
-                    typingTimer.Stop();
-                    typingTimer.Tick -= TypingTimer_Tick;
-                }
+                typingTimer.Stop();
+                typingTimer.Tick -= TypingTimer_Tick;
+                completionRequestedWhileBusy = false;
 
                 cancellationTokenSource?.Cancel();
                 cancellationTokenSource?.Dispose();
