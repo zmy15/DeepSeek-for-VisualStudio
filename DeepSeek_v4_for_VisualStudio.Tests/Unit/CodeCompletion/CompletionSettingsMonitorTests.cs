@@ -64,4 +64,40 @@ public class CompletionSettingsMonitorTests
 
         observed.Should().BeNull();
     }
+
+    [Fact]
+    public void OptionsInstanceReplacement_RefreshesRestoredViews()
+    {
+        DeepSeekOptionsPage? originalInstance = DeepSeekOptionsPage.Instance;
+        try
+        {
+            var startupDefaults = DeepSeekOptionsPageTestFactory.Create();
+            startupDefaults.AutoCompleteEnabled = false;
+            startupDefaults.AutoCompleteDelay = 800;
+            startupDefaults.AutoCompleteContinueAfterAccept = true;
+
+            var persistedOptions = DeepSeekOptionsPageTestFactory.Create();
+            persistedOptions.AutoCompleteEnabled = true;
+            persistedOptions.AutoCompleteDelay = 450;
+            persistedOptions.AutoCompleteContinueAfterAccept = false;
+
+            DeepSeekOptionsPage.Instance = startupDefaults;
+            using var monitor = new CompletionSettingsMonitor(
+                () => DeepSeekOptionsPage.Instance);
+            CompletionRuntimeSettings? observed = null;
+            monitor.Changed += settings => observed = settings;
+
+            DeepSeekOptionsPage.Instance = persistedOptions;
+
+            monitor.Current.Should().Be(new CompletionRuntimeSettings(
+                Enabled: true,
+                DelayMilliseconds: 450,
+                ContinueAfterAccept: false));
+            observed.Should().Be(monitor.Current);
+        }
+        finally
+        {
+            DeepSeekOptionsPage.Instance = originalInstance;
+        }
+    }
 }

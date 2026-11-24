@@ -13,9 +13,10 @@ namespace DeepSeek_v4_for_VisualStudio.CodeCompletion
         bool ContinueAfterAccept);
 
     /// <summary>
-    /// Watches <see cref="DeepSeekOptionsPage.SettingsChanged"/> and raises a change
-    /// only when a completion-related setting has changed. This keeps existing text
-    /// views in sync with both the classic options page and Unified Settings.
+    /// Watches setting updates and <see cref="DeepSeekOptionsPage.Instance"/> replacement,
+    /// raising a change only when a completion-related setting has changed. This keeps
+    /// existing text views in sync with persisted settings, the classic options page,
+    /// and Unified Settings.
     /// </summary>
     internal sealed class CompletionSettingsMonitor : IDisposable
     {
@@ -29,6 +30,7 @@ namespace DeepSeek_v4_for_VisualStudio.CodeCompletion
 
             Current = ReadSettings(optionsProvider());
             DeepSeekOptionsPage.SettingsChanged += OnSettingsChanged;
+            DeepSeekOptionsPage.InstanceChanged += OnSettingsChanged;
         }
 
         public CompletionRuntimeSettings Current { get; private set; }
@@ -44,6 +46,7 @@ namespace DeepSeek_v4_for_VisualStudio.CodeCompletion
 
             disposed = true;
             DeepSeekOptionsPage.SettingsChanged -= OnSettingsChanged;
+            DeepSeekOptionsPage.InstanceChanged -= OnSettingsChanged;
         }
 
         private void OnSettingsChanged()
