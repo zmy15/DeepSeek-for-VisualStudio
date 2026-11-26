@@ -1,0 +1,1457 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="utf-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1" />
+<title>DeepSeek for Visual Studio · 架构图</title>
+<!--
+  说明：本文件是 DeepSeek Chat for Visual Studio 的交互式架构图，单文件、零外部依赖，可离线双击打开。
+  数据来源：docs/Architecture.md 与实际目录结构（Services / View / CodeCompletion / Settings / Commands）。
+  生成时间：2026-02，由架构分析任务生成。
+
+  操作方式：
+    · 拖动空白处 —— 平移画布
+    · 滚轮 —— 以鼠标位置为锚点缩放
+    · 点击节点右上角圆点 —— 展开 / 折叠该分组的子节点
+    · 点击节点 —— 在右侧面板查看职责、文件路径与上下游依赖
+    · 顶部搜索框 —— 按类名或职责过滤高亮
+-->
+<style>
+  * { box-sizing: border-box; }
+
+  html, body {
+    margin: 0;
+    height: 100%;
+    overflow: hidden;
+    font-family: "Segoe UI", "Microsoft YaHei", Consolas, sans-serif;
+  }
+
+  /* 深色为默认主题，浅色由 body.light 覆盖同名变量 */
+  body {
+    --bg: #1e1e1e;
+    --panel: #252526;
+    --panel2: #2d2d30;
+    --border: #3f3f46;
+    --text: #d4d4d4;
+    --muted: #8f8f95;
+    --accent: #4ec9b0;
+    --node-fill: #2a2a2e;
+    --edge: #6b6b73;
+    --shadow: rgba(0, 0, 0, .45);
+    background: var(--bg);
+    color: var(--text);
+  }
+
+  body.light {
+    --bg: #f6f6f7;
+    --panel: #ffffff;
+    --panel2: #f0f0f2;
+    --border: #d8d8dc;
+    --text: #24292e;
+    --muted: #6a737d;
+    --accent: #0b7a68;
+    --node-fill: #ffffff;
+    --edge: #b6b6bd;
+    --shadow: rgba(0, 0, 0, .12);
+  }
+
+  /* ── 顶栏 ───────────────────────────────────────────── */
+  #toolbar {
+    position: fixed;
+    top: 0;
+    left: 0;
+    right: 0;
+    height: 50px;
+    display: flex;
+    align-items: center;
+    gap: 8px;
+    padding: 0 12px;
+    background: var(--panel);
+    border-bottom: 1px solid var(--border);
+    z-index: 20;
+  }
+
+  #toolbar .title {
+    font-size: 13px;
+    font-weight: 600;
+    letter-spacing: .3px;
+    margin-right: 6px;
+    white-space: nowrap;
+  }
+
+  #toolbar .title span { color: var(--accent); }
+
+  #search {
+    width: 220px;
+    height: 30px;
+    padding: 0 10px;
+    border-radius: 6px;
+    border: 1px solid var(--border);
+    background: var(--panel2);
+    color: var(--text);
+    font-size: 12px;
+    outline: none;
+  }
+
+  #search:focus { border-color: var(--accent); }
+
+  button {
+    height: 30px;
+    padding: 0 10px;
+    border-radius: 6px;
+    border: 1px solid var(--border);
+    background: var(--panel2);
+    color: var(--text);
+    font-size: 12px;
+    cursor: pointer;
+    white-space: nowrap;
+  }
+
+  button:hover { border-color: var(--accent); color: var(--accent); }
+  button:active { transform: translateY(1px); }
+
+  #stats {
+    margin-left: auto;
+    font-size: 11px;
+    color: var(--muted);
+    white-space: nowrap;
+  }
+
+  /* ── 画布 ───────────────────────────────────────────── */
+  #stage {
+    position: absolute;
+    inset: 50px 0 0 0;
+    overflow: hidden;
+  }
+
+  #svg {
+    width: 100%;
+    height: 100%;
+    display: block;
+    cursor: grab;
+    touch-action: none;
+  }
+
+  #svg.dragging { cursor: grabbing; }
+
+  .node-box {
+    fill: var(--node-fill);
+    stroke-width: 1.5;
+    transition: filter .12s;
+  }
+
+  .node:hover .node-box { filter: brightness(1.25); }
+
+  .node-label {
+    fill: var(--text);
+    font-size: 11px;
+    text-anchor: middle;
+    pointer-events: none;
+    font-family: Consolas, "Segoe UI", monospace;
+  }
+
+  .node-sub {
+    fill: var(--muted);
+    font-size: 9px;
+    text-anchor: middle;
+    pointer-events: none;
+  }
+
+  .node.selected .node-box { stroke-width: 3; }
+  .node.dim { opacity: .13; }
+
+  /* 方块可拖拽：悬停显示抓手，拖拽中提升亮度与描边 */
+  .node-box { cursor: grab; }
+  .node.dragging .node-box { cursor: grabbing; stroke-width: 3; filter: brightness(1.6); }
+  .node.hit .node-box { filter: brightness(1.5); }
+  .node.hit .node-label { fill: var(--accent); font-weight: 600; }
+
+  .edge {
+    fill: none;
+    stroke: var(--edge);
+    stroke-width: 1.4;
+    opacity: .9;
+  }
+
+  .edge.impl { stroke: #c678dd; stroke-dasharray: 6 4; }
+  .edge.call { stroke: #e3b341; stroke-width: 1.6; }
+  .edge.data { stroke: #56d4dd; stroke-dasharray: 2 3; stroke-width: 1.4; }
+  .edge.dep { stroke: #7ee787; opacity: .8; }
+  .edge.dim { opacity: .05; }
+  .edge.hit { opacity: 1; stroke-width: 2.4; }
+
+  .toggle { cursor: pointer; }
+  .toggle circle { fill: var(--panel2); stroke: var(--border); }
+  .toggle text {
+    fill: var(--text);
+    font-size: 10px;
+    text-anchor: middle;
+    pointer-events: none;
+  }
+  .toggle:hover circle { fill: var(--accent); }
+  .toggle:hover text { fill: #101010; }
+
+  /* ── 详情面板 ───────────────────────────────────────── */
+  #detail {
+    position: fixed;
+    top: 62px;
+    right: 12px;
+    width: 330px;
+    max-height: calc(100% - 80px);
+    overflow: auto;
+    padding: 14px;
+    border-radius: 10px;
+    border: 1px solid var(--border);
+    background: var(--panel);
+    box-shadow: 0 6px 24px var(--shadow);
+    font-size: 12px;
+    line-height: 1.6;
+    display: none;
+    z-index: 15;
+  }
+
+  #detail.open { display: block; }
+
+  #detail h2 {
+    margin: 0 0 4px;
+    font-size: 14px;
+    font-family: Consolas, monospace;
+    word-break: break-all;
+  }
+
+  #detail .layer-chip {
+    display: inline-block;
+    padding: 1px 8px;
+    border-radius: 10px;
+    font-size: 10px;
+    margin-bottom: 8px;
+  }
+
+  #detail .file {
+    font-family: Consolas, monospace;
+    font-size: 11px;
+    color: var(--muted);
+    word-break: break-all;
+    margin-bottom: 8px;
+  }
+
+  #detail .desc { margin-bottom: 12px; }
+
+  #detail .sect {
+    font-size: 11px;
+    color: var(--muted);
+    margin: 10px 0 4px;
+    text-transform: uppercase;
+    letter-spacing: .5px;
+  }
+
+  #detail a.dep-link {
+    display: block;
+    padding: 3px 6px;
+    border-radius: 4px;
+    color: var(--text);
+    text-decoration: none;
+    font-family: Consolas, monospace;
+    font-size: 11px;
+  }
+
+  #detail a.dep-link:hover { background: var(--panel2); color: var(--accent); }
+  #detail .empty { color: var(--muted); font-size: 11px; }
+
+  /* ── 图例 ───────────────────────────────────────────── */
+  #legend {
+    position: fixed;
+    left: 12px;
+    bottom: 12px;
+    padding: 10px 12px;
+    border-radius: 10px;
+    border: 1px solid var(--border);
+    background: var(--panel);
+    box-shadow: 0 6px 24px var(--shadow);
+    font-size: 11px;
+    line-height: 1.5;
+    z-index: 15;
+    max-width: 260px;
+  }
+
+  #legend .row { display: flex; align-items: center; gap: 6px; margin-bottom: 2px; }
+  #legend .swatch { width: 10px; height: 10px; border-radius: 3px; flex: 0 0 auto; }
+  #legend .line-swatch { width: 18px; height: 0; border-top-width: 2px; border-top-style: solid; flex: 0 0 auto; }
+  #legend .sect { color: var(--muted); margin: 6px 0 3px; font-size: 10px; letter-spacing: .5px; }
+</style>
+</head>
+<body class="dark">
+
+<div id="toolbar">
+  <div class="title">DeepSeek for Visual Studio · <span>架构图</span></div>
+  <input id="search" type="search" placeholder="搜索类名或职责…" autocomplete="off" />
+  <button id="btn-expand">全部展开</button>
+  <button id="btn-collapse">全部折叠</button>
+  <button id="btn-relayout">重新布局</button>
+  <button id="btn-freeze">固定布局</button>
+  <button id="btn-fit">适配窗口</button>
+  <button id="btn-zoom-in">放大</button>
+  <button id="btn-zoom-out">缩小</button>
+  <button id="btn-theme">浅色</button>
+  <div id="stats">—</div>
+</div>
+
+<div id="stage">
+  <svg id="svg">
+    <defs>
+      <marker id="m-impl" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="6" markerHeight="6" orient="auto-start-reverse">
+        <path d="M0,0 L10,5 L0,10 z" fill="#c678dd" />
+      </marker>
+      <marker id="m-call" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="6" markerHeight="6" orient="auto-start-reverse">
+        <path d="M0,0 L10,5 L0,10 z" fill="#e3b341" />
+      </marker>
+      <marker id="m-data" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="6" markerHeight="6" orient="auto-start-reverse">
+        <path d="M0,0 L10,5 L0,10 z" fill="#56d4dd" />
+      </marker>
+      <marker id="m-dep" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="6" markerHeight="6" orient="auto-start-reverse">
+        <path d="M0,0 L10,5 L0,10 z" fill="#7ee787" />
+      </marker>
+    </defs>
+    <g id="viewport"></g>
+  </svg>
+</div>
+
+<aside id="detail"></aside>
+
+<div id="legend">
+  <div class="sect">分层</div>
+  <div id="legend-layers"></div>
+  <div class="sect">连线</div>
+  <div class="row"><span class="line-swatch" style="border-top-color:#e3b341"></span>调用 / 移交</div>
+  <div class="row"><span class="line-swatch" style="border-top-color:#c678dd;border-top-style:dashed"></span>实现（继承 / 接口）</div>
+  <div class="row"><span class="line-swatch" style="border-top-color:#7ee787;opacity:.7"></span>依赖</div>
+  <div class="row"><span class="line-swatch" style="border-top-color:#56d4dd;border-top-style:dotted"></span>数据流</div>
+</div>
+
+<script>
+(function () {
+  'use strict';
+
+  // ─────────────────────────────────────────────────────────────
+  // 一、架构数据：分层、节点、连线
+  // ─────────────────────────────────────────────────────────────
+
+  var LAYERS = [
+    { n: 1, name: '入口层', color: '#ff7b72' },
+    { n: 2, name: 'UI 层', color: '#79c0ff' },
+    { n: 3, name: 'DI 容器', color: '#c678dd' },
+    { n: 4, name: 'Agent 层', color: '#e3b341' },
+    { n: 5, name: '工具层', color: '#7ee787' },
+    { n: 6, name: '模型提供方', color: '#56d4dd' },
+    { n: 7, name: '上下文与缓存', color: '#ffa657' },
+    { n: 8, name: '编辑管线', color: '#f78ca2' },
+    { n: 9, name: '代码补全', color: '#d2a8ff' },
+    { n: 10, name: '设置与横切', color: '#9aa0a6' }
+  ];
+
+  var LAYER_NAME = {};
+  var LAYER_COLOR = {};
+  LAYERS.forEach(function (l) { LAYER_NAME[l.n] = l.name; LAYER_COLOR[l.n] = l.color; });
+
+  // 节点字段：id 唯一标识；parent 表示属于哪个可折叠分组；file 为相对路径；desc 为中文职责
+  var NODES = [
+    // ── L1 入口层 ──────────────────────────────────────────
+    { id: 'pkg', label: 'DeepSeek_v4_for_VisualStudioPackage', layer: 1, file: 'DeepSeek_v4_for_VisualStudioPackage.cs', desc: 'AsyncPackage 入口，执行 9 步有序初始化，每步独立 try/catch 保证非致命失败不阻断加载。' },
+    { id: 'ext', label: 'DeepSeekExtension', layer: 1, file: 'DeepSeekExtension.cs', desc: 'VisualStudio.Extensibility 进程内宿主。' },
+    { id: 'cmdShow', label: 'ShowChatWindowCommand', layer: 1, file: 'Commands/ShowChatWindowCommand.cs', desc: '打开聊天工具窗口的命令，启动时立即注册。' },
+    { id: 'cmdInline', label: 'InlineAiEditCommand', layer: 1, file: 'Commands/InlineAiEditCommand.cs', desc: '内联 AI 编辑命令，延迟到后台任务注册以保证启动速度。' },
+
+    // ── L2 UI 层 ──────────────────────────────────────────
+    { id: 'pane', label: 'DeepSeekChatWindowPane', layer: 2, file: 'View/DeepSeekChatWindowPane.cs', desc: '聊天工具窗口宿主（ToolWindowPane）。' },
+    { id: 'ctrl', label: 'DeepSeekChatControl', layer: 2, file: 'View/DeepSeekChatControl.xaml.cs', desc: '聊天主控件，按职责拆为 15 个分部类，避免单文件膨胀。' },
+    { id: 'ctrlAgent', label: '.Agent', layer: 2, parent: 'ctrl', file: 'View/DeepSeekChatControl.Agent.cs', desc: 'Agent 调度：构建消息、驱动工具循环、接收流式帧。' },
+    { id: 'ctrlRendering', label: '.Rendering', layer: 2, parent: 'ctrl', file: 'View/DeepSeekChatControl.Rendering.cs', desc: 'HTML 快照与终态渲染，含页面重建期间的补发队列。' },
+    { id: 'ctrlSessions', label: '.Sessions', layer: 2, parent: 'ctrl', file: 'View/DeepSeekChatControl.Sessions.cs', desc: '会话创建、切换与持久化协调。' },
+    { id: 'ctrlTheme', label: '.Theme', layer: 2, parent: 'ctrl', file: 'View/DeepSeekChatControl.Theme.cs', desc: '跟随 VS 主题切换并触发整页重建。' },
+    { id: 'ctrlEvents', label: '.Events', layer: 2, parent: 'ctrl', file: 'View/DeepSeekChatControl.Events.cs', desc: '按钮点击与 WebMessage 事件路由。' },
+    { id: 'ctrlPlanIntent', label: '.PlanIntent', layer: 2, parent: 'ctrl', file: 'View/DeepSeekChatControl.PlanIntent.cs', desc: '计划确认、意图识别与移交按钮的一次性控制。' },
+    { id: 'ctrlEvaluation', label: '.Evaluation', layer: 2, parent: 'ctrl', file: 'View/DeepSeekChatControl.Evaluation.cs', desc: '评测数据采集与遥测上报入口。' },
+    { id: 'ctrlRetryEdit', label: '.RetryEdit', layer: 2, parent: 'ctrl', file: 'View/DeepSeekChatControl.RetryEdit.cs', desc: '失败重试与再次编辑流程。' },
+    { id: 'ctrlChangeSummary', label: '.ChangeSummary', layer: 2, parent: 'ctrl', file: 'View/DeepSeekChatControl.ChangeSummary.cs', desc: '本轮变更汇总与差异入口。' },
+    { id: 'ctrlSkills', label: '.Skills', layer: 2, parent: 'ctrl', file: 'View/DeepSeekChatControl.Skills.cs', desc: '技能列表展示与技能调用。' },
+    { id: 'ctrlMessaging', label: '.Messaging', layer: 2, parent: 'ctrl', file: 'View/DeepSeekChatControl.Messaging.cs', desc: 'C#→JS 消息发送，PostWebMessageAsString 优先并逐级降级。' },
+    { id: 'ctrlClipboard', label: '.Clipboard', layer: 2, parent: 'ctrl', file: 'View/DeepSeekChatControl.Clipboard.cs', desc: '复制、粘贴与附件收集。' },
+    { id: 'ctrlHighlight', label: '.Highlight', layer: 2, parent: 'ctrl', file: 'View/DeepSeekChatControl.Highlight.cs', desc: '代码高亮与搜索定位。' },
+    { id: 'ctrlInit', label: '.Initialization', layer: 2, parent: 'ctrl', file: 'View/DeepSeekChatControl.Initialization.cs', desc: '控件初始化与依赖装配。' },
+    { id: 'html', label: 'ChatHtmlService', layer: 2, file: 'Services/ChatHtmlService.cs', desc: '生成完整 HTML 文档（Markdig 渲染 + KaTeX / highlight.js / Mermaid），并以 __pageReady__ 通报就绪。' },
+    { id: 'htmlCss', label: '.Css', layer: 2, parent: 'html', file: 'Services/ChatHtmlService.Css.cs', desc: '主题 CSS 生成，深浅色由变量驱动。' },
+    { id: 'htmlJs', label: '.Js', layer: 2, parent: 'html', file: 'Services/ChatHtmlService.Js.cs', desc: '客户端脚本：requestAnimationFrame 批量更新与 __sendToHost 回传。' },
+    { id: 'webview', label: 'WebView2CompositionControl', layer: 2, file: 'View/DeepSeekChatControl.xaml', desc: '对话正文渲染载体，选用 Composition 版本以规避 ReSharper 引发的 BAML 解析失败。' },
+    { id: 'inlineDiffHost', label: 'InlineDiffHostControl', layer: 2, file: 'View/InlineDiffHostControl.xaml.cs', desc: '内联差异覆盖层与逐块保留/撤销工具栏。' },
+    { id: 'mcpDialog', label: 'McpConfigDialog', layer: 2, file: 'View/McpConfigDialog.xaml.cs', desc: 'MCP 服务器配置对话框。' },
+    { id: 'quickSettings', label: 'QuickSettingsDialog', layer: 2, file: 'View/QuickSettingsDialog.xaml.cs', desc: '快捷设置对话框。' },
+
+    // ── L3 DI 容器 ────────────────────────────────────────
+    { id: 'compositionRoot', label: 'CompositionRoot', layer: 3, file: 'Services/CompositionRoot.cs', desc: '静态服务定位器，在包初始化阶段构建一次。' },
+    { id: 'serviceCollectionExt', label: 'ServiceCollectionExtensions', layer: 3, file: 'Services/ServiceCollectionExtensions.cs', desc: 'AddDeepSeekServices() 集中注册 API、编辑、上下文、工具、持久化与 Agent 工厂。' },
+
+    // ── L4 Agent 层 ───────────────────────────────────────
+    { id: 'agentFactory', label: 'AgentFactory', layer: 4, file: 'Services/Agents/AgentFactory.cs', desc: '按角色创建 Agent 实例并注入共享服务。' },
+    { id: 'baseAgent', label: 'BaseAgent', layer: 4, file: 'Services/Agents/BaseAgent.cs', desc: '唯一工具循环：并行工具执行、分档超时、执行守卫预算、流式容错与降级解析兜底。' },
+    { id: 'ask', label: 'AskAgent', layer: 4, file: 'Services/Agents/AskAgent.cs', desc: '只读问答 Agent，运行时被剔除编辑类工具。' },
+    { id: 'explore', label: 'ExploreAgent', layer: 4, file: 'Services/Agents/ExploreAgent.cs', desc: '只读代码库检索子代理，供 Plan/Ask 并行调用。' },
+    { id: 'plan', label: 'PlanAgent', layer: 4, file: 'Services/Agents/PlanAgent.cs', desc: '研究代码库并产出实现计划，不修改代码。' },
+    { id: 'edit', label: 'EditAgent', layer: 4, file: 'Services/Agents/EditAgent.cs', desc: '执行代码修改，按步骤推进并在必要时验证。' },
+    { id: 'editAutoSplit', label: 'EditAgent.AutoSplit', layer: 4, parent: 'edit', file: 'Services/Agents/EditAgent.AutoSplit.cs', desc: '大型改动自动拆分步骤与批次。' },
+    { id: 'build', label: 'BuildAgent', layer: 4, file: 'Services/Agents/BuildAgent.cs', desc: '诊断并修复构建或测试失败，构建成功后提前终止循环。' },
+    { id: 'execGuard', label: 'AgentExecutionGuard', layer: 4, file: 'Services/Agents/AgentExecutionGuard.cs', desc: '墙钟时间、token、工具调用数与嵌套深度预算，滚动指纹检测无进展。' },
+    { id: 'planReconciler', label: 'PlanBuildOutcomeReconciler', layer: 4, file: 'Services/Agents/PlanBuildOutcomeReconciler.cs', desc: '计划与构建结果对账，避免重复或遗漏步骤。' },
+
+    // ── L5 工具层 ─────────────────────────────────────────
+    { id: 'bits', label: 'BuiltInToolService', layer: 5, file: 'Services/BuiltInToolService.cs', desc: '内置工具注册、白名单校验与统一调度入口。' },
+    { id: 'bitBase', label: 'BuiltInToolBase', layer: 5, file: 'Services/BuiltInTools/BuiltInToolBase.cs', desc: '工具基类：公共参数解析、结果压缩与审计能力。32 个内置工具由此派生。' },
+    { id: 'tReadFile', label: 'ReadFileTool', layer: 5, parent: 'bitBase', file: 'Services/BuiltInTools/ReadFileTool.cs', desc: '读取文件内容，支持文本、Word/Excel、PDF 与图片。' },
+    { id: 'tReplace', label: 'ReplaceStringInFileTool', layer: 5, parent: 'bitBase', file: 'Services/BuiltInTools/ReplaceStringInFileTool.cs', desc: '精确替换单处字符串。' },
+    { id: 'tMultiReplace', label: 'MultiReplaceStringInFileTool', layer: 5, parent: 'bitBase', file: 'Services/BuiltInTools/MultiReplaceStringInFileTool.cs', desc: '同文件多处精确替换。' },
+    { id: 'tApplyPatch', label: 'ApplyPatchTool', layer: 5, parent: 'bitBase', file: 'Services/BuiltInTools/ApplyPatchTool.cs', desc: '自定义 diff 补丁，支持跨文件与锚点定位。' },
+    { id: 'tCreateFile', label: 'CreateFileTool', layer: 5, parent: 'bitBase', file: 'Services/BuiltInTools/CreateFileTool.cs', desc: '新建或整体覆盖文件，并自动加入 VS 项目。' },
+    { id: 'tDeleteFile', label: 'DeleteFileTool', layer: 5, parent: 'bitBase', file: 'Services/BuiltInTools/DeleteFileTool.cs', desc: '删除文件并从项目移除。' },
+    { id: 'tGrep', label: 'GrepSearchTool', layer: 5, parent: 'bitBase', file: 'Services/BuiltInTools/GrepSearchTool.cs', desc: '按内容正则检索文件。' },
+    { id: 'tFileSearch', label: 'FileSearchTool', layer: 5, parent: 'bitBase', file: 'Services/BuiltInTools/FileSearchTool.cs', desc: '按 glob 模式查找文件。' },
+    { id: 'tSymbolSearch', label: 'SymbolSearchTool', layer: 5, parent: 'bitBase', file: 'Services/BuiltInTools/SymbolSearchTool.cs', desc: '基于 VS 符号索引查找具名代码元素。' },
+    { id: 'tListDir', label: 'ListDirTool', layer: 5, parent: 'bitBase', file: 'Services/BuiltInTools/ListDirTool.cs', desc: '列出目录内容。' },
+    { id: 'tGetErrors', label: 'GetErrorsTool', layer: 5, parent: 'bitBase', file: 'Services/BuiltInTools/GetErrorsTool.cs', desc: '读取工作区编译错误与警告。' },
+    { id: 'tBuildSolution', label: 'BuildSolutionTool', layer: 5, parent: 'bitBase', file: 'Services/BuiltInTools/BuildSolutionTool.cs', desc: '触发解决方案构建。' },
+    { id: 'tRunTests', label: 'RunTestsTool', layer: 5, parent: 'bitBase', file: 'Services/BuiltInTools/RunTestsTool.cs', desc: '构建并运行单元测试，返回结构化结果。' },
+    { id: 'tRunTerminal', label: 'RunInTerminalTool', layer: 5, parent: 'bitBase', file: 'Services/BuiltInTools/RunInTerminalTool.cs', desc: '在终端执行命令（Windows PowerShell 语法）。' },
+    { id: 'tGit', label: 'GitTool', layer: 5, parent: 'bitBase', file: 'Services/BuiltInTools/GitTool.cs', desc: '常用 Git 操作，只读子命令自动放行。' },
+    { id: 'tHandoff', label: 'RequestHandoffTool', layer: 5, parent: 'bitBase', file: 'Services/BuiltInTools/RequestHandoffTool.cs', desc: '完整控制权移交：当前 Agent 结束，目标 Agent 接管。' },
+    { id: 'tSubagent', label: 'RunSubagentTool', layer: 5, parent: 'bitBase', file: 'Services/BuiltInTools/RunSubagentTool.cs', desc: '委派子代理执行检索，调用方等待结果后继续。' },
+    { id: 'tAsk', label: 'AskQuestionsTool', layer: 5, parent: 'bitBase', file: 'Services/BuiltInTools/AskQuestionsTool.cs', desc: '向用户展示结构化问题并等待回答。' },
+    { id: 'tMemory', label: 'MemoryTool', layer: 5, parent: 'bitBase', file: 'Services/BuiltInTools/MemoryTool.cs', desc: '读写 user / repo / session 三类持久化记忆。' },
+    { id: 'tSkill', label: 'SkillTools', layer: 5, parent: 'bitBase', file: 'Services/BuiltInTools/SkillTools.cs', desc: '技能发现、加载与资源读取。' },
+    { id: 'tFetchWeb', label: 'FetchWebpageTool', layer: 5, parent: 'bitBase', file: 'Services/BuiltInTools/FetchWebpageTool.cs', desc: '抓取网页正文，支持递归抓取相关链接。' },
+    { id: 'tWebSearch', label: 'WebSearchTool', layer: 5, parent: 'bitBase', file: 'Services/BuiltInTools/WebSearchTool.cs', desc: '联网搜索并返回结果摘要。' },
+    { id: 'tCaptureWeb', label: 'CaptureWebpageTool', layer: 5, parent: 'bitBase', file: 'Services/BuiltInTools/CaptureWebpageTool.cs', desc: '离屏渲染网页并截图。' },
+    { id: 'tCaptureWin', label: 'CaptureWindowTool', layer: 5, parent: 'bitBase', file: 'Services/BuiltInTools/CaptureWindowTool.cs', desc: '捕获 Windows 窗口截图。' },
+    { id: 'tTime', label: 'GetCurrentTimeTool', layer: 5, parent: 'bitBase', file: 'Services/BuiltInTools/GetCurrentTimeTool.cs', desc: '获取当前日期、时间与星期。' },
+    { id: 'tComments', label: 'GetFileCommentsTool', layer: 5, parent: 'bitBase', file: 'Services/BuiltInTools/GetFileCommentsTool.cs', desc: '提取源文件中符号的文档注释。' },
+    { id: 'tTermOut', label: 'GetTerminalOutputTool', layer: 5, parent: 'bitBase', file: 'Services/BuiltInTools/GetTerminalOutputTool.cs', desc: '等待异步终端命令完成并取回输出。' },
+    { id: 'tCreateDir', label: 'CreateDirectoryTool', layer: 5, parent: 'bitBase', file: 'Services/BuiltInTools/CreateDirectoryTool.cs', desc: '递归创建目录结构。' },
+    { id: 'mcpManager', label: 'McpManagerService', layer: 5, file: 'Services/McpManagerService.cs', desc: 'MCP 服务器生命周期管理与工具导入。' },
+    { id: 'mcpStdio', label: 'McpStdioClient', layer: 5, parent: 'mcpManager', file: 'Services/McpStdioClient.cs', desc: 'MCP stdio 传输实现。' },
+    { id: 'mcpHttp', label: 'McpHttpClient', layer: 5, parent: 'mcpManager', file: 'Services/McpHttpClient.cs', desc: 'MCP HTTP 传输实现。' },
+    { id: 'mcpStore', label: 'McpConfigStore', layer: 5, parent: 'mcpManager', file: 'Services/McpConfigStore.cs', desc: 'MCP 配置持久化。' },
+
+    // ── L6 模型提供方 ─────────────────────────────────────
+    { id: 'apiService', label: 'DeepSeekApiService', layer: 6, file: 'Services/DeepSeekApiService.cs', desc: '薄兼容门面，真实传输委托给 Provider。' },
+    { id: 'oaip', label: 'OpenAiCompatibleProvider', layer: 6, file: 'Services/Providers/OpenAiCompatibleProvider.cs', desc: 'SSE 流式传输、深克隆消息清洗、4 次指数退避重试，伪协议承载 [THINKING]/[TOOL_CALL]/[CACHE]。' },
+    { id: 'dsProvider', label: 'DeepSeekProvider', layer: 6, file: 'Services/Providers/DeepSeekProvider.cs', desc: '覆写 DeepSeek 原生能力：FIM 补全、账户余额、峰谷定价与推理参数塑形。' },
+    { id: 'apiRetry', label: 'ApiRetryPolicy', layer: 6, file: 'Services/ApiRetryPolicy.cs', desc: '按设置执行指数退避，4xx（429 除外）不重试。' },
+    { id: 'reasoningCfg', label: 'ReasoningCapabilityConfig', layer: 6, file: 'Services/ReasoningCapabilityConfig.cs', desc: '按厂商方言推断推理参数并钳制到合法枚举。' },
+    { id: 'reasoningGuard', label: 'ReasoningGuard', layer: 6, file: 'Services/ReasoningGuard.cs', desc: '检测退化的推理重复并限制长度。' },
+    { id: 'modelFetch', label: 'ModelFetchService', layer: 6, file: 'Services/ModelFetchService.cs', desc: '拉取可用模型列表。' },
+    { id: 'modelCatalog', label: 'OfficialModelCatalogService', layer: 6, file: 'Services/OfficialModelCatalogService.cs', desc: '官方模型目录与上下文长度信息。' },
+
+    // ── L7 上下文与缓存 ───────────────────────────────────
+    { id: 'ctxMgr', label: 'ConversationContextManager', layer: 7, file: 'Services/ConversationContextManager.cs', desc: '对话上下文管理，用指数移动平均校准 token 估算并在多个边界计算前缀哈希。' },
+    { id: 'prefixCache', label: 'PrefixCacheManager', layer: 7, file: 'Services/PrefixCacheManager.cs', desc: '对系统提示词与规范化工具目录计算 SHA-256 指纹，区分前缀断裂严重程度。' },
+    { id: 'compressor', label: 'ContextCompressorService', layer: 7, file: 'Services/ContextCompressorService.cs', desc: '生成稳定压缩摘要并固定在 messages[1] 动态块，避免扰动前缀。' },
+    { id: 'memory', label: 'MemoryService', layer: 7, file: 'Services/MemoryService.cs', desc: '跨会话记忆的存取与作用域管理。' },
+    { id: 'skill', label: 'SkillService', layer: 7, file: 'Services/SkillService.cs', desc: '技能发现、指令加载与资源读取。' },
+    { id: 'webSearch', label: 'WebSearchService', layer: 7, file: 'Services/WebSearchService.cs', desc: '联网搜索后端，支持多引擎回退。' },
+    { id: 'prompts', label: 'AiPrompts', layer: 7, file: 'Services/AiPrompts.cs', desc: '系统提示词与共享不可变前缀 SharedImmutablePrefix。' },
+    { id: 'compactor', label: 'ToolResultCompactor', layer: 7, file: 'Services/ToolResultCompactor.cs', desc: '工具结果压缩，降低上下文占用。' },
+    { id: 'approvalQueue', label: 'ApprovalRequestQueue', layer: 7, file: 'Services/ApprovalRequestQueue.cs', desc: '审批请求排队与交互式等待。' },
+
+    // ── L8 编辑管线 ───────────────────────────────────────
+    { id: 'editPatch', label: 'EditPatchService', layer: 8, file: 'Services/EditPatchService.cs', desc: '编辑补丁生成、字符串匹配与自动修复原语。' },
+    { id: 'diffSession', label: 'InlineDiffSession', layer: 8, file: 'Services/InlineDiffSession.cs', desc: '差异会话状态机：Created → Showing → Applying → Committed/Dismissed/Failed。' },
+    { id: 'diffSessionMgr', label: 'InlineDiffSessionManager', layer: 8, file: 'Services/InlineDiffSessionManager.cs', desc: '以 ITextBuffer 为键管理会话，强制单文档单会话。' },
+    { id: 'commitCoord', label: 'ProposalCommitCoordinator', layer: 8, file: 'Services/Editing/ProposalCommitCoordinator.cs', desc: '提交前对所有文件预检，任一失败则不写入任何文件，中途失败尽力回滚。' },
+    { id: 'openBufferTarget', label: 'OpenBufferCommitTarget', layer: 8, file: 'Services/Editing/OpenBufferCommitTarget.cs', desc: '在单个 Apply AI Edit 撤销事务内应用改动，一次 Ctrl+Z 可整体撤销。' },
+    { id: 'fileTarget', label: 'FileCommitTarget', layer: 8, file: 'Services/Editing/FileCommitTarget.cs', desc: '磁盘文件：SHA-256 预检 → 备份 → 保持编码写入 → 回读校验。' },
+    { id: 'newFileTarget', label: 'NewFileCommitTarget', layer: 8, file: 'Services/Editing/NewFileCommitTarget.cs', desc: '新建文件：拒绝已存在文件，建目录写入后通过 DTE 加入项目。' },
+    { id: 'deleteFileTarget', label: 'DeleteFileCommitTarget', layer: 8, file: 'Services/Editing/DeleteFileCommitTarget.cs', desc: '删除文件：校验哈希、备份后删除，回滚恢复原路径。' },
+    { id: 'stagedWs', label: 'StagedEditWorkspace', layer: 8, file: 'Services/Editing/StagedEditWorkspace.cs', desc: '长任务暂存工作区：记录基线内容与哈希，先预览后统一提交。' },
+    { id: 'diffViewer', label: 'DiffViewerService', layer: 8, file: 'Services/DiffViewerService.cs', desc: '通过 MEF 构建只读差异缓冲区。' },
+    { id: 'editorDiffHost', label: 'EditorDiffHost', layer: 8, file: 'View/Hosts/EditorDiffHost.cs', desc: '装饰层差异展示，250 毫秒刷新防抖与缩放同步。' },
+    { id: 'editorDiffMarker', label: 'EditorDiffMarkerService', layer: 8, file: 'Services/EditorDiffMarkerService.cs', desc: '编辑器内差异标记与定位。' },
+    { id: 'backup', label: 'BackupService', layer: 8, file: 'Services/BackupService.cs', desc: '破坏性操作前快照，超过 14 天的备份在启动时清扫。' },
+
+    // ── L9 代码补全 ───────────────────────────────────────
+    { id: 'tcl', label: 'TextViewCreationListener', layer: 9, file: 'CodeCompletion/TextViewCreationListener.cs', desc: 'MEF 导出的 IVsTextViewCreationListener，为每个代码视图挂载补全组件。' },
+    { id: 'ipm', label: 'InlinePredictionManager', layer: 9, file: 'CodeCompletion/InlinePredictionManager.cs', desc: 'DispatcherTimer 防抖后发 FIM 请求（256 token / 温度 0 / 10 条 LRU 缓存）。' },
+    { id: 'ghost', label: 'GhostTextTagger', layer: 9, file: 'CodeCompletion/GhostTextTagger.cs', desc: '以 IntraTextAdornmentTag 渲染灰色幽灵文本，使用编辑器自身字体度量。' },
+    { id: 'ghostProvider', label: 'GhostTextTaggerProvider', layer: 9, file: 'CodeCompletion/GhostTextTaggerProvider.cs', desc: 'Tagger 的 MEF 提供者。' },
+    { id: 'cmdFilter', label: 'CommandFilter', layer: 9, file: 'CodeCompletion/CommandFilter.cs', desc: 'Tab 接受、Esc 取消、Enter 重启定时器的命令拦截。' },
+    { id: 'cppScanner', label: 'CppBlockContextScanner', layer: 9, file: 'CodeCompletion/CppBlockContextScanner.cs', desc: 'C/C++ 纯文本扫描：先屏蔽注释与字符串再做花括号配对，不调用 VC 语言服务。' },
+    { id: 'completionMonitor', label: 'CompletionSettingsMonitor', layer: 9, file: 'CodeCompletion/CompletionSettingsMonitor.cs', desc: '监听补全相关设置变更并热更新运行参数。' },
+    { id: 'diffPreviewFactory', label: 'DiffPreviewAdornmentFactory', layer: 9, file: 'CodeCompletion/DiffPreviewAdornmentFactory.cs', desc: '内联差异预览装饰工厂。' },
+
+    // ── L10 设置与横切 ────────────────────────────────────
+    { id: 'optionsPage', label: 'DeepSeekOptionsPage', layer: 10, file: 'Settings/DeepSeekOptionsPage.cs', desc: '选项页与属性描述符，本地化在构建描述符之前完成。' },
+    { id: 'unifiedSettings', label: 'DeepSeekUnifiedSettings', layer: 10, file: 'Settings/DeepSeekUnifiedSettings.cs', desc: '与 VS 统一设置（Unified Settings）的桥接。' },
+    { id: 'unifiedSync', label: 'UnifiedSettingsSync', layer: 10, file: 'Settings/UnifiedSettingsSync.cs', desc: '设置双向同步与变更广播。' },
+    { id: 'runtimeSnapshot', label: 'RuntimeSettingsSnapshot', layer: 10, file: 'Settings/RuntimeSettingsSnapshot.cs', desc: '运行时不可变设置快照，避免运行中读到半更新状态。' },
+    { id: 'apiKeyStore', label: 'VisualStudioApiKeyStore', layer: 10, file: 'Settings/VisualStudioApiKeyStore.cs', desc: 'API Key 的安全存储读写。' },
+    { id: 'apiKeyProt', label: 'ApiKeyProtection', layer: 10, file: 'Settings/ApiKeyProtection.cs', desc: 'API Key 加密与解密保护。' },
+    { id: 'migration', label: 'SettingsMigration', layer: 10, file: 'Settings/SettingsMigration.cs', desc: '历史设置格式迁移。' },
+    { id: 'chatPersistence', label: 'ChatPersistenceService', layer: 10, file: 'Services/ChatPersistenceService.cs', desc: '会话文件读写，包含中断恢复所需的运行标记。' },
+    { id: 'inflight', label: 'InflightTurnSnapshotService', layer: 10, file: 'Services/InflightTurnSnapshotService.cs', desc: '执行中每 5 秒写快照，强杀后可恢复为不完整消息。' },
+    { id: 'storagePaths', label: 'StoragePaths', layer: 10, file: 'Services/StoragePaths.cs', desc: '集中解析各类存储路径（会话、快照、备份、导出）。' },
+    { id: 'themeService', label: 'ThemeService', layer: 10, file: 'Services/ThemeService.cs', desc: 'VS 主题服务，向渲染层提供颜色与样式。' },
+    { id: 'localization', label: 'LocalizationService', layer: 10, file: 'Services/LocalizationService.cs', desc: '从 Resources/Locales 加载本地化资源。' },
+    { id: 'toast', label: 'ToastNotificationService', layer: 10, file: 'Services/ToastNotificationService.cs', desc: '轻量 Toast 通知。' },
+    { id: 'metrics', label: 'AgentMetricsCollector', layer: 10, file: 'Services/Telemetry/AgentMetricsCollector.cs', desc: '采集 Agent 轮次、工具调用与耗时指标。' },
+    { id: 'sessionEval', label: 'SessionEvaluationExporter', layer: 10, file: 'Services/Evaluation/SessionEvaluationExporter.cs', desc: '会话级评测数据导出。' },
+    { id: 'turnEval', label: 'TurnEvaluationExporter', layer: 10, file: 'Services/Evaluation/TurnEvaluationExporter.cs', desc: '轮次级评测数据导出。' },
+    { id: 'buildService', label: 'BuildService', layer: 10, file: 'Services/BuildService.cs', desc: '解决方案构建与错误收集。' },
+    { id: 'testService', label: 'TestService', layer: 10, file: 'Services/TestService.cs', desc: '单元测试运行，支持 TRX / JUnit / CMake 多种结果格式。' },
+    { id: 'ocrService', label: 'OcrService', layer: 10, file: 'Services/OcrService.cs', desc: 'OCR 识别，运行时从 dll\\x64 预加载原生依赖。' },
+    { id: 'fileParser', label: 'FileParserService', layer: 10, file: 'Services/FileParserService.cs', desc: 'PDF / Word / Excel / PowerPoint 文本提取。' },
+    { id: 'visionFetch', label: 'VisionImageFetchService', layer: 10, file: 'Services/VisionImageFetchService.cs', desc: '视觉图片抓取与临时批次（超过 6 小时清理）。' }
+  ];
+
+  // 连线类型：call=调用/移交，impl=实现/继承，dep=依赖，data=数据流
+  var EDGES = [
+    // 入口 → DI / 命令 / 设置
+    { from: 'ext', to: 'pkg', type: 'dep' },
+    { from: 'pkg', to: 'compositionRoot', type: 'dep' },
+    { from: 'pkg', to: 'cmdShow', type: 'dep' },
+    { from: 'pkg', to: 'runtimeSnapshot', type: 'dep' },
+    { from: 'pkg', to: 'localization', type: 'dep' },
+    { from: 'pkg', to: 'themeService', type: 'dep' },
+    { from: 'cmdShow', to: 'pane', type: 'call' },
+    { from: 'cmdInline', to: 'ctrl', type: 'call' },
+
+    // UI 层内部
+    { from: 'pane', to: 'ctrl', type: 'dep' },
+    { from: 'ctrl', to: 'ctrlAgent', type: 'dep' },
+    { from: 'ctrl', to: 'ctrlRendering', type: 'dep' },
+    { from: 'ctrl', to: 'ctrlSessions', type: 'dep' },
+    { from: 'ctrl', to: 'ctrlTheme', type: 'dep' },
+    { from: 'ctrl', to: 'ctrlEvents', type: 'dep' },
+    { from: 'ctrl', to: 'ctrlPlanIntent', type: 'dep' },
+    { from: 'ctrl', to: 'ctrlEvaluation', type: 'dep' },
+    { from: 'ctrl', to: 'ctrlRetryEdit', type: 'dep' },
+    { from: 'ctrl', to: 'ctrlChangeSummary', type: 'dep' },
+    { from: 'ctrl', to: 'ctrlSkills', type: 'dep' },
+    { from: 'ctrl', to: 'ctrlMessaging', type: 'dep' },
+    { from: 'ctrl', to: 'ctrlClipboard', type: 'dep' },
+    { from: 'ctrl', to: 'ctrlHighlight', type: 'dep' },
+    { from: 'ctrl', to: 'ctrlInit', type: 'dep' },
+    { from: 'html', to: 'htmlCss', type: 'dep' },
+    { from: 'html', to: 'htmlJs', type: 'dep' },
+    { from: 'ctrlAgent', to: 'html', type: 'call' },
+    { from: 'html', to: 'webview', type: 'data' },
+    { from: 'ctrlMessaging', to: 'webview', type: 'data' },
+    { from: 'ctrl', to: 'inlineDiffHost', type: 'dep' },
+    { from: 'ctrl', to: 'mcpDialog', type: 'dep' },
+    { from: 'ctrl', to: 'quickSettings', type: 'dep' },
+    { from: 'ctrlSessions', to: 'chatPersistence', type: 'call' },
+
+    // DI
+    { from: 'compositionRoot', to: 'serviceCollectionExt', type: 'dep' },
+    { from: 'compositionRoot', to: 'agentFactory', type: 'dep' },
+
+    // Agent 层
+    { from: 'agentFactory', to: 'baseAgent', type: 'call' },
+    { from: 'baseAgent', to: 'ask', type: 'impl' },
+    { from: 'baseAgent', to: 'explore', type: 'impl' },
+    { from: 'baseAgent', to: 'plan', type: 'impl' },
+    { from: 'baseAgent', to: 'edit', type: 'impl' },
+    { from: 'baseAgent', to: 'build', type: 'impl' },
+    { from: 'edit', to: 'editAutoSplit', type: 'dep' },
+    { from: 'baseAgent', to: 'execGuard', type: 'dep' },
+    { from: 'plan', to: 'edit', type: 'call' },
+    { from: 'edit', to: 'build', type: 'call' },
+    { from: 'planReconciler', to: 'plan', type: 'dep' },
+    { from: 'planReconciler', to: 'build', type: 'dep' },
+
+    // 工具层
+    { from: 'baseAgent', to: 'bits', type: 'call' },
+    { from: 'bits', to: 'bitBase', type: 'dep' },
+    { from: 'bits', to: 'mcpManager', type: 'dep' },
+    { from: 'mcpManager', to: 'mcpStdio', type: 'dep' },
+    { from: 'mcpManager', to: 'mcpHttp', type: 'dep' },
+    { from: 'mcpManager', to: 'mcpStore', type: 'dep' },
+    { from: 'tHandoff', to: 'agentFactory', type: 'call' },
+    { from: 'tSubagent', to: 'agentFactory', type: 'call' },
+    { from: 'tRunTests', to: 'testService', type: 'call' },
+    { from: 'tBuildSolution', to: 'buildService', type: 'call' },
+    { from: 'tGetErrors', to: 'buildService', type: 'call' },
+    { from: 'tMemory', to: 'memory', type: 'call' },
+    { from: 'tSkill', to: 'skill', type: 'call' },
+    { from: 'tWebSearch', to: 'webSearch', type: 'call' },
+    { from: 'tFetchWeb', to: 'webSearch', type: 'call' },
+    { from: 'tCaptureWeb', to: 'visionFetch', type: 'call' },
+    { from: 'tCaptureWin', to: 'visionFetch', type: 'call' },
+    { from: 'tReadFile', to: 'fileParser', type: 'call' },
+    { from: 'tReadFile', to: 'ocrService', type: 'call' },
+
+    // 提供方
+    { from: 'baseAgent', to: 'apiService', type: 'call' },
+    { from: 'apiService', to: 'oaip', type: 'impl' },
+    { from: 'dsProvider', to: 'oaip', type: 'impl' },
+    { from: 'oaip', to: 'apiRetry', type: 'dep' },
+    { from: 'oaip', to: 'reasoningCfg', type: 'dep' },
+    { from: 'oaip', to: 'reasoningGuard', type: 'dep' },
+    { from: 'apiService', to: 'modelFetch', type: 'dep' },
+    { from: 'modelFetch', to: 'modelCatalog', type: 'dep' },
+
+    // 上下文与缓存
+    { from: 'baseAgent', to: 'ctxMgr', type: 'call' },
+    { from: 'ctxMgr', to: 'prefixCache', type: 'dep' },
+    { from: 'ctxMgr', to: 'compressor', type: 'dep' },
+    { from: 'baseAgent', to: 'prompts', type: 'dep' },
+    { from: 'baseAgent', to: 'compactor', type: 'dep' },
+    { from: 'baseAgent', to: 'approvalQueue', type: 'dep' },
+
+    // 编辑管线
+    { from: 'edit', to: 'editPatch', type: 'call' },
+    { from: 'editPatch', to: 'diffSession', type: 'call' },
+    { from: 'diffSession', to: 'diffSessionMgr', type: 'dep' },
+    { from: 'diffSession', to: 'commitCoord', type: 'call' },
+    { from: 'commitCoord', to: 'openBufferTarget', type: 'call' },
+    { from: 'commitCoord', to: 'fileTarget', type: 'call' },
+    { from: 'commitCoord', to: 'newFileTarget', type: 'call' },
+    { from: 'commitCoord', to: 'deleteFileTarget', type: 'call' },
+    { from: 'commitCoord', to: 'stagedWs', type: 'dep' },
+    { from: 'diffSession', to: 'diffViewer', type: 'call' },
+    { from: 'diffViewer', to: 'editorDiffHost', type: 'dep' },
+    { from: 'editorDiffMarker', to: 'editorDiffHost', type: 'dep' },
+    { from: 'fileTarget', to: 'backup', type: 'dep' },
+    { from: 'newFileTarget', to: 'backup', type: 'dep' },
+    { from: 'deleteFileTarget', to: 'backup', type: 'dep' },
+
+    // 代码补全
+    { from: 'tcl', to: 'ipm', type: 'call' },
+    { from: 'tcl', to: 'ghost', type: 'call' },
+    { from: 'tcl', to: 'cmdFilter', type: 'dep' },
+    { from: 'ghostProvider', to: 'ghost', type: 'impl' },
+    { from: 'ipm', to: 'ghost', type: 'data' },
+    { from: 'ipm', to: 'cppScanner', type: 'dep' },
+    { from: 'ipm', to: 'dsProvider', type: 'data' },
+    { from: 'completionMonitor', to: 'ipm', type: 'dep' },
+
+    // 设置与横切
+    { from: 'migration', to: 'optionsPage', type: 'dep' },
+    { from: 'optionsPage', to: 'unifiedSettings', type: 'dep' },
+    { from: 'unifiedSettings', to: 'unifiedSync', type: 'dep' },
+    { from: 'unifiedSync', to: 'runtimeSnapshot', type: 'data' },
+    { from: 'optionsPage', to: 'apiKeyStore', type: 'dep' },
+    { from: 'apiKeyStore', to: 'apiKeyProt', type: 'dep' },
+    { from: 'chatPersistence', to: 'inflight', type: 'dep' },
+    { from: 'chatPersistence', to: 'storagePaths', type: 'dep' },
+    { from: 'inflight', to: 'storagePaths', type: 'dep' },
+    { from: 'ctrl', to: 'chatPersistence', type: 'dep' },
+    { from: 'ctrl', to: 'metrics', type: 'dep' },
+    { from: 'ctrlEvaluation', to: 'sessionEval', type: 'data' },
+    { from: 'metrics', to: 'sessionEval', type: 'data' },
+    { from: 'sessionEval', to: 'turnEval', type: 'dep' },
+
+    // 工具基类与 28 个内置工具的归属关系。包含关系（parent 字段）只影响折叠展开、不画连线，
+    // 因此这里显式补上基类边；否则展开 BuiltInToolBase 后，那些没有业务调用的工具会变成
+    // 没有任何连线的孤立节点，只受向心力作用漂在整张图的最外圈。
+    { from: 'bitBase', to: 'tReadFile', type: 'dep' },
+    { from: 'bitBase', to: 'tReplace', type: 'dep' },
+    { from: 'bitBase', to: 'tMultiReplace', type: 'dep' },
+    { from: 'bitBase', to: 'tApplyPatch', type: 'dep' },
+    { from: 'bitBase', to: 'tCreateFile', type: 'dep' },
+    { from: 'bitBase', to: 'tDeleteFile', type: 'dep' },
+    { from: 'bitBase', to: 'tGrep', type: 'dep' },
+    { from: 'bitBase', to: 'tFileSearch', type: 'dep' },
+    { from: 'bitBase', to: 'tSymbolSearch', type: 'dep' },
+    { from: 'bitBase', to: 'tListDir', type: 'dep' },
+    { from: 'bitBase', to: 'tGetErrors', type: 'dep' },
+    { from: 'bitBase', to: 'tBuildSolution', type: 'dep' },
+    { from: 'bitBase', to: 'tRunTests', type: 'dep' },
+    { from: 'bitBase', to: 'tRunTerminal', type: 'dep' },
+    { from: 'bitBase', to: 'tGit', type: 'dep' },
+    { from: 'bitBase', to: 'tHandoff', type: 'dep' },
+    { from: 'bitBase', to: 'tSubagent', type: 'dep' },
+    { from: 'bitBase', to: 'tAsk', type: 'dep' },
+    { from: 'bitBase', to: 'tMemory', type: 'dep' },
+    { from: 'bitBase', to: 'tSkill', type: 'dep' },
+    { from: 'bitBase', to: 'tFetchWeb', type: 'dep' },
+    { from: 'bitBase', to: 'tWebSearch', type: 'dep' },
+    { from: 'bitBase', to: 'tCaptureWeb', type: 'dep' },
+    { from: 'bitBase', to: 'tCaptureWin', type: 'dep' },
+    { from: 'bitBase', to: 'tTime', type: 'dep' },
+    { from: 'bitBase', to: 'tComments', type: 'dep' },
+    { from: 'bitBase', to: 'tTermOut', type: 'dep' },
+    { from: 'bitBase', to: 'tCreateDir', type: 'dep' },
+
+    // 两条此前遗漏的业务边
+    { from: 'ctrl', to: 'toast', type: 'dep' },
+    { from: 'diffPreviewFactory', to: 'editorDiffHost', type: 'dep' }
+  ];
+
+  // ─────────────────────────────────────────────────────────────
+  // 二、布局与渲染参数
+  // ─────────────────────────────────────────────────────────────
+
+  var NODE_W = 196;
+  var NODE_H = 46;
+
+  // 力导向参数。斥力用「真实像素距离的平方反比」计算（各向同性），
+  // 另补一条按矩形重叠深度分离的力，保证方块既分散又不会互相压住。
+  var REPULSION_PX = 480000;    // 斥力系数：dist=500px 时约 1.9 px/帧
+  var SEPARATION = 0.35;        // 矩形分离强度：每帧消解 35% 的重叠深度
+  var SPRING_LEN = 300;         // 常规连线理想长度
+  var SPRING_LEN_DATA = 390;    // 数据流连线更长，把 data 边推到外围，减轻中心拥堵
+  var SPRING_STRENGTH = 0.02;   // 弹簧刚度
+  var CENTER_STRENGTH = 0.0038; // 向心力：与斥力在半径约 500px 处平衡，整图直径约 1000px
+  var DAMPING = 0.82;           // 速度阻尼
+  var MAX_STEP = 20;            // 单帧最大位移，抑制抖动
+  var ALPHA_DECAY = 0.985;      // 温度衰减系数
+  var MIN_ALPHA = 0.004;        // 低于此温度即判定收敛
+
+  var MAP = {};
+  var CHILDREN = {};
+  NODES.forEach(function (n) {
+    MAP[n.id] = n;
+    if (n.parent) {
+      if (!CHILDREN[n.parent]) CHILDREN[n.parent] = [];
+      CHILDREN[n.parent].push(n.id);
+    }
+  });
+
+  // 初始只展开主干：折叠工具基类、聊天控件分部类与 HTML 分部类，避免一上来 130+ 节点挤在一起
+  var COLLAPSED = new Set(['bitBase', 'ctrl', 'html']);
+
+  var view = { x: 0, y: 0, k: 1 };
+  var selectedId = null;
+  var query = '';
+
+  // 位置状态：POS 保存节点左上角坐标，一旦生成就跨折叠/搜索持久保留，不会被重排。
+  // VEL 是每帧速度，FIXED 记录被拖拽或需要钉住的节点。
+  var POS = new Map();
+  var VEL = new Map();
+  var FIXED = new Map();
+
+  var alpha = 0;      // 模拟温度，越大越活跃
+  var rafId = 0;      // requestAnimationFrame 句柄，0 表示循环未运行
+  var frozen = false; // 「固定布局」开关，为真时不再自动迭代
+
+  var svg = document.getElementById('svg');
+  var viewport = document.getElementById('viewport');
+  var stage = document.getElementById('stage');
+  var detail = document.getElementById('detail');
+  var stats = document.getElementById('stats');
+
+  function esc(s) {
+    return String(s).replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;');
+  }
+
+  // 估算文本像素宽度：中文按 11.5px、其余按 6.4px（与 node-label 的 11px 字号匹配）
+  function textWidth(s) {
+    var w = 0;
+    for (var i = 0; i < s.length; i++) {
+      w += /[\u4e00-\u9fff]/.test(s[i]) ? 11.5 : 6.4;
+    }
+    return w;
+  }
+
+  function truncate(s, max) {
+    if (textWidth(s) <= max) return s;
+    var out = '';
+    var w = 0;
+    for (var i = 0; i < s.length; i++) {
+      var cw = /[\u4e00-\u9fff]/.test(s[i]) ? 11.5 : 6.4;
+      if (w + cw > max - 9) break;
+      out += s[i];
+      w += cw;
+    }
+    return out + '…';
+  }
+
+  // 某节点的后代总数，用于折叠徽标显示隐藏数量
+  function countDescendants(id) {
+    var kids = CHILDREN[id];
+    if (!kids) return 0;
+    var total = 0;
+    kids.forEach(function (k) {
+      total += 1 + countDescendants(k);
+    });
+    return total;
+  }
+
+  // 节点可见 <=> 自身及所有祖先都未被折叠
+  function visibleIds() {
+    var out = [];
+    NODES.forEach(function (n) {
+      var p = n.parent;
+      var ok = true;
+      while (p) {
+        if (COLLAPSED.has(p)) { ok = false; break; }
+        var pn = MAP[p];
+        p = pn ? pn.parent : null;
+      }
+      if (ok) out.push(n.id);
+    });
+    return out;
+  }
+
+  // 为尚未布点的节点生成初始坐标：优先紧贴父节点，否则撒在中心周围的圆环上
+  function ensurePositions(ids) {
+    var added = false;
+    ids.forEach(function (id) {
+      if (POS.has(id)) return;
+      added = true;
+      var n = MAP[id];
+      var x, y;
+      var pp = n.parent ? POS.get(n.parent) : null;
+      if (pp) {
+        // 展开出来的子节点紧贴父节点附近，避免全图重排
+        x = pp.x + (Math.random() - 0.5) * 420;
+        y = pp.y + 110 + Math.random() * 180;
+      } else {
+        var r = 300 + Math.random() * 700;
+        var t = Math.random() * Math.PI * 2;
+        x = Math.cos(t) * r;
+        y = Math.sin(t) * r;
+      }
+      POS.set(id, { x: x, y: y });
+      VEL.set(id, { x: 0, y: 0 });
+    });
+    return added;
+  }
+
+  function clamp(v, lo, hi) { return v < lo ? lo : (v > hi ? hi : v); }
+
+  // 一次力导向迭代：斥力（矩形归一化）+ 连线弹簧 + 向心力，最后按温度缩放位移
+  function simulate(ids, alphaScale) {
+    var count = ids.length;
+    var i, j;
+
+    var pts = new Array(count);
+    var vels = new Array(count);
+    for (i = 0; i < count; i++) {
+      var p0 = POS.get(ids[i]);
+      pts[i] = { x: p0.x + NODE_W / 2, y: p0.y + NODE_H / 2 };
+      vels[i] = VEL.get(ids[i]);
+      vels[i].x = 0;
+      vels[i].y = 0;
+    }
+
+    // 用无原型对象做 id → 下标映射，避开 Object 原型链上的同名属性
+    var indexOf = Object.create(null);
+    for (i = 0; i < count; i++) indexOf[ids[i]] = i;
+
+    // 统计可见节点的连线条数：零度节点没有弹簧约束，会被斥力推到最外圈单独漂着，
+    // 后面给它更强的向心力兜底（以后再漏补边也不会出现孤立散点）。
+    var deg = Object.create(null);
+    for (i = 0; i < count; i++) deg[ids[i]] = 0;
+    for (i = 0; i < EDGES.length; i++) {
+      var de = EDGES[i];
+      if (deg[de.from] !== undefined) deg[de.from]++;
+      if (deg[de.to] !== undefined) deg[de.to]++;
+    }
+
+    // 斥力（各向同性）：真实像素距离的平方反比，500px 处约 3.6 px/帧。
+    // 再叠一条矩形分离力：两个方块的 AABB 一旦相交，就沿「穿透更浅」的轴推开，
+    // 否则纯平方反比在近处衰减过猛，方块会频繁互相压住导致文字不可读。
+    for (i = 0; i < count; i++) {
+      var a = pts[i];
+      for (j = i + 1; j < count; j++) {
+        var b = pts[j];
+        var dx = b.x - a.x;
+        var dy = b.y - a.y;
+        var dist = Math.sqrt(dx * dx + dy * dy);
+
+        if (dist < 1) {
+          // 完全重合时方向无意义，给一个随机微方向把两点掰开
+          dx = (Math.random() - 0.5) * 2;
+          dy = (Math.random() - 0.5) * 2;
+          dist = Math.sqrt(dx * dx + dy * dy) || 1;
+        }
+
+        var ux = dx / dist;
+        var uy = dy / dist;
+        var rep = REPULSION_PX / (dist * dist);
+        vels[i].x -= ux * rep;
+        vels[i].y -= uy * rep;
+        vels[j].x += ux * rep;
+        vels[j].y += uy * rep;
+
+        // 矩形分离：取最小平移向量（沿重叠更浅的轴）把两者推开
+        var ox = (NODE_W + 40) - Math.abs(dx);
+        var oy = (NODE_H + 26) - Math.abs(dy);
+        if (ox > 0 && oy > 0) {
+          if (ox < oy) {
+            var sx = (dx >= 0 ? -1 : 1) * ox * SEPARATION;
+            vels[i].x += sx;
+            vels[j].x -= sx;
+          } else {
+            var sy = (dy >= 0 ? -1 : 1) * oy * SEPARATION;
+            vels[i].y += sy;
+            vels[j].y -= sy;
+          }
+        }
+      }
+    }
+
+    // 连线弹簧：data 边用更长的理想长度，把数据流推到外围
+    for (i = 0; i < EDGES.length; i++) {
+      var e = EDGES[i];
+      var ia = indexOf[e.from];
+      var ib = indexOf[e.to];
+      if (ia === undefined || ib === undefined) continue;
+
+      var pa = pts[ia];
+      var pb = pts[ib];
+      var dx = pb.x - pa.x;
+      var dy = pb.y - pa.y;
+      var dist = Math.sqrt(dx * dx + dy * dy);
+      if (dist < 1e-3) continue;
+      var rest = (e.type === 'data') ? SPRING_LEN_DATA : SPRING_LEN;
+      var stretch = (dist - rest) / dist * SPRING_STRENGTH;
+      var fx = dx * stretch;
+      var fy = dy * stretch;
+      vels[ia].x += fx;
+      vels[ia].y += fy;
+      vels[ib].x -= fx;
+      vels[ib].y -= fy;
+    }
+
+    // 向心力 + 阻尼 + 应用位移
+    for (i = 0; i < count; i++) {
+      var id = ids[i];
+      var v = vels[i];
+      var pt = pts[i];
+
+      if (FIXED.has(id)) {
+        var f = FIXED.get(id);
+        var np = POS.get(id);
+        np.x = f.x;
+        np.y = f.y;
+        v.x = 0;
+        v.y = 0;
+        continue;
+      }
+
+      // 零度节点额外加强向心，避免它被斥力推到外围变成孤立散点
+      var pull = (deg[id] === 0) ? CENTER_STRENGTH * 3 : CENTER_STRENGTH;
+      v.x -= pt.x * pull;
+      v.y -= pt.y * pull;
+      v.x *= DAMPING;
+      v.y *= DAMPING;
+
+      var node = POS.get(id);
+      node.x += clamp(v.x * alphaScale, -MAX_STEP, MAX_STEP);
+      node.y += clamp(v.y * alphaScale, -MAX_STEP, MAX_STEP);
+    }
+  }
+
+  // 停止当前动画循环
+  function stopLoop() {
+    if (rafId) { cancelAnimationFrame(rafId); rafId = 0; }
+  }
+
+  // 提高温度并启动循环：用于展开新节点、拖拽让位等局部松弛
+  function heat(a) {
+    if (frozen) return;
+    alpha = Math.max(alpha, a);
+    if (!rafId) rafId = requestAnimationFrame(tick);
+  }
+
+  // 动画循环：每帧迭代一次并重绘，温度衰减到阈值后停住，避免空转耗 CPU
+  function tick() {
+    rafId = 0;
+    if (alpha <= MIN_ALPHA || frozen) {
+      alpha = 0;
+      render();
+      return;
+    }
+    simulate(visibleIds(), alpha);
+    alpha *= ALPHA_DECAY;
+    render();
+    rafId = requestAnimationFrame(tick);
+  }
+
+  // 预热：连续迭代但不渲染，让首屏直接呈现收敛后的布局，而不是看到节点爆炸散开
+  function warmup(iterations) {
+    var ids = visibleIds();
+    ensurePositions(ids);
+    for (var k = 0; k < iterations; k++) simulate(ids, 1);
+    alpha = 0;
+  }
+
+  // 重新布局：清空全部坐标后重新撒点并充分预热
+  function relayout() {
+    stopLoop();
+    POS.clear();
+    VEL.clear();
+    FIXED.clear();
+    frozen = false;
+    var fb = document.getElementById('btn-freeze');
+    if (fb) fb.textContent = '固定布局';
+    warmup(520);
+    render();
+    fit();
+  }
+
+  // 计算连线两端落在方块边框上的锚点：水平距离明显更大时走左右边，否则走上下边，
+  // 网状布局下方块四散，固定「底→顶」会让连线穿过方块内部。
+  function borderAnchor(fromPos, toPos) {
+    var fx = fromPos.x + NODE_W / 2;
+    var fy = fromPos.y + NODE_H / 2;
+    var tx = toPos.x + NODE_W / 2;
+    var ty = toPos.y + NODE_H / 2;
+    var dx = tx - fx;
+    var dy = ty - fy;
+
+    if (Math.abs(dx) > Math.abs(dy) * 1.6) {
+      return { x: fx + (dx > 0 ? NODE_W / 2 : -NODE_W / 2), y: fy, out: { x: dx > 0 ? 1 : -1, y: 0 } };
+    }
+    return { x: fx, y: fy + (dy > 0 ? NODE_H / 2 : -NODE_H / 2), out: { x: 0, y: dy > 0 ? 1 : -1 } };
+  }
+
+  function edgePath(a, b) {
+    var from = borderAnchor(a, b);
+    var to = borderAnchor(b, a);
+    // 控制点沿各自出射方向外推，形成平滑弧线而不是一条直线
+    var bend = Math.min(120, Math.max(40, Math.sqrt((to.x - from.x) * (to.x - from.x) + (to.y - from.y) * (to.y - from.y)) * 0.28));
+    var c1x = from.x + from.out.x * bend;
+    var c1y = from.y + from.out.y * bend;
+    var c2x = to.x + to.out.x * bend;
+    var c2y = to.y + to.out.y * bend;
+    return 'M' + from.x + ',' + from.y +
+           ' C' + c1x + ',' + c1y + ' ' + c2x + ',' + c2y + ' ' + to.x + ',' + to.y;
+  }
+
+  function matchesQuery(n) {
+    if (!query) return false;
+    var q = query.toLowerCase();
+    return (n.label && n.label.toLowerCase().indexOf(q) >= 0) ||
+           (n.desc && n.desc.toLowerCase().indexOf(q) >= 0) ||
+           (n.file && n.file.toLowerCase().indexOf(q) >= 0);
+  }
+
+  function render() {
+    var ids = visibleIds();
+    var visSet = new Set(ids);
+    // 折叠展开后可能出现新节点：补上初始坐标并触发一次局部松弛
+    if (ensurePositions(ids)) heat(0.6);
+    var pos = POS;
+
+    var parts = [];
+    var visEdges = 0;
+    var hitEdge = 0;
+
+    // 先画连线，保证节点覆盖在其上
+    EDGES.forEach(function (e) {
+      if (!visSet.has(e.from) || !visSet.has(e.to)) return;
+      var a = pos.get(e.from);
+      var b = pos.get(e.to);
+      if (!a || !b) return;
+      visEdges++;
+
+      var d = edgePath(a, b);
+
+      var cls = 'edge ' + e.type;
+      if (query) {
+        var hit = matchesQuery(MAP[e.from]) || matchesQuery(MAP[e.to]);
+        cls += hit ? ' hit' : ' dim';
+        if (hit) hitEdge++;
+      }
+      parts.push('<path class="' + cls + '" d="' + d + '" marker-end="url(#m-' + e.type + ')"></path>');
+    });
+
+    // 再画节点
+    NODES.forEach(function (n) {
+      if (!visSet.has(n.id)) return;
+      var p = pos.get(n.id);
+      if (!p) return;
+
+      var color = LAYER_COLOR[n.layer] || '#888';
+      var isGroup = !!CHILDREN[n.id];
+      var isCollapsed = COLLAPSED.has(n.id);
+
+      var cls = 'node';
+      if (n.id === selectedId) cls += ' selected';
+      if (n.id === draggingId) cls += ' dragging';
+      if (query) cls += matchesQuery(n) ? ' hit' : ' dim';
+
+      var label = truncate(n.label, NODE_W - 16);
+      var sub = LAYER_NAME[n.layer] + (isGroup ? ' · 分组' : '');
+
+      var s = '<g class="' + cls + '" data-id="' + n.id + '" transform="translate(' + p.x + ',' + p.y + ')">';
+      s += '<rect class="node-box" width="' + NODE_W + '" height="' + NODE_H + '" rx="9" style="stroke:' + color + '"></rect>';
+      s += '<text class="node-label" x="' + (NODE_W / 2) + '" y="21">' + esc(label) + '</text>';
+      s += '<text class="node-sub" x="' + (NODE_W / 2) + '" y="35">' + esc(sub) + '</text>';
+      s += '<title>' + esc(n.label) + ' — ' + esc(n.desc) + '</title>';
+
+      if (isGroup) {
+        var badge = isCollapsed ? '+' + countDescendants(n.id) : '−';
+        s += '<g class="toggle" data-toggle="' + n.id + '">';
+        s += '<circle cx="' + (NODE_W - 14) + '" cy="14" r="9"></circle>';
+        s += '<text x="' + (NODE_W - 14) + '" y="18">' + badge + '</text>';
+        s += '</g>';
+      }
+
+      s += '</g>';
+      parts.push(s);
+    });
+
+    viewport.innerHTML = parts.join('');
+
+    stats.textContent = '可见节点 ' + ids.length + ' / ' + NODES.length +
+      '　连线 ' + visEdges + ' / ' + EDGES.length +
+      (query ? '　命中连线 ' + hitEdge : '');
+  }
+
+  // ─────────────────────────────────────────────────────────────
+  // 三、视图变换：平移、缩放、适配
+  // ─────────────────────────────────────────────────────────────
+
+  function applyView() {
+    viewport.setAttribute('transform', 'translate(' + view.x + ',' + view.y + ') scale(' + view.k + ')');
+  }
+
+  function zoomAt(cx, cy, factor) {
+    var nk = Math.min(3, Math.max(0.15, view.k * factor));
+    var real = nk / view.k;
+    view.x = cx - (cx - view.x) * real;
+    view.y = cy - (cy - view.y) * real;
+    view.k = nk;
+    applyView();
+  }
+
+  function fit() {
+    var ids = visibleIds();
+    if (!ids.length) return;
+    var pos = POS;
+
+    var minX = Infinity, minY = Infinity, maxX = -Infinity, maxY = -Infinity;
+    ids.forEach(function (id) {
+      var p = pos.get(id);
+      if (!p) return;
+      minX = Math.min(minX, p.x);
+      minY = Math.min(minY, p.y);
+      maxX = Math.max(maxX, p.x + NODE_W);
+      maxY = Math.max(maxY, p.y + NODE_H);
+    });
+    if (!isFinite(minX)) return;
+
+    var rect = stage.getBoundingClientRect();
+    var bw = maxX - minX;
+    var bh = maxY - minY;
+    var k = Math.min(rect.width / (bw + 140), rect.height / (bh + 140), 1.15);
+    k = Math.max(0.15, k);
+
+    view.k = k;
+    view.x = rect.width / 2 - (minX + bw / 2) * k;
+    view.y = rect.height / 2 - (minY + bh / 2) * k;
+    applyView();
+  }
+
+  // 把某个节点平移到视口中心，用于搜索命中后定位
+  function centerOn(id) {
+    var p = POS.get(id);
+    if (!p) return;
+    var rect = stage.getBoundingClientRect();
+    view.x = rect.width / 2 - (p.x + NODE_W / 2) * view.k;
+    view.y = rect.height / 2 - (p.y + NODE_H / 2) * view.k;
+    applyView();
+  }
+
+  // ─────────────────────────────────────────────────────────────
+  // 四、详情面板
+  // ─────────────────────────────────────────────────────────────
+
+  function depLinks(ids, emptyText) {
+    if (!ids.length) return '<div class="empty">' + emptyText + '</div>';
+    return ids.map(function (id) {
+      var n = MAP[id];
+      return '<a class="dep-link" href="#" data-jump="' + id + '">' + esc(n ? n.label : id) + '</a>';
+    }).join('');
+  }
+
+  function select(id) {
+    selectedId = id;
+    var n = MAP[id];
+    if (!n) {
+      detail.classList.remove('open');
+      render();
+      return;
+    }
+
+    var outs = [];
+    var ins = [];
+    EDGES.forEach(function (e) {
+      if (e.from === id && outs.indexOf(e.to) < 0) outs.push(e.to);
+      if (e.to === id && ins.indexOf(e.from) < 0) ins.push(e.from);
+    });
+
+    var color = LAYER_COLOR[n.layer] || '#888';
+    var html = '';
+    html += '<h2>' + esc(n.label) + '</h2>';
+    html += '<div class="layer-chip" style="background:' + color + '22;border:1px solid ' + color + ';color:' + color + '">' +
+            LAYER_NAME[n.layer] + ' · L' + n.layer + '</div>';
+    html += '<div class="file">' + esc(n.file || '（无独立文件）') + '</div>';
+    html += '<div class="desc">' + esc(n.desc || '') + '</div>';
+
+    if (CHILDREN[id]) {
+      html += '<div class="sect">包含 ' + CHILDREN[id].length + ' 个子项</div>';
+      html += depLinks(CHILDREN[id], '');
+    }
+
+    html += '<div class="sect">依赖（下游 ' + outs.length + '）</div>';
+    html += depLinks(outs, '无出向依赖');
+    html += '<div class="sect">被依赖（上游 ' + ins.length + '）</div>';
+    html += depLinks(ins, '无入向依赖');
+
+    detail.innerHTML = html;
+    detail.classList.add('open');
+    render();
+  }
+
+  // ─────────────────────────────────────────────────────────────
+  // 五、事件绑定
+  // ─────────────────────────────────────────────────────────────
+
+  // 交互模式：node=拖拽单个方块，pan=平移画布。两者互斥，避免拖方块时手一斜就跑偏整个画布。
+  var mode = null;
+  var dragStart = null;
+  var nodeDrag = null;
+  var draggingId = null; // 当前被拖的节点 id，render 时用来保留 .dragging 样式
+  var moved = false;
+
+  // 屏幕坐标 → 画布坐标（先去掉画布平移与缩放，否则缩放后拖动会跟手不一致）
+  function toCanvas(clientX, clientY) {
+    var rect = svg.getBoundingClientRect();
+    return {
+      x: (clientX - rect.left - view.x) / view.k,
+      y: (clientY - rect.top - view.y) / view.k
+    };
+  }
+
+  svg.addEventListener('pointerdown', function (ev) {
+    if (ev.button !== 0) return;
+
+    moved = false;
+    var nd = ev.target.closest ? ev.target.closest('[data-id]') : null;
+    var tg = ev.target.closest ? ev.target.closest('[data-toggle]') : null;
+
+    // 命中方块本体（且不是折叠圆点）→ 拖拽该方块
+    if (nd && !tg) {
+      var id = nd.getAttribute('data-id');
+      var p = POS.get(id);
+      if (!p) return;
+
+      var pt = toCanvas(ev.clientX, ev.clientY);
+      mode = 'node';
+      draggingId = id;
+      // 记录指针相对方块左上角的偏移，拖动时方块不会“跳到指针中心”
+      nodeDrag = { id: id, offX: pt.x - p.x, offY: pt.y - p.y };
+
+      // 钉住被拖方块，并提高温度让周围节点主动让位
+      FIXED.set(id, { x: p.x, y: p.y });
+      svg.classList.add('dragging');
+      svg.setPointerCapture(ev.pointerId);
+      heat(0.45);
+      return;
+    }
+
+    // 其他位置 → 平移画布
+    mode = 'pan';
+    dragStart = { x: ev.clientX, y: ev.clientY, vx: view.x, vy: view.y };
+    svg.classList.add('dragging');
+    svg.setPointerCapture(ev.pointerId);
+  });
+
+  svg.addEventListener('pointermove', function (ev) {
+    if (mode === 'node' && nodeDrag) {
+      var pt = toCanvas(ev.clientX, ev.clientY);
+      var nx = pt.x - nodeDrag.offX;
+      var ny = pt.y - nodeDrag.offY;
+      var np = POS.get(nodeDrag.id);
+      if (!np) return;
+
+      np.x = nx;
+      np.y = ny;
+      FIXED.set(nodeDrag.id, { x: nx, y: ny });
+      moved = true;
+
+      // 已有动画循环时由 tick 完成重绘；「固定布局」下没有循环，需要手动重绘
+      if (frozen) render(); else heat(0.45);
+      return;
+    }
+
+    if (mode === 'pan' && dragStart) {
+      var dx = ev.clientX - dragStart.x;
+      var dy = ev.clientY - dragStart.y;
+      if (Math.abs(dx) > 3 || Math.abs(dy) > 3) moved = true;
+      view.x = dragStart.vx + dx;
+      view.y = dragStart.vy + dy;
+      applyView();
+    }
+  });
+
+  svg.addEventListener('pointerup', function (ev) {
+    if (mode === 'node' && nodeDrag) {
+      // 松手后解除固定但保留当前位置：让力模型把邻居推开、自己小幅归位，
+      // 而不是永久钉死在可能与其它方块重叠的位置。
+      FIXED.delete(nodeDrag.id);
+      nodeDrag = null;
+      draggingId = null;
+      mode = null;
+      svg.classList.remove('dragging');
+      try { svg.releasePointerCapture(ev.pointerId); } catch (e) { /* 指针已释放时忽略 */ }
+      if (frozen) render(); else heat(0.3);
+      return;
+    }
+
+    if (mode === 'pan') {
+      mode = null;
+      dragStart = null;
+      svg.classList.remove('dragging');
+      try { svg.releasePointerCapture(ev.pointerId); } catch (e) { /* 指针已释放时忽略 */ }
+    }
+  });
+
+  svg.addEventListener('pointercancel', function () {
+    if (nodeDrag) FIXED.delete(nodeDrag.id);
+    mode = null;
+    nodeDrag = null;
+    draggingId = null;
+    dragStart = null;
+    svg.classList.remove('dragging');
+  });
+
+  // 缩放：以鼠标位置为锚点
+  svg.addEventListener('wheel', function (ev) {
+    ev.preventDefault();
+    var rect = svg.getBoundingClientRect();
+    var cx = ev.clientX - rect.left;
+    var cy = ev.clientY - rect.top;
+    zoomAt(cx, cy, ev.deltaY < 0 ? 1.12 : 1 / 1.12);
+  }, { passive: false });
+
+  // 点击：优先命中折叠按钮，其次节点，最后空白取消选中
+  svg.addEventListener('click', function (ev) {
+    if (moved) { moved = false; return; }
+
+    var tg = ev.target.closest('[data-toggle]');
+    if (tg) {
+      var tid = tg.getAttribute('data-toggle');
+      if (COLLAPSED.has(tid)) COLLAPSED.delete(tid); else COLLAPSED.add(tid);
+      render();
+      return;
+    }
+
+    var nd = ev.target.closest('[data-id]');
+    if (nd) {
+      select(nd.getAttribute('data-id'));
+      return;
+    }
+
+    selectedId = null;
+    detail.classList.remove('open');
+    render();
+  });
+
+  // 详情面板内的依赖跳转
+  detail.addEventListener('click', function (ev) {
+    var a = ev.target.closest('[data-jump]');
+    if (!a) return;
+    ev.preventDefault();
+    var id = a.getAttribute('data-jump');
+
+    // 目标可能被折叠隐藏，先展开其所有祖先再定位
+    var p = MAP[id] ? MAP[id].parent : null;
+    while (p) {
+      COLLAPSED.delete(p);
+      p = MAP[p] ? MAP[p].parent : null;
+    }
+    select(id);
+    centerOn(id);
+  });
+
+  // 搜索
+  var searchInput = document.getElementById('search');
+  searchInput.addEventListener('input', function () {
+    query = searchInput.value.trim();
+    render();
+  });
+
+  searchInput.addEventListener('keydown', function (ev) {
+    if (ev.key !== 'Enter') return;
+    var first = null;
+    for (var i = 0; i < NODES.length; i++) {
+      if (matchesQuery(NODES[i])) { first = NODES[i].id; break; }
+    }
+    if (!first) return;
+    // 命中节点可能在折叠子树里，逐级展开祖先
+    var p = MAP[first].parent;
+    while (p) {
+      COLLAPSED.delete(p);
+      p = MAP[p] ? MAP[p].parent : null;
+    }
+    select(first);
+    centerOn(first);
+  });
+
+  // 工具栏
+  document.getElementById('btn-expand').addEventListener('click', function () {
+    COLLAPSED.clear();
+    render();
+  });
+
+  document.getElementById('btn-collapse').addEventListener('click', function () {
+    Object.keys(CHILDREN).forEach(function (id) { COLLAPSED.add(id); });
+    render();
+  });
+
+  document.getElementById('btn-relayout').addEventListener('click', function () {
+    relayout();
+  });
+
+  document.getElementById('btn-freeze').addEventListener('click', function () {
+    frozen = !frozen;
+    if (frozen) {
+      stopLoop();
+      alpha = 0;
+    } else {
+      heat(0.6);
+    }
+    this.textContent = frozen ? '恢复模拟' : '固定布局';
+  });
+
+  document.getElementById('btn-fit').addEventListener('click', function () { render(); fit(); });
+
+  document.getElementById('btn-zoom-in').addEventListener('click', function () {
+    var rect = stage.getBoundingClientRect();
+    zoomAt(rect.width / 2, rect.height / 2, 1.25);
+  });
+
+  document.getElementById('btn-zoom-out').addEventListener('click', function () {
+    var rect = stage.getBoundingClientRect();
+    zoomAt(rect.width / 2, rect.height / 2, 1 / 1.25);
+  });
+
+  var themeBtn = document.getElementById('btn-theme');
+  themeBtn.addEventListener('click', function () {
+    var light = document.body.classList.toggle('light');
+    document.body.classList.toggle('dark', !light);
+    themeBtn.textContent = light ? '深色' : '浅色';
+  });
+
+  // 图例：按层生成
+  var legendLayers = document.getElementById('legend-layers');
+  legendLayers.innerHTML = LAYERS.map(function (l) {
+    return '<div class="row"><span class="swatch" style="background:' + l.color + '"></span>' +
+           l.n + '. ' + l.name + '</div>';
+  }).join('');
+
+  // 首次：先预热力模拟再渲染，避免用户看到节点从原点爆开的过程
+  warmup(520);
+  render();
+  fit();
+
+  // 视口尺寸变化时只调整画布，不重置用户当前的缩放
+  window.addEventListener('resize', function () {
+    applyView();
+  });
+})();
+</script>
+</body>
+</html>
