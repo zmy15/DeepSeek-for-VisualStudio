@@ -299,8 +299,11 @@ very differently from a real solution switch:
 
 A MEF-exported `IVsTextViewCreationListener` (content type `code`, editable role) attaches an
 `InlinePredictionManager`, a `GhostTextTagger`, and a `CommandFilter` to each code view. A `DispatcherTimer`
-debounces edits; surrounding code is gathered by walking enclosing spans (up to 5 nesting levels, ±500-char
-fallback); a FIM request goes to `/beta/completions` capped at 256 tokens at temperature 0 and is cached (10-entry
+debounces edits; C/C++ context is scanned as plain text (`CppBlockContextScanner`: brace matching after masking
+comments/strings, so it captures the enclosing function from signature to closing brace without ever calling the
+VC language service), while other languages walk enclosing spans (up to 5 nesting levels) and **degrade to the
+same text scanner** when the language service throws `E_FAIL` (logged at Debug, no longer the old ±500-char
+fallback). A FIM request then goes to `/beta/completions` capped at 256 tokens at temperature 0 and is cached (10-entry
 LRU). The suggestion renders as a grey `IntraTextAdornmentTag` using the editor's own font metrics. <kbd>Tab</kbd>
 accepts and formats, <kbd>Esc</kbd> dismisses, <kbd>Enter</kbd> restarts the timer.
 
@@ -587,7 +590,10 @@ Agent 改写 `.sln`/`.slnx`/`.csproj`/`Directory.Build.props` 时，Visual Studi
 
 MEF 导出的 `IVsTextViewCreationListener`（内容类型 `code`，可编辑角色）为每个代码视图挂载
 `InlinePredictionManager`、`GhostTextTagger` 与 `CommandFilter`。`DispatcherTimer` 对编辑做防抖；
-通过逐层扩展包围区间收集上下文（最多 5 层嵌套，回退 ±500 字符）；向 `/beta/completions` 发送 FIM 请求，
+C/C++ 的上下文由 `CppBlockContextScanner` 纯文本扫描（先屏蔽注释/字符串再做花括号配对，因此能稳定取到
+「函数签名 → 右括号」的完整函数体，完全不调用 VC 语言服务）；其他语言仍逐层扩展包围区间（最多 5 层嵌套），
+语言服务抛 `E_FAIL` 时**降级为同一套纯文本扫描**（只记 Debug 日志，不再是旧的 ±500 字符硬窗口）。
+随后向 `/beta/completions` 发送 FIM 请求，
 上限 256 token、温度 0，并做缓存（10 条 LRU）。建议以灰色 `IntraTextAdornmentTag` 渲染，
 并使用编辑器自身字体度量。<kbd>Tab</kbd> 接受并格式化，<kbd>Esc</kbd> 取消，<kbd>Enter</kbd> 重启定时器。
 

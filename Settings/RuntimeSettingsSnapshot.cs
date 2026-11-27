@@ -34,7 +34,11 @@ namespace DeepSeek_v4_for_VisualStudio.Settings
         bool EnableEvaluationExport = false,
         string CustomEndpointsData = "",
         string ActiveCustomEndpointId = "",
-        string OfficialOcrPurpose = "")
+        string OfficialOcrPurpose = "",
+        bool EnableAutoCompression = true,
+        int CompressionThreshold = 85,
+        int PreserveRecentTurns = 3,
+        int LlmTimeoutSeconds = 300)
     {
         public static RuntimeSettingsSnapshot Capture(DeepSeekOptionsPage options)
         {
@@ -70,7 +74,11 @@ namespace DeepSeek_v4_for_VisualStudio.Settings
                 options.EnableEvaluationExport,
                 options.CustomEndpointsData ?? string.Empty,
                 options.ActiveCustomEndpointId ?? string.Empty,
-                options.OfficialOcrPurpose ?? string.Empty);
+                options.OfficialOcrPurpose ?? string.Empty,
+                options.EnableAutoCompression,
+                options.CompressionThreshold,
+                options.PreserveRecentTurns,
+                options.LlmTimeoutSeconds);
         }
 
         public override string ToString() => "RuntimeSettingsSnapshot { redacted }";
@@ -88,7 +96,9 @@ namespace DeepSeek_v4_for_VisualStudio.Settings
         bool OcrChanged,
         bool WebSearchChanged,
         bool LayoutChanged,
-        bool DeveloperChanged)
+        bool DeveloperChanged,
+        bool CompressionChanged = false,
+        bool LlmTimeoutChanged = false)
     {
         public bool HasChanges =>
             EndpointChanged ||
@@ -101,7 +111,9 @@ namespace DeepSeek_v4_for_VisualStudio.Settings
             OcrChanged ||
             WebSearchChanged ||
             LayoutChanged ||
-            DeveloperChanged;
+            DeveloperChanged ||
+            CompressionChanged ||
+            LlmTimeoutChanged;
 
         public static RuntimeSettingsChangeSet All { get; } = new(
             EndpointChanged: true,
@@ -114,7 +126,9 @@ namespace DeepSeek_v4_for_VisualStudio.Settings
             OcrChanged: true,
             WebSearchChanged: true,
             LayoutChanged: true,
-            DeveloperChanged: true);
+            DeveloperChanged: true,
+            CompressionChanged: true,
+            LlmTimeoutChanged: true);
 
         public static RuntimeSettingsChangeSet Between(
             RuntimeSettingsSnapshot previous,
@@ -132,6 +146,10 @@ namespace DeepSeek_v4_for_VisualStudio.Settings
             bool contextChanged =
                 previous.TokenBudgetPercent != current.TokenBudgetPercent ||
                 Changed(previous.ModelMaxTokenLimits, current.ModelMaxTokenLimits);
+            bool compressionChanged =
+                previous.EnableAutoCompression != current.EnableAutoCompression ||
+                previous.CompressionThreshold != current.CompressionThreshold ||
+                previous.PreserveRecentTurns != current.PreserveRecentTurns;
 
             return new RuntimeSettingsChangeSet(
                 EndpointChanged:
@@ -163,7 +181,10 @@ namespace DeepSeek_v4_for_VisualStudio.Settings
                     previous.BottomAreaScalePercent != current.BottomAreaScalePercent ||
                     previous.WebView2ZoomPercent != current.WebView2ZoomPercent,
                 DeveloperChanged:
-                    previous.EnableEvaluationExport != current.EnableEvaluationExport);
+                    previous.EnableEvaluationExport != current.EnableEvaluationExport,
+                CompressionChanged: compressionChanged,
+                LlmTimeoutChanged:
+                    previous.LlmTimeoutSeconds != current.LlmTimeoutSeconds);
         }
 
         private static bool Changed(string left, string right)

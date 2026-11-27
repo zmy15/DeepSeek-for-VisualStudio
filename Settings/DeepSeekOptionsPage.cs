@@ -9,6 +9,7 @@ using System.Drawing.Design;
 using System.Globalization;
 using System.Linq;
 using System.Text.Json;
+using System.Threading;
 
 namespace DeepSeek_v4_for_VisualStudio.Settings
 {
@@ -79,6 +80,15 @@ namespace DeepSeek_v4_for_VisualStudio.Settings
 
             // Language affects resource loading before general subscribers refresh the UI.
             ApplyLanguageSetting();
+            NotifySettingsChanged();
+        }
+
+        /// <summary>
+        /// Raises the runtime settings change notification.
+        /// Keep publication in one place so every settings surface follows the same path.
+        /// </summary>
+        internal static void NotifySettingsChanged()
+        {
             SettingsChanged?.Invoke();
         }
 
@@ -93,7 +103,26 @@ namespace DeepSeek_v4_for_VisualStudio.Settings
         /// <summary>
         /// 全局实例引用，在 Package 初始化时设置，方便静态工具类读取设置。
         /// </summary>
-        public static DeepSeekOptionsPage? Instance { get; set; }
+        public static DeepSeekOptionsPage? Instance
+        {
+            get => Volatile.Read(ref _instance);
+            set
+            {
+                if (ReferenceEquals(Volatile.Read(ref _instance), value))
+                    return;
+
+                Volatile.Write(ref _instance, value);
+                InstanceChanged?.Invoke();
+            }
+        }
+
+        private static DeepSeekOptionsPage? _instance;
+
+        /// <summary>
+        /// 持久化装载会把启动阶段的内存默认选项替换为真正的 DialogPage。
+        /// 已绑定到旧实例的编辑器组件通过此事件重新读取当前设置。
+        /// </summary>
+        internal static event Action? InstanceChanged;
 
         /// <summary>关于扩展、仓库和 Issue 地址。</summary>
         [LocalizedCategory("settings.category.about")]
@@ -745,7 +774,7 @@ namespace DeepSeek_v4_for_VisualStudio.Settings
                 // 规范 DialogPage 的过期实例），否则用户手动选择的语言会被静默丢弃、
                 // 回退到自动检测（中文），表现为"切换失效"。
                 ApplyLanguageSetting();
-                SettingsChanged?.Invoke();
+                NotifySettingsChanged();
 
                 // ── 旧页改动 → 推送到 Unified Settings（新版设置 UI 同步）──
                 UnifiedSettingsSync.PushFromPage(this);
