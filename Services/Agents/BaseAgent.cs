@@ -844,7 +844,7 @@ namespace DeepSeek_v4_for_VisualStudio.Services.Agents
             {
                 // Cache 统计信息 — 过滤，不混入正文
             }
-            else if (chunk.StartsWith("[TITLE]"))
+            else if (chunk.StartsWith(ConversationTitleChunkPrefix))
             {
                 // 官方会话标题元数据 — 由 CallAiWithToolLoopAsync 单独分派，不混入正文
             }
@@ -863,7 +863,7 @@ namespace DeepSeek_v4_for_VisualStudio.Services.Agents
             return !chunk.StartsWith("[THINKING]")
                 && !chunk.StartsWith("[TOOL_CALL]")
                 && !chunk.StartsWith("[CACHE]")
-                && !chunk.StartsWith("[TITLE]");
+                && !chunk.StartsWith(ConversationTitleChunkPrefix);
         }
 
         /// <summary>

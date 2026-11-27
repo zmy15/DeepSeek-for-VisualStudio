@@ -239,13 +239,13 @@ namespace DeepSeek_v4_for_VisualStudio.Services.Agents
 
                 bool TryHandleConversationTitleChunk(string chunk)
                 {
-                    if (!chunk.StartsWith("[TITLE]", StringComparison.Ordinal))
+                    if (!chunk.StartsWith(ConversationTitleChunkPrefix, StringComparison.Ordinal))
                         return false;
 
                     conversationTitleReceived = true;
                     try
                     {
-                        Context?.OnConversationTitleReceived?.Invoke(chunk.Substring(7));
+                        Context?.OnConversationTitleReceived?.Invoke(chunk.Substring(ConversationTitleChunkPrefix.Length));
                     }
                     catch (Exception ex)
                     {
@@ -679,9 +679,7 @@ namespace DeepSeek_v4_for_VisualStudio.Services.Agents
                     // ── Ask Agent 直接探索提示：所有调用始终正常执行；
                     //    达到阈值后，仅在本次真实工具结果末尾追加一次效率建议。──
                     HashSet<int>? directExplorationHintIndices = null;
-                    bool canDelegateAskExploration = Definition.Type == AgentType.Ask
-                        && ExploreAgent != null
-                        && effectiveWhitelist?.Contains("runSubagent", StringComparer.OrdinalIgnoreCase) == true;
+                    bool canDelegateAskExploration = CanDelegateAskExploration(effectiveWhitelist);
                     if (canDelegateAskExploration)
                     {
                         foreach (int idx in dedupedIndices)
@@ -1153,15 +1151,7 @@ namespace DeepSeek_v4_for_VisualStudio.Services.Agents
                     // 检测连续错误：检查本轮 tool 消息是否全部以 Error: 开头
                     if (!loopDetected)
                     {
-                        // toolInsertPos 在插入 assistant + N 条 tool 后指向 agent 消息，
-                        // 故第一个 tool 消息位于 toolInsertPos - toolCalls.Count
-                        int toolMsgStart = toolInsertPos - toolCalls.Count;
-                        bool allErrors = toolCalls.Count > 0;
-                        for (int i = toolMsgStart; i < messages.Count && allErrors; i++)
-                        {
-                            if (messages[i].Role == "tool" && !(messages[i].Content ?? "").StartsWith("Error: "))
-                                allErrors = false;
-                        }
+                        bool allErrors = AreAllToolMessagesErrors(messages, toolInsertPos, toolCalls.Count);
 
                         if (allErrors)
                             consecutiveErrorRounds++;
@@ -1269,6 +1259,45 @@ namespace DeepSeek_v4_for_VisualStudio.Services.Agents
             }
 
             return (toolDefs, effectiveWhitelist, toolChoice);
+        }
+
+        /// <summary>
+        /// 流式分片中的官方会话标题控制前缀。"[TITLE]" 后的内容是标题正文，
+        /// <see cref="ProcessStreamChunk"/> 与 <see cref="IsContentChunk"/> 也以同一前缀过滤。
+        /// </summary>
+        private const string ConversationTitleChunkPrefix = "[TITLE]";
+
+        /// <summary>
+        /// 判断当前 Agent 是否可以把探索委派给 Explore 子代理（P3 直探提示与 P4 计数重置的共同前置条件）。
+        /// 需同时满足：Agent 类型为 Ask、已注入 ExploreAgent、且白名单包含 runSubagent。
+        /// </summary>
+        /// <param name="effectiveWhitelist">本轮生效的客户端拦截白名单。</param>
+        /// <returns>可以委派探索时返回 <c>true</c>。</returns>
+        private bool CanDelegateAskExploration(List<string>? effectiveWhitelist)
+            => Definition.Type == AgentType.Ask
+               && ExploreAgent != null
+               && effectiveWhitelist?.Contains("runSubagent", StringComparer.OrdinalIgnoreCase) == true;
+
+        /// <summary>
+        /// 判断本轮新增的 tool 消息是否全部以 <c>Error: </c> 开头（P5 连续错误轮次检测的纯逻辑）。
+        /// <c>toolInsertPos</c> 在插入 assistant + N 条 tool 后指向 agent 消息，
+        /// 故首个 tool 消息位于 <c>toolInsertPos - toolCallCount</c>。
+        /// </summary>
+        /// <param name="messages">当前消息列表。</param>
+        /// <param name="toolInsertPos">工具消息插入位置的游标。</param>
+        /// <param name="toolCallCount">本轮工具调用数量。</param>
+        /// <returns>本轮全部为错误结果时返回 <c>true</c>；无工具调用时返回 <c>false</c>。</returns>
+        private static bool AreAllToolMessagesErrors(
+            List<ChatApiMessage> messages, int toolInsertPos, int toolCallCount)
+        {
+            int toolMsgStart = toolInsertPos - toolCallCount;
+            bool allErrors = toolCallCount > 0;
+            for (int i = toolMsgStart; i < messages.Count && allErrors; i++)
+            {
+                if (messages[i].Role == "tool" && !(messages[i].Content ?? "").StartsWith("Error: "))
+                    allErrors = false;
+            }
+            return allErrors;
         }
 
         /// <summary>
