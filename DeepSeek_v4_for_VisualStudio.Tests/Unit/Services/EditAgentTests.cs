@@ -585,14 +585,50 @@ public class EditAgentTests
     }
 
     [Fact]
-    public void SystemPrompt_DeclaresSubsequentStepCompletionRule()
+    public void SystemPrompt_NoLongerDeclaresSubsequentStepCompletionRule()
     {
-        // 步骤提示精简后，"顺带完成后续步骤需声明" 规则移至常驻 system 提示词，
-        // 否则 DetectAndAutoCompleteLaterSteps 失去触发来源。
+        // 声明式自动完成（DetectAndAutoCompleteLaterSteps）已删除：
+        // 任务面板状态改由 update_task_progress 工具显式同步，
+        // system 提示词不应再要求模型声明「也完成了步骤X、Y」。
         var agent = new EditAgent(_apiService);
 
-        agent.Definition.SystemPrompt.Should().Contain("也完成了步骤X、Y");
-        agent.Definition.SystemPrompt.Should().Contain("also completed step X, Y");
+        agent.Definition.SystemPrompt.Should().NotContain("也完成了步骤X、Y");
+        agent.Definition.SystemPrompt.Should().NotContain("also completed step X, Y");
+    }
+
+    [Fact]
+    public void DetectAndAutoCompleteLaterSteps_IsRemovedEntirely()
+    {
+        // 契约锁定：声明式自动完成必须彻底删除，不得被重新加回。
+        // 它纯靠正则匹配正文、无客观校验，会把后续步骤静默跳过（连构建/测试步骤也不例外）；
+        // 现改由 update_task_progress 显式上报。
+        typeof(EditAgent).GetMethod("DetectAndAutoCompleteLaterSteps",
+            System.Reflection.BindingFlags.NonPublic | System.Reflection.BindingFlags.Instance)
+            .Should().BeNull("AI 正文声明不得再隐式改写步骤状态");
+
+        typeof(EditAgent).GetMethod("ParseStepNumbers",
+            System.Reflection.BindingFlags.NonPublic | System.Reflection.BindingFlags.Static)
+            .Should().BeNull("仅服务于声明解析的辅助方法应一并删除");
+    }
+
+    [Fact]
+    public void AdvanceCurrentStepIndexToLastFinished_AdvancesOverContinuousCompletedSteps()
+    {
+        // 进度推进算法必须保留（原在 DetectAndAutoCompleteLaterSteps 内部），
+        // 供 update_task_progress 与主循环共用，否则顶栏进度会停在旧值。
+        var method = typeof(EditAgent).GetMethod("AdvanceCurrentStepIndexToLastFinished",
+            System.Reflection.BindingFlags.NonPublic | System.Reflection.BindingFlags.Static);
+        method.Should().NotBeNull("进度推进算法不得随声明式自动完成一起被删掉");
+
+        var plan = new AgentTaskPlan { CurrentStepIndex = 1 };
+        for (int i = 1; i <= 4; i++)
+            plan.Steps.Add(new AgentStep { Index = i, Title = $"步骤{i}", Status = AgentStepStatus.Pending });
+        plan.Steps[0].Status = AgentStepStatus.Completed;
+        plan.Steps[1].Status = AgentStepStatus.Completed;
+
+        method!.Invoke(null, new object[] { plan, 1 });
+
+        plan.CurrentStepIndex.Should().Be(2, "只推进到连续完成段的末尾，遇到未完成步骤即停");
     }
 
     #endregion
@@ -844,188 +880,6 @@ public class EditAgentTests
 
     #region Logging Events
 
-    [Fact]
-    public void DetectAndAutoCompleteLaterSteps_RangeDeclaration_CompletesRangeAndAdvancesIndex()
-    {
-        var agent = new EditAgent(_apiService);
-        var plan = new AgentTaskPlan
-        {
-            Title = "Test Plan",
-            CurrentStepIndex = 1,
-            Steps = Enumerable.Range(1, 6)
-                .Select(i => new AgentStep
-                {
-                    Index = i,
-                    Title = $"步骤{i}",
-                    Status = i == 1 ? AgentStepStatus.Pending : AgentStepStatus.Pending,
-                })
-                .ToList(),
-        };
-        plan.Steps[0].Status = AgentStepStatus.InProgress;
-        plan.Steps[0].AiResponse = "已完成第一步。步骤1-6 已完成。";
-
-        DetectAndAutoCompleteLaterStepsPublic(agent, plan.Steps[0], plan);
-
-        // 步骤 2..6 应被自动标记为完成
-        plan.Steps.Skip(1).Should().OnlyContain(s => s.Status == AgentStepStatus.Completed);
-        // CurrentStepIndex 应推进到 6
-        plan.CurrentStepIndex.Should().Be(6);
-    }
-
-    [Fact]
-    public void DetectAndAutoCompleteLaterSteps_DashRange_CompletesSteps()
-    {
-        var agent = new EditAgent(_apiService);
-        var plan = new AgentTaskPlan
-        {
-            Title = "Test Plan",
-            CurrentStepIndex = 1,
-            Steps = Enumerable.Range(1, 5)
-                .Select(i => new AgentStep
-                {
-                    Index = i,
-                    Title = $"步骤{i}",
-                    Status = AgentStepStatus.Pending,
-                })
-                .ToList(),
-        };
-        plan.Steps[0].Status = AgentStepStatus.InProgress;
-        plan.Steps[0].AiResponse = "前两步已完成，步骤2-4 也随之完成。";
-
-        DetectAndAutoCompleteLaterStepsPublic(agent, plan.Steps[0], plan);
-
-        plan.Steps[1].Status.Should().Be(AgentStepStatus.Completed); // 2
-        plan.Steps[2].Status.Should().Be(AgentStepStatus.Completed); // 3
-        plan.Steps[3].Status.Should().Be(AgentStepStatus.Completed); // 4
-        plan.Steps[4].Status.Should().Be(AgentStepStatus.Pending);   // 5 不受影响
-        plan.CurrentStepIndex.Should().Be(4);
-    }
-
-    [Fact]
-    public void DetectAndAutoCompleteLaterSteps_EnglishRange_CompletesSteps()
-    {
-        var agent = new EditAgent(_apiService);
-        var plan = new AgentTaskPlan
-        {
-            Title = "Test Plan",
-            CurrentStepIndex = 1,
-            Steps = Enumerable.Range(1, 4)
-                .Select(i => new AgentStep
-                {
-                    Index = i,
-                    Title = $"Step {i}",
-                    Status = AgentStepStatus.Pending,
-                })
-                .ToList(),
-        };
-        plan.Steps[0].Status = AgentStepStatus.InProgress;
-        plan.Steps[0].AiResponse = "Step 1 done. Steps 2 through 4 are also completed.";
-
-        DetectAndAutoCompleteLaterStepsPublic(agent, plan.Steps[0], plan);
-
-        plan.Steps[1].Status.Should().Be(AgentStepStatus.Completed); // 2
-        plan.Steps[2].Status.Should().Be(AgentStepStatus.Completed); // 3
-        plan.Steps[3].Status.Should().Be(AgentStepStatus.Completed); // 4
-        plan.CurrentStepIndex.Should().Be(4);
-    }
-
-    [Fact]
-    public void DetectAndAutoCompleteLaterSteps_NoDeclaration_DoesNotAdvanceIndex()
-    {
-        var agent = new EditAgent(_apiService);
-        var plan = new AgentTaskPlan
-        {
-            Title = "Test Plan",
-            CurrentStepIndex = 1,
-            Steps = Enumerable.Range(1, 4)
-                .Select(i => new AgentStep
-                {
-                    Index = i,
-                    Title = $"步骤{i}",
-                    Status = AgentStepStatus.Pending,
-                })
-                .ToList(),
-        };
-        plan.Steps[0].Status = AgentStepStatus.InProgress;
-        plan.Steps[0].AiResponse = "完成了第一步，但没有涉及后续步骤。";
-
-        DetectAndAutoCompleteLaterStepsPublic(agent, plan.Steps[0], plan);
-
-        plan.Steps.Skip(1).Should().OnlyContain(s => s.Status == AgentStepStatus.Pending);
-        plan.CurrentStepIndex.Should().Be(1);
-    }
-
-    [Fact]
-    public void DetectAndAutoCompleteLaterSteps_TakesOnlyAiResponse_NoThinkingInput()
-    {
-        // 契约：自动完成只依据正式输出（AiResponse）。
-        // 思考内容不得再作为输入，否则引述/假设会被当成真声明。
-        var method = typeof(EditAgent).GetMethod("DetectAndAutoCompleteLaterSteps",
-            System.Reflection.BindingFlags.NonPublic | System.Reflection.BindingFlags.Instance);
-
-        var parameters = method!.GetParameters();
-        parameters.Should().HaveCount(2, "签名只接收(AiResponse 所在的 step, plan)");
-        parameters.Should().NotContain(p =>
-            p.Name != null && p.Name.Contains("thinking", StringComparison.OrdinalIgnoreCase));
-    }
-
-    [Fact]
-    public void DetectAndAutoCompleteLaterSteps_QuotedClaimInThinking_DoesNotSkipLaterStep()
-    {
-        // 回归：真实的步骤 1 输出只说"步骤 1 完成，等待下一步执行删除"，
-        // 但思考里出现了引述"也完成了步骤2"。该引述曾被当成真声明，
-        // 使步骤 2 被标记完成并跳过（文件创建后未被删除）。
-        var agent = new EditAgent(_apiService);
-        var plan = new AgentTaskPlan
-        {
-            Title = "Test Plan",
-            CurrentStepIndex = 1,
-            Steps = Enumerable.Range(1, 2)
-                .Select(i => new AgentStep
-                {
-                    Index = i,
-                    Title = $"步骤{i}",
-                    Status = AgentStepStatus.Pending,
-                })
-                .ToList(),
-        };
-        plan.Steps[0].Status = AgentStepStatus.InProgress;
-        plan.Steps[0].AiResponse = "已在 test_temp.txt 创建测试文件。步骤 1 完成，等待下一步执行删除。";
-
-        DetectAndAutoCompleteLaterStepsPublic(agent, plan.Steps[0], plan);
-
-        plan.Steps[1].Status.Should().Be(AgentStepStatus.Pending, "步骤2必须留给主循环真正执行");
-        plan.CurrentStepIndex.Should().Be(1);
-    }
-
-    [Fact]
-    public void DetectAndAutoCompleteLaterSteps_AiResponseAlsoCompletedStep2_CompletesIt()
-    {
-        // 反向校验：同一句话若真的出现在正式输出里，仍应被识别为声明
-        // （即回归修复来自"不读思考内容"，而非禁用自动完成本身）。
-        var agent = new EditAgent(_apiService);
-        var plan = new AgentTaskPlan
-        {
-            Title = "Test Plan",
-            CurrentStepIndex = 1,
-            Steps = Enumerable.Range(1, 4)
-                .Select(i => new AgentStep
-                {
-                    Index = i,
-                    Title = $"步骤{i}",
-                    Status = AgentStepStatus.Pending,
-                })
-                .ToList(),
-        };
-        plan.Steps[0].Status = AgentStepStatus.InProgress;
-        plan.Steps[0].AiResponse = "创建测试文件完成。也完成了步骤2。";
-
-        DetectAndAutoCompleteLaterStepsPublic(agent, plan.Steps[0], plan);
-
-        plan.Steps[1].Status.Should().Be(AgentStepStatus.Completed);
-        plan.CurrentStepIndex.Should().Be(2);
-    }
-
     #endregion
 
     [Fact]
@@ -1272,13 +1126,6 @@ public class EditAgentTests
     #endregion
 
     // ──────────── Reflection helpers for testing private methods ────────────
-
-    private static void DetectAndAutoCompleteLaterStepsPublic(EditAgent agent, AgentStep completedStep, AgentTaskPlan plan)
-    {
-        var method = typeof(EditAgent).GetMethod("DetectAndAutoCompleteLaterSteps",
-            System.Reflection.BindingFlags.NonPublic | System.Reflection.BindingFlags.Instance);
-        method!.Invoke(agent, new object[] { completedStep, plan });
-    }
 
     private static AgentTaskPlan CreateSingleStepPlanPublic(string userMessage)
     {

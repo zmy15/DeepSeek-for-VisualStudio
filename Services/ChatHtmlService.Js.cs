@@ -982,9 +982,12 @@ window._showCopyFeedback=function(msgIndex){
                                 if (msg.rawContent) {
                                     container.setAttribute('data-raw-content', msg.rawContent);
                                 }
-                                // 注入尾部 HTML
+                                // 注入尾部 HTML：容器必须与 C# 侧 BuildFooterContainerHtml 一致
+                                // （class=msg-footer，且落在 #msg-body-N 内部），否则页面重建后
+                                // 缓存条会从内容卡片里掉出来变成独立卡片。
                                 if(msg.footerHtml){
                                     var footerDiv=document.createElement('div');
+                                    footerDiv.className='msg-footer';
                                     footerDiv.innerHTML=msg.footerHtml;
                                     container.appendChild(footerDiv);
                                 }

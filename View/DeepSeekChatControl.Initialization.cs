@@ -136,7 +136,7 @@ namespace DeepSeek_v4_for_VisualStudio.View
                         {
                             try
                             {
-                                // 压缩摘要目标可达数万 token（默认约为预算的 10%），
+                                // 压缩摘要目标可达数万 token（默认约为预算的 20%），
                                 // 传 null 表示不发送 max_tokens，交由模型/端点自行决定输出长度，
                                 // 避免摘要被固定输出上限截断。
                                 return await agent.CallAiWithMessagesAsync(messages.ToList(), ct, maxTokens: null);

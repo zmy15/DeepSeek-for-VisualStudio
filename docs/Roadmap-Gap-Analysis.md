@@ -108,8 +108,8 @@ JS _streamBuf + requestAnimationFrame 批量应用         ← ChatHtmlService.J
 | Working Set 追踪 | `ActiveFileTracker` 记录工具读写的文件，生成摘要块（ActiveFileTracker.cs） |
 | 读写字节点 | ReadFileTool/BaseAgent 写入后调用 ObserveRead/ObserveWrite（ReadFileTool.cs:225 等） |
 | 三层消息结构 | 稳定前缀 [0..3] + 历史 + 动态块（压缩摘要/记忆/语言守卫）+ 易变块（Working Set/搜索/RAG）（ConversationContextManager.cs:577, 625-650, 750-777） |
-| 前缀缓存保护 | dynamicBlock 冻结快照防每轮漂移（:138-154）；缓存窗口 FindCacheWindowStart |
-| 自动压缩 | 85% 触发 / 95% 激进阈值，保留最近 3 轮（CompressionConfig） |
+| 前缀缓存保护 | dynamicBlock 冻结快照防每轮漂移 |
+| 自动压缩 | 仅按 Token 预算压缩；85% 普通阈值 / 95% 激进阈值，默认目标分别为预算的 20% / 10%（CompressionConfig） |
 
 **缺失的部分（对照报告第五/十四/十五节）：**
 

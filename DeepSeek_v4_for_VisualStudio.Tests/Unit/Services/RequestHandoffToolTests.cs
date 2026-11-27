@@ -9,7 +9,7 @@ namespace DeepSeek_v4_for_VisualStudio.Tests.Unit.Services;
 
 /// <summary>
 /// RequestHandoffTool 的 editSteps 参数测试：
-/// 覆盖解析重排、超限截断、空标题过滤、缺省保持 null 及 schema 结构。
+/// 覆盖解析重排、步数不设上限、空标题过滤、缺省保持 null 及 schema 结构。
 /// </summary>
 public class RequestHandoffToolTests
 {
@@ -84,9 +84,9 @@ public class RequestHandoffToolTests
         parsed[1].Description.Should().Be("补充测试");
     }
 
-    /// <summary>5 项 editSteps 被防御性截断为前 4 项，且 Index 重新连续。</summary>
+    /// <summary>超过 4 项 editSteps 不再被截断：全部保留且 Index 从 1 连续。</summary>
     [Fact]
-    public async Task Execute_WithMoreThanFourEditSteps_TruncatesToFour()
+    public async Task Execute_WithMoreThanFourEditSteps_KeepsAllSteps()
     {
         var args = BuildArgs(JsonSerializer.SerializeToElement(new[]
         {
@@ -95,6 +95,7 @@ public class RequestHandoffToolTests
             new { title = "S3" },
             new { title = "S4" },
             new { title = "S5" },
+            new { title = "S6" },
         }));
 
         var request = await RunExecuteAsync(args);
@@ -102,10 +103,10 @@ public class RequestHandoffToolTests
         var steps = request.EditSteps;
         steps.Should().NotBeNull();
         var parsed = steps!;
-        parsed.Should().HaveCount(4);
+        parsed.Should().HaveCount(6, "步数上限已放开为「2 步以上」");
         parsed[0].Title.Should().Be("S1");
-        parsed[3].Title.Should().Be("S4");
-        parsed.Select(s => s.Index).Should().Equal(1, 2, 3, 4);
+        parsed[5].Title.Should().Be("S6");
+        parsed.Select(s => s.Index).Should().Equal(1, 2, 3, 4, 5, 6);
     }
 
     /// <summary>标题为纯空白的项被过滤，剩余项 Index 仍从 1 连续。</summary>
@@ -225,7 +226,7 @@ public class RequestHandoffToolTests
 
     #region Schema
 
-    /// <summary>工具定义 schema 中包含 editSteps 数组参数（maxItems=4、items.required=[title]）。</summary>
+    /// <summary>工具定义 schema 中包含 editSteps 数组参数（不限步数、items.required=[title]）。</summary>
     [Fact]
     public void GetDefinition_IncludesEditStepsSchema()
     {
@@ -236,7 +237,8 @@ public class RequestHandoffToolTests
         schema.TryGetProperty("properties", out var properties).Should().BeTrue();
         properties.TryGetProperty("editSteps", out var editSteps).Should().BeTrue();
         editSteps.GetProperty("type").GetString().Should().Be("array");
-        editSteps.GetProperty("maxItems").GetInt32().Should().Be(4);
+        // 步骤数改为「2 步以上」：不再声明 maxItems，否则多步计划会被静默截断
+        editSteps.TryGetProperty("maxItems", out _).Should().BeFalse("editSteps 不应再限制步数上限");
         editSteps.GetProperty("items").GetProperty("required")[0].GetString().Should().Be("title");
     }
 

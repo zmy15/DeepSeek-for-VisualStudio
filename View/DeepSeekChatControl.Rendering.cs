@@ -701,6 +701,14 @@ namespace DeepSeek_v4_for_VisualStudio.View
                 {
                     _browserInitialized = false;
                     _lastRenderedMessagesLength = 0;
+
+                    // ── 页面即将被全量重灌，DOM 中的动态面板会随之消失 ──
+                    // _createdPlanIds 是 C# 侧的「已创建过」集合，与页面 DOM 没有任何关联：
+                    // 页面重建后它仍保留旧 PlanId，会让 RebuildPersistedTaskPanelsAsync
+                    // 误判「面板已存在」而跳过重建，表现为切窗口回来触发重绘后任务面板不再显示。
+                    // 与重建控件路径（RebuildWebViewCoreAsync）保持一致，此处必须一并清空。
+                    lock (_lock) { _createdPlanIds.Clear(); }
+
                     RebuildMessagesHtml();
                     UpdateBrowser();
                     return;

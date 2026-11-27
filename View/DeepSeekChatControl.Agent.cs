@@ -2449,6 +2449,21 @@ namespace DeepSeek_v4_for_VisualStudio.View
             {
                 var opts = new JsonSerializerOptions { PropertyNamingPolicy = JsonNamingPolicy.CamelCase };
 
+                // ── 页面重灌自愈：丢弃与实际 DOM 不一致的去重记录 ──
+                // _createdPlanIds 只反映 C# 侧的「已创建过」，无法感知页面是否被重新导航过。
+                // 若页面里一个任务面板都没有、集合却非空，说明某条重灌路径漏清了集合
+                // （历史上主题切换、会话切换、控件重建都各自补过清理，容易再次遗漏）。
+                // 此时必须丢弃集合，否则面板会永久不再重建。
+                // 该 await 必须在 lock 之外执行：锁内禁止异步让出。
+                int stalePlanIdCount;
+                lock (_lock) { stalePlanIdCount = _createdPlanIds.Count; }
+
+                if (stalePlanIdCount > 0 && !await HasAnyTaskPanelInDomAsync())
+                {
+                    Logger.Warn($"[Panel] 页面已无可显示的任务面板但去重集合仍有 {stalePlanIdCount} 条记录，清空后重新重建");
+                    lock (_lock) { _createdPlanIds.Clear(); }
+                }
+
                 // ── 从锁中收集需要重建的计划（async 操作不能在锁内执行）──
                 var plansToRebuild = new List<(AgentTaskPlan Plan, bool NeedsTwoPass)>();
                 var handoffsToRebuild = new List<(int MessageIndex, AgentHandoff Handoff)>();
@@ -2573,6 +2588,31 @@ namespace DeepSeek_v4_for_VisualStudio.View
             catch (Exception ex)
             {
                 Logger.Warn($"[Panel] 重建持久化任务面板异常: {ex.Message}");
+            }
+        }
+
+        /// <summary>
+        /// 探测当前页面 DOM 中是否还存在任一任务面板元素。
+        /// 用于区分「面板确实还在页面上」与「C# 侧集合记着已创建、但页面已被整体重灌」两种情况。
+        /// </summary>
+        /// <returns>DOM 中存在至少一个 agent-task-panel 元素返回 true；控件不可用或脚本执行失败返回 false。</returns>
+        private async Task<bool> HasAnyTaskPanelInDomAsync()
+        {
+            try
+            {
+                var core = ChatWebView?.CoreWebView2;
+                if (core == null)
+                    return false;
+
+                // ExecuteScriptAsync 返回的是 JSON 字面量，布尔值即 "true" / "false" 字符串
+                string result = await core.ExecuteScriptAsync(
+                    "document.querySelectorAll('[id^=\"agent-task-panel-\"]').length>0?true:false");
+                return string.Equals(result, "true", StringComparison.OrdinalIgnoreCase);
+            }
+            catch (Exception ex)
+            {
+                Logger.Warn($"[Panel] 探测页面任务面板失败: {ex.Message}");
+                return false;
             }
         }
 

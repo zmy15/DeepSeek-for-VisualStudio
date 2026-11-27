@@ -7,7 +7,7 @@
 <!--
   说明：本文件是 DeepSeek Chat for Visual Studio 的交互式架构图，单文件、零外部依赖，可离线双击打开。
   数据来源：docs/Architecture.md 与实际目录结构（Services / View / CodeCompletion / Settings / Commands）。
-  生成时间：2026-02，由架构分析任务生成。
+  生成时间：2026-11，由架构分析任务生成。
 
   操作方式：
     · 拖动空白处 —— 平移画布
@@ -363,7 +363,7 @@
 
     // ── L2 UI 层 ──────────────────────────────────────────
     { id: 'pane', label: 'DeepSeekChatWindowPane', layer: 2, file: 'View/DeepSeekChatWindowPane.cs', desc: '聊天工具窗口宿主（ToolWindowPane）。' },
-    { id: 'ctrl', label: 'DeepSeekChatControl', layer: 2, file: 'View/DeepSeekChatControl.xaml.cs', desc: '聊天主控件，按职责拆为 15 个分部类，避免单文件膨胀。' },
+    { id: 'ctrl', label: 'DeepSeekChatControl', layer: 2, file: 'View/DeepSeekChatControl.xaml.cs', desc: '聊天主控件，按职责拆为 14 个分部类，避免单文件膨胀。' },
     { id: 'ctrlAgent', label: '.Agent', layer: 2, parent: 'ctrl', file: 'View/DeepSeekChatControl.Agent.cs', desc: 'Agent 调度：构建消息、驱动工具循环、接收流式帧。' },
     { id: 'ctrlRendering', label: '.Rendering', layer: 2, parent: 'ctrl', file: 'View/DeepSeekChatControl.Rendering.cs', desc: 'HTML 快照与终态渲染，含页面重建期间的补发队列。' },
     { id: 'ctrlSessions', label: '.Sessions', layer: 2, parent: 'ctrl', file: 'View/DeepSeekChatControl.Sessions.cs', desc: '会话创建、切换与持久化协调。' },
@@ -385,6 +385,9 @@
     { id: 'inlineDiffHost', label: 'InlineDiffHostControl', layer: 2, file: 'View/InlineDiffHostControl.xaml.cs', desc: '内联差异覆盖层与逐块保留/撤销工具栏。' },
     { id: 'mcpDialog', label: 'McpConfigDialog', layer: 2, file: 'View/McpConfigDialog.xaml.cs', desc: 'MCP 服务器配置对话框。' },
     { id: 'quickSettings', label: 'QuickSettingsDialog', layer: 2, file: 'View/QuickSettingsDialog.xaml.cs', desc: '快捷设置对话框。' },
+    { id: 'localizedMsgBox', label: 'LocalizedMessageBox', layer: 2, file: 'View/LocalizedMessageBox.cs', desc: '本地化消息框，供各 WinForms 对话框统一取本地化标题与按钮文本。' },
+    { id: 'inlineEditBar', label: 'InlineEditBarWindow', layer: 2, file: 'View/InlineEdit/InlineEditBarWindow.cs', desc: '内联编辑浮条窗口，在编辑器上方承载指令输入与操作按钮。' },
+    { id: 'inlineEditCmdFilter', label: 'InlineEditCommandFilter', layer: 2, file: 'View/InlineEdit/InlineEditCommandFilter.cs', desc: '内联编辑命令拦截，捕获快捷键下发与取消操作。' },
 
     // ── L3 DI 容器 ────────────────────────────────────────
     { id: 'compositionRoot', label: 'CompositionRoot', layer: 3, file: 'Services/CompositionRoot.cs', desc: '静态服务定位器，在包初始化阶段构建一次。' },
@@ -392,19 +395,35 @@
 
     // ── L4 Agent 层 ───────────────────────────────────────
     { id: 'agentFactory', label: 'AgentFactory', layer: 4, file: 'Services/Agents/AgentFactory.cs', desc: '按角色创建 Agent 实例并注入共享服务。' },
-    { id: 'baseAgent', label: 'BaseAgent', layer: 4, file: 'Services/Agents/BaseAgent.cs', desc: '唯一工具循环：并行工具执行、分档超时、执行守卫预算、流式容错与降级解析兜底。' },
+    { id: 'baseAgent', label: 'BaseAgent', layer: 4, file: 'Services/Agents/BaseAgent.cs', desc: '唯一工具循环：并行工具执行、分档超时、执行守卫预算、流式容错与降级解析兜底。已拆为 10 个分部类（Diagnostics / Explore / Handoff / HandoffCache / Interaction / Messages / Prompt / ToolDispatch / ToolLoop / ToolSet）。' },
     { id: 'ask', label: 'AskAgent', layer: 4, file: 'Services/Agents/AskAgent.cs', desc: '只读问答 Agent，运行时被剔除编辑类工具。' },
     { id: 'explore', label: 'ExploreAgent', layer: 4, file: 'Services/Agents/ExploreAgent.cs', desc: '只读代码库检索子代理，供 Plan/Ask 并行调用。' },
     { id: 'plan', label: 'PlanAgent', layer: 4, file: 'Services/Agents/PlanAgent.cs', desc: '研究代码库并产出实现计划，不修改代码。' },
-    { id: 'edit', label: 'EditAgent', layer: 4, file: 'Services/Agents/EditAgent.cs', desc: '执行代码修改，按步骤推进并在必要时验证。' },
+    { id: 'edit', label: 'EditAgent', layer: 4, file: 'Services/Agents/EditAgent.cs', desc: '执行代码修改，按步骤推进并在必要时验证；不设硬性的文件数 / 行数限额，分步由计划与工具描述约束。' },
     { id: 'editAutoSplit', label: 'EditAgent.AutoSplit', layer: 4, parent: 'edit', file: 'Services/Agents/EditAgent.AutoSplit.cs', desc: '大型改动自动拆分步骤与批次。' },
+    { id: 'baDiagnostics', label: 'BaseAgent.Diagnostics', layer: 4, parent: 'baseAgent', file: 'Services/Agents/BaseAgent.Diagnostics.cs', desc: '诊断日志与运行态快照，定位工具循环异常时用。' },
+    { id: 'baExplore', label: 'BaseAgent.Explore', layer: 4, parent: 'baseAgent', file: 'Services/Agents/BaseAgent.Explore.cs', desc: 'Explore 子代理委派入口，转发只读检索请求。' },
+    { id: 'baHandoff', label: 'BaseAgent.Handoff', layer: 4, parent: 'baseAgent', file: 'Services/Agents/BaseAgent.Handoff.cs', desc: '移交决策与 Handoff 请求构造。' },
+    { id: 'baHandoffCache', label: 'BaseAgent.HandoffCache', layer: 4, parent: 'baseAgent', file: 'Services/Agents/BaseAgent.HandoffCache.cs', desc: '移交状态缓存，避免对同一次移交重复判定。' },
+    { id: 'baInteraction', label: 'BaseAgent.Interaction', layer: 4, parent: 'baseAgent', file: 'Services/Agents/BaseAgent.Interaction.cs', desc: '交互类工具（结构化提问、终端审批）的挂起与恢复。' },
+    { id: 'baMessages', label: 'BaseAgent.Messages', layer: 4, parent: 'baseAgent', file: 'Services/Agents/BaseAgent.Messages.cs', desc: '消息组装与清洗，保证请求体符合模型约束。' },
+    { id: 'baPrompt', label: 'BaseAgent.Prompt', layer: 4, parent: 'baseAgent', file: 'Services/Agents/BaseAgent.Prompt.cs', desc: '系统提示词构建与不可变前缀维护。' },
+    { id: 'baToolDispatch', label: 'BaseAgent.ToolDispatch', layer: 4, parent: 'baseAgent', file: 'Services/Agents/BaseAgent.ToolDispatch.cs', desc: '工具分发与执行入口，负责并行调度与结果回填。' },
+    { id: 'baToolLoop', label: 'BaseAgent.ToolLoop', layer: 4, parent: 'baseAgent', file: 'Services/Agents/BaseAgent.ToolLoop.cs', desc: '唯一工具循环主体，串起模型输出、工具执行与终止判定。' },
+    { id: 'baToolSet', label: 'BaseAgent.ToolSet', layer: 4, parent: 'baseAgent', file: 'Services/Agents/BaseAgent.ToolSet.cs', desc: '按 Agent 角色裁剪工具集，只读角色在此剔除编辑类工具。' },
     { id: 'build', label: 'BuildAgent', layer: 4, file: 'Services/Agents/BuildAgent.cs', desc: '诊断并修复构建或测试失败，构建成功后提前终止循环。' },
     { id: 'execGuard', label: 'AgentExecutionGuard', layer: 4, file: 'Services/Agents/AgentExecutionGuard.cs', desc: '墙钟时间、token、工具调用数与嵌套深度预算，滚动指纹检测无进展。' },
     { id: 'planReconciler', label: 'PlanBuildOutcomeReconciler', layer: 4, file: 'Services/Agents/PlanBuildOutcomeReconciler.cs', desc: '计划与构建结果对账，避免重复或遗漏步骤。' },
+    { id: 'execLimits', label: 'ExecutionLimits', layer: 4, file: 'Services/Agents/ExecutionLimits.cs', desc: '执行预算常量：工具调用数、Token 与墙钟时间的默认上限。' },
+    { id: 'toolDedup', label: 'ToolCallDeduplicator', layer: 4, file: 'Services/Agents/ToolCallDeduplicator.cs', desc: '重复工具调用检测与抑制，避免同一请求空转。' },
+    { id: 'toolClassifier', label: 'ToolClassifier', layer: 4, file: 'Services/Agents/ToolClassifier.cs', desc: '按只读 / 写入 / 危险分类工具，供审批策略判定放行。' },
+    { id: 'verifyDecider', label: 'VerificationLoopDecider', layer: 4, file: 'Services/Agents/VerificationLoopDecider.cs', desc: '判定本轮改动是否需要进入验证循环。' },
+    { id: 'agentJson', label: 'AgentJsonHelper', layer: 4, file: 'Services/Agents/AgentJsonHelper.cs', desc: 'Agent 侧 JSON 序列化辅助，统一空值与枚举处理。' },
+    { id: 'agentPath', label: 'AgentPathResolver', layer: 4, file: 'Services/Agents/AgentPathResolver.cs', desc: 'Agent 工作路径解析，把相对路径归一化到解决方案根。' },
 
     // ── L5 工具层 ─────────────────────────────────────────
     { id: 'bits', label: 'BuiltInToolService', layer: 5, file: 'Services/BuiltInToolService.cs', desc: '内置工具注册、白名单校验与统一调度入口。' },
-    { id: 'bitBase', label: 'BuiltInToolBase', layer: 5, file: 'Services/BuiltInTools/BuiltInToolBase.cs', desc: '工具基类：公共参数解析、结果压缩与审计能力。32 个内置工具由此派生。' },
+    { id: 'bitBase', label: 'BuiltInToolBase', layer: 5, file: 'Services/BuiltInTools/BuiltInToolBase.cs', desc: '工具基类：公共参数解析、结果压缩与审计能力。30 个内置工具由此派生。' },
     { id: 'tReadFile', label: 'ReadFileTool', layer: 5, parent: 'bitBase', file: 'Services/BuiltInTools/ReadFileTool.cs', desc: '读取文件内容，支持文本、Word/Excel、PDF 与图片。' },
     { id: 'tReplace', label: 'ReplaceStringInFileTool', layer: 5, parent: 'bitBase', file: 'Services/BuiltInTools/ReplaceStringInFileTool.cs', desc: '精确替换单处字符串。' },
     { id: 'tMultiReplace', label: 'MultiReplaceStringInFileTool', layer: 5, parent: 'bitBase', file: 'Services/BuiltInTools/MultiReplaceStringInFileTool.cs', desc: '同文件多处精确替换。' },
@@ -433,6 +452,9 @@
     { id: 'tComments', label: 'GetFileCommentsTool', layer: 5, parent: 'bitBase', file: 'Services/BuiltInTools/GetFileCommentsTool.cs', desc: '提取源文件中符号的文档注释。' },
     { id: 'tTermOut', label: 'GetTerminalOutputTool', layer: 5, parent: 'bitBase', file: 'Services/BuiltInTools/GetTerminalOutputTool.cs', desc: '等待异步终端命令完成并取回输出。' },
     { id: 'tCreateDir', label: 'CreateDirectoryTool', layer: 5, parent: 'bitBase', file: 'Services/BuiltInTools/CreateDirectoryTool.cs', desc: '递归创建目录结构。' },
+    { id: 'tFileSymbols', label: 'FileSymbolsTool', layer: 5, parent: 'bitBase', file: 'Services/BuiltInTools/FileSymbolsTool.cs', desc: '获取文件内容符号定义列表（get_file_symbols）。' },
+    { id: 'tTaskProgress', label: 'UpdateTaskProgressTool', layer: 5, parent: 'bitBase', file: 'Services/BuiltInTools/UpdateTaskProgressTool.cs', desc: '同步任务面板步骤状态（update_task_progress，Edit 专属）。' },
+    { id: 'toolTimeout', label: 'ToolTimeoutPolicy', layer: 5, file: 'Services/Tools/ToolTimeoutPolicy.cs', desc: '工具分档超时策略：按工具类型给出不同等待上限，避免长任务被统一阈值误杀。' },
     { id: 'mcpManager', label: 'McpManagerService', layer: 5, file: 'Services/McpManagerService.cs', desc: 'MCP 服务器生命周期管理与工具导入。' },
     { id: 'mcpStdio', label: 'McpStdioClient', layer: 5, parent: 'mcpManager', file: 'Services/McpStdioClient.cs', desc: 'MCP stdio 传输实现。' },
     { id: 'mcpHttp', label: 'McpHttpClient', layer: 5, parent: 'mcpManager', file: 'Services/McpHttpClient.cs', desc: 'MCP HTTP 传输实现。' },
@@ -449,7 +471,7 @@
     { id: 'modelCatalog', label: 'OfficialModelCatalogService', layer: 6, file: 'Services/OfficialModelCatalogService.cs', desc: '官方模型目录与上下文长度信息。' },
 
     // ── L7 上下文与缓存 ───────────────────────────────────
-    { id: 'ctxMgr', label: 'ConversationContextManager', layer: 7, file: 'Services/ConversationContextManager.cs', desc: '对话上下文管理，用指数移动平均校准 token 估算并在多个边界计算前缀哈希。' },
+    { id: 'ctxMgr', label: 'ConversationContextManager', layer: 7, file: 'Services/ConversationContextManager.cs', desc: '对话上下文管理：估算 Token 并对账预算（默认 900K，留 100K 给输出），仅在超出预算时触发压缩而非截断，并在多个边界计算前缀哈希。' },
     { id: 'prefixCache', label: 'PrefixCacheManager', layer: 7, file: 'Services/PrefixCacheManager.cs', desc: '对系统提示词与规范化工具目录计算 SHA-256 指纹，区分前缀断裂严重程度。' },
     { id: 'compressor', label: 'ContextCompressorService', layer: 7, file: 'Services/ContextCompressorService.cs', desc: '生成稳定压缩摘要并固定在 messages[1] 动态块，避免扰动前缀。' },
     { id: 'memory', label: 'MemoryService', layer: 7, file: 'Services/MemoryService.cs', desc: '跨会话记忆的存取与作用域管理。' },
@@ -458,6 +480,10 @@
     { id: 'prompts', label: 'AiPrompts', layer: 7, file: 'Services/AiPrompts.cs', desc: '系统提示词与共享不可变前缀 SharedImmutablePrefix。' },
     { id: 'compactor', label: 'ToolResultCompactor', layer: 7, file: 'Services/ToolResultCompactor.cs', desc: '工具结果压缩，降低上下文占用。' },
     { id: 'approvalQueue', label: 'ApprovalRequestQueue', layer: 7, file: 'Services/ApprovalRequestQueue.cs', desc: '审批请求排队与交互式等待。' },
+    { id: 'ideContextTracker', label: 'IdeContextTracker', layer: 7, file: 'Services/IdeContext/IdeContextTracker.cs', desc: '采集活动文件、光标位置与选中代码，注入为易变上下文。' },
+    { id: 'gitContextProvider', label: 'GitContextProvider', layer: 7, file: 'Services/IdeContext/GitContextProvider.cs', desc: '提供当前分支与 HEAD 等 Git 上下文，供提示词注入。' },
+    { id: 'activeFileTracker', label: 'ActiveFileTracker', layer: 7, file: 'Services/ActiveFileTracker.cs', desc: '跟踪解决方案中的活动文件切換，作为上下文注入与补全的依据。' },
+    { id: 'modelTokenLimit', label: 'ModelTokenLimitService', layer: 7, file: 'Services/ModelTokenLimitService.cs', desc: '查询并缓存各模型的上下文 Token 上限，供压缩阈值推算。' },
 
     // ── L8 编辑管线 ───────────────────────────────────────
     { id: 'editPatch', label: 'EditPatchService', layer: 8, file: 'Services/EditPatchService.cs', desc: '编辑补丁生成、字符串匹配与自动修复原语。' },
@@ -473,6 +499,13 @@
     { id: 'editorDiffHost', label: 'EditorDiffHost', layer: 8, file: 'View/Hosts/EditorDiffHost.cs', desc: '装饰层差异展示，250 毫秒刷新防抖与缩放同步。' },
     { id: 'editorDiffMarker', label: 'EditorDiffMarkerService', layer: 8, file: 'Services/EditorDiffMarkerService.cs', desc: '编辑器内差异标记与定位。' },
     { id: 'backup', label: 'BackupService', layer: 8, file: 'Services/BackupService.cs', desc: '破坏性操作前快照，超过 14 天的备份在启动时清扫。' },
+    { id: 'commitTargetIface', label: 'IProposalCommitTarget', layer: 8, file: 'Services/Editing/IProposalCommitTarget.cs', desc: '提交目标接口，四个具体 Target 均实现它，协调器只面向接口写入。' },
+    { id: 'commitResultTypes', label: 'CommitResultTypes', layer: 8, file: 'Services/Editing/CommitResultTypes.cs', desc: '提交结果与失败原因类型，供协调器汇总回滚信息。' },
+    { id: 'inlineEditService', label: 'InlineEditService', layer: 8, file: 'Services/InlineEdit/InlineEditService.cs', desc: '内联 AI 编辑服务：把选中代码与指令组装为一次补丁请求。' },
+    { id: 'editToolBase', label: 'AbstractEditTool', layer: 8, file: 'Services/EditTools/AbstractEditTool.cs', desc: '编辑工具基类，统一参数校验与结果形状；Insert / Replace / MultiReplace / ApplyPatch 由此派生。' },
+    { id: 'editStringMatcher', label: 'EditStringMatcher', layer: 8, file: 'Services/EditTools/EditStringMatcher.cs', desc: '目标字符串定位与容错匹配（含 LevenshteinDistanceExtensions 相似度度量）。' },
+    { id: 'editFileHealing', label: 'EditFileHealing', layer: 8, file: 'Services/EditTools/EditFileHealing.cs', desc: '匹配失败时对源文件做最小自修复，提高补丁落地率。' },
+    { id: 'editBufferApplier', label: 'EditBufferApplier', layer: 8, file: 'Services/EditTools/EditBufferApplier.cs', desc: '将已验证的编辑落到内存缓冲区，保持撤销事务完整。' },
 
     // ── L9 代码补全 ───────────────────────────────────────
     { id: 'tcl', label: 'TextViewCreationListener', layer: 9, file: 'CodeCompletion/TextViewCreationListener.cs', desc: 'MEF 导出的 IVsTextViewCreationListener，为每个代码视图挂载补全组件。' },
@@ -483,9 +516,20 @@
     { id: 'cppScanner', label: 'CppBlockContextScanner', layer: 9, file: 'CodeCompletion/CppBlockContextScanner.cs', desc: 'C/C++ 纯文本扫描：先屏蔽注释与字符串再做花括号配对，不调用 VC 语言服务。' },
     { id: 'completionMonitor', label: 'CompletionSettingsMonitor', layer: 9, file: 'CodeCompletion/CompletionSettingsMonitor.cs', desc: '监听补全相关设置变更并热更新运行参数。' },
     { id: 'diffPreviewFactory', label: 'DiffPreviewAdornmentFactory', layer: 9, file: 'CodeCompletion/DiffPreviewAdornmentFactory.cs', desc: '内联差异预览装饰工厂。' },
+    { id: 'completionTypes', label: 'DeepSeekCompletionContentTypes', layer: 9, file: 'CodeCompletion/DeepSeekCompletionContentTypes.cs', desc: '补全专用的 VS 内容类型定义，限定幽灵文本只在代码视图中生效。' },
 
     // ── L10 设置与横切 ────────────────────────────────────
     { id: 'optionsPage', label: 'DeepSeekOptionsPage', layer: 10, file: 'Settings/DeepSeekOptionsPage.cs', desc: '选项页与属性描述符，本地化在构建描述符之前完成。' },
+    { id: 'localizedAttributes', label: 'LocalizedAttributes', layer: 10, file: 'Settings/LocalizedAttributes.cs', desc: '本地化属性标记（DisplayName / Description / Category），在描述符构建前解析。' },
+    { id: 'quickSettingsValues', label: 'QuickSettingsValues', layer: 10, file: 'Settings/QuickSettingsValues.cs', desc: '快速设置对话框的值对象，与选项页共享同一保存链路。' },
+    { id: 'aboutEditor', label: 'AboutEditor', layer: 10, parent: 'optionsPage', file: 'Settings/AboutEditor.cs', desc: '关于对话框的 UITypeEditor 入口，打开仓库 / Issue / 反馈 / Star 链接。' },
+    { id: 'aboutInfo', label: 'AboutInfo', layer: 10, parent: 'optionsPage', file: 'Settings/AboutInfo.cs', desc: '扩展公开信息：仓库、Issue 列表、Star 地址与版本；含 Bug 报告 / 功能建议两个模板直达链接。' },
+    { id: 'downloadLinkEditor', label: 'DownloadLinkEditor', layer: 10, parent: 'optionsPage', file: 'Settings/DownloadLinkEditor.cs', desc: '下载链接编辑控件。' },
+    { id: 'modelCatalogEditor', label: 'ModelCatalogEditor', layer: 10, parent: 'optionsPage', file: 'Settings/ModelCatalogEditor.cs', desc: '官方模型目录选择器，从内置目录快速填模型名。' },
+    { id: 'modelMaxTokenEditor', label: 'ModelMaxTokenEditor', layer: 10, parent: 'optionsPage', file: 'Settings/ModelMaxTokenEditor.cs', desc: '模型上下文上限的编辑控件。' },
+    { id: 'modelPickerEditor', label: 'ModelPickerEditor', layer: 10, parent: 'optionsPage', file: 'Settings/ModelPickerEditor.cs', desc: '模型选择器，支持从端点拉取或手动填写。' },
+    { id: 'restoreDefaultEditor', label: 'RestoreDefaultSettingsEditor', layer: 10, parent: 'optionsPage', file: 'Settings/RestoreDefaultSettingsEditor.cs', desc: '恢复默认设置控件。' },
+    { id: 'testConnectionEditor', label: 'TestConnectionEditor', layer: 10, parent: 'optionsPage', file: 'Settings/TestConnectionEditor.cs', desc: '连接测试控件，验证端点与密钥可用性。' },
     { id: 'unifiedSettings', label: 'DeepSeekUnifiedSettings', layer: 10, file: 'Settings/DeepSeekUnifiedSettings.cs', desc: '与 VS 统一设置（Unified Settings）的桥接。' },
     { id: 'unifiedSync', label: 'UnifiedSettingsSync', layer: 10, file: 'Settings/UnifiedSettingsSync.cs', desc: '设置双向同步与变更广播。' },
     { id: 'runtimeSnapshot', label: 'RuntimeSettingsSnapshot', layer: 10, file: 'Settings/RuntimeSettingsSnapshot.cs', desc: '运行时不可变设置快照，避免运行中读到半更新状态。' },
@@ -505,7 +549,18 @@
     { id: 'testService', label: 'TestService', layer: 10, file: 'Services/TestService.cs', desc: '单元测试运行，支持 TRX / JUnit / CMake 多种结果格式。' },
     { id: 'ocrService', label: 'OcrService', layer: 10, file: 'Services/OcrService.cs', desc: 'OCR 识别，运行时从 dll\\x64 预加载原生依赖。' },
     { id: 'fileParser', label: 'FileParserService', layer: 10, file: 'Services/FileParserService.cs', desc: 'PDF / Word / Excel / PowerPoint 文本提取。' },
-    { id: 'visionFetch', label: 'VisionImageFetchService', layer: 10, file: 'Services/VisionImageFetchService.cs', desc: '视觉图片抓取与临时批次（超过 6 小时清理）。' }
+    { id: 'visionFetch', label: 'VisionImageFetchService', layer: 10, file: 'Services/VisionImageFetchService.cs', desc: '视觉图片抓取与临时批次（超过 6 小时清理）。' },
+    { id: 'attachmentCollector', label: 'AttachmentCollector', layer: 10, file: 'Services/AttachmentCollector.cs', desc: '收集粘贴与拖入的附件，归并为可发送的图片 / 文本片段。' },
+    { id: 'codeDiffService', label: 'CodeDiffService', layer: 10, file: 'Services/CodeDiffService.cs', desc: '计算代码差异并提供展示入口（含 DiffViewerHandle 视图句柄）。' },
+    { id: 'endpointResolver', label: 'DeepSeekEndpointResolver', layer: 10, file: 'Services/DeepSeekEndpointResolver.cs', desc: '根据设置解析生效的 API 端点与厂商方言。' },
+    { id: 'ocrClient', label: 'DeepSeekOcrClient', layer: 10, file: 'Services/DeepSeekOcrClient.cs', desc: '官方 OCR 接口客户端，与本地 OCR 引擎互为回退。' },
+    { id: 'captureServices', label: 'GraphicsCaptureService', layer: 10, file: 'Services/GraphicsCaptureService.cs', desc: '窗口 / 屏幕帧捕获底座（WebPageCaptureService 复用于网页截图）。' },
+    { id: 'renderServices', label: 'PresentationRenderService', layer: 10, file: 'Services/PresentationRenderService.cs', desc: 'PPT / PDF 等版式渲染抽取（PdfRenderService 处理 PDF 页渲染）。' },
+    { id: 'processTreeKiller', label: 'ProcessTreeKiller', layer: 10, file: 'Services/ProcessTreeKiller.cs', desc: '终端命令超时后按进程树整组终止，避免残留子进程。' },
+    { id: 'streamFlush', label: 'StreamFlushPolicy', layer: 10, file: 'Services/StreamFlushPolicy.cs', desc: '流式输出的刷新节流策略（StreamBatchContentRules 定义批量内容规则）。' },
+    { id: 'persistenceAdapters', label: 'ChatPersistenceServiceAdapter', layer: 10, file: 'Services/ChatPersistenceServiceAdapter.cs', desc: '把持久化 / 文件解析服务适配为工具侧接口（FileParserServiceAdapter 同构）。' },
+    { id: 'apiDebugDump', label: 'ApiDebugDumpService', layer: 10, file: 'Services/ApiDebugDumpService.cs', desc: '开发者调试用：把完整请求与响应流转储到本地，超 7 天自动清理。' },
+    { id: 'solutionIdentity', label: 'SolutionIdentity', layer: 10, file: 'Services/SolutionIdentity.cs', desc: '当前解决方案的身份标识与根路径（SharedConstants 提供全局常量）。' }
   ];
 
   // 连线类型：call=调用/移交，impl=实现/继承，dep=依赖，data=数据流
@@ -544,6 +599,9 @@
     { from: 'ctrl', to: 'inlineDiffHost', type: 'dep' },
     { from: 'ctrl', to: 'mcpDialog', type: 'dep' },
     { from: 'ctrl', to: 'quickSettings', type: 'dep' },
+    { from: 'ctrl', to: 'localizedMsgBox', type: 'dep' },
+    { from: 'cmdInline', to: 'inlineEditBar', type: 'dep' },
+    { from: 'inlineEditCmdFilter', to: 'inlineEditBar', type: 'dep' },
     { from: 'ctrlSessions', to: 'chatPersistence', type: 'call' },
 
     // DI
@@ -564,9 +622,30 @@
     { from: 'planReconciler', to: 'plan', type: 'dep' },
     { from: 'planReconciler', to: 'build', type: 'dep' },
 
+    // BaseAgent 的 10 个分部类。parent 只影响折叠展开、不画连线，
+    // 所以这里显式补边，避免展开后在图上变成孤立节点。
+    { from: 'baseAgent', to: 'baDiagnostics', type: 'dep' },
+    { from: 'baseAgent', to: 'baExplore', type: 'dep' },
+    { from: 'baseAgent', to: 'baHandoff', type: 'dep' },
+    { from: 'baseAgent', to: 'baHandoffCache', type: 'dep' },
+    { from: 'baseAgent', to: 'baInteraction', type: 'dep' },
+    { from: 'baseAgent', to: 'baMessages', type: 'dep' },
+    { from: 'baseAgent', to: 'baPrompt', type: 'dep' },
+    { from: 'baseAgent', to: 'baToolDispatch', type: 'dep' },
+    { from: 'baseAgent', to: 'baToolLoop', type: 'dep' },
+    { from: 'baseAgent', to: 'baToolSet', type: 'dep' },
+
+    // Agent 层辅助组件
+    { from: 'baseAgent', to: 'execLimits', type: 'dep' },
+    { from: 'baseAgent', to: 'toolDedup', type: 'dep' },
+    { from: 'baseAgent', to: 'toolClassifier', type: 'dep' },
+    { from: 'baseAgent', to: 'verifyDecider', type: 'dep' },
+    { from: 'toolClassifier', to: 'approvalQueue', type: 'dep' },
+
     // 工具层
     { from: 'baseAgent', to: 'bits', type: 'call' },
     { from: 'bits', to: 'bitBase', type: 'dep' },
+    { from: 'bits', to: 'toolTimeout', type: 'dep' },
     { from: 'bits', to: 'mcpManager', type: 'dep' },
     { from: 'mcpManager', to: 'mcpStdio', type: 'dep' },
     { from: 'mcpManager', to: 'mcpHttp', type: 'dep' },
@@ -602,9 +681,19 @@
     { from: 'baseAgent', to: 'prompts', type: 'dep' },
     { from: 'baseAgent', to: 'compactor', type: 'dep' },
     { from: 'baseAgent', to: 'approvalQueue', type: 'dep' },
+    { from: 'ctrlInit', to: 'ideContextTracker', type: 'dep' },
+    { from: 'ideContextTracker', to: 'activeFileTracker', type: 'dep' },
+    { from: 'ideContextTracker', to: 'gitContextProvider', type: 'dep' },
+    { from: 'ctxMgr', to: 'modelTokenLimit', type: 'dep' },
 
     // 编辑管线
     { from: 'edit', to: 'editPatch', type: 'call' },
+    { from: 'edit', to: 'editToolBase', type: 'dep' },
+    { from: 'editToolBase', to: 'editStringMatcher', type: 'dep' },
+    { from: 'editToolBase', to: 'editFileHealing', type: 'dep' },
+    { from: 'editToolBase', to: 'editBufferApplier', type: 'dep' },
+    { from: 'cmdInline', to: 'inlineEditService', type: 'call' },
+    { from: 'inlineEditService', to: 'editPatch', type: 'call' },
     { from: 'editPatch', to: 'diffSession', type: 'call' },
     { from: 'diffSession', to: 'diffSessionMgr', type: 'dep' },
     { from: 'diffSession', to: 'commitCoord', type: 'call' },
@@ -613,6 +702,12 @@
     { from: 'commitCoord', to: 'newFileTarget', type: 'call' },
     { from: 'commitCoord', to: 'deleteFileTarget', type: 'call' },
     { from: 'commitCoord', to: 'stagedWs', type: 'dep' },
+    { from: 'commitCoord', to: 'commitResultTypes', type: 'dep' },
+    { from: 'openBufferTarget', to: 'commitTargetIface', type: 'impl' },
+    { from: 'fileTarget', to: 'commitTargetIface', type: 'impl' },
+    { from: 'newFileTarget', to: 'commitTargetIface', type: 'impl' },
+    { from: 'deleteFileTarget', to: 'commitTargetIface', type: 'impl' },
+    { from: 'commitCoord', to: 'commitTargetIface', type: 'dep' },
     { from: 'diffSession', to: 'diffViewer', type: 'call' },
     { from: 'diffViewer', to: 'editorDiffHost', type: 'dep' },
     { from: 'editorDiffMarker', to: 'editorDiffHost', type: 'dep' },
@@ -629,6 +724,7 @@
     { from: 'ipm', to: 'cppScanner', type: 'dep' },
     { from: 'ipm', to: 'dsProvider', type: 'data' },
     { from: 'completionMonitor', to: 'ipm', type: 'dep' },
+    { from: 'tcl', to: 'completionTypes', type: 'dep' },
 
     // 设置与横切
     { from: 'migration', to: 'optionsPage', type: 'dep' },
@@ -646,7 +742,35 @@
     { from: 'metrics', to: 'sessionEval', type: 'data' },
     { from: 'sessionEval', to: 'turnEval', type: 'dep' },
 
-    // 工具基类与 28 个内置工具的归属关系。包含关系（parent 字段）只影响折叠展开、不画连线，
+    // 设置层编辑器与转换服务。编辑器类挂在 optionsPage 下折叠，仍需显式补边。
+    { from: 'optionsPage', to: 'localizedAttributes', type: 'dep' },
+    { from: 'optionsPage', to: 'aboutEditor', type: 'dep' },
+    { from: 'optionsPage', to: 'downloadLinkEditor', type: 'dep' },
+    { from: 'optionsPage', to: 'modelCatalogEditor', type: 'dep' },
+    { from: 'optionsPage', to: 'modelMaxTokenEditor', type: 'dep' },
+    { from: 'optionsPage', to: 'modelPickerEditor', type: 'dep' },
+    { from: 'optionsPage', to: 'restoreDefaultEditor', type: 'dep' },
+    { from: 'optionsPage', to: 'testConnectionEditor', type: 'dep' },
+    { from: 'aboutEditor', to: 'aboutInfo', type: 'dep' },
+    { from: 'quickSettings', to: 'quickSettingsValues', type: 'dep' },
+    { from: 'modelPickerEditor', to: 'modelFetch', type: 'call' },
+
+    // 横切服务
+    { from: 'ctrlClipboard', to: 'attachmentCollector', type: 'dep' },
+    { from: 'ctrl', to: 'codeDiffService', type: 'dep' },
+    { from: 'oaip', to: 'endpointResolver', type: 'dep' },
+    { from: 'oaip', to: 'streamFlush', type: 'dep' },
+    { from: 'oaip', to: 'apiDebugDump', type: 'dep' },
+    { from: 'ocrService', to: 'ocrClient', type: 'dep' },
+    { from: 'tCaptureWin', to: 'captureServices', type: 'call' },
+    { from: 'tCaptureWeb', to: 'captureServices', type: 'call' },
+    { from: 'fileParser', to: 'renderServices', type: 'dep' },
+    { from: 'tRunTerminal', to: 'processTreeKiller', type: 'call' },
+    { from: 'chatPersistence', to: 'persistenceAdapters', type: 'dep' },
+    { from: 'chatPersistence', to: 'solutionIdentity', type: 'dep' },
+    { from: 'storagePaths', to: 'solutionIdentity', type: 'dep' },
+
+    // 工具基类与 30 个内置工具的归属关系。包含关系（parent 字段）只影响折叠展开、不画连线，
     // 因此这里显式补上基类边；否则展开 BuiltInToolBase 后，那些没有业务调用的工具会变成
     // 没有任何连线的孤立节点，只受向心力作用漂在整张图的最外圈。
     { from: 'bitBase', to: 'tReadFile', type: 'dep' },
@@ -677,6 +801,8 @@
     { from: 'bitBase', to: 'tComments', type: 'dep' },
     { from: 'bitBase', to: 'tTermOut', type: 'dep' },
     { from: 'bitBase', to: 'tCreateDir', type: 'dep' },
+    { from: 'bitBase', to: 'tFileSymbols', type: 'dep' },
+    { from: 'bitBase', to: 'tTaskProgress', type: 'dep' },
 
     // 两条此前遗漏的业务边
     { from: 'ctrl', to: 'toast', type: 'dep' },
@@ -1228,6 +1354,10 @@
     if (ev.button !== 0) return;
 
     moved = false;
+    // 折叠圆点交给 click 单独处理：一旦在这里启动平移并 setPointerCapture，
+    // 随后的 click 目标会被重定向到 <svg>，closest('[data-toggle]') 就会失配。
+    var toggleHit = ev.target.closest ? ev.target.closest('[data-toggle]') : null;
+    if (toggleHit) return;
     var nd = ev.target.closest ? ev.target.closest('[data-id]') : null;
     var tg = ev.target.closest ? ev.target.closest('[data-toggle]') : null;
 
@@ -1330,7 +1460,13 @@
   svg.addEventListener('click', function (ev) {
     if (moved) { moved = false; return; }
 
-    var tg = ev.target.closest('[data-toggle]');
+    // 优先用 composedPath：即使 target 因指针捕获被重定向，也能定位到折叠圆点。
+    var tg = null;
+    var path = ev.composedPath ? ev.composedPath() : [];
+    for (var pi = 0; pi < path.length; pi++) {
+      if (path[pi] && path[pi].getAttribute && path[pi].getAttribute('data-toggle')) { tg = path[pi]; break; }
+    }
+    if (!tg && ev.target.closest) tg = ev.target.closest('[data-toggle]');
     if (tg) {
       var tid = tg.getAttribute('data-toggle');
       if (COLLAPSED.has(tid)) COLLAPSED.delete(tid); else COLLAPSED.add(tid);

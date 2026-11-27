@@ -303,6 +303,17 @@ public class WebViewReloadRecoveryTests
         });
     }
 
+    /// <summary>调用控件上的私有异步方法并同步等待其结果。</summary>
+    private static T InvokeAsyncPrivate<T>(DeepSeekChatControl control, string methodName)
+    {
+        var method = typeof(DeepSeekChatControl).GetMethod(
+            methodName, BindingFlags.Instance | BindingFlags.NonPublic);
+        method.Should().NotBeNull($"方法 {methodName} 应存在于 DeepSeekChatControl");
+
+        var task = (System.Threading.Tasks.Task<T>)method!.Invoke(control, Array.Empty<object?>())!;
+        return task.GetAwaiter().GetResult();
+    }
+
     // ── 卸载/重载路径的渲染状态复位契约 ──────────────────────────────
 
     [Fact]
@@ -473,6 +484,27 @@ public class WebViewReloadRecoveryTests
             SetField(control, "_pendingEditMsgIndex", -1);
             control.TryGetPendingInlineEditState(out _, out _).Should().BeFalse(
                 "未处于编辑状态时不得重放编辑框");
+        });
+    }
+
+    [Fact]
+    public void HasAnyTaskPanelInDomAsync_WithoutLiveWebView_ShouldReportAbsentSoStaleIdsGetDropped()
+    {
+        RunOnStaThread(control =>
+        {
+            // 加固契约：探测不到活页面时必须返回 false（判为「页面上已没有面板」）。
+            // 这正是「切窗口回来触发重绘后任务面板不再显示」的自愈前提：
+            // 页面被重新导航成空 DOM，而 _createdPlanIds 仍留着旧 PlanId，
+            // 只有返回 false 才会丢弃集合、让 RebuildPersistedTaskPanelsAsync 重新创建面板。
+            InvokeAsyncPrivate<bool>(control, "HasAnyTaskPanelInDomAsync").Should().BeFalse(
+                "无可用 CoreWebView2 时不能谎报页面仍有面板，否则残留去重记录会永久阻断重建");
+
+            var createdPlanIds = GetField<HashSet<string>>(control, "_createdPlanIds");
+            createdPlanIds.Add("plan-stale");
+            createdPlanIds.Should().Contain("plan-stale");
+
+            createdPlanIds.Clear();
+            createdPlanIds.Should().BeEmpty("自愈路径依赖清空集合，该操作必须有效");
         });
     }
 

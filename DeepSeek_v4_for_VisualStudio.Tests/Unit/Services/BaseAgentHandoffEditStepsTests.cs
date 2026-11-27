@@ -126,10 +126,10 @@ public class BaseAgentHandoffEditStepsTests
     #region BuildLightweightPlanFromHandoff
 
     /// <summary>
-    /// 轻量计划构造：字段映射、Index 重排、空描述回退标题、超 4 项兜底截断。
+    /// 轻量计划构造：字段映射、Index 重排、空描述回退标题、步数不设上限（不截断）。
     /// </summary>
     [Fact]
-    public void BuildLightweightPlanFromHandoff_MapsFieldsAndTruncates()
+    public void BuildLightweightPlanFromHandoff_MapsFieldsWithoutTruncation()
     {
         var handoff = new AgentHandoff
         {
@@ -156,8 +156,8 @@ public class BaseAgentHandoffEditStepsTests
         plan.IsFromPlanAgent.Should().BeFalse();
         plan.TaskDescription.Should().Be(handoff.Prompt);
 
-        plan.Steps.Should().HaveCount(4);
-        plan.Steps.Select(s => s.Index).Should().Equal(1, 2, 3, 4);
+        plan.Steps.Should().HaveCount(5, "步数上限已放开为「2 步以上」");
+        plan.Steps.Select(s => s.Index).Should().Equal(1, 2, 3, 4, 5);
         plan.Steps.Should().OnlyContain(s => s.Status == AgentStepStatus.Pending && !s.RequiresApproval);
         plan.Steps[0].Description.Should().Be("步骤一");
         plan.Steps[1].Description.Should().Be("步骤二");

@@ -926,3 +926,55 @@ graph TD
 设想在阶段 1~3 稳定后，把剩余职责抽为协作者并由 `AgentFactory` 注入：`IToolSetProvider`、`IToolLoopExecutor`、`IToolDispatcher`、`IHandoffCoordinator`、`IAgentInteractionGateway`。
 
 不纳入本轮的原因：`BaseAgent` 有 5 个子类通过 `protected` 成员深度继承（`BuildContextAwareMessages` 被 5 个子类全部使用，`AddLog` 被 4 个文件高频调用 45 处以上），对象化会强制把这些继承点改为组合注入点，影响面远超本轮「结构等价重构」的边界（涉及 `AgentFactory`、5 个子类构造函数、`ServiceCollectionExtensions` 注册）。建议阶段 1~3 落地并稳定一个版本后单独评估。
+
+---
+
+## 10. 实施进度（执行记录）
+
+> 基线对比：原 `Services/Agents/BaseAgent.cs` **5074 行** → 现主文件 **1003 行**。
+> 提交：`b808f26 refactor(agent): 拆分 BaseAgent 并下沉无状态职责`（22 files, +5376 −4226）。
+> 验证基线：`run_tests` total=2534 / passed=2534 / failed=0。
+
+### 10.1 阶段完成情况
+
+| 阶段 | 状态 | 实际结果 |
+|---|---|---|
+| 阶段 1：partial 分部切分 | ✅ 完成 | 拆出 11 个分部文件（`ToolSet`、`Prompt`、`HandoffCache`、`Messages`、`Handoff`、`Explore`、`Interaction`、`Diagnostics`、`ToolLoop`、`ToolDispatch` 及主文件），主文件 5074 → 3373，阶段 3 搬移后再降至 1003 |
+| 阶段 2：静态类下沉 | ✅ 完成 | 6 个 `internal static` 类：`AgentJsonHelper`、`AgentPathResolver`、`ToolCallDeduplicator`、`VerificationLoopDecider`、`ToolClassifier`、`ExecutionLimits`；`BaseAgent` 保留 32 条转发；`VerificationRoundStatus` 枚举未迁出；`GetWorkspaceRoot` 签名逐字保持以维持 `BuildAgent` 的 `new` 隐藏 |
+| 阶段 3：巨方法分解 | ⚠️ 部分完成 | 3.0.1 / 3.0.2 / 3.0.3 完成（两巨方法整块搬入 `BaseAgent.ToolLoop.cs` 与 `BaseAgent.ToolDispatch.cs`，8 个私有类型骨架已建）；P1~P5 / E1~E4 **阶段方法未实施**，详见 10.3 |
+| 阶段 4：新增单测 | ✅ 完成 | 5 个测试文件：`AgentJsonHelperTests`、`AgentPathResolverTests`、`ToolCallDeduplicatorTests`、`VerificationLoopDeciderTests`、`ToolClassifierTests` |
+
+### 10.2 阶段 3 实际落地的纯逻辑抽取
+
+整段提取受阻后，改为逐块抽出无控制流副作用的纯逻辑，共 6 项：
+
+| 成员 | 位置 | 作用 |
+|---|---|---|
+| `BuildLoopTerminationSummary` | `BaseAgent.ToolLoop.cs` | 合并 P5 三处终止摘要拼装（白名单拒绝 / 循环检测 / 连续错误） |
+| `BuildToolCallSignature` | `BaseAgent.ToolLoop.cs` | 统一 P3/P5 三处签名计算口径（工具名 + 参数前 200 字符） |
+| `AreAllToolMessagesErrors` | `BaseAgent.ToolLoop.cs` | P5 连续错误轮次的消息判定 |
+| `CanDelegateAskExploration` | `BaseAgent.ToolLoop.cs` | P3/P4 共用的委派前置条件 |
+| `PrepareToolDefinitions` | `BaseAgent.ToolLoop.cs` | P1 的 57 行工具集与白名单构建 |
+| `ConversationTitleChunkPrefix` | `BaseAgent.ToolLoop.cs` | 消除 5 处 `[TITLE]` 硬编码，`Substring(7)` 改为 `Prefix.Length` |
+
+### 10.3 未完成项与阻塞原因
+
+`3.0.3` 引入的 8 个私有类型（`ToolLoopState`、`ToolLoopRoundResponse`、`ToolInvocationBatch`、`ToolExecutionSummary`、`ToolLoopDecision`、`ToolInvocationContext`、`AgentPermissionDecision`）目前仍是**空占位类**，尚未被任何代码使用。
+
+阻塞原因三条：
+
+1. **容器化是硬性前置**：C# 值类型无法为局部变量建立别名，把方法开头约 90 行声明迁入 `ToolLoopState` 意味着改写方法体内全部引用点，改动面覆盖约 1290 行。
+2. **跳转语义需逐分支确认**：P5 有 8 处 `break`、P3 有 `continue`，整体提取必须先改写为「返回决策对象 + 外层调度」。
+3. **失败模式是静默行为变更而非编译错误**：循环终止时机、移交链保存顺序、审批登记/注销配对一旦出错，编译器不会报错，只能靠测试察觉；缺少逐步构建闭环时风险不可接受。
+
+已知两个命名坑，后续接手必读：
+
+- `ToolExecutionOutcome` 是项目既有公共类型（含 `Classify` / `FromRaw` / `StartsWithContractMarker`），**不可**在 `BaseAgent` 内声明同名嵌套类型，否则 CS0117 且静默遮蔽原类型。
+- `ToolCall.Function` 的类型是 `ToolCallFunction`（有 `Arguments`），不是 `ToolFunction`（用于工具定义，无 `Arguments`）。
+
+### 10.4 后续执行建议
+
+- 必须在**每一步都能构建验证**的连续环境中推进，避免多轮之间无法编译确认。
+- 顺序：`3.3.1 ToolLoopState` 容器化 → `P5` → `P4` → `P3` → `P2` → `P1` → `E4` → `E3` → `E2` → `E1`，每提取一个阶段方法立即构建。
+- 两巨方法须**同批提交**，避免只拆一个留下结构割裂的中间态。
+- 阶段 3 完成后主文件预期降至约 1700 行（当前 1003 行已含搬移收益，剩余缩减来自 `ToolLoop` / `ToolDispatch` 两文件内部）。

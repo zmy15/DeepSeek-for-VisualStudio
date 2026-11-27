@@ -23,17 +23,10 @@ namespace DeepSeek_v4_for_VisualStudio.Services.Agents
     /// - 请求用户权限确认
     /// - 追踪文件变更
     /// 
-    /// 限制策略（v1.1.10）：
-    /// - 每次编辑 ≤ 3 个文件
-    /// - 每次编辑 ≤ 500 行代码变更
-    /// - 文件修改后再次编辑前强制重新读取
+    /// 文件修改后再次编辑前强制重新读取。
     /// </summary>
     public partial class EditAgent : BaseAgent
     {
-        // ── 编辑限制常量 ──
-        internal const int MaxFilesPerEdit = 3;
-        internal const int MaxLinesPerEdit = 500;
-
         private CancellationTokenSource? _agentCts;
         private ExploreAgent? _exploreAgent;
 
@@ -128,6 +121,8 @@ namespace DeepSeek_v4_for_VisualStudio.Services.Agents
             "delete_file",
             "apply_patch",
             "create_directory",
+            // 任务面板进度同步（Edit 专属）
+            "update_task_progress",
             // 记忆与用户交互
             "memory",
             "VisualStudio_askQuestions",
@@ -159,9 +154,7 @@ namespace DeepSeek_v4_for_VisualStudio.Services.Agents
                 + LocalizationService.Instance["system.agent.editBuildTrustRule"]
                 + LocalizationService.Instance["system.agent.editPhaseToolOverride"]
                 + AiPrompts.AgentConclusionStopRule
-                // 顺带完成后续步骤时的声明规则：原先写在每个步骤的 user 提示词末尾，
-                // 步骤提示精简后移至常驻 system 提示词，规则不丢失且每步不变、利于前缀缓存。
-                + "\n\n- 如果本步骤顺带完成了后续步骤，请在响应末尾声明：\"也完成了步骤X、Y\" 或 \"also completed step X, Y\"。";
+                + LocalizationService.Instance["system.agent.editTaskProgressRule"];
         }
 
         #endregion
@@ -270,6 +263,10 @@ namespace DeepSeek_v4_for_VisualStudio.Services.Agents
             // ── 记录本轮计划开始时刻：供"前序步骤已代劳"判定区分本轮改动与上一轮残留 ──
             _planStartedUtc = DateTime.UtcNow;
 
+            // ── 把 update_task_progress 工具桥接到本次计划 ──
+            // 工具实例由 BuiltInToolService 长期持有，不在每次执行时重绑则可能写回旧计划。
+            InstallTaskProgressHandler(plan);
+
             // ── P0-6: 新计划开始，重置跨计划状态（防止前一个计划的累积上下文泄漏）──
             context.AccumulatedContext = null;
 
@@ -297,7 +294,6 @@ namespace DeepSeek_v4_for_VisualStudio.Services.Agents
                 {
                     foreach (var kvp in builtInCache)
                         context.FileReadCache[kvp.Key] = kvp.Value;
-                    AddLog("INFO", LocalizationService.Instance.Format("agent.log.editCachedFiles", builtInCache.Count));
                 }
             }
 
@@ -339,6 +335,9 @@ namespace DeepSeek_v4_for_VisualStudio.Services.Agents
                         await ExecuteStepAsync(step, plan, context);
                         step.Status = AgentStepStatus.Completed;
                         AddLog("INFO", string.Format(L["agent.log.editStepDone"], step.Index, step.ResultSummary ?? "OK"));
+                        // 顶栏进度同步：模型可能已通过 update_task_progress 把后续步骤一并标完成，
+                        // 若只依赖循环下一轮赋值，索引会停在旧值上。
+                        AdvanceCurrentStepIndexToLastFinished(plan, step.Index);
                     }
                     catch (OperationCanceledException)
                     {
@@ -378,11 +377,6 @@ namespace DeepSeek_v4_for_VisualStudio.Services.Agents
 
                         // ── 将步骤摘要写入会话记忆（供 Ask Agent 最终汇总使用）──
                         await SaveStepSummaryToMemoryAsync(step, plan, context);
-
-                        // ── v1.1.10: 检测 AI 输出中声明的后续步骤完成情况 ──
-                        // 只扫正式输出：思考内容里常出现引述/假设（如「并声明"也完成了步骤2"」），
-                        // 会被正则当成真声明，导致后续步骤被静默跳过。
-                        DetectAndAutoCompleteLaterSteps(step, plan);
                     }
                 }
 
@@ -887,53 +881,6 @@ namespace DeepSeek_v4_for_VisualStudio.Services.Agents
                 EditorDiffMarkerService.Instance.TryAutoPreviewOpenFile(change.FilePath);
             }
 
-            // ── v1.1.10: 步骤完成自检 — 对比步骤描述中的文件名与实际修改 ──
-            // 如果步骤描述明确提到了某文件但未在本次编辑中修改，记录提示。
-            PerformStepCompletenessCheck(step, appliedResults, workspaceRoot);
-        }
-
-        /// <summary>
-        /// 步骤完整性自检（v1.1.10）。
-        /// 对比步骤描述中引用的文件与实际修改的文件，发现遗漏时记录警告。
-        /// 不阻断执行，仅作为日志提示供用户参考。
-        /// </summary>
-        private void PerformStepCompletenessCheck(
-            AgentStep step, List<EditApplyResult> appliedResults, string workspaceRoot)
-        {
-            if (string.IsNullOrWhiteSpace(step.Description) || appliedResults.Count == 0)
-                return;
-
-            // 从步骤描述中提取文件引用（匹配常见代码文件扩展名）
-            var matches = StepFileReferenceRegex.Matches(step.Description);
-
-            if (matches.Count == 0) return;
-
-            var mentionedFiles = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
-            foreach (System.Text.RegularExpressions.Match m in matches)
-            {
-                mentionedFiles.Add(m.Groups[1].Value);
-            }
-
-            // 收集实际修改的文件名
-            var actuallyModified = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
-            foreach (var r in appliedResults.Where(r => r.Success))
-            {
-                actuallyModified.Add(Path.GetFileName(r.FilePath));
-            }
-
-            // 找出步骤描述中提到但未修改的文件
-            var untouched = mentionedFiles
-                .Where(f => !actuallyModified.Contains(f))
-                .ToList();
-
-            if (untouched.Count > 0)
-            {
-                AddLog("WARN", string.Format(
- "[EditAgent]  步骤自检：步骤描述中提到了 {0} 个文件，但以下文件未被本次编辑修改: {1}。" +
-                    "如果这些修改在后续步骤中完成则可忽略，否则可能是遗漏。",
-                    mentionedFiles.Count,
-                    string.Join(", ", untouched)));
-            }
         }
 
         #region Step Satisfaction — "前序步骤已代劳"判定
@@ -1135,128 +1082,82 @@ namespace DeepSeek_v4_for_VisualStudio.Services.Agents
         #endregion
 
         /// <summary>
-        /// 从 AI 响应中检测是否声明了后续步骤也已完成（v1.1.10）。
-        /// 解析 AI 输出中的步骤完成声明（如"步骤2和3也完成了"/"also completed step 2"），
-        /// 自动将对应步骤标记为 Completed。比文件级启发式更可靠，尤其适用于同文件多步骤场景。
-        /// v1.1.12: 支持范围式声明（"步骤1-6 已完成"）。
-        ///
-        /// 只依据正式输出（<see cref="AgentStep.AiResponse"/>）判定，不再扫描思考内容：
-        /// 思考里经常出现引述、假设与自我反驳（如"我可以声明『也完成了步骤2』，但…"），
-        /// 正则只看字面短语，会把这类否定语境误判为真声明，从而静默跳过后续步骤。
+        /// 把 <see cref="AgentTaskPlan.CurrentStepIndex"/> 推进到最后一个已完成/跳过的连续步骤，
+        /// 使任务面板顶栏进度（如 "6/10"）与真实状态保持同步。
+        /// <para>
+        /// 有两种场景需要它：主循环正常完成某一步，以及模型通过 update_task_progress 主动上报
+        /// （可能连带把后续几步一起标完成）。若只在执行前设置索引，进度会停在旧值上。
+        /// </para>
         /// </summary>
-        private void DetectAndAutoCompleteLaterSteps(AgentStep completedStep, AgentTaskPlan plan)
+        /// <param name="plan">要推进进度的计划。</param>
+        /// <param name="fromIndex">起点步骤序号（1 基）：从它的下一个步骤开始寻找连续完成项。</param>
+        private static void AdvanceCurrentStepIndexToLastFinished(AgentTaskPlan plan, int fromIndex)
         {
-            if (string.IsNullOrWhiteSpace(completedStep.AiResponse)) return;
+            if (plan == null || plan.Steps.Count == 0) return;
 
-            // 检测范围：仅正式输出
-            string response = completedStep.AiResponse ?? "";
-            var autoCompletedIndices = new HashSet<int>();
-
-            // 模式1: 中文 "步骤2、3也完成了" / "步骤2和3已完成" / "也完成了步骤2,3"
-            var cnPatterns = new[]
+            int advanced = Math.Max(fromIndex, 0);
+            for (int idx = fromIndex + 1; idx <= plan.Steps.Count; idx++)
             {
-                @"步骤\s*(\d+(?:[、,，\s]+(?:和|及|与)?\s*\d+)*)\s*(?:也|已|同样|一并|同时)?\s*(?:完成|做完|搞定)",
-                @"(?:也|已|同样|一并|同时)\s*(?:完成|做完|搞定)了?\s*步骤\s*(\d+(?:[、,，\s]+(?:和|及|与)?\s*\d+)*)",
-            };
-            foreach (var pattern in cnPatterns)
-            {
-                foreach (System.Text.RegularExpressions.Match m in
-                    System.Text.RegularExpressions.Regex.Matches(response, pattern, System.Text.RegularExpressions.RegexOptions.IgnoreCase))
-                {
-                    ParseStepNumbers(m.Groups[1].Value, autoCompletedIndices);
-                }
+                var step = plan.Steps[idx - 1];
+                if (step.Status is AgentStepStatus.Completed or AgentStepStatus.Skipped)
+                    advanced = idx;
+                else
+                    break;
             }
 
-            // 模式2: 英文 "also completed step 2,3" / "steps 2 and 3 are done"
-            var enPatterns = new[]
-            {
-                @"(?:also\s+)?(?:completed?|finished?|done)\s+steps?\s*(\d+(?:[,\s]+(?:and\s+)?\d+)*)",
-                @"steps?\s*(\d+(?:[,\s]+(?:and\s+)?\d+)*)\s*(?:are\s+)?(?:also\s+)?(?:done|completed?|finished?)",
-            };
-            foreach (var pattern in enPatterns)
-            {
-                foreach (System.Text.RegularExpressions.Match m in
-                    System.Text.RegularExpressions.Regex.Matches(response, pattern, System.Text.RegularExpressions.RegexOptions.IgnoreCase))
-                {
-                    ParseStepNumbers(m.Groups[1].Value, autoCompletedIndices);
-                }
-            }
-
-            // 模式3（原"勾号+步骤"）：勾号字形已随 emoji 清理移除，
-            // 无完成词的裸步骤列表不再作为自动完成依据，避免误标
-
-            // 模式4: 范围式声明 "步骤1-6 已完成" / "步骤1~6" / "步骤1到6" / "步骤1至6"
-            // "steps 1 through 6 done" / "steps 1-6 completed"
-            var rangePatterns = new[]
-            {
-                // "步骤2-4 也随之完成" / "步骤1~6 已完成" / "步骤1-6做完"
-                @"步骤\s*(\d+)\s*[-~—–]\s*(\d+)\s*[也已均都随之一同顺并]*\s*(?:完成|做完|搞定)",
-                @"步骤\s*(\d+)\s*(?:到|至|一直到)\s*(\d+)\s*[也已均都随之一同顺并]*\s*(?:完成|做完|搞定)",
-                @"(?:也|已|同样|一并|同时)\s*完成(?:了)?\s*步骤\s*(\d+)\s*[-~—–到至]\s*(\d+)",
-                @"steps?\s*(\d+)\s*(?:through|to|-|~|&amp;)\s*(\d+)\s*(?:are\s+)?(?:also\s+)?(?:done|completed|finished)",
-            };
-            foreach (var pattern in rangePatterns)
-            {
-                foreach (System.Text.RegularExpressions.Match m in
-                    System.Text.RegularExpressions.Regex.Matches(response, pattern, System.Text.RegularExpressions.RegexOptions.IgnoreCase))
-                {
-                    if (int.TryParse(m.Groups[1].Value, out int start) && int.TryParse(m.Groups[2].Value, out int end))
-                    {
-                        if (start > 0 && end >= start && end - start <= 50)
-                        {
-                            for (int n = start; n <= end; n++)
-                                autoCompletedIndices.Add(n);
-                        }
-                    }
-                }
-            }
-
-            // 过滤：仅处理当前步骤之后的 Pending 步骤
-            var toAutoComplete = autoCompletedIndices
-                .Where(idx => idx > completedStep.Index && idx <= plan.Steps.Count)
-                .Select(idx => plan.Steps[idx - 1])
-                .Where(s => s.Status == AgentStepStatus.Pending)
-                .ToList();
-
-            foreach (var s in toAutoComplete)
-            {
-                s.Status = AgentStepStatus.Completed;
-                s.ResultSummary = LocalizationService.Instance.Format(
-                    "agent.log.editStepClaimedByAiSummary", completedStep.Index);
-                AddLog("INFO", "[EditAgent] " + LocalizationService.Instance.Format(
-                    "agent.log.editStepClaimedByAi", s.Index, s.Title));
-            }
-
-            if (toAutoComplete.Count > 0)
-            {
-                // 推进 CurrentStepIndex 到最后一个已完成/跳过步骤，
-                // 使 UI 顶栏进度(如 "6/10")随之同步
-                // （步骤2..n 由 AI 声明完成时若仍停在旧索引，状态栏会一直显示旧计数）。
-                int advanced = completedStep.Index;
-                for (int idx = completedStep.Index + 1; idx <= plan.Steps.Count; idx++)
-                {
-                    var s = plan.Steps[idx - 1];
-                    if (s.Status is AgentStepStatus.Completed or AgentStepStatus.Skipped)
-                        advanced = idx;
-                    else
-                        break;
-                }
-                plan.CurrentStepIndex = advanced;
-                NotifyPlanUpdated();
-            }
+            plan.CurrentStepIndex = advanced;
         }
 
         /// <summary>
-        /// 解析步骤编号字符串（如 "2、3、5" 或 "2,3,5" 或 "2 and 3"）并加入集合。
+        /// 把任务面板进度同步请求应用到当前计划，并立即刷新 UI。
+        /// <para>
+        /// 由 update_task_progress 工具经 <c>BuiltInToolService.TaskProgressHandler</c> 回调。
+        /// 允许更新任意步骤（含后续步骤）：这是模型主动、可审计的声明，
+        /// 取代了此前无客观校验的正则推断。
+        /// </para>
         /// </summary>
-        private static void ParseStepNumbers(string text, HashSet<int> result)
+        /// <param name="update">工具解析出的更新项集合。</param>
+        private void ApplyTaskProgressUpdate(TaskProgressUpdate update)
         {
-            foreach (System.Text.RegularExpressions.Match m in
-                System.Text.RegularExpressions.Regex.Matches(text, @"\d+"))
+            var plan = CurrentPlan;
+            if (plan == null || update?.Items == null || update.Items.Count == 0) return;
+
+            bool changed = false;
+            foreach (var item in update.Items)
             {
-                if (int.TryParse(m.Value, out int num) && num > 0)
-                    result.Add(num);
+                var step = plan.Steps.FirstOrDefault(s => s.Index == item.Index);
+                if (step == null) continue;   // 越界序号静默忽略：模型可能误写计划外的编号
+
+                step.Status = item.Status;
+                if (!string.IsNullOrWhiteSpace(item.Summary))
+                    step.ResultSummary = item.Summary;
+                if (!string.IsNullOrWhiteSpace(item.Title))
+                    step.Title = item.Title;
+                changed = true;
             }
+
+            if (!changed) return;
+
+            // 顶栏进度必须随之推进，否则面板会显示「已完成 N 步」但进度仍停在旧值
+            AdvanceCurrentStepIndexToLastFinished(plan, 0);
+            NotifyPlanUpdated();
+        }
+
+        /// <summary>
+        /// 把 update_task_progress 工具的回调桥接到当前计划。
+        /// 在每次计划执行开始时调用：工具实例由 BuiltInToolService 持有，
+        /// 不重绑则切换计划后仍会写回旧计划。
+        /// </summary>
+        /// <param name="plan">本次要执行的计划。</param>
+        private void InstallTaskProgressHandler(AgentTaskPlan plan)
+        {
+            if (BuiltInTools == null) return;
+
+            BuiltInTools.TaskProgressHandler = update =>
+            {
+                ApplyTaskProgressUpdate(update);
+                return Task.CompletedTask;
+            };
         }
 
         /// <summary>
@@ -1300,22 +1201,6 @@ namespace DeepSeek_v4_for_VisualStudio.Services.Agents
             var extraModified = allModified
                 .Where(f => !allMentioned.Contains(f))
                 .ToList();
-
-            if (neverTouched.Count > 0)
-            {
-                AddLog("WARN", string.Format(
-                    "[EditAgent] " + LocalizationService.Instance["agent.log.editPlanTrackingNeverTouched"],
-                    allMentioned.Count, neverTouched.Count,
-                    string.Join(", ", neverTouched.Take(10))));
-            }
-
-            if (extraModified.Count > 0)
-            {
-                AddLog("INFO", string.Format(
-                    "[EditAgent] " + LocalizationService.Instance["agent.log.editPlanTrackingExtraModified"],
-                    extraModified.Count,
-                    string.Join(", ", extraModified.Take(10))));
-            }
 
             if (neverTouched.Count == 0 && extraModified.Count == 0)
             {
