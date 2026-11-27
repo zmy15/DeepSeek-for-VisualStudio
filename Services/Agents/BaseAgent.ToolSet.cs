@@ -40,7 +40,7 @@ namespace DeepSeek_v4_for_VisualStudio.Services.Agents
             "replace_string_in_file", "multi_replace_string_in_file",
             "create_file", "delete_file", "apply_patch", "create_directory", "run_in_terminal",
             "get_terminal_output", "list_skills", "load_skill", "read_skill_resource",
-            "VisualStudio_askQuestions", "runSubagent", "request_handoff",
+            "VisualStudio_askQuestions", "runSubagent", "request_handoff", "update_task_progress",
             "git", "memory"
         };
 

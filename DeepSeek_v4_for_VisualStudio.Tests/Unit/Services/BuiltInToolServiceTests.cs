@@ -15,18 +15,19 @@ public class BuiltInToolServiceTests
     #region Tool Registration
 
     [Fact]
-    public void Constructor_RegistersAll29Tools()
+    public void Constructor_RegistersAll30Tools()
     {
         var service = new BuiltInToolService();
 
         var defs = service.GetFilteredToolDefinitions(null);
 
-        defs.Should().HaveCount(29);
+        defs.Should().HaveCount(30);
         defs.Select(d => d.Function.Name).Should().Contain("get_file_symbols");
         defs.Select(d => d.Function.Name).Should().Contain("get_file_comments");
         defs.Select(d => d.Function.Name).Should().Contain("get_current_time");
         defs.Select(d => d.Function.Name).Should().Contain("list_skills");
         defs.Select(d => d.Function.Name).Should().Contain("run_tests");
+        defs.Select(d => d.Function.Name).Should().Contain("update_task_progress");
     }
 
     [Fact]
@@ -104,7 +105,7 @@ public class BuiltInToolServiceTests
 
         var defs = service.GetFilteredToolDefinitions(new List<string>());
 
-        defs.Should().HaveCount(29);
+        defs.Should().HaveCount(30);
     }
 
     [Fact]
@@ -114,7 +115,7 @@ public class BuiltInToolServiceTests
 
         var defs = service.GetFilteredToolDefinitions(null);
 
-        defs.Should().HaveCount(29);
+        defs.Should().HaveCount(30);
     }
 
     [Theory]

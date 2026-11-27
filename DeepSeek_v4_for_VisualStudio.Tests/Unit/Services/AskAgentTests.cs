@@ -220,7 +220,8 @@ public class AskAgentTests
             + LocalizationService.Instance["agent.ask.editStepsInstruction"];
 
         prompt.Should().Contain("editSteps");
-        prompt.Should().Contain("2-4");
+        prompt.Should().Contain("至少 2 个步骤");
+        prompt.Should().Contain("不设上限");
         prompt.Should().Contain("Edit");
     }
 
