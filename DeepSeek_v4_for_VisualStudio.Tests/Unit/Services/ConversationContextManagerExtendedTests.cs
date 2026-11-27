@@ -453,8 +453,7 @@ public class ConversationContextManagerExtendedTests
             return Task.FromResult(BuildStructuredSummary("compressed-summary"));
         });
 
-        _manager.TokenBudget = 100;
-        _manager.CacheWindowMaxTokens = 1;
+        _manager.TokenBudget = 10;
         _manager.SetCompressor(compressor);
         _manager.AddUserMessage("Q1");
         _manager.AddAssistantMessage("A1");
@@ -477,7 +476,7 @@ public class ConversationContextManagerExtendedTests
     }
 
     [Fact]
-    public void TryCompressForToolLoop_WhenWindowExceeded_ReturnsLocalSpliceCounts()
+    public void TryCompressForToolLoop_WhenBudgetExceeded_ReturnsLocalSpliceCounts()
     {
         IReadOnlyList<ChatApiMessage>? capturedMessages = null;
         var compressor = new ContextCompressorService((messages, ct) =>
@@ -486,10 +485,12 @@ public class ConversationContextManagerExtendedTests
             return Task.FromResult(BuildStructuredSummary("tool-loop-summary"));
         });
 
-        _manager.CacheWindowMaxTokens = 1;
+        _manager.TokenBudget = 10;
         _manager.SetCompressor(compressor);
         _manager.AddUserMessage("Q1");
         _manager.AddAssistantMessage("A1");
+        _manager.AddUserMessage("Q2");
+        _manager.AddAssistantMessage("A2");
         _manager.AddToolResult("call_1", "read_file", "T1");
 
         bool compressed = _manager.TryCompressForToolLoop(
@@ -503,6 +504,7 @@ public class ConversationContextManagerExtendedTests
         dynamicBlock.Should().Contain("tool-loop-summary");
         capturedMessages.Should().Contain(m => m.Content == Prefixed("Q1"));
         capturedMessages.Should().Contain(m => m.Content == "A1");
+        capturedMessages.Should().NotContain(m => m.Content == Prefixed("Q2"));
         capturedMessages.Should().NotContain(m => m.Content == "T1");
     }
 
@@ -511,10 +513,12 @@ public class ConversationContextManagerExtendedTests
     {
         var compressor = new ContextCompressorService((messages, ct) =>
             Task.FromResult(BuildStructuredSummary("once")));
-        _manager.CacheWindowMaxTokens = 1;
+        _manager.TokenBudget = 10;
         _manager.SetCompressor(compressor);
         _manager.AddUserMessage("Q1");
         _manager.AddAssistantMessage("A1");
+        _manager.AddUserMessage("Q2");
+        _manager.AddAssistantMessage("A2");
         _manager.AddToolResult("call_1", "read_file", "T1");
 
         bool first = _manager.TryCompressForToolLoop(out _, out _, out _);
@@ -532,7 +536,7 @@ public class ConversationContextManagerExtendedTests
         string structuredSummary = BuildStructuredSummary("old-summary");
         var oldCompressor = new ContextCompressorService((messages, ct) =>
             Task.FromResult(structuredSummary));
-        _manager.CacheWindowMaxTokens = 1;
+        _manager.TokenBudget = 10;
         _manager.SetCompressor(oldCompressor);
         _manager.AddUserMessage("Q1");
         _manager.AddAssistantMessage("A1");
@@ -542,7 +546,7 @@ public class ConversationContextManagerExtendedTests
         _manager.Compressor!.CompressedSummaries.Should().ContainSingle()
             .Which.Summary.Should().Be(structuredSummary);
 
-        _manager.CacheWindowMaxTokens = 0;
+        _manager.TokenBudget = 1_000_000;
         _manager.SetCompressor(new ContextCompressorService());
         var messages = _manager.BuildApiMessages();
 
@@ -561,12 +565,14 @@ public class ConversationContextManagerExtendedTests
             Task.FromResult(BuildStructuredSummary("compression-event-summary")));
         var states = new List<(bool Active, double UsagePercent)>();
 
-        _manager.CacheWindowMaxTokens = 1;
+        _manager.TokenBudget = 10;
         _manager.SetCompressor(compressor);
         _manager.CompressionStateChanged += (active, usagePercent) =>
             states.Add((active, usagePercent));
         _manager.AddUserMessage("Q1");
         _manager.AddAssistantMessage("A1");
+        _manager.AddUserMessage("Q2");
+        _manager.AddAssistantMessage("A2");
         _manager.AddToolResult("call_1", "read_file", "T1");
 
         bool compressed = _manager.TryCompressForToolLoop(
@@ -586,20 +592,22 @@ public class ConversationContextManagerExtendedTests
         var compressor = new ContextCompressorService((messages, ct) =>
             Task.FromResult(BuildStructuredSummary("summary")));
 
-        _manager.TokenBudget = 1;
+        _manager.TokenBudget = 10;
         _manager.SetSystemPrompt("system");
-        _manager.CacheWindowMaxTokens = 1;
         _manager.SetCompressor(compressor);
         _manager.AddUserMessage("Q1");
         _manager.AddAssistantMessage("A1");
         _manager.AddToolResult("call_1", "read_file", "T1");
+        _manager.AddUserMessage("Q2");
+        _manager.AddAssistantMessage("A2");
+        _manager.AddToolResult("call_2", "read_file", "T2");
 
         _manager.TryCompressForToolLoop(out _, out _, out _).Should().BeTrue();
 
         // 新用户轮次允许再次压缩一次。
-        _manager.AddUserMessage("Q2");
-        _manager.AddAssistantMessage("A2");
-        _manager.AddToolResult("call_2", "read_file", "T2");
+        _manager.AddUserMessage("Q3");
+        _manager.AddAssistantMessage("A3");
+        _manager.AddToolResult("call_3", "read_file", "T3");
         _manager.TryCompressForToolLoop(out _, out _, out _).Should().BeTrue();
 
         // 此时边界内只剩两个 custom 条目，没有新的 user/assistant/tool 内容。
@@ -608,50 +616,6 @@ public class ConversationContextManagerExtendedTests
 
         _manager.ConsumeConversationResetNotice().Should().BeTrue();
         _manager.ConsumeConversationResetNotice().Should().BeFalse();
-    }
-
-    [Fact]
-    public void TryCompressForToolLoop_CacheWindowOnlyWithoutBudgetPressure_DoesNotSignalReset()
-    {
-        var compressor = new ContextCompressorService((messages, ct) =>
-            Task.FromResult(BuildStructuredSummary("summary")));
-
-        _manager.CacheWindowMaxTokens = 1;
-        _manager.SetCompressor(compressor);
-        _manager.AddCustomMessage("system", "custom-1");
-        _manager.AddCustomMessage("system", "custom-2");
-
-        _manager.TryCompressForToolLoop(out _, out _, out _).Should().BeFalse();
-
-        _manager.ConsumeConversationResetNotice().Should().BeFalse();
-    }
-
-    [Fact]
-    public void TryCompressForToolLoop_CompressedSummaryFillsBudget_SignalsReset()
-    {
-        var compressor = new ContextCompressorService((messages, ct) =>
-            Task.FromResult(BuildStructuredSummary("summary")));
-
-        _manager.TokenBudget = 1;
-        _manager.SetCompressor(compressor);
-        _manager.RestoreCompressedSummaries(new[]
-        {
-            new CompressedTurnSummary
-            {
-                FromTurn = 1,
-                ToTurn = 2,
-                Summary = "compressed-content",
-                OriginalTokens = 100,
-                CompressedTokens = 20,
-            },
-        });
-        _manager.CacheWindowMaxTokens = 1;
-        _manager.AddCustomMessage("system", "custom-1");
-        _manager.AddCustomMessage("system", "custom-2");
-
-        _manager.TryCompressForToolLoop(out _, out _, out _).Should().BeFalse();
-
-        _manager.ConsumeConversationResetNotice().Should().BeTrue();
     }
 
     [Fact]
@@ -736,9 +700,10 @@ public class ConversationContextManagerExtendedTests
                 CompressedTokens = 20,
             },
         });
-        _manager.CacheWindowMaxTokens = 1;
-        _manager.AddUserMessage("Q1");
-        _manager.AddAssistantMessage("A1");
+        _manager.TokenBudget = 10;
+        _manager.AddUserMessage(new string('q', 100));
+        _manager.AddAssistantMessage(new string('a', 100));
+        _manager.AddUserMessage(new string('q', 100));
 
         bool compressed = _manager.TryCompressForToolLoop(
             out _,
@@ -757,12 +722,9 @@ public class ConversationContextManagerExtendedTests
     }
 
     [Fact]
-    public void TokenTargetCompression_NormalThreshold_TargetsTenPercentBudget()
+    public void TokenTargetCompression_NormalThreshold_TargetsTwentyPercentBudget()
     {
         _manager.TokenBudget = 1000;
-        _manager.CacheWindowMaxTokens = 0;
-        _manager.CacheWindowMaxTurns = 0;
-        _manager.CacheWindowMaxEntries = 0;
         _manager.SetCompressor(new ContextCompressorService());
         for (int i = 0; i < 5; i++)
             AddSizedTurn(_manager);
@@ -782,9 +744,6 @@ public class ConversationContextManagerExtendedTests
     public void TokenTargetCompression_AggressiveThreshold_TargetsTenPercentBudget()
     {
         _manager.TokenBudget = 800;
-        _manager.CacheWindowMaxTokens = 0;
-        _manager.CacheWindowMaxTurns = 0;
-        _manager.CacheWindowMaxEntries = 0;
         _manager.SetCompressor(new ContextCompressorService());
         for (int i = 0; i < 5; i++)
             AddSizedTurn(_manager);
@@ -798,6 +757,40 @@ public class ConversationContextManagerExtendedTests
         var summary = _manager.Compressor!.CompressedSummaries.Should().ContainSingle().Subject;
         summary.FromTurn.Should().Be(1);
         summary.ToTurn.Should().Be(4);
+    }
+
+    [Fact]
+    public void ThirtyTurnsWithoutTokenBudgetPressure_DoesNotCompress()
+    {
+        _manager.TokenBudget = 1_000_000;
+        _manager.SetCompressor(new ContextCompressorService());
+
+        for (int i = 0; i < 30; i++)
+        {
+            _manager.AddUserMessage("u");
+            _manager.AddAssistantMessage("a");
+        }
+
+        _manager.TurnCount.Should().Be(30);
+        _manager.TryCompressForToolLoop(out _, out _, out _).Should().BeFalse();
+        _manager.Compressor!.CompressedSummaries.Should().BeEmpty();
+    }
+
+    [Fact]
+    public void FiveHundredEntriesWithoutTokenBudgetPressure_DoesNotCompress()
+    {
+        _manager.TokenBudget = 1_000_000;
+        _manager.SetCompressor(new ContextCompressorService());
+
+        for (int i = 0; i < 250; i++)
+        {
+            _manager.AddUserMessage("u");
+            _manager.AddAssistantMessage("a");
+        }
+
+        _manager.MessageCount.Should().Be(500);
+        _manager.TryCompressForToolLoop(out _, out _, out _).Should().BeFalse();
+        _manager.Compressor!.CompressedSummaries.Should().BeEmpty();
     }
 
     private static void AddSizedTurn(ConversationContextManager manager)

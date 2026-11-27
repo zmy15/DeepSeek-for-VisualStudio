@@ -145,7 +145,7 @@ public class ContextModelsTests
         config.PreserveRecentTurns.Should().Be(3);
         config.MinTurnsToCompress.Should().Be(2);
         config.AutoCompressEnabled.Should().BeTrue();
-        config.CompressionTargetRatio.Should().Be(0.10);
+        config.CompressionTargetRatio.Should().Be(0.20);
         config.AggressiveCompressionTargetRatio.Should().Be(0.10);
         config.CompressionPrompt.Should().NotBeNullOrEmpty();
         config.CompressionPrompt.Should().Contain("{0}");
