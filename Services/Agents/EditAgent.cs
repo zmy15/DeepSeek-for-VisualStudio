@@ -23,17 +23,10 @@ namespace DeepSeek_v4_for_VisualStudio.Services.Agents
     /// - 请求用户权限确认
     /// - 追踪文件变更
     /// 
-    /// 限制策略（v1.1.10）：
-    /// - 每次编辑 ≤ 3 个文件
-    /// - 每次编辑 ≤ 500 行代码变更
-    /// - 文件修改后再次编辑前强制重新读取
+    /// 文件修改后再次编辑前强制重新读取。
     /// </summary>
     public partial class EditAgent : BaseAgent
     {
-        // ── 编辑限制常量 ──
-        internal const int MaxFilesPerEdit = 3;
-        internal const int MaxLinesPerEdit = 500;
-
         private CancellationTokenSource? _agentCts;
         private ExploreAgent? _exploreAgent;
 
