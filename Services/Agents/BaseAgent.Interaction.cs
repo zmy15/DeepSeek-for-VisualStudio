@@ -277,7 +277,7 @@ namespace DeepSeek_v4_for_VisualStudio.Services.Agents
             try
             {
                 PermissionRequested?.Invoke(request);
-                AddLog("INFO", string.Format(LocalizationService.Instance["agent.log.waitingTerminalApproval"], command));
+                AddLog("INFO", LocalizationService.Instance["agent.log.waitingTerminalApproval"]);
 
                 bool approved = await request.ResponseTcs.Task;
                 // 清理

@@ -297,7 +297,6 @@ namespace DeepSeek_v4_for_VisualStudio.Services.Agents
                 {
                     foreach (var kvp in builtInCache)
                         context.FileReadCache[kvp.Key] = kvp.Value;
-                    AddLog("INFO", LocalizationService.Instance.Format("agent.log.editCachedFiles", builtInCache.Count));
                 }
             }
 
@@ -887,53 +886,6 @@ namespace DeepSeek_v4_for_VisualStudio.Services.Agents
                 EditorDiffMarkerService.Instance.TryAutoPreviewOpenFile(change.FilePath);
             }
 
-            // ── v1.1.10: 步骤完成自检 — 对比步骤描述中的文件名与实际修改 ──
-            // 如果步骤描述明确提到了某文件但未在本次编辑中修改，记录提示。
-            PerformStepCompletenessCheck(step, appliedResults, workspaceRoot);
-        }
-
-        /// <summary>
-        /// 步骤完整性自检（v1.1.10）。
-        /// 对比步骤描述中引用的文件与实际修改的文件，发现遗漏时记录警告。
-        /// 不阻断执行，仅作为日志提示供用户参考。
-        /// </summary>
-        private void PerformStepCompletenessCheck(
-            AgentStep step, List<EditApplyResult> appliedResults, string workspaceRoot)
-        {
-            if (string.IsNullOrWhiteSpace(step.Description) || appliedResults.Count == 0)
-                return;
-
-            // 从步骤描述中提取文件引用（匹配常见代码文件扩展名）
-            var matches = StepFileReferenceRegex.Matches(step.Description);
-
-            if (matches.Count == 0) return;
-
-            var mentionedFiles = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
-            foreach (System.Text.RegularExpressions.Match m in matches)
-            {
-                mentionedFiles.Add(m.Groups[1].Value);
-            }
-
-            // 收集实际修改的文件名
-            var actuallyModified = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
-            foreach (var r in appliedResults.Where(r => r.Success))
-            {
-                actuallyModified.Add(Path.GetFileName(r.FilePath));
-            }
-
-            // 找出步骤描述中提到但未修改的文件
-            var untouched = mentionedFiles
-                .Where(f => !actuallyModified.Contains(f))
-                .ToList();
-
-            if (untouched.Count > 0)
-            {
-                AddLog("WARN", string.Format(
- "[EditAgent]  步骤自检：步骤描述中提到了 {0} 个文件，但以下文件未被本次编辑修改: {1}。" +
-                    "如果这些修改在后续步骤中完成则可忽略，否则可能是遗漏。",
-                    mentionedFiles.Count,
-                    string.Join(", ", untouched)));
-            }
         }
 
         #region Step Satisfaction — "前序步骤已代劳"判定
@@ -1300,22 +1252,6 @@ namespace DeepSeek_v4_for_VisualStudio.Services.Agents
             var extraModified = allModified
                 .Where(f => !allMentioned.Contains(f))
                 .ToList();
-
-            if (neverTouched.Count > 0)
-            {
-                AddLog("WARN", string.Format(
-                    "[EditAgent] " + LocalizationService.Instance["agent.log.editPlanTrackingNeverTouched"],
-                    allMentioned.Count, neverTouched.Count,
-                    string.Join(", ", neverTouched.Take(10))));
-            }
-
-            if (extraModified.Count > 0)
-            {
-                AddLog("INFO", string.Format(
-                    "[EditAgent] " + LocalizationService.Instance["agent.log.editPlanTrackingExtraModified"],
-                    extraModified.Count,
-                    string.Join(", ", extraModified.Take(10))));
-            }
 
             if (neverTouched.Count == 0 && extraModified.Count == 0)
             {
