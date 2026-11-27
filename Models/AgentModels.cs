@@ -108,6 +108,33 @@ namespace DeepSeek_v4_for_VisualStudio.Models
     }
 
     /// <summary>
+    /// 任务面板进度同步请求：由 update_task_progress 工具解析后交给 Edit Agent 应用。
+    /// </summary>
+    public class TaskProgressUpdate
+    {
+        /// <summary>要更新的步骤项列表（按 index 定位，允许一次同步多个步骤）。</summary>
+        public List<TaskProgressItem> Items { get; set; } = new();
+    }
+
+    /// <summary>
+    /// 单个步骤的进度更新项。
+    /// </summary>
+    public class TaskProgressItem
+    {
+        /// <summary>步骤序号（1 基，对应 <see cref="AgentStep.Index"/>）。</summary>
+        public int Index { get; set; }
+
+        /// <summary>目标状态。</summary>
+        public AgentStepStatus Status { get; set; } = AgentStepStatus.Completed;
+
+        /// <summary>结果摘要；非空时覆盖步骤原有的 <see cref="AgentStep.ResultSummary"/>。</summary>
+        public string? Summary { get; set; }
+
+        /// <summary>步骤标题；非空时覆盖步骤标题（计划与实际偏离时用于纠正）。</summary>
+        public string? Title { get; set; }
+    }
+
+    /// <summary>
     /// Agent 任务计划：包含意图类型和分解后的步骤列表。
     /// </summary>
     public class AgentTaskPlan

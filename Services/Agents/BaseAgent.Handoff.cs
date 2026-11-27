@@ -64,7 +64,8 @@ namespace DeepSeek_v4_for_VisualStudio.Services.Agents
         internal static AgentTaskPlan BuildLightweightPlanFromHandoff(AgentHandoff handoff)
         {
             var steps = new List<AgentStep>();
-            foreach (var s in handoff.EditSteps!.Take(4))     // 双重保护：工具层已截断，这里兜底
+            // 步数不设上限：多步计划由 Ask 通过 editSteps 提供，工具层与此处均不再截断
+            foreach (var s in handoff.EditSteps!)
             {
                 steps.Add(new AgentStep
                 {

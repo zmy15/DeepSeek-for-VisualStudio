@@ -77,7 +77,6 @@ namespace DeepSeek_v4_for_VisualStudio.Services.BuiltInTools
                             editSteps = new
                             {
                                 type = "array",
-                                maxItems = 4,
                                 description = LocalizationService.Instance["tool.requestHandoff.param.editSteps"],
                                 items = new
                                 {
@@ -136,7 +135,7 @@ namespace DeepSeek_v4_for_VisualStudio.Services.BuiltInTools
             bool chainBack = args.TryGetValue("chainBack", out var chainBackNode)
                 && chainBackNode.ValueKind == JsonValueKind.True;
 
-            // ── 解析可选 editSteps → List<AgentStep>?（防御式：非法项跳过、空标题过滤、超限截断）──
+            // ── 解析可选 editSteps → List<AgentStep>?（防御式：非法项跳过、空标题过滤；不限制步数）──
             List<AgentStep>? editSteps = null;
             if (args.TryGetValue("editSteps", out var editStepsNode) && editStepsNode.ValueKind == JsonValueKind.Array)
             {
@@ -159,7 +158,6 @@ namespace DeepSeek_v4_for_VisualStudio.Services.BuiltInTools
                         Status = AgentStepStatus.Pending,
                         RequiresApproval = false,
                     });
-                    if (parsedSteps.Count >= 4) break;               // 防御性截断：超出 4 步不报错
                 }
                 if (parsedSteps.Count > 0) editSteps = parsedSteps;  // 无有效步骤 → 保持 null
             }

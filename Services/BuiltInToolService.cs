@@ -170,6 +170,12 @@ namespace DeepSeek_v4_for_VisualStudio.Services
         public Func<HandoffRequest, Task>? HandoffHandler { get; set; }
 
         /// <summary>
+        /// UpdateTaskProgress 工具的处理委托（由 Edit Agent 在执行计划前注入）。
+        /// 桥接 BuiltInToolService 与当前计划的步骤状态，使任务面板能随模型上报实时刷新。
+        /// </summary>
+        public Func<TaskProgressUpdate, Task>? TaskProgressHandler { get; set; }
+
+        /// <summary>
         /// 当前会话 ID，供 MemoryTool 等需要会话上下文的工具使用。
         /// 由 ChatControl 在会话切换/创建时设置。
         /// </summary>
@@ -373,6 +379,13 @@ namespace DeepSeek_v4_for_VisualStudio.Services
                 if (HandoffHandler != null)
                     await HandoffHandler(request);
             }));
+
+            // Edit Agent 专属：任务面板进度同步
+            Register(new UpdateTaskProgressTool(async (update) =>
+            {
+                if (TaskProgressHandler != null)
+                    await TaskProgressHandler(update);
+            }));
         }
 
         private void Register(BuiltInToolBase tool)
@@ -494,6 +507,7 @@ namespace DeepSeek_v4_for_VisualStudio.Services
                 // 子代理委派 + Agent 移交工具（仅用于显示，无需真实 handler）
                 new RunSubagentTool(_ => Task.FromResult(string.Empty)),
                 new RequestHandoffTool(_ => Task.CompletedTask),
+                new UpdateTaskProgressTool(_ => Task.CompletedTask),
                 new GitTool(),
             };
         }
