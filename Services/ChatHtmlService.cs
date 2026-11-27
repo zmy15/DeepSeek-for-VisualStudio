@@ -649,6 +649,20 @@ namespace DeepSeek_v4_for_VisualStudio.Services
         }
 
         /// <summary>
+        /// 生成消息 footer 的容器 HTML（缓存统计条、执行过程等挂在其中）。
+        ///
+        /// 两条渲染路径必须经过这里或与之保持同一结构：静态重灌走 AppendAssistantMessageHtml，
+        /// 流式结束走内嵌脚本里的 streamEnd 分支。此前两处各自拼一层裸 &lt;div&gt;，
+        /// 只要一边漏改，footer 就会从 .msg-content 内掉到外面，页面重建后变成独立卡片。
+        /// </summary>
+        /// <param name="footerHtml">footer 内容 HTML，可为空。</param>
+        /// <returns>包裹后的 HTML 片段；无内容时返回空字符串。</returns>
+        private static string BuildFooterContainerHtml(string? footerHtml)
+            => string.IsNullOrEmpty(footerHtml)
+                ? string.Empty
+                : "<div class='msg-footer'>" + footerHtml + "</div>";
+
+        /// <summary>
         /// 构建内联编辑区域的 JS 脚本。
         /// 在用户消息气泡中用 textarea + 保存/取消按钮替换正文区域。
         /// </summary>
@@ -1103,13 +1117,9 @@ namespace DeepSeek_v4_for_VisualStudio.Services
             sb.Append(reasoningHtml);
             // ── 内嵌原始 Markdown 内容（`data-raw-content`），供复制按钮读取 ──
             string encodedRawContent = System.Net.WebUtility.HtmlEncode(displayContent);
-            sb.Append($"<div class='msg-content' id='msg-body-{idx}' data-raw-content='{encodedRawContent}'>{bodyHtml}</div>");
+            // footer 拼在 .msg-content 内部，容器结构由 BuildFooterContainerHtml 统一提供。
+            sb.Append($"<div class='msg-content' id='msg-body-{idx}' data-raw-content='{encodedRawContent}'>{bodyHtml}{BuildFooterContainerHtml(msg.CacheFooterHtml)}</div>");
             sb.Append(streamingCursor);
-            // ── 缓存命中率统计卡片（放在操作按钮之前，消息内容下方）──
-            if (!string.IsNullOrEmpty(msg.CacheFooterHtml))
-            {
-                sb.Append(msg.CacheFooterHtml);
-            }
             // ── 统一 action 行：flex 容器保证重来/复制按钮水平对齐、尺寸一致 ──
             if (retryBtnHtml.Length > 0 || copyBtnHtml.Length > 0 || branchNavHtml.Length > 0)
             {
