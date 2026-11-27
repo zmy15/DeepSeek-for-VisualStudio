@@ -1354,6 +1354,10 @@
     if (ev.button !== 0) return;
 
     moved = false;
+    // 折叠圆点交给 click 单独处理：一旦在这里启动平移并 setPointerCapture，
+    // 随后的 click 目标会被重定向到 <svg>，closest('[data-toggle]') 就会失配。
+    var toggleHit = ev.target.closest ? ev.target.closest('[data-toggle]') : null;
+    if (toggleHit) return;
     var nd = ev.target.closest ? ev.target.closest('[data-id]') : null;
     var tg = ev.target.closest ? ev.target.closest('[data-toggle]') : null;
 
@@ -1456,7 +1460,13 @@
   svg.addEventListener('click', function (ev) {
     if (moved) { moved = false; return; }
 
-    var tg = ev.target.closest('[data-toggle]');
+    // 优先用 composedPath：即使 target 因指针捕获被重定向，也能定位到折叠圆点。
+    var tg = null;
+    var path = ev.composedPath ? ev.composedPath() : [];
+    for (var pi = 0; pi < path.length; pi++) {
+      if (path[pi] && path[pi].getAttribute && path[pi].getAttribute('data-toggle')) { tg = path[pi]; break; }
+    }
+    if (!tg && ev.target.closest) tg = ev.target.closest('[data-toggle]');
     if (tg) {
       var tid = tg.getAttribute('data-toggle');
       if (COLLAPSED.has(tid)) COLLAPSED.delete(tid); else COLLAPSED.add(tid);
