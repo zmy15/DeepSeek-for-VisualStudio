@@ -73,10 +73,25 @@ namespace DeepSeek_v4_for_VisualStudio.Settings
                 Size = new Size(520, 42),
             };
 
+            // 反馈通道：直接落到仓库的两个 Issue 模板，省去用户先选模板的一步。
+            var bugButton = new Button
+            {
+                Text = l["settings.about.bugReport"],
+                Location = new Point(118, 224),
+                Size = new Size(100, 30),
+            };
+            bugButton.Click += (_, _) => OpenLink(AboutInfo.BugReportUrl);
+            var featureButton = new Button
+            {
+                Text = l["settings.about.featureRequest"],
+                Location = new Point(226, 224),
+                Size = new Size(100, 30),
+            };
+            featureButton.Click += (_, _) => OpenLink(AboutInfo.FeatureRequestUrl);
             var starButton = new Button
             {
                 Text = l["settings.about.star"],
-                Location = new Point(324, 224),
+                Location = new Point(334, 224),
                 Size = new Size(100, 30),
             };
             starButton.Click += (_, _) => OpenLink(AboutInfo.StarUrl);
@@ -84,7 +99,7 @@ namespace DeepSeek_v4_for_VisualStudio.Settings
             {
                 Text = l["settings.about.close"],
                 DialogResult = DialogResult.OK,
-                Location = new Point(434, 224),
+                Location = new Point(442, 224),
                 Size = new Size(100, 30),
             };
             AcceptButton = closeButton;
@@ -99,6 +114,8 @@ namespace DeepSeek_v4_for_VisualStudio.Settings
                 issuesLabel,
                 issuesLink,
                 starLabel,
+                bugButton,
+                featureButton,
                 starButton,
                 closeButton,
             });
