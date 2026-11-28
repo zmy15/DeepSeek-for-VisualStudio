@@ -57,6 +57,18 @@ namespace DeepSeek_v4_for_VisualStudio.View
         private void OnPendingChangesChanged(object? sender, EventArgs e) => RefreshChangeSummary();
 
         /// <summary>
+        /// 会话上下文真正发生变化时清理上一会话的待处理追踪。
+        /// WebView 重绘、主题切换等纯渲染动作不得调用本方法。
+        /// </summary>
+        private void ResetFileChangeTrackingForConversationSwitch()
+        {
+            EditorDiffMarkerService.Instance.ClearPendingTracking();
+            // ClearPendingTracking 会触发 PendingChangesChanged；仅在未订阅时手动兜底。
+            if (!_changeSummarySubscribed)
+                RefreshChangeSummary();
+        }
+
+        /// <summary>
         /// 重新计算并刷新文件改动列表。可从任意线程调用；WPF 操作会切回 UI 线程。
         ///
         /// 行数据的计算（读盘 + diff）放到线程池执行：编辑过程中每次文件写入与

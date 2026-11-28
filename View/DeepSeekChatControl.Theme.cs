@@ -3,6 +3,7 @@ using DeepSeek_v4_for_VisualStudio.Services;
 using DeepSeek_v4_for_VisualStudio.Utils;
 using Microsoft.VisualStudio.Shell;
 using System;
+using System.Threading.Tasks;
 using System.Windows;
 using System.Windows.Controls;
 using System.Windows.Controls.Primitives;
@@ -23,15 +24,15 @@ namespace DeepSeek_v4_for_VisualStudio.View
         /// <summary>
         /// VS 主题或用户设置变更时触发。
         /// </summary>
-        private void OnThemeChanged(bool isLight)
+        private async void OnThemeChanged(bool isLight)
         {
             if (_isApplyingTheme) return;
             _isApplyingTheme = true;
             try
             {
-                ThreadHelper.ThrowIfNotOnUIThread();
+                await ThreadHelper.JoinableTaskFactory.SwitchToMainThreadAsync();
                 ApplyWpfTheme(isLight);
-                ReloadWebViewForTheme();
+                await ReloadWebViewForThemeAsync();
             }
             catch (Exception ex)
             {
@@ -544,12 +545,18 @@ namespace DeepSeek_v4_for_VisualStudio.View
         /// 主题变更后重新加载 WebView2 内容。
         /// 如果 WebView 已就绪且有消息，则重新渲染当前窗口中的消息。
         /// </summary>
-        private async void ReloadWebViewForTheme()
+        private async Task ReloadWebViewForThemeAsync()
         {
             try
             {
                 if (ChatWebView?.CoreWebView2 == null) return;
                 if (_messages.Count == 0) return;
+
+                if (await TryApplyWebViewThemeInPlaceAsync())
+                {
+                    Logger.Info("[Theme] WebView2 CSS updated in place");
+                    return;
+                }
 
                 // ── 重置页面就绪标志，等待新页面加载完成后再重建面板 ──
                 _pageReady = false;
@@ -568,6 +575,31 @@ namespace DeepSeek_v4_for_VisualStudio.View
             catch (Exception ex)
             {
                 Logger.Warn($"[Theme] Failed to reload WebView2: {ex.Message}");
+            }
+        }
+
+        /// <summary>
+        /// 普通聊天页原地替换 CSS。动态卡片或 Mermaid 存在时返回 false，
+        /// 由调用方走完整页面重建，避免只换一半主题。
+        /// </summary>
+        private async Task<bool> TryApplyWebViewThemeInPlaceAsync()
+        {
+            try
+            {
+                var core = ChatWebView?.CoreWebView2;
+                if (core == null || !_pageReady)
+                    return false;
+
+                string script = ChatHtmlService.BuildApplyThemeInPlaceJs(
+                    ThemeService.Instance.PageCss,
+                    ThemeService.Instance.IsLight);
+                string result = await core.ExecuteScriptAsync(script);
+                return string.Equals(result, "true", StringComparison.OrdinalIgnoreCase);
+            }
+            catch (Exception ex)
+            {
+                Logger.Debug($"[Theme] 原地更新 WebView CSS 失败: {ex.GetType().Name}: {ex.Message}");
+                return false;
             }
         }
 

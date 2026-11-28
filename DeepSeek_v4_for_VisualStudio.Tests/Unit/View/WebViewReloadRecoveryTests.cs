@@ -383,6 +383,57 @@ public class WebViewReloadRecoveryTests
     }
 
     [Fact]
+    public void UpdateBrowser_WhenAlreadyRunning_ShouldCoalescePendingRequest()
+    {
+        RunOnStaThread(control =>
+        {
+            SetField(control, "_webViewInitialized", false);
+            SetField(control, "_browserUpdateRunning", true);
+            SetField(control, "_browserUpdatePending", false);
+
+            var method = typeof(DeepSeekChatControl).GetMethod(
+                "UpdateBrowser", BindingFlags.Instance | BindingFlags.NonPublic);
+            method.Should().NotBeNull();
+
+            method!.Invoke(control, null);
+
+            GetField<bool>(control, "_browserUpdatePending").Should().BeTrue(
+                "并发渲染请求应合并为一次 pending，而不是同时执行 NavigateToString");
+        });
+    }
+
+    [Fact]
+    public void RenderedSampleMaxEdge_ShouldBeBounded()
+    {
+        var field = typeof(DeepSeekChatControl).GetField(
+            "RenderedSampleMaxEdge",
+            BindingFlags.NonPublic | BindingFlags.Static);
+        field.Should().NotBeNull();
+
+        int maxEdge = (int)field!.GetRawConstantValue()!;
+        maxEdge.Should().BeGreaterThan(0);
+        maxEdge.Should().BeLessThanOrEqualTo(512, "健康检查不能重新引入全尺寸位图分配");
+    }
+
+    [Fact]
+    public void CanPostStreamingUpdateNow_WhenPageIsNotReady_ShouldBeFalse()
+    {
+        RunOnStaThread(control =>
+        {
+            SetField(control, "_pageReady", false);
+            SetField(control, "_webViewInitialized", true);
+
+            var method = typeof(DeepSeekChatControl).GetMethod(
+                "CanPostStreamingUpdateNow",
+                BindingFlags.Instance | BindingFlags.NonPublic);
+            method.Should().NotBeNull();
+
+            bool canPost = (bool)method!.Invoke(control, null)!;
+            canPost.Should().BeFalse("页面未就绪时流式更新必须继续积压");
+        });
+    }
+
+    [Fact]
     public void Loaded_WhenNeverUnloaded_ShouldNotArmRestore()
     {
         RunOnStaThread(control =>

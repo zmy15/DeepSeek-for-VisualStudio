@@ -1093,6 +1093,29 @@ public class ChatHtmlServiceTests
         js.Should().Contain("&amp;");
     }
 
+    [Fact]
+    public void BuildInitialPage_TagsThemeStyleForInPlaceUpdate()
+    {
+        string html = ChatHtmlService.BuildInitialPage(new List<ChatMessage>());
+
+        html.Should().Contain("<style id='deepseek-page-style'>");
+    }
+
+    [Fact]
+    public void BuildApplyThemeInPlaceJs_EncodesCssAndRejectsThemeSensitiveDom()
+    {
+        string js = ChatHtmlService.BuildApplyThemeInPlaceJs(
+            "body{background:#fff}\n.special::after{content:\"</style>\"}",
+            isLight: true);
+
+        js.Should().Contain("deepseek-page-style");
+        js.Should().Contain("data-theme");
+        js.Should().Contain("agent-task-panel");
+        js.Should().Contain("mermaid");
+        js.Should().Contain("return false");
+        js.Should().Contain("\\u003C/style\\u003E");
+    }
+
     #endregion
 
     private static int CountOccurrences(string haystack, string needle)

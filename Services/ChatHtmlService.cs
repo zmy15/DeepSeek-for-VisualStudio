@@ -1831,7 +1831,7 @@ namespace DeepSeek_v4_for_VisualStudio.Services
 
 return "<!DOCTYPE html><html lang='" + htmlLang + "'><head><meta charset='UTF-8'>" +
        "<meta name='viewport' content='width=device-width,initial-scale=1'>" +
-       "<style>" + PageCss + "</style>" +
+       "<style id='deepseek-page-style'>" + PageCss + "</style>" +
        // ── KaTeX / Highlight.js CSS 均为非阻塞加载（media='none' + onload 翻转）──
        // 关键：Chromium 中 <link rel='stylesheet'> 会阻塞其后所有 <script> 的执行，
        // 而 __pageReady__ 信号正是在 body 末尾的内联脚本中发送的。
@@ -1883,6 +1883,40 @@ return "<!DOCTYPE html><html lang='" + htmlLang + "'><head><meta charset='UTF-8'
        "if(window.chrome?.webview)window.chrome.webview.postMessage('__pageReady__');" +
        "setTimeout(function(){window.__scrollToBottom('auto');},100);" +
        "</script></body></html>";
+        }
+
+        #endregion
+
+        #region Theme Update
+
+        /// <summary>
+        /// 页面只包含普通消息时，原地替换主题 CSS，避免整页 NavigateToString。
+        /// 动态卡片和 Mermaid 含 C# 预生成的内联颜色/SVG，检测到时返回 false 由宿主整页重载。
+        /// </summary>
+        internal static string BuildApplyThemeInPlaceJs(string pageCss, bool isLight)
+        {
+            if (pageCss == null)
+                throw new ArgumentNullException(nameof(pageCss));
+
+            string cssJson = JsonSerializer.Serialize(pageCss);
+            string theme = isLight ? "light" : "dark";
+            string mermaidTheme = isLight ? "default" : "dark";
+            return "(function(){"
+                + "var s=document.getElementById('deepseek-page-style');"
+                + "if(!s||window.__pageReady!==true)return false;"
+                + "var sensitive=document.querySelector("
+                + "'[id^=\"agent-task-panel-\"],[id^=\"agent-permission-\"],"
+                + "[id^=\"terminal-approval-\"],[id^=\"file-delete-confirm-\"],"
+                + "#agent-questions,.handoff-btn,.mermaid');"
+                + "if(sensitive)return false;"
+                + "s.textContent=" + cssJson + ";"
+                + "document.documentElement.setAttribute('data-theme','" + theme + "');"
+                + "try{if(window.mermaid&&mermaid.initialize){"
+                + "mermaid.initialize({startOnLoad:false,theme:'" + mermaidTheme + "',"
+                + "securityLevel:'loose',suppressErrorRendering:true});"
+                + "}}catch(e){}"
+                + "return true;"
+                + "})();";
         }
 
         #endregion

@@ -1805,6 +1805,17 @@ namespace DeepSeek_v4_for_VisualStudio.View
 
             CancelStreaming();
             DisposeStreamingCts();
+            try
+            {
+                _flushIdleTimer?.Stop();
+                _flushIdleTimer?.Dispose();
+                _flushIdleTimer = null;
+                _flushIdleTimerCreated = false;
+            }
+            catch (Exception ex)
+            {
+                Logger.Debug($"[Dispose] 释放流式空闲定时器失败: {ex.GetType().Name}");
+            }
             StopBalanceTimer();
             StopInflightSnapshotTimer();
             StopPricingPeriodTimer();
@@ -2651,6 +2662,9 @@ namespace DeepSeek_v4_for_VisualStudio.View
             {
                 try
                 {
+                    if (_disposed)
+                        return;
+
                     Dictionary<int, StreamBatchState> pending;
                     lock (_streamBatchLock)
                     {
@@ -2747,7 +2761,11 @@ namespace DeepSeek_v4_for_VisualStudio.View
                     state.ReasoningDelta.Length,
                     elapsedMs);
 
-                if (plan.Flush)
+                bool canPostNow = CanPostStreamingUpdateNow();
+                if (!canPostNow)
+                    _webViewRenderDirtyWhileDetached = true;
+
+                if (plan.Flush && canPostNow)
                 {
                     state.LastFlushTicks = now;
                     state.LastFlushedReasoningLength = state.Reasoning.Length;
@@ -2788,7 +2806,7 @@ namespace DeepSeek_v4_for_VisualStudio.View
                     || state.ReasoningDelta.Length > 0
                     || (state.Reasoning.Length > 0
                         && state.Reasoning.Length != state.LastFlushedReasoningLength);
-                if (!state.IsComplete && hasUnflushed)
+                if (canPostNow && !state.IsComplete && hasUnflushed)
                 {
                     EnsureFlushIdleTimer();
                     _flushIdleTimer?.Stop();

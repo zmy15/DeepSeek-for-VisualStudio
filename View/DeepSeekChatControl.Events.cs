@@ -2932,6 +2932,8 @@ namespace DeepSeek_v4_for_VisualStudio.View
                     TryReplayPendingStreamEnd();
                     // 任务面板、Handoff、提问和审批均属于动态 DOM，页面重建后统一重放。
                     _ = ReplayDynamicPanelsAfterPageReadyAsync();
+                    // 页面不可用/窗口隐藏期间积压的流式内容，在页面就绪后补齐。
+                    FlushDeferredWebViewRendering();
                     return;
                 }
 

@@ -4,6 +4,7 @@ using DeepSeek_v4_for_VisualStudio.Settings;
 using DeepSeek_v4_for_VisualStudio.Utils;
 using Microsoft.Web.WebView2.Core;
 using System;
+using System.Buffers;
 using System.Collections.Generic;
 using System.Runtime.InteropServices;
 using System.Text;
@@ -76,6 +77,24 @@ namespace DeepSeek_v4_for_VisualStudio.View
 
         /// <summary>进行中的「重挂控件修复空白」任务；用于合并并发请求。</summary>
         private Task? _composeRecoveryTask;
+
+        /// <summary>合成健康检查已排入 Dispatcher，避免一组可见性事件重复入队。</summary>
+        private bool _compositionHealthCheckQueued;
+
+        /// <summary>合成健康检查正在执行；执行期间的新请求只记录一次重跑。</summary>
+        private bool _compositionHealthCheckRunning;
+        private bool _compositionHealthCheckRequested;
+
+        /// <summary>合成画面采样最大边长；诊断只需要判断是否完全空白，无需全分辨率复制。</summary>
+        private const int RenderedSampleMaxEdge = 256;
+
+        /// <summary>合并并发浏览器更新，避免主题/会话/恢复路径重复全量导航。</summary>
+        private bool _browserUpdateRunning;
+        private bool _browserUpdatePending;
+
+        private bool _webViewRestoreQueued;
+        private bool _webViewRestoreRunning;
+        private bool _webViewRestoreRequested;
 
         #region Private Methods - Rendering
 
@@ -345,6 +364,9 @@ namespace DeepSeek_v4_for_VisualStudio.View
                 return;
             }
 
+            if (_webViewReloadNeedsRestore || _webViewRenderDirtyWhileDetached)
+                ScheduleWebViewRestoreAfterReload();
+
             ScheduleCompositionHealthCheck();
         }
 
@@ -365,6 +387,9 @@ namespace DeepSeek_v4_for_VisualStudio.View
                 return;
             }
 
+            if (_webViewReloadNeedsRestore || _webViewRenderDirtyWhileDetached)
+                ScheduleWebViewRestoreAfterReload();
+
             ScheduleCompositionHealthCheck();
         }
 
@@ -378,15 +403,49 @@ namespace DeepSeek_v4_for_VisualStudio.View
             if (_disposed)
                 return;
 
+            if (_compositionHealthCheckQueued)
+                return;
+
+            if (_compositionHealthCheckRunning)
+            {
+                _compositionHealthCheckRequested = true;
+                return;
+            }
+
             try
             {
+                _compositionHealthCheckQueued = true;
                 Dispatcher.BeginInvoke(
                     System.Windows.Threading.DispatcherPriority.Background,
-                    new Action(() => { _ = CheckCompositionHealthAsync(); }));
+                    new Action(RunScheduledCompositionHealthCheck));
             }
             catch (Exception ex)
             {
+                _compositionHealthCheckQueued = false;
                 Logger.Debug($"[WebViewLifecycle] 排入合成健康检查失败: {ex.GetType().Name}");
+            }
+        }
+
+        private async void RunScheduledCompositionHealthCheck()
+        {
+            _compositionHealthCheckQueued = false;
+
+            if (_disposed || _compositionHealthCheckRunning)
+                return;
+
+            _compositionHealthCheckRunning = true;
+            try
+            {
+                await CheckCompositionHealthAsync();
+            }
+            finally
+            {
+                _compositionHealthCheckRunning = false;
+                if (_compositionHealthCheckRequested && !_disposed)
+                {
+                    _compositionHealthCheckRequested = false;
+                    ScheduleCompositionHealthCheck();
+                }
             }
         }
 
@@ -409,12 +468,58 @@ namespace DeepSeek_v4_for_VisualStudio.View
 
             try
             {
-                return webView.Parent == null || !webView.IsLoaded;
+                return webView.Parent == null || !webView.IsLoaded || !webView.IsVisible;
             }
             catch
             {
                 return true;
             }
+        }
+
+        /// <summary>页面和窗口都可见，且浏览器可访问时才允许推送流式 DOM 更新。</summary>
+        private bool CanPostStreamingUpdateNow()
+        {
+            if (_disposed || !_pageReady || ShouldDeferWebViewRender())
+                return false;
+
+            try
+            {
+                return ChatWebView?.CoreWebView2 != null;
+            }
+            catch
+            {
+                return false;
+            }
+        }
+
+        /// <summary>
+        /// 控件重新可见后补齐隐藏期间积压的渲染。优先冲刷流式批处理状态，
+        /// 没有活动流时才走普通 HTML 增量更新。
+        /// </summary>
+        private void FlushDeferredWebViewRendering()
+        {
+            if (!CanPostStreamingUpdateNow())
+                return;
+
+            int[] pendingStreamIndexes;
+            lock (_streamBatchLock)
+            {
+                pendingStreamIndexes = new int[_streamBatchStates.Count];
+                _streamBatchStates.Keys.CopyTo(pendingStreamIndexes, 0);
+            }
+
+            if (pendingStreamIndexes.Length > 0)
+            {
+                // 本次已具备补发条件；未达到刷新窗口的剩余增量交给 idle timer。
+                _webViewRenderDirtyWhileDetached = false;
+                foreach (int index in pendingStreamIndexes)
+                    BatchStreamingUpdate(index);
+
+                return;
+            }
+
+            _webViewRenderDirtyWhileDetached = false;
+            UpdateBrowser();
         }
 
         /// <summary>
@@ -529,33 +634,129 @@ namespace DeepSeek_v4_for_VisualStudio.View
                 if (w < 1 || h < 1)
                     return (-1, $"<尺寸为 0: {w:F0}x{h:F0}>");
 
-                var rtb = new System.Windows.Media.Imaging.RenderTargetBitmap(
-                    (int)w, (int)h, 96, 96, System.Windows.Media.PixelFormats.Pbgra32);
-                rtb.Render(webView);
+                double scale = Math.Min(
+                    1.0,
+                    RenderedSampleMaxEdge / Math.Max(w, h));
+                int sampleWidth = Math.Max(1, (int)Math.Round(w * scale));
+                int sampleHeight = Math.Max(1, (int)Math.Round(h * scale));
 
-                int stride = rtb.PixelWidth * 4;
-                var pixels = new byte[stride * rtb.PixelHeight];
-                rtb.CopyPixels(pixels, stride, 0);
-
-                // 以左上角像素为背景基准，统计与背景差异明显的像素比例
-                byte bgB = pixels[0], bgG = pixels[1], bgR = pixels[2];
-                long nonBg = 0;
-                long total = (long)rtb.PixelWidth * rtb.PixelHeight;
-
-                for (int i = 0; i < pixels.Length; i += 4)
+                var visual = new System.Windows.Media.DrawingVisual();
+                using (var dc = visual.RenderOpen())
                 {
-                    int diff = Math.Abs(pixels[i] - bgB)
-                             + Math.Abs(pixels[i + 1] - bgG)
-                             + Math.Abs(pixels[i + 2] - bgR);
-                    if (diff > 24) nonBg++;
+                    var brush = new System.Windows.Media.VisualBrush(webView)
+                    {
+                        Stretch = System.Windows.Media.Stretch.Fill,
+                    };
+                    dc.DrawRectangle(
+                        brush,
+                        null,
+                        new Rect(0, 0, sampleWidth, sampleHeight));
                 }
 
-                double pct = total > 0 ? (nonBg * 100.0 / total) : 0;
-                return (pct, $"(非背景 {nonBg}/{total}, bg=#{bgR:X2}{bgG:X2}{bgB:X2})");
+                var rtb = new System.Windows.Media.Imaging.RenderTargetBitmap(
+                    sampleWidth,
+                    sampleHeight,
+                    96,
+                    96,
+                    System.Windows.Media.PixelFormats.Pbgra32);
+                rtb.Render(visual);
+
+                int stride = rtb.PixelWidth * 4;
+                int byteCount = stride * rtb.PixelHeight;
+                byte[] pixels = ArrayPool<byte>.Shared.Rent(byteCount);
+                try
+                {
+                    rtb.CopyPixels(pixels, stride, 0);
+
+                    // 以左上角像素为背景基准，统计与背景差异明显的像素比例
+                    byte bgB = pixels[0], bgG = pixels[1], bgR = pixels[2];
+                    long nonBg = 0;
+                    long total = (long)rtb.PixelWidth * rtb.PixelHeight;
+
+                    for (int i = 0; i < byteCount; i += 4)
+                    {
+                        int diff = Math.Abs(pixels[i] - bgB)
+                                 + Math.Abs(pixels[i + 1] - bgG)
+                                 + Math.Abs(pixels[i + 2] - bgR);
+                        if (diff > 24) nonBg++;
+                    }
+
+                    double pct = total > 0 ? (nonBg * 100.0 / total) : 0;
+                    return (pct, $"(缩略 {rtb.PixelWidth}x{rtb.PixelHeight}, "
+                        + $"非背景 {nonBg}/{total}, bg=#{bgR:X2}{bgG:X2}{bgB:X2})");
+                }
+                finally
+                {
+                    ArrayPool<byte>.Shared.Return(pixels);
+                }
             }
             catch (Exception ex)
             {
                 return (-1, $"<采样失败:{ex.GetType().Name}>");
+            }
+        }
+
+        /// <summary>
+        /// 缩略采样判定为空白时，用一次全尺寸采样复核，避免 VisualBrush
+        /// 在特殊合成环境下无法捕获 WebView2 而导致误重挂。仅疑似故障时调用。
+        /// </summary>
+        private double ConfirmRenderedCoverage(double sampledCoverage)
+        {
+            if (sampledCoverage < 0 || sampledCoverage >= RenderedCoverageThreshold)
+                return sampledCoverage;
+
+            var webView = ChatWebView;
+            if (webView == null)
+                return sampledCoverage;
+
+            try
+            {
+                int width = Math.Max(1, (int)webView.ActualWidth);
+                int height = Math.Max(1, (int)webView.ActualHeight);
+                var rtb = new System.Windows.Media.Imaging.RenderTargetBitmap(
+                    width,
+                    height,
+                    96,
+                    96,
+                    System.Windows.Media.PixelFormats.Pbgra32);
+                rtb.Render(webView);
+
+                int stride = width * 4;
+                int byteCount = stride * height;
+                byte[] pixels = ArrayPool<byte>.Shared.Rent(byteCount);
+                try
+                {
+                    rtb.CopyPixels(pixels, stride, 0);
+                    byte bgB = pixels[0], bgG = pixels[1], bgR = pixels[2];
+                    long nonBg = 0;
+                    long total = (long)width * height;
+                    for (int i = 0; i < byteCount; i += 4)
+                    {
+                        int diff = Math.Abs(pixels[i] - bgB)
+                                 + Math.Abs(pixels[i + 1] - bgG)
+                                 + Math.Abs(pixels[i + 2] - bgR);
+                        if (diff > 24) nonBg++;
+                    }
+
+                    double fullCoverage = total > 0 ? nonBg * 100.0 / total : 0;
+                    if (fullCoverage >= RenderedCoverageThreshold)
+                    {
+                        Logger.Debug($"[WebViewLifecycle] 缩略采样偏低，但全尺寸复核正常 "
+                            + $"(sampled={sampledCoverage:F1}%, full={fullCoverage:F1}%)");
+                        return fullCoverage;
+                    }
+
+                    return sampledCoverage;
+                }
+                finally
+                {
+                    ArrayPool<byte>.Shared.Return(pixels);
+                }
+            }
+            catch (Exception ex)
+            {
+                Logger.Debug($"[WebViewLifecycle] 全尺寸复核失败，保留缩略采样结果: {ex.GetType().Name}");
+                return sampledCoverage;
             }
         }
 
@@ -583,28 +784,24 @@ namespace DeepSeek_v4_for_VisualStudio.View
 
             try
             {
-                // ── 1. 控件自身失效重绘 ──
-                webView.InvalidateVisual();
+                double coverage = ConfirmRenderedCoverage(
+                    await RepaintAndSampleAsync(invalidateLayout: false));
+                if (coverage < 0)
+                    return;
+                if (coverage >= RenderedCoverageThreshold)
+                {
+                    Logger.Debug($"[WebViewLifecycle] 轻量重绘已恢复画面（coverage={coverage:F1}%）");
+                    return;
+                }
 
-                // ── 2. 宿主与控件一并失效，并请求一次布局重算 ──
-                // 宿主 ContentControl 有自己的裁剪区域；只让控件失效时，
-                // 宿主的陈旧内容有时会继续遮挡（与 issue #31 同源的 WPF 合成层 z-order 问题）。
-                ChatWebViewHost.InvalidateVisual();
-                webView.InvalidateMeasure();
-                webView.InvalidateArrange();
-
-                // 把重绘推到下一轮渲染优先级，确保在本次布局完成后真正执行
-                await Dispatcher.InvokeAsync(() => { }, System.Windows.Threading.DispatcherPriority.Render);
-                if (_disposed) return;
-
-                // ── 验证重绘是否真的产出画面 ──
-                // 关键：不假设「重绘必然有效」，而是实测非背景像素占比。
-                // 该失效的特点是 DOM 侧完全正常、状态量全部正常，但控件产出 0 个像素，
-                // 单纯 InvalidateVisual 无法恢复，必须重建合成链路。
-                double coverage = SampleRenderedCoverage();
+                Logger.Debug($"[WebViewLifecycle] 轻量重绘后无画面（coverage={coverage:F1}%），升级宿主布局刷新");
+                coverage = ConfirmRenderedCoverage(
+                    await RepaintAndSampleAsync(invalidateLayout: true));
+                if (coverage < 0)
+                    return;
                 if (coverage >= 0 && coverage < RenderedCoverageThreshold)
                 {
-                    Logger.Warn($"[WebViewLifecycle] 重绘后仍无画面（coverage={coverage:F1}%），"
+                    Logger.Warn($"[WebViewLifecycle] 宿主布局刷新后仍无画面（coverage={coverage:F1}%），"
                         + "重建合成链路以恢复显示");
                     await RecoverCompositionByReattachAsync();
                 }
@@ -613,6 +810,32 @@ namespace DeepSeek_v4_for_VisualStudio.View
             {
                 Logger.Warn($"[WebViewLifecycle] 重绘聊天区域失败: {ex.GetType().Name}: {ex.Message}");
             }
+        }
+
+        private async Task<double> RepaintAndSampleAsync(bool invalidateLayout)
+        {
+            if (_disposed)
+                return -1;
+
+            var webView = ChatWebView;
+            if (webView == null)
+                return -1;
+
+            webView.InvalidateVisual();
+            if (invalidateLayout)
+            {
+                ChatWebViewHost.InvalidateVisual();
+                webView.InvalidateMeasure();
+                webView.InvalidateArrange();
+            }
+
+            await Dispatcher.InvokeAsync(
+                () => { },
+                System.Windows.Threading.DispatcherPriority.Render);
+            if (_disposed)
+                return -1;
+
+            return SampleRenderedCoverage();
         }
 
         /// <summary>
@@ -713,7 +936,7 @@ namespace DeepSeek_v4_for_VisualStudio.View
                 await Microsoft.VisualStudio.Shell.ThreadHelper.JoinableTaskFactory.SwitchToMainThreadAsync();
                 if (_disposed) return;
 
-                double after = SampleRenderedCoverage();
+                double after = ConfirmRenderedCoverage(SampleRenderedCoverage());
                 if (after >= 0 && after < RenderedCoverageThreshold)
                 {
                     Logger.Error($"[WebViewLifecycle] 重建合成链路后仍未恢复显示（coverage={after:F1}%），"
@@ -736,15 +959,49 @@ namespace DeepSeek_v4_for_VisualStudio.View
             if (_disposed)
                 return;
 
+            if (_webViewRestoreQueued)
+                return;
+
+            if (_webViewRestoreRunning)
+            {
+                _webViewRestoreRequested = true;
+                return;
+            }
+
             try
             {
+                _webViewRestoreQueued = true;
                 Dispatcher.BeginInvoke(
                     System.Windows.Threading.DispatcherPriority.Background,
-                    new Action(() => { _ = RestoreWebViewAfterReloadAsync(); }));
+                    new Action(RunScheduledWebViewRestore));
             }
             catch (Exception ex)
             {
+                _webViewRestoreQueued = false;
                 Logger.Debug($"[WebViewLifecycle] 排入重载恢复任务失败: {ex.GetType().Name}");
+            }
+        }
+
+        private async void RunScheduledWebViewRestore()
+        {
+            _webViewRestoreQueued = false;
+
+            if (_disposed || _webViewRestoreRunning)
+                return;
+
+            _webViewRestoreRunning = true;
+            try
+            {
+                await RestoreWebViewAfterReloadAsync();
+            }
+            finally
+            {
+                _webViewRestoreRunning = false;
+                if (_webViewRestoreRequested && !_disposed)
+                {
+                    _webViewRestoreRequested = false;
+                    ScheduleWebViewRestoreAfterReload();
+                }
             }
         }
 
@@ -842,9 +1099,8 @@ namespace DeepSeek_v4_for_VisualStudio.View
                 // 暂时脱离宿主期间积累的聊天内容在此补渲染。
                 if (_webViewRenderDirtyWhileDetached)
                 {
-                    _webViewRenderDirtyWhileDetached = false;
                     Logger.Info("[WebViewLifecycle] reload.restore | 浏览器仍可用，补做延迟渲染");
-                    UpdateBrowser();
+                    FlushDeferredWebViewRendering();
                     return;
                 }
 
@@ -1062,15 +1318,47 @@ namespace DeepSeek_v4_for_VisualStudio.View
             if (_disposed)
                 return;
 
+            if (ShouldDeferWebViewRender())
+            {
+                _webViewRenderDirtyWhileDetached = true;
+                Logger.Debug("[WebViewLifecycle] 控件暂时未挂载或不可见，已延迟本次渲染");
+                return;
+            }
+
+            if (_browserUpdateRunning)
+            {
+                _browserUpdatePending = true;
+                return;
+            }
+
+            _browserUpdateRunning = true;
             try
             {
-                if (ShouldDeferWebViewRender())
+                do
                 {
-                    _webViewRenderDirtyWhileDetached = true;
-                    Logger.Debug("[WebViewLifecycle] 控件暂时未挂载，已延迟本次渲染");
-                    return;
+                    _browserUpdatePending = false;
+                    await UpdateBrowserCoreAsync();
                 }
+                while (_browserUpdatePending && !_disposed && !ShouldDeferWebViewRender());
 
+                if (_browserUpdatePending && ShouldDeferWebViewRender())
+                    _webViewRenderDirtyWhileDetached = true;
+            }
+            finally
+            {
+                _browserUpdateRunning = false;
+                if (_browserUpdatePending && !_disposed && !ShouldDeferWebViewRender())
+                {
+                    _browserUpdatePending = false;
+                    Dispatcher.BeginInvoke(new Action(UpdateBrowser));
+                }
+            }
+        }
+
+        private async Task UpdateBrowserCoreAsync()
+        {
+            try
+            {
                 // ── 控件失效（被视觉树卸载）时先重建，再继续本次渲染 ──
                 if (!TryGetLiveCoreWebView(out var core))
                 {
@@ -1305,11 +1593,6 @@ namespace DeepSeek_v4_for_VisualStudio.View
 
             string windowHtml = BuildMessagesWindowHtml(RenderWindowBatchSize, out int windowStart);
             ApplyMessagesWindow(windowHtml, windowStart);
-
-            // 会话切换 / 新建 / 清空 / 重启恢复都会走到这里：
-            // 先丢弃上一会话残留的待处理追踪，再刷新文件改动列表（通常为空 → 隐藏）。
-            EditorDiffMarkerService.Instance.ClearPendingTracking();
-            RefreshChangeSummary();
         }
 
         /// <summary>
@@ -1352,12 +1635,20 @@ namespace DeepSeek_v4_for_VisualStudio.View
             // 主题切换/全量刷新也可能绕过 RebuildMessagesHtml，导航前统一同步当前流式快照。
             SyncStreamingSnapshotToMessageForRebuild();
 
+            // 页面壳固定，先算一次。后续窗口收缩复用其字节数，避免每轮重新拼接
+            // 数十 KB 的 CSS/JS，再对完整页面做 UTF-8/UTF-16 两次统计。
+            string shellHtml = ChatHtmlService.BuildInitialPageFromMessagesHtml(string.Empty);
+            int shellUtf8Bytes = Encoding.UTF8.GetByteCount(shellHtml);
+            int shellUtf16Bytes = shellHtml.Length * 2;
+
             int windowSize = Math.Min(RenderWindowBatchSize, _messages.Count);
             while (true)
             {
                 string windowHtml = BuildMessagesWindowHtml(windowSize, out int windowStart);
-                string pageHtml = ChatHtmlService.BuildInitialPageFromMessagesHtml(windowHtml);
-                int pageBytes = GetNavigateToStringPayloadBytes(pageHtml);
+                int windowUtf8Bytes = Encoding.UTF8.GetByteCount(windowHtml);
+                int pageBytes = Math.Max(
+                    shellUtf8Bytes + windowUtf8Bytes,
+                    shellUtf16Bytes + windowHtml.Length * 2);
 
                 if (pageBytes <= maxBytes)
                 {
@@ -1368,15 +1659,14 @@ namespace DeepSeek_v4_for_VisualStudio.View
                     }
 
                     ApplyMessagesWindow(windowHtml, windowStart);
-                    return pageHtml;
+                    return ChatHtmlService.BuildInitialPageFromMessagesHtml(windowHtml);
                 }
 
                 // 单条最新消息仍超限时，不能继续缩到空窗口并把历史静默丢掉。
                 // 先导航不含消息的轻量页面，再由 __pageReady__ 分块补发完整窗口。
                 if (windowSize <= 1)
                 {
-                    string shellHtml = ChatHtmlService.BuildInitialPageFromMessagesHtml(string.Empty);
-                    int shellBytes = GetNavigateToStringPayloadBytes(shellHtml);
+                    int shellBytes = Math.Max(shellUtf8Bytes, shellUtf16Bytes);
                     if (shellBytes > maxBytes)
                     {
                         throw new InvalidOperationException(
@@ -1417,9 +1707,11 @@ namespace DeepSeek_v4_for_VisualStudio.View
             if (html == null)
                 throw new ArgumentNullException(nameof(html));
 
+            // UTF-16 的字节数就是 char 数 * 2（代理对同样是两个 char、四个字节），
+            // 无需再跑一次 Encoding.Unicode.GetByteCount 全量扫描。
             return Math.Max(
                 Encoding.UTF8.GetByteCount(html),
-                Encoding.Unicode.GetByteCount(html));
+                html.Length * 2);
         }
 
         /// <summary>
@@ -1431,7 +1723,7 @@ namespace DeepSeek_v4_for_VisualStudio.View
                 throw new ArgumentNullException(nameof(html));
 
             int utf8Bytes = Encoding.UTF8.GetByteCount(html);
-            int utf16Bytes = Encoding.Unicode.GetByteCount(html);
+            int utf16Bytes = html.Length * 2;
             int nullCount = 0;
             int controlCount = 0;
             int unpairedSurrogateCount = 0;
@@ -1679,7 +1971,11 @@ namespace DeepSeek_v4_for_VisualStudio.View
             string? reasoningDelta = null,
             string? contentDelta = null)
         {
-            if (ChatWebView.CoreWebView2 == null || !_pageReady) return;
+            if (!CanPostStreamingUpdateNow())
+            {
+                _webViewRenderDirtyWhileDetached = true;
+                return;
+            }
 
             try
             {
@@ -1935,9 +2231,7 @@ namespace DeepSeek_v4_for_VisualStudio.View
                 _pageReady = false;
                 _browserInitialized = false;
 
-                Dispatcher.BeginInvoke(
-                    System.Windows.Threading.DispatcherPriority.Background,
-                    new Action(() => { _ = RestoreWebViewAfterReloadAsync(); }));
+                ScheduleWebViewRestoreAfterReload();
             }
             catch (Exception ex)
             {
