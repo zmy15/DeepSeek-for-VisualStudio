@@ -2431,6 +2431,10 @@ namespace DeepSeek_v4_for_VisualStudio.View
         /// </summary>
         private void CoreWebView2_NavigationStarting(object? sender, CoreWebView2NavigationStartingEventArgs e)
         {
+            // ── 页面即将导航：旧页面的回执不可能再到达 ──
+            // 先结束所有在途等待，避免等待方挂到超时（导航重建页面时尤其常见）。
+            _turnProcessWaiter.CancelAll();
+
             if (string.IsNullOrEmpty(e.Uri)) return;
 
             // ── 只拦截 vs-navigate:// 自定义协议 ──
@@ -2941,6 +2945,18 @@ namespace DeepSeek_v4_for_VisualStudio.View
                 if (obj.TryGetProperty("type", out var typeProp))
                 {
                     string type = typeProp.GetString() ?? string.Empty;
+
+                    // ── 过程折叠块渲染回执：DOM 节点已挂载，立即放行等待方执行折叠 ──
+                    // 该类型先于其它业务分支处理并返回，避免回执消息继续走后续分发链。
+                    if (type == "turnProcessRendered")
+                    {
+                        string? receiptTurnId = obj.TryGetProperty("turnId", out var receiptTurnIdProp)
+                            ? receiptTurnIdProp.GetString()
+                            : null;
+                        if (!string.IsNullOrEmpty(receiptTurnId))
+                            _turnProcessWaiter.Complete(receiptTurnId!);
+                        return;
+                    }
 
                     if (type == "debugShortcut")
                     {

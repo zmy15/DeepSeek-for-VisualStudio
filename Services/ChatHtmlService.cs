@@ -1205,16 +1205,31 @@ namespace DeepSeek_v4_for_VisualStudio.Services
         }
 
         /// <summary>
-        /// 构建「过程折叠块是否已就绪」的探测脚本。
-        /// 用于替代固定的等待时长：streamEnd 的 innerHTML 覆盖与收起指令之间存在竞态，
-        /// 靠 Task.Delay 猜时间在繁忙或大 DOM 下并不可靠。
+        /// 构建「过程折叠块已渲染」的握手脚本：先扫描 DOM，未命中则用 MutationObserver 等待插入，
+        /// 命中后经统一上行通道回发 turnProcessRendered 回执并立即断开观察。
+        /// 一次脚本同时覆盖首屏全量渲染与后续增量插入两条路径，
+        /// 替代原先 20 次 × 50ms 的往返探测（轮询在繁忙或大 DOM 下既不可靠又固定耗时）。
         /// </summary>
-        /// <param name="turnId">目标轮次标识。</param>
-        /// <returns>返回布尔值的 JS 表达式（ExecuteScriptAsync 结果为 "true" / "false"）。</returns>
-        public static string BuildTurnProcessProbeJs(string turnId)
+        /// <param name="turnId">目标轮次标识，与过程折叠块的 data-turn-id 一致。</param>
+        /// <returns>可直接交给 ExecuteScriptAsync 执行的自执行 JS 片段。</returns>
+        public static string BuildTurnProcessReceiptJs(string turnId)
         {
-            return "(function(){try{return !!document.querySelector(\"details.turn-process[data-turn-id='\""
-                + EscapeJsString(turnId) + "']\");}catch(e){return false;}})()";
+            // 轮次标识经 EscapeJsString 转义后作为 JS 字符串字面量嵌入，避免引号截断选择器、
+            // 也避免轮次标识中的特殊字符破坏后续拼接。
+            string idLiteral = EscapeJsString(turnId ?? string.Empty);
+
+            return "(function(){try{"
+                + "var id=" + idLiteral + ";"
+                + "var sel=\"details.turn-process[data-turn-id='\"+id+\"']\";"
+                + "var send=function(){try{if(window.__sendToHost)window.__sendToHost({type:'turnProcessRendered',turnId:id});}catch(e){}};"
+                // 首屏全量渲染路径：节点可能已随初始 HTML 就位，直接回执
+                + "if(document.querySelector(sel)){send();return;}"
+                // 增量插入路径：监听后续插入，命中即回执并立刻断开观察
+                + "var obs=new MutationObserver(function(){if(document.querySelector(sel)){obs.disconnect();send();}});"
+                + "obs.observe(document.documentElement,{childList:true,subtree:true});"
+                // 自断开兜底：本脚本只关心当前回合，页面长期存活时不得残留观察器
+                + "setTimeout(function(){try{obs.disconnect();}catch(e){}},2000);"
+                + "}catch(e){}})()";
         }
 
         /// <summary>

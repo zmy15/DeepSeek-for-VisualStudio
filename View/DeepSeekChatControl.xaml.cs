@@ -1842,6 +1842,19 @@ namespace DeepSeek_v4_for_VisualStudio.View
             _suppressWebViewUpdate = true;
             DetachChatWebViewEvents(ChatWebView);
 
+            // ── 取消尚未完成的过程折叠块回执等待 ──
+            // 页面随控件一起销毁后回执不可能再到达，必须主动结束在途等待，
+            // 否则 Dispatcher 队列中的折叠逻辑会一直挂到超时。
+            try
+            {
+                _turnProcessWaiter.CancelAll();
+                _turnProcessWaiter.Dispose();
+            }
+            catch (Exception ex)
+            {
+                Logger.Debug($"[Dispose] 释放过程折叠块回执等待器失败: {ex.GetType().Name}");
+            }
+
             if (_agentFactory != null)
             {
                 if (_activeAgent != null)

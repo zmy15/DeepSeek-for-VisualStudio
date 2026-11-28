@@ -8,3 +8,12 @@ repos:
       - id: check-toml
       - id: check-yaml
       - id: detect-private-key
+  # WebView 前端资源：仅在前端资源变更时触发，无 node 环境下自动降级为警告
+  - repo: local
+    hooks:
+      - id: check-web-assets
+        name: 校验 WebView 前端资源（编码 / 占位符 / JS 语法）
+        entry: pwsh -NoProfile -File tools/check-web-assets.ps1
+        language: system
+        files: ^Resources/Chat/.*\.(js|css)$
+        pass_filenames: true

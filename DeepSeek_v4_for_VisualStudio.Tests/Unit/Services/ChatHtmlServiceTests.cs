@@ -379,14 +379,28 @@ public class ChatHtmlServiceTests
     }
 
     [Fact]
-    public void BuildTurnProcessProbeJs_TargetsTurnSpecificElement()
+    public void BuildTurnProcessReceiptJs_EmitsReceiptViaUnifiedChannel()
     {
-        string js = ChatHtmlService.BuildTurnProcessProbeJs("turn123");
+        string js = ChatHtmlService.BuildTurnProcessReceiptJs("turn123");
 
         js.Should().Contain("details.turn-process");
         js.Should().Contain("turn123");
-        // 探测需返回布尔值，供宿主判定节点是否已挂上 DOM
-        js.Should().Contain("!!document.querySelector");
+        // 回执必须走统一上行通道，且消息类型与宿主分发分支保持一致
+        js.Should().Contain("__sendToHost");
+        js.Should().Contain("turnProcessRendered");
+        // 节点尚未插入时需挂观察器等待增量插入，并自断开避免观察器长期残留
+        js.Should().Contain("MutationObserver");
+        js.Should().Contain("setTimeout");
+    }
+
+    [Fact]
+    public void BuildTurnProcessReceiptJs_EscapesTurnId()
+    {
+        string js = ChatHtmlService.BuildTurnProcessReceiptJs("a'b");
+
+        js.Should().Contain("turnProcessRendered");
+        // 轮次标识中的引号必须转义，否则会截断选择器字符串
+        js.Should().NotContain("'a'b'");
     }
 
     [Fact]
@@ -397,6 +411,148 @@ public class ChatHtmlServiceTests
         js.Should().Contain("__collapseTurnProcess");
         // 轮次标识中的引号必须转义，否则会截断选择器字符串
         js.Should().NotContain("'a'b'");
+    }
+
+    /// <summary>
+    /// 迁移基线目录：从测试输出目录向上回溯到仓库根。
+    /// 基线是「脚本正文逐字等价」的唯一客观证据，缺失即视为验收失败。
+    /// </summary>
+    private static string MigrationBaselineDir
+    {
+        get
+        {
+            DirectoryInfo? dir = new DirectoryInfo(AppContext.BaseDirectory);
+            while (dir != null)
+            {
+                string candidate = Path.Combine(dir.FullName, "tools", "webasset-baseline");
+                if (Directory.Exists(candidate))
+                    return candidate;
+                dir = dir.Parent;
+            }
+
+            throw new DirectoryNotFoundException(
+                $"未找到 tools\\webasset-baseline 目录（起点: {AppContext.BaseDirectory}）");
+        }
+    }
+
+    /// <summary>计算文本的 SHA256，用于等价性断言失败时快速判断漂移规模。</summary>
+    private static string Sha256(string text)
+    {
+        using var sha = System.Security.Cryptography.SHA256.Create();
+        byte[] hash = sha.ComputeHash(System.Text.Encoding.UTF8.GetBytes(text));
+        return BitConverter.ToString(hash).Replace("-", string.Empty);
+    }
+
+    [Theory]
+    [InlineData("detox-emojis", "BuildDetoxEmojisJs")]
+    [InlineData("shift-scroll", "BuildShiftScrollJs")]
+    [InlineData("vs-shortcut-forwarding", "BuildVsShortcutForwardingJs")]
+    [InlineData("render-math", "BuildRenderMathJsFunction")]
+    [InlineData("auto-scroll", "BuildAutoScrollJs")]
+    [InlineData("append-message", "BuildAppendMessageJsFunction")]
+    public void StaticJsAsset_MatchesMigrationBaseline(string assetName, string methodName)
+    {
+        string baselinePath = Path.Combine(MigrationBaselineDir, assetName + ".baseline.js");
+        File.Exists(baselinePath).Should().BeTrue($"迁移基线缺失: {baselinePath}");
+
+        string expected = File.ReadAllText(baselinePath);
+
+        MethodInfo? method = typeof(ChatHtmlService).GetMethod(
+            methodName, BindingFlags.NonPublic | BindingFlags.Static);
+        method.Should().NotBeNull($"{nameof(ChatHtmlService)} 应保留 {methodName} 方法");
+
+        string actual = (string?)method!.Invoke(null, null) ?? string.Empty;
+
+        // 失败信息带 SHA256，便于快速判断是首尾空白、缩进还是转义漂移
+        actual.Should().Be(expected,
+            $"脚本正文必须与迁移基线逐字一致（{assetName}）。actual={Sha256(actual)} expected={Sha256(expected)}");
+    }
+
+    [Fact]
+    public void StaticJsAssets_HaveNoCStyleEscapesLeftover()
+    {
+        // 直接读取资源原文而非经 loader 替换：含占位符的资源在无取值时会按设计抛异常。
+        string jsDir = Path.Combine(
+            Directory.GetParent(MigrationBaselineDir)!.Parent!.FullName, "Resources", "Chat", "Js");
+
+        foreach (string file in Directory.GetFiles(jsDir, "*.js"))
+        {
+            string js = File.ReadAllText(file);
+
+            // C# 原始字符串里的 "" 表示单个双引号，外移后必须还原；
+            // 残留会让属性选择器永不匹配且不报错，属静默失效。
+            js.Should().NotContain("\"\"agent-task-panel",
+                $"{Path.GetFileName(file)} 的双引号应为单个，而不是原始字符串的双写形式");
+        }
+    }
+
+    [Fact]
+    public void BuildContextDebugLabelsJs_ProducesParsableJsonWithAllKeys()
+    {
+        // 该方法为 private static，与其他外移方法一致，通过反射调用以保持封装。
+        MethodInfo? labelsMethod = typeof(ChatHtmlService).GetMethod(
+            "BuildContextDebugLabelsJs", BindingFlags.NonPublic | BindingFlags.Static);
+        labelsMethod.Should().NotBeNull();
+
+        string js = (string?)labelsMethod!.Invoke(null, null) ?? string.Empty;
+
+        js.Should().Contain("window.__ctxDebugLabels");
+        js.Should().Contain("JSON.parse");
+
+        // 资源把标签 JSON 放在独立变量里再交给 JSON.parse（这样脚本文件本身才是合法 JS），
+        // 因此这里取出该变量字符串字面量的内容，先按 JSON 字符串还原，再解析成对象。
+        // 任一步失败或某个键缺失，都会让上下文面板显示空白标签。
+        System.Text.RegularExpressions.Match labelMatch = System.Text.RegularExpressions.Regex.Match(
+            js, "__ctxLabelsJson\\s*=\\s*\"(?<json>(?:[^\"\\\\]|\\\\.)*)\";");
+        labelMatch.Success.Should().BeTrue("输出应包含 __ctxLabelsJson 的赋值");
+
+        string json = System.Text.Json.JsonDocument
+            .Parse("\"" + labelMatch.Groups["json"].Value + "\"")
+            .RootElement.GetString()!;
+
+        using var doc = System.Text.Json.JsonDocument.Parse(json);
+        foreach (string key in new[]
+        {
+            "title", "tokens", "injected", "characters", "file", "selection", "cursor", "symbol",
+            "diagnostics", "errors", "warnings", "off", "turns", "messages", "toolCalls",
+            "forwarded", "requestEstimate", "tokensPerSecond",
+        })
+        {
+            doc.RootElement.TryGetProperty(key, out _).Should().BeTrue($"标签键 {key} 缺失");
+        }
+    }
+
+    [Fact]
+    public void BuildRetryEditJsFunctions_LoadsCompleteScriptFromResource()
+    {
+        MethodInfo? method = typeof(ChatHtmlService).GetMethod(
+            "BuildRetryEditJsFunctions", BindingFlags.NonPublic | BindingFlags.Static);
+        method.Should().NotBeNull();
+
+        string js = (string?)method!.Invoke(null, null) ?? string.Empty;
+
+        // 关键入口必须齐全：任一段缺失都会让消息操作 / SVG 预览 / 问题卡片整体失效。
+        foreach (string marker in new[]
+        {
+            "window.__sendToHost",
+            "window.__openSvgPreview",
+            "window.__wireSvgDiagramPreviews",
+            "window.__answerQuestions",
+            "window.__copyMessage",
+            "window.__applyCtxDebugTheme",
+            "_flushStreamBuf",
+        })
+        {
+            js.Should().Contain(marker, $"外移后的脚本应包含 {marker}");
+        }
+
+        // 占位符必须全部替换；C# 原始字符串的 "" 转义必须已还原（否则选择器静默失效）
+        js.Should().NotContain("{{");
+        js.Should().NotContain("\"\"agent-task-panel", "双引号应为单个，而不是原始字符串的双写形式");
+
+        // 本地化前缀应以合法 JS 字面量形式注入
+        js.Should().Contain("var __markdownFailText=");
+        js.Should().Contain("var __actLabels={retry:");
     }
 
     [Fact]
