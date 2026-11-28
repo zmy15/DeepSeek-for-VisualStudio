@@ -845,18 +845,43 @@ window._showCopyFeedback=function(msgIndex){
 
     // ═══ Context Debugger 面板（P2，序号 20 渲染层）═══
     // 懒创建：首条 contextDebug 消息到达时注入固定抽屉（右上角，默认折叠）
+    function _applyCtxDebugTheme(panel){
+        if(!panel)return;
+        var light=document.documentElement.getAttribute('data-theme')==='light';
+        var colors=light?{
+            bg:'#ffffffee',text:'#333333',border:'#0078d4',
+            head:'#005a9e',divider:'#d0d7de',shadow:'rgba(0,0,0,.16)'
+        }:{
+            bg:'#252526ee',text:'#d4d4d4',border:'#007acc',
+            head:'#9cdcfe',divider:'#3f3f46',shadow:'rgba(0,0,0,.4)'
+        };
+        panel.style.background=colors.bg;
+        panel.style.borderColor=colors.border;
+        panel.style.color=colors.text;
+        panel.style.boxShadow='0 4px 14px '+colors.shadow;
+        var head=document.getElementById('ctx-debug-head');
+        var body=document.getElementById('ctx-debug-body');
+        if(head)head.style.color=colors.head;
+        if(body)body.style.borderTopColor=colors.divider;
+    }
+    window.__applyCtxDebugTheme=function(){
+        _applyCtxDebugTheme(document.getElementById('ctx-debug'));
+    };
     function _ensureCtxPanel(){
         var p=document.getElementById('ctx-debug');
-        if(p)return p;
+        if(p){
+            _applyCtxDebugTheme(p);
+            return p;
+        }
         p=document.createElement('div');
         p.id='ctx-debug';
-        p.style.cssText='position:fixed;top:8px;right:12px;z-index:9999;background:#252526ee;'
-            +'border:1px solid #007ACC;border-radius:8px;font:11px/1.55 Consolas,monospace;'
-            +'color:#d4d4d4;max-width:420px;display:none;box-shadow:0 4px 14px rgba(0,0,0,.4);';
+        p.style.cssText='position:fixed;top:8px;right:12px;z-index:9999;'
+            +'border:1px solid #007acc;border-radius:8px;font:11px/1.55 Consolas,monospace;'
+            +'max-width:420px;display:none;';
         var head=document.createElement('div');
         head.id='ctx-debug-head';
         head.textContent=(window.__ctxDebugLabels||{}).title||'Context';
-        head.style.cssText='padding:4px 10px;cursor:pointer;user-select:none;color:#9CDCFE;';
+        head.style.cssText='padding:4px 10px;cursor:pointer;user-select:none;';
         var body=document.createElement('div');
         body.id='ctx-debug-body';
         body.style.cssText='display:none;padding:6px 10px 8px;border-top:1px solid #3f3f46;white-space:pre-wrap;';
@@ -867,12 +892,14 @@ window._showCopyFeedback=function(msgIndex){
         });
         p.appendChild(head);p.appendChild(body);
         document.body.appendChild(p);
+        _applyCtxDebugTheme(p);
         return p;
     }
     function _renderCtxDebug(d){
         try{
             var panel=_ensureCtxPanel();
             panel.style.display='block';
+            _applyCtxDebugTheme(panel);
             var t=window.__ctxDebugLabels||{};
             var rows=[];
             var tk=d.tokens||{};

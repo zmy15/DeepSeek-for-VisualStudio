@@ -679,15 +679,7 @@ namespace DeepSeek_v4_for_VisualStudio.View
 
         private void ApplyLightPalette()
         {
-            Resources["QuickComboBackground"] = CreateFrozenBrush(0xFF, 0xFF, 0xFF);
-            Resources["QuickComboBorder"] = CreateFrozenBrush(0xC2, 0xC2, 0xC2);
-            Resources["QuickComboHover"] = CreateFrozenBrush(0xEE, 0xEE, 0xEE);
-            Resources["QuickComboPopup"] = CreateFrozenBrush(0xFF, 0xFF, 0xFF);
-            Resources["QuickComboSelection"] = CreateFrozenBrush(0xCC, 0xE4, 0xF7);
-            Resources["QuickComboArrow"] = CreateFrozenBrush(0x60, 0x60, 0x60);
-            Resources["QuickSliderTrack"] = CreateFrozenBrush(0xD0, 0xD0, 0xD0);
-            Resources["QuickSliderFill"] = CreateFrozenBrush(0x00, 0x78, 0xD4);
-            Resources["QuickSliderThumb"] = CreateFrozenBrush(0xFF, 0xFF, 0xFF);
+            ApplyLightPaletteResources(Resources);
 
             var map = new Dictionary<Color, Color>
             {
@@ -708,6 +700,28 @@ namespace DeepSeek_v4_for_VisualStudio.View
             Swap(this, Control.BackgroundProperty, map);
             Swap(this, Control.ForegroundProperty, map);
             RewriteBrushes(this, map);
+        }
+
+        /// <summary>
+        /// 应用快速设置浅色资源。下拉项是稍后生成的 Popup 内容，
+        /// 必须通过动态资源提供前景色，不能依赖打开后再遍历逻辑树。
+        /// </summary>
+        internal static void ApplyLightPaletteResources(ResourceDictionary resources)
+        {
+            if (resources == null)
+                throw new ArgumentNullException(nameof(resources));
+
+            resources["QuickComboBackground"] = CreateFrozenBrush(0xFF, 0xFF, 0xFF);
+            resources["QuickComboBorder"] = CreateFrozenBrush(0xC2, 0xC2, 0xC2);
+            resources["QuickComboHover"] = CreateFrozenBrush(0xEE, 0xEE, 0xEE);
+            resources["QuickComboPopup"] = CreateFrozenBrush(0xFF, 0xFF, 0xFF);
+            resources["QuickComboSelection"] = CreateFrozenBrush(0xCC, 0xE4, 0xF7);
+            resources["QuickComboArrow"] = CreateFrozenBrush(0x60, 0x60, 0x60);
+            resources["QuickComboForeground"] = CreateFrozenBrush(0x20, 0x20, 0x20);
+            resources["QuickTextPrimary"] = CreateFrozenBrush(0x20, 0x20, 0x20);
+            resources["QuickSliderTrack"] = CreateFrozenBrush(0xD0, 0xD0, 0xD0);
+            resources["QuickSliderFill"] = CreateFrozenBrush(0x00, 0x78, 0xD4);
+            resources["QuickSliderThumb"] = CreateFrozenBrush(0xFF, 0xFF, 0xFF);
         }
 
         private static SolidColorBrush CreateFrozenBrush(byte red, byte green, byte blue)

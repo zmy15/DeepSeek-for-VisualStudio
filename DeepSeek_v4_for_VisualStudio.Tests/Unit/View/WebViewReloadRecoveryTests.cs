@@ -111,6 +111,24 @@ public class WebViewReloadRecoveryTests
         method!.Invoke(control, new object?[] { control, new System.Windows.RoutedEventArgs() });
     }
 
+    private static T? FindVisualChild<T>(System.Windows.DependencyObject parent)
+        where T : System.Windows.DependencyObject
+    {
+        int count = System.Windows.Media.VisualTreeHelper.GetChildrenCount(parent);
+        for (int i = 0; i < count; i++)
+        {
+            var child = System.Windows.Media.VisualTreeHelper.GetChild(parent, i);
+            if (child is T match)
+                return match;
+
+            var nested = FindVisualChild<T>(child);
+            if (nested != null)
+                return nested;
+        }
+
+        return null;
+    }
+
     /// <summary>调用控件的私有可见性处理器（DependencyPropertyChangedEventArgs 版本）。</summary>
     private static void InvokeVisibilityHandler(
         DeepSeekChatControl control, string methodName, bool newValue)
@@ -126,9 +144,9 @@ public class WebViewReloadRecoveryTests
     }
 
     // ── 失效实例识别（本次修复的核心）────────────────────────────────
-    // 实测教训：控件卸载后 CoreWebView2 引用仍在、属性访问不抛异常，
-    // 但 NavigateToString 完全无效（2.5 秒后 docUrl 仍为 about:blank）。
-    // 因此必须以「实例是否经历过卸载」作为实质判据，而非属性可访问性。
+    // 一次 Unloaded 不能直接判定实例永久失效：VS 停靠 / 自动隐藏会短暂
+    // 移出并重新挂载同一 WebView2。恢复时必须先尝试现有实例，只有探测失败
+    // 或 CoreWebView2 访问异常时才设置 stale 并进入完整重建。
 
     /// <summary>调用 TryGetLiveCoreWebView 并返回其结果。</summary>
     private static bool InvokeTryGetLiveCoreWebView(DeepSeekChatControl control)
@@ -142,7 +160,7 @@ public class WebViewReloadRecoveryTests
     }
 
     [Fact]
-    public void Unloaded_ShouldMarkInstanceStale()
+    public void Unloaded_ShouldNotImmediatelyMarkInstanceStale()
     {
         RunOnStaThread(control =>
         {
@@ -151,10 +169,10 @@ public class WebViewReloadRecoveryTests
 
             InvokeHandler(control, "ChatWebView_Unloaded");
 
-            // 这是关键状态：卸载后实例的底层浏览器已释放，
-            // 必须持续标记为失效（直到创建新控件），否则恢复路径会做无效的导航尝试。
-            GetField<bool>(control, "_webViewInstanceStale").Should().BeTrue(
-                "卸载后的控件实例必须被标记为失效");
+            GetField<bool>(control, "_webViewInstanceStale").Should().BeFalse(
+                "短暂停靠或布局切换触发的 Unloaded 不能直接判死");
+            GetField<bool>(control, "_webViewReloadNeedsRestore").Should().BeTrue(
+                "仍应标记为待恢复，等到 Loaded 后探测现有实例");
         });
     }
 
@@ -317,7 +335,7 @@ public class WebViewReloadRecoveryTests
     // ── 卸载/重载路径的渲染状态复位契约 ──────────────────────────────
 
     [Fact]
-    public void Unloaded_ShouldInvalidateRenderingStateAndArmRestore()
+    public void Unloaded_ShouldPreserveRenderingStateAndArmRestore()
     {
         RunOnStaThread(control =>
         {
@@ -329,14 +347,432 @@ public class WebViewReloadRecoveryTests
 
             InvokeHandler(control, "ChatWebView_Unloaded");
 
-            // 控件脱离视觉树后 CoreWebView2 与页面 DOM 均已消失，
-            // 这些标志若不复位，恢复路径会误判「页面仍然完好」而跳过重绘 → 空白窗口
-            GetField<bool>(control, "_webViewInitialized").Should().BeFalse();
-            GetField<bool>(control, "_pageReady").Should().BeFalse();
-            GetField<bool>(control, "_browserInitialized").Should().BeFalse();
+            // 暂时卸载不代表 DOM 已消失。保留状态，Loaded 后先探测现有实例；
+            // 只有探测失败才由恢复路径复位这些标志并重建。
+            GetField<bool>(control, "_webViewInitialized").Should().BeTrue();
+            GetField<bool>(control, "_pageReady").Should().BeTrue();
+            GetField<bool>(control, "_browserInitialized").Should().BeTrue();
 
             // 置位恢复标记，供 Loaded 判断这是一次真实的重载往返
             GetField<bool>(control, "_webViewReloadNeedsRestore").Should().BeTrue();
+        });
+    }
+
+    [Fact]
+    public void IntentionalReattach_ShouldNotArmRestoreOrInvalidateState()
+    {
+        RunOnStaThread(control =>
+        {
+            SetField(control, "_webViewInitialized", true);
+            SetField(control, "_pageReady", true);
+            SetField(control, "_browserInitialized", true);
+            SetField(control, "_isIntentionalWebViewReattach", true);
+
+            InvokeHandler(control, "ChatWebView_Unloaded");
+
+            GetField<bool>(control, "_webViewReloadNeedsRestore").Should().BeFalse(
+                "代码主动重挂只用于修复 D3D 合成链，不应升级为窗口恢复");
+            GetField<bool>(control, "_webViewInstanceStale").Should().BeFalse();
+            GetField<bool>(control, "_webViewInitialized").Should().BeTrue();
+            GetField<bool>(control, "_pageReady").Should().BeTrue();
+            GetField<bool>(control, "_browserInitialized").Should().BeTrue();
+        });
+    }
+
+    [Fact]
+    public void UpdateBrowser_WhenDetachedAfterInitialization_ShouldDeferWithoutRebuild()
+    {
+        RunOnStaThread(control =>
+        {
+            SetField(control, "_webViewInitialized", true);
+            SetField(control, "_webViewRenderDirtyWhileDetached", false);
+
+            var method = typeof(DeepSeekChatControl).GetMethod(
+                "UpdateBrowser", BindingFlags.Instance | BindingFlags.NonPublic);
+            method.Should().NotBeNull("UpdateBrowser 应存在");
+
+            method!.Invoke(control, null);
+
+            GetField<bool>(control, "_webViewRenderDirtyWhileDetached").Should().BeTrue(
+                "暂时脱离视觉树期间应只记录待渲染状态");
+            GetField<Task<bool>?>(control, "_webViewRebuildTask").Should().BeNull(
+                "未挂载不能仅因 Parent/IsLoaded 为空就启动完整重建");
+        });
+    }
+
+    [Fact]
+    public void UpdateBrowser_WhenAlreadyRunning_ShouldCoalescePendingRequest()
+    {
+        RunOnStaThread(control =>
+        {
+            SetField(control, "_webViewInitialized", false);
+            SetField(control, "_browserUpdateRunning", true);
+            SetField(control, "_browserUpdatePending", false);
+
+            var method = typeof(DeepSeekChatControl).GetMethod(
+                "UpdateBrowser", BindingFlags.Instance | BindingFlags.NonPublic);
+            method.Should().NotBeNull();
+
+            method!.Invoke(control, null);
+
+            GetField<bool>(control, "_browserUpdatePending").Should().BeTrue(
+                "并发渲染请求应合并为一次 pending，而不是同时执行 NavigateToString");
+        });
+    }
+
+    [Fact]
+    public void RenderedSampleMaxEdge_ShouldBeBounded()
+    {
+        var field = typeof(DeepSeekChatControl).GetField(
+            "RenderedSampleMaxEdge",
+            BindingFlags.NonPublic | BindingFlags.Static);
+        field.Should().NotBeNull();
+
+        int maxEdge = (int)field!.GetRawConstantValue()!;
+        maxEdge.Should().BeGreaterThan(0);
+        maxEdge.Should().BeLessThanOrEqualTo(512, "健康检查不能重新引入全尺寸位图分配");
+    }
+
+    [Fact]
+    public void CanPostStreamingUpdateNow_WhenPageIsNotReady_ShouldBeFalse()
+    {
+        RunOnStaThread(control =>
+        {
+            SetField(control, "_pageReady", false);
+            SetField(control, "_webViewInitialized", true);
+
+            var method = typeof(DeepSeekChatControl).GetMethod(
+                "CanPostStreamingUpdateNow",
+                BindingFlags.Instance | BindingFlags.NonPublic);
+            method.Should().NotBeNull();
+
+            bool canPost = (bool)method!.Invoke(control, null)!;
+            canPost.Should().BeFalse("页面未就绪时流式更新必须继续积压");
+        });
+    }
+
+    [Fact]
+    public void ScheduleCompositionHealthCheck_ShouldCollapseDuplicateQueuedRequests()
+    {
+        RunOnStaThread(control =>
+        {
+            SetField(control, "_compositionHealthCheckQueued", false);
+            SetField(control, "_compositionHealthCheckRunning", false);
+            SetField(control, "_compositionHealthCheckRequested", false);
+
+            var method = typeof(DeepSeekChatControl).GetMethod(
+                "ScheduleCompositionHealthCheck",
+                BindingFlags.Instance | BindingFlags.NonPublic);
+            method.Should().NotBeNull();
+
+            method!.Invoke(control, null);
+            method.Invoke(control, null);
+
+            GetField<bool>(control, "_compositionHealthCheckQueued").Should().BeTrue();
+            GetField<bool>(control, "_compositionHealthCheckRequested").Should().BeFalse(
+                "尚在队列中的重复请求不需要再安排第二轮");
+        });
+    }
+
+    [Fact]
+    public void ScheduleCompositionHealthCheck_WhenRunning_ShouldRequestOneRerun()
+    {
+        RunOnStaThread(control =>
+        {
+            SetField(control, "_compositionHealthCheckQueued", false);
+            SetField(control, "_compositionHealthCheckRunning", true);
+            SetField(control, "_compositionHealthCheckRequested", false);
+
+            var method = typeof(DeepSeekChatControl).GetMethod(
+                "ScheduleCompositionHealthCheck",
+                BindingFlags.Instance | BindingFlags.NonPublic);
+            method.Should().NotBeNull();
+
+            method!.Invoke(control, null);
+
+            GetField<bool>(control, "_compositionHealthCheckRequested").Should().BeTrue(
+                "执行期间的新可见性变化只应合并成一次重跑");
+        });
+    }
+
+    [Fact]
+    public void ScheduleWebViewRestore_ShouldCollapseQueuedAndRunningRequests()
+    {
+        RunOnStaThread(control =>
+        {
+            var method = typeof(DeepSeekChatControl).GetMethod(
+                "ScheduleWebViewRestoreAfterReload",
+                BindingFlags.Instance | BindingFlags.NonPublic);
+            method.Should().NotBeNull();
+
+            SetField(control, "_webViewRestoreQueued", false);
+            SetField(control, "_webViewRestoreRunning", false);
+            SetField(control, "_webViewRestoreRequested", false);
+            method!.Invoke(control, null);
+            method.Invoke(control, null);
+            GetField<bool>(control, "_webViewRestoreQueued").Should().BeTrue();
+            GetField<bool>(control, "_webViewRestoreRequested").Should().BeFalse();
+
+            SetField(control, "_webViewRestoreQueued", false);
+            SetField(control, "_webViewRestoreRunning", true);
+            method.Invoke(control, null);
+            method.Invoke(control, null);
+            GetField<bool>(control, "_webViewRestoreRequested").Should().BeTrue(
+                "恢复执行期间的重复 Loaded/可见性事件只保留一次后续恢复");
+        });
+    }
+
+    [Fact]
+    public void BatchStreamingUpdate_WhenPageNotReady_ShouldPreservePendingDeltas()
+    {
+        RunOnStaThread(control =>
+        {
+            SetField(control, "_pageReady", false);
+            SetField(control, "_webViewInitialized", true);
+            SetField(control, "_webViewRenderDirtyWhileDetached", false);
+
+            var method = typeof(DeepSeekChatControl).GetMethod(
+                "BatchStreamingUpdate",
+                BindingFlags.Instance | BindingFlags.NonPublic);
+            method.Should().NotBeNull();
+
+            method!.Invoke(control, new object?[]
+            {
+                0,
+                null,
+                null,
+                false,
+                "reasoning-delta",
+                "content-delta",
+            });
+
+            var states = (System.Collections.IDictionary)GetField<object>(
+                control, "_streamBatchStates");
+            states.Count.Should().Be(1, "不可推送时不能丢弃流式批处理状态");
+            GetField<bool>(control, "_webViewRenderDirtyWhileDetached").Should().BeTrue();
+        });
+    }
+
+    [Fact]
+    public void FlushDeferredWebViewRendering_WhenStillHidden_ShouldKeepDirtyState()
+    {
+        RunOnStaThread(control =>
+        {
+            SetField(control, "_pageReady", false);
+            SetField(control, "_webViewInitialized", true);
+            SetField(control, "_webViewRenderDirtyWhileDetached", true);
+
+            var method = typeof(DeepSeekChatControl).GetMethod(
+                "FlushDeferredWebViewRendering",
+                BindingFlags.Instance | BindingFlags.NonPublic);
+            method.Should().NotBeNull();
+
+            method!.Invoke(control, null);
+
+            GetField<bool>(control, "_webViewRenderDirtyWhileDetached").Should().BeTrue(
+                "页面仍不可见/未就绪时不能提前清除待渲染状态");
+        });
+    }
+
+    [Fact]
+    public void FlushDeferredWebViewRendering_WhenNothingIsDirty_ShouldNotScheduleBrowserUpdate()
+    {
+        RunOnStaThread(control =>
+        {
+            SetField(control, "_pageReady", true);
+            SetField(control, "_webViewInitialized", true);
+            SetField(control, "_webViewRenderDirtyWhileDetached", false);
+            SetField(control, "_browserUpdateRunning", true);
+            SetField(control, "_browserUpdatePending", false);
+
+            var method = typeof(DeepSeekChatControl).GetMethod(
+                "FlushDeferredWebViewRendering",
+                BindingFlags.Instance | BindingFlags.NonPublic);
+            method.Should().NotBeNull();
+
+            method!.Invoke(control, null);
+
+            GetField<bool>(control, "_browserUpdatePending").Should().BeFalse(
+                "没有待渲染内容时不得启动新的浏览器更新");
+        });
+    }
+
+    [Fact]
+    public void UpdateBrowser_WhenContentUnchanged_ShouldSkipBeforeWebViewRecovery()
+    {
+        RunOnStaThread(control =>
+        {
+            var html = GetField<System.Text.StringBuilder>(control, "_messagesHtml");
+            html.Clear();
+            html.Append("<div>already-rendered</div>");
+
+            SetField(control, "_browserInitialized", true);
+            SetField(control, "_pendingInitialHtml", null);
+            SetField(control, "_lastRenderedMessagesLength", html.Length);
+            SetField(control, "_browserUpdateRunning", false);
+            SetField(control, "_browserUpdatePending", false);
+            SetField(control, "_rebuildAttemptCount", 0);
+
+            var method = typeof(DeepSeekChatControl).GetMethod(
+                "UpdateBrowser", BindingFlags.Instance | BindingFlags.NonPublic);
+            method.Should().NotBeNull();
+
+            method!.Invoke(control, null);
+
+            GetField<int>(control, "_rebuildAttemptCount").Should().Be(0,
+                "内容未变化时不得探测/重建 WebView 或再次全量导航");
+            GetField<bool>(control, "_browserUpdatePending").Should().BeFalse();
+        });
+    }
+
+    [Fact]
+    public void Dispose_ShouldStopAndReleaseFlushIdleTimer()
+    {
+        RunOnStaThread(control =>
+        {
+            var ensure = typeof(DeepSeekChatControl).GetMethod(
+                "EnsureFlushIdleTimer",
+                BindingFlags.Instance | BindingFlags.NonPublic);
+            ensure.Should().NotBeNull();
+
+            ensure!.Invoke(control, null);
+            GetField<object>(control, "_flushIdleTimer").Should().NotBeNull();
+
+            control.Dispose();
+
+            GetField<object?>(control, "_flushIdleTimer").Should().BeNull();
+            GetField<bool>(control, "_flushIdleTimerCreated").Should().BeFalse();
+        });
+    }
+
+    [Fact]
+    public void HistoryTheme_WhenLight_ShouldUseDarkTextAndLightScrollBars()
+    {
+        RunOnStaThread(control =>
+        {
+            var applyLight = typeof(DeepSeekChatControl).GetMethod(
+                "ApplyWpfLightTheme",
+                BindingFlags.Instance | BindingFlags.NonPublic);
+            applyLight.Should().NotBeNull();
+
+            applyLight!.Invoke(control, null);
+
+            var historyList = GetField<System.Windows.Controls.ListBox>(
+                control, "HistoryListBox");
+            historyList.Style.Should().BeSameAs(
+                control.Resources["HistoryListBoxStyle"],
+                "历史列表必须显式使用专用模板，不能回退到 VS 深色 ScrollBar");
+            control.Resources["HistoryScrollViewerStyle"]
+                .Should().BeOfType<System.Windows.Style>();
+            control.Resources["HistoryScrollBarStyle"]
+                .Should().BeOfType<System.Windows.Style>();
+            var textBrush = (System.Windows.Media.SolidColorBrush)historyList.Foreground;
+            textBrush.Color.R.Should().BeLessThan(0x80,
+                "浅色历史浮层必须使用深色标题，不能继承深色主题的浅灰文字");
+
+            var track = (System.Windows.Media.SolidColorBrush)
+                control.Resources["HistoryScrollTrackBrush"];
+            var thumb = (System.Windows.Media.SolidColorBrush)
+                control.Resources["HistoryScrollThumbBrush"];
+            var hover = (System.Windows.Media.SolidColorBrush)
+                control.Resources["TransparentButtonHoverBrush"];
+            var tooltipBackground = (System.Windows.Media.SolidColorBrush)
+                control.Resources["ToolTipBackgroundBrush"];
+            var tooltipForeground = (System.Windows.Media.SolidColorBrush)
+                control.Resources["ToolTipForegroundBrush"];
+            var quickSettings = GetField<System.Windows.Controls.Button>(
+                control, "QuickSettingsButton");
+            track.Color.R.Should().BeGreaterThan(0xD0,
+                "浅色主题滚动条轨道应为浅色");
+            thumb.Color.R.Should().BeGreaterThan(0xA0,
+                "浅色主题滚动条滑块应为中浅灰");
+            hover.Color.R.Should().BeGreaterThan(0xD0,
+                "浅色主题按钮悬停遮罩不能继续使用深色");
+            tooltipBackground.Color.R.Should().BeGreaterThan(0xE0,
+                "浅色主题 ToolTip 背景应为浅色");
+            tooltipForeground.Color.R.Should().BeLessThan(0x80,
+                "浅色主题 ToolTip 文字应为深色");
+            ((System.Windows.Media.SolidColorBrush)quickSettings.Foreground)
+                .Color.R.Should().BeLessThan(0x80,
+                    "浅色主题快速设置图标必须使用高对比的前景色");
+        });
+    }
+
+    [Fact]
+    public void HistoryTheme_WhenDark_ShouldRestoreDarkScrollBarsAndHoverState()
+    {
+        RunOnStaThread(control =>
+        {
+            var applyDark = typeof(DeepSeekChatControl).GetMethod(
+                "ApplyWpfDarkTheme",
+                BindingFlags.Instance | BindingFlags.NonPublic);
+            applyDark.Should().NotBeNull();
+
+            applyDark!.Invoke(control, null);
+
+            var track = (System.Windows.Media.SolidColorBrush)
+                control.Resources["HistoryScrollTrackBrush"];
+            var hover = (System.Windows.Media.SolidColorBrush)
+                control.Resources["HistoryItemHoverBrush"];
+            var tooltipBackground = (System.Windows.Media.SolidColorBrush)
+                control.Resources["ToolTipBackgroundBrush"];
+            var tooltipForeground = (System.Windows.Media.SolidColorBrush)
+                control.Resources["ToolTipForegroundBrush"];
+            track.Color.R.Should().BeLessThan(0x40,
+                "深色主题滚动条轨道应保持深色");
+            hover.Color.R.Should().BeLessThan(0x60,
+                "深色主题条目悬停底色应保持深色");
+            tooltipBackground.Color.R.Should().BeLessThan(0x60,
+                "深色主题 ToolTip 背景应保持深色");
+            tooltipForeground.Color.R.Should().BeGreaterThan(0xD0,
+                "深色主题 ToolTip 文字应为浅色");
+        });
+    }
+
+    [Fact]
+    public void HistoryListBoxTemplate_ShouldUseThemedScrollViewerAndScrollBar()
+    {
+        RunOnStaThread(control =>
+        {
+            var historyList = GetField<System.Windows.Controls.ListBox>(
+                control, "HistoryListBox");
+            historyList.ApplyTemplate();
+            historyList.Measure(new System.Windows.Size(320, 400));
+            historyList.Arrange(new System.Windows.Rect(0, 0, 320, 400));
+            historyList.UpdateLayout();
+
+            var scrollViewer = FindVisualChild<System.Windows.Controls.ScrollViewer>(historyList);
+            scrollViewer.Should().NotBeNull("HistoryListBox 模板必须包含显式 ScrollViewer");
+            scrollViewer!.Style.Should().BeSameAs(control.Resources["HistoryScrollViewerStyle"]);
+
+            var scrollBar = FindVisualChild<System.Windows.Controls.Primitives.ScrollBar>(
+                scrollViewer);
+            scrollBar.Should().NotBeNull("滚动区域必须使用主题化 ScrollBar");
+            scrollBar!.Style.Should().BeSameAs(control.Resources["HistoryScrollBarStyle"]);
+        });
+    }
+
+    [Fact]
+    public void QuickSettingsLightPalette_ShouldUseDarkComboTextOnLightPopup()
+    {
+        RunOnStaThread(_ =>
+        {
+            var resources = new System.Windows.ResourceDictionary();
+            QuickSettingsDialog.ApplyLightPaletteResources(resources);
+
+            var foreground = (System.Windows.Media.SolidColorBrush)
+                resources["QuickComboForeground"];
+            var popup = (System.Windows.Media.SolidColorBrush)
+                resources["QuickComboPopup"];
+            var selection = (System.Windows.Media.SolidColorBrush)
+                resources["QuickComboSelection"];
+
+            foreground.Color.R.Should().BeLessThan(0x80,
+                "浅色下拉项必须使用深色文字，包括稍后生成的 Popup 内容");
+            popup.Color.R.Should().BeGreaterThan(0xE0,
+                "浅色下拉菜单背景必须为浅色");
+            selection.Color.R.Should().BeGreaterThan(0xB0,
+                "选中项背景必须是浅蓝，不能继续使用深色主题色");
         });
     }
 

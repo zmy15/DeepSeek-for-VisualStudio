@@ -4,6 +4,7 @@ using DeepSeek_v4_for_VisualStudio.Settings;
 using DeepSeek_v4_for_VisualStudio.Utils;
 using Microsoft.Web.WebView2.Core;
 using System;
+using System.Buffers;
 using System.Collections.Generic;
 using System.Runtime.InteropServices;
 using System.Text;
@@ -33,21 +34,37 @@ namespace DeepSeek_v4_for_VisualStudio.View
         private bool _webViewReloadNeedsRestore;
 
         /// <summary>
-        /// 当前控件实例的底层浏览器是否已随视觉树卸载而失效。
+        /// 当前控件实例是否已经确认不可恢复。
         /// <para>
-        /// 与 <see cref="_webViewReloadNeedsRestore"/> 的区别：后者是「一次性触发标记」，
-        /// 在 <c>Loaded</c> 时即被消费；本字段是**持续状态**，表示当前
-        /// <see cref="ChatWebView"/> 实例已不可用，只有创建出全新控件实例
-        /// （<see cref="InitializeChatWebView"/>）时才会清除。
-        /// </para>
-        /// <para>
-        /// 存在的原因（实测）：控件卸载后其 <c>CoreWebView2</c> 引用仍在、属性访问不抛异常，
-        /// 但导航已完全失效——日志显示 <c>NavigateToString</c> 调用后 2.5 秒
-        /// <c>docUrl</c> 依旧是 <c>about:blank</c>。仅靠属性可访问性无法识别这种
-        /// 「已死但引用残留」的实例，故用本字段作为实质判据。
+        /// 不能仅凭一次 <c>Unloaded</c> 就设置此状态。VS 停靠、自动隐藏和布局切换
+        /// 都会短暂把控件移出视觉树，随后又重新挂载；这类实例通常仍可继续使用。
+        /// 只有在重新挂载后等待布局完成、且响应探测或 CoreWebView2 访问失败时，
+        /// 才将实例标记为失效并进入完整重建。
         /// </para>
         /// </summary>
         private bool _webViewInstanceStale;
+
+        /// <summary>
+        /// 控件暂时脱离宿主期间有新的渲染请求。重新挂载并确认 WebView 仍存活后，
+        /// 需要补做一次增量渲染，而不是重建整个浏览器控件。
+        /// </summary>
+        private bool _webViewRenderDirtyWhileDetached;
+
+        /// <summary>
+        /// 正在由代码主动摘挂 WebView 以重建 D3D 合成链路。
+        /// 此期间的 Unloaded/Loaded 不应被解释为窗口永久失效。
+        /// </summary>
+        private bool _isIntentionalWebViewReattach;
+
+        /// <summary>重新挂载后验证浏览器仍能执行脚本的等待上限。</summary>
+        private const int WebViewResponsivenessProbeTimeoutMs = 1500;
+
+        /// <summary>
+        /// 控件重新加载后给 VS 停靠布局和 WebView2 合成表面留出的稳定时间。
+        /// 过早采样会把停靠过程中的空帧误判为合成链故障。
+        /// </summary>
+        private const int CompositionSettleAfterLoadMs = 800;
+        private DateTime _webViewCompositionReadyAtUtc;
 
         /// <summary>
         /// 已尝试的连续重建次数。重建成功时归零；达到
@@ -61,6 +78,24 @@ namespace DeepSeek_v4_for_VisualStudio.View
         /// <summary>进行中的「重挂控件修复空白」任务；用于合并并发请求。</summary>
         private Task? _composeRecoveryTask;
 
+        /// <summary>合成健康检查已排入 Dispatcher，避免一组可见性事件重复入队。</summary>
+        private bool _compositionHealthCheckQueued;
+
+        /// <summary>合成健康检查正在执行；执行期间的新请求只记录一次重跑。</summary>
+        private bool _compositionHealthCheckRunning;
+        private bool _compositionHealthCheckRequested;
+
+        /// <summary>合成画面采样最大边长；诊断只需要判断是否完全空白，无需全分辨率复制。</summary>
+        private const int RenderedSampleMaxEdge = 256;
+
+        /// <summary>合并并发浏览器更新，避免主题/会话/恢复路径重复全量导航。</summary>
+        private bool _browserUpdateRunning;
+        private bool _browserUpdatePending;
+
+        private bool _webViewRestoreQueued;
+        private bool _webViewRestoreRunning;
+        private bool _webViewRestoreRequested;
+
         #region Private Methods - Rendering
 
         /// <summary>
@@ -72,13 +107,9 @@ namespace DeepSeek_v4_for_VisualStudio.View
         /// 因此不能用「属性是否为 null」来判断控件是否还活着。
         /// </para>
         /// <para>
-        /// <b>实测教训</b>：仅靠「属性可访问 + Parent 非 null」仍会把**已死但引用尚存**的
-        /// 实例判为可用。日志证据：控件卸载后探测判定 <c>core=可用</c>，
-        /// 但随后 <c>NavigateToString</c> 完全无效（2.5 秒后 <c>docUrl</c> 仍为
-        /// <c>about:blank</c>）。因此这里追加一项实质判据——
-        /// 若该控件实例**经历过卸载**（<see cref="_webViewReloadNeedsRestore"/> 为 true），
-        /// 则其底层浏览器必然已释放，直接判定不可用，交由重建路径处理，
-        /// 不再浪费时间做注定无效的导航尝试。
+        /// 一次卸载不能证明实例永久失效；重新挂载后的脚本响应探测由
+        /// <see cref="RestoreWebViewAfterReloadAsync"/> 负责。本方法只在基础属性
+        /// 访问失败，或实例已被明确标记为不可恢复时返回 false。
         /// </para>
         /// </summary>
         /// <param name="core">探测到的可用 <see cref="CoreWebView2"/> 实例；控件不可用时为 null。</param>
@@ -91,11 +122,10 @@ namespace DeepSeek_v4_for_VisualStudio.View
             if (_disposed)
                 return false;
 
-            // ── 实质判据：经历过卸载的控件实例，其浏览器已释放 ──
-            // 这类实例的属性访问不会抛异常，但导航已完全无效；必须交给重建路径。
+            // 仅在重新挂载后的响应探测或浏览器进程退出后设置此状态。
             if (_webViewInstanceStale)
             {
-                LogWebViewGoneOnce(ChatWebView, "控件实例已随视觉树卸载而失效（引用残留但导航无效）");
+                LogWebViewGoneOnce(ChatWebView, "控件实例已确认不可恢复");
                 return false;
             }
 
@@ -253,11 +283,20 @@ namespace DeepSeek_v4_for_VisualStudio.View
         private void ChatWebView_Loaded(object sender, RoutedEventArgs e)
         {
             LogWebViewLifecycle("webview.loaded", sender as DependencyObject);
+            _webViewCompositionReadyAtUtc = DateTime.UtcNow.AddMilliseconds(
+                CompositionSettleAfterLoadMs);
+
+            if (_isIntentionalWebViewReattach)
+            {
+                Logger.Debug("[WebViewLifecycle] webview.loaded 来自合成链主动重挂，跳过恢复判定");
+                return;
+            }
 
             // ── 仅在「曾经被卸载过」时触发恢复 ──
             // 初次挂载（启动路径）不满足该条件，WebView2 的首次初始化仍由
             // LoadAndShowAsync 独占负责，恢复逻辑不介入，避免与之竞争。
-            if (!_webViewReloadNeedsRestore)
+            bool needsRestore = _webViewReloadNeedsRestore || _webViewRenderDirtyWhileDetached;
+            if (!needsRestore)
             {
                 Logger.Debug("[WebViewLifecycle] webview.loaded 为首次挂载，跳过恢复逻辑（由启动路径初始化）");
                 return;
@@ -268,36 +307,30 @@ namespace DeepSeek_v4_for_VisualStudio.View
         }
 
         /// <summary>
-        /// WebView2 控件被卸出视觉树：记录日志并作废「已初始化」状态。
+        /// WebView2 控件被卸出视觉树：记录日志并挂起一次恢复判定。
         /// <para>
-        /// 控件脱离视觉树后底层 <c>CoreWebView2</c> 会被释放（HRESULT 0x8007139F）。
-        /// 此处必须把 <c>_webViewInitialized</c> 复位为 false，否则后续
-        /// <c>LoadAndShowCoreAsync</c> 会因该标志仍为 true 而走「已初始化，直接刷新页面内容」
-        /// 分支，跳过必要的重新初始化，导致恢复失败。
+        /// VS 停靠、自动隐藏和布局切换可能只造成短暂脱离视觉树；此时不能
+        /// 立即作废初始化状态。重新挂载后由响应探测确认实例是否仍可用。
         /// </para>
         /// </summary>
         private void ChatWebView_Unloaded(object sender, RoutedEventArgs e)
         {
             LogWebViewLifecycle("webview.unloaded", sender as DependencyObject);
 
+            if (_isIntentionalWebViewReattach)
+            {
+                Logger.Debug("[WebViewLifecycle] webview.unloaded 来自合成链主动重挂，保留现有浏览器实例");
+                return;
+            }
+
             // ── 标记「本次卸载后需要恢复」 ──
             // 供 Loaded 处理器判断这是否为一次真实的重载往返。
             _webViewReloadNeedsRestore = true;
 
-            // ── 标记当前控件实例已失效（持续状态，直到创建新控件才清除）──
-            // 这是关键判据：卸载后 CoreWebView2 引用仍在、属性访问正常，
-            // 但导航已无效（实测 NavigateToString 后 docUrl 仍是 about:blank）。
-            _webViewInstanceStale = true;
-
-            // ── 作废渲染状态 ──
-            // 控件已脱离视觉树，CoreWebView2 随之释放，页面 DOM 一并消失。
-            // 这些标志若不复位，恢复路径会误判「页面仍然完好」而跳过重新灌入历史消息，
-            // 结果就是重新挂载后看到一个空白窗口。
-            _webViewInitialized = false;
-            _pageReady = false;
-            _browserInitialized = false;
-
-            Logger.Info("[WebViewLifecycle] webview.unloaded 已作废初始化与页面就绪状态，等待重新挂载后恢复");
+            // Unloaded 只代表控件暂时脱离视觉树，并不等于 CoreWebView2 已永久失效。
+            // VS 停靠 / 自动隐藏 / 布局重建会在很短时间内重新挂载同一实例。
+            // 此时保留初始化与页面状态，待 Loaded 后通过响应探测决定是否真的重建。
+            Logger.Info("[WebViewLifecycle] webview.unloaded 已挂起，等待重新挂载后探测现有实例");
         }
 
         /// <summary>
@@ -331,6 +364,9 @@ namespace DeepSeek_v4_for_VisualStudio.View
                 return;
             }
 
+            if (_webViewReloadNeedsRestore || _webViewRenderDirtyWhileDetached)
+                ScheduleWebViewRestoreAfterReload();
+
             ScheduleCompositionHealthCheck();
         }
 
@@ -351,6 +387,9 @@ namespace DeepSeek_v4_for_VisualStudio.View
                 return;
             }
 
+            if (_webViewReloadNeedsRestore || _webViewRenderDirtyWhileDetached)
+                ScheduleWebViewRestoreAfterReload();
+
             ScheduleCompositionHealthCheck();
         }
 
@@ -364,15 +403,157 @@ namespace DeepSeek_v4_for_VisualStudio.View
             if (_disposed)
                 return;
 
+            if (_compositionHealthCheckQueued)
+                return;
+
+            if (_compositionHealthCheckRunning)
+            {
+                _compositionHealthCheckRequested = true;
+                return;
+            }
+
             try
             {
+                _compositionHealthCheckQueued = true;
                 Dispatcher.BeginInvoke(
                     System.Windows.Threading.DispatcherPriority.Background,
-                    new Action(() => { _ = CheckCompositionHealthAsync(); }));
+                    new Action(RunScheduledCompositionHealthCheck));
             }
             catch (Exception ex)
             {
+                _compositionHealthCheckQueued = false;
                 Logger.Debug($"[WebViewLifecycle] 排入合成健康检查失败: {ex.GetType().Name}");
+            }
+        }
+
+        private async void RunScheduledCompositionHealthCheck()
+        {
+            _compositionHealthCheckQueued = false;
+
+            if (_disposed || _compositionHealthCheckRunning)
+                return;
+
+            _compositionHealthCheckRunning = true;
+            try
+            {
+                await CheckCompositionHealthAsync();
+            }
+            finally
+            {
+                _compositionHealthCheckRunning = false;
+                if (_compositionHealthCheckRequested && !_disposed)
+                {
+                    _compositionHealthCheckRequested = false;
+                    ScheduleCompositionHealthCheck();
+                }
+            }
+        }
+
+        /// <summary>
+        /// 控件已初始化但暂时脱离宿主时，渲染必须延迟，不能把 Parent/IsLoaded
+        /// 的瞬时空值当成浏览器永久失效。
+        /// </summary>
+        private bool ShouldDeferWebViewRender()
+        {
+            if (_disposed)
+                return false;
+
+            // 首次初始化期间 CoreWebView2 尚不可用属于正常状态，交由初始化流程处理。
+            if (!_webViewInitialized)
+                return false;
+
+            var webView = ChatWebView;
+            if (webView == null)
+                return true;
+
+            try
+            {
+                return webView.Parent == null || !webView.IsLoaded || !webView.IsVisible;
+            }
+            catch
+            {
+                return true;
+            }
+        }
+
+        /// <summary>页面和窗口都可见，且浏览器可访问时才允许推送流式 DOM 更新。</summary>
+        private bool CanPostStreamingUpdateNow()
+        {
+            if (_disposed || !_pageReady || ShouldDeferWebViewRender())
+                return false;
+
+            try
+            {
+                return ChatWebView?.CoreWebView2 != null;
+            }
+            catch
+            {
+                return false;
+            }
+        }
+
+        /// <summary>
+        /// 控件重新可见后补齐隐藏期间积压的渲染。优先冲刷流式批处理状态，
+        /// 没有活动流时才走普通 HTML 增量更新。
+        /// </summary>
+        private void FlushDeferredWebViewRendering()
+        {
+            if (!_webViewRenderDirtyWhileDetached)
+                return;
+
+            if (!CanPostStreamingUpdateNow())
+                return;
+
+            int[] pendingStreamIndexes;
+            lock (_streamBatchLock)
+            {
+                pendingStreamIndexes = new int[_streamBatchStates.Count];
+                _streamBatchStates.Keys.CopyTo(pendingStreamIndexes, 0);
+            }
+
+            if (pendingStreamIndexes.Length > 0)
+            {
+                // 本次已具备补发条件；未达到刷新窗口的剩余增量交给 idle timer。
+                _webViewRenderDirtyWhileDetached = false;
+                foreach (int index in pendingStreamIndexes)
+                    BatchStreamingUpdate(index);
+
+                return;
+            }
+
+            _webViewRenderDirtyWhileDetached = false;
+            UpdateBrowser();
+        }
+
+        /// <summary>
+        /// 验证重新挂载后的 CoreWebView2 不只是“属性可访问”，而是仍能执行脚本，
+        /// 并检查聊天页自身的页面就绪标记是否仍在。
+        /// </summary>
+        private async Task<(bool Responsive, bool PageReady)> ProbeWebViewStateAsync(CoreWebView2 core)
+        {
+            try
+            {
+                var probe = core.ExecuteScriptAsync(
+                    "(window.__pageReady===true && document.readyState!=='loading')");
+                var completed = await Task.WhenAny(
+                    probe,
+                    Task.Delay(WebViewResponsivenessProbeTimeoutMs));
+
+                if (!ReferenceEquals(completed, probe))
+                {
+                    Logger.Warn($"[WebViewLifecycle] reload.probe | 超时 {WebViewResponsivenessProbeTimeoutMs}ms");
+                    return (false, false);
+                }
+
+                string result = await probe;
+                bool pageReady = string.Equals(result, "true", StringComparison.OrdinalIgnoreCase);
+                Logger.Info($"[WebViewLifecycle] reload.probe | responsive=true | pageReady={pageReady}");
+                return (true, pageReady);
+            }
+            catch (Exception ex)
+            {
+                Logger.Warn($"[WebViewLifecycle] reload.probe | 失败: {ex.GetType().Name}: {ex.Message}");
+                return (false, false);
             }
         }
 
@@ -405,6 +586,17 @@ namespace DeepSeek_v4_for_VisualStudio.View
                 if (!_pageReady)
                 {
                     return;
+                }
+
+                var settleRemaining = _webViewCompositionReadyAtUtc - DateTime.UtcNow;
+                if (settleRemaining > TimeSpan.Zero)
+                {
+                    await Task.Delay(settleRemaining);
+                    await Microsoft.VisualStudio.Shell.ThreadHelper.JoinableTaskFactory.SwitchToMainThreadAsync();
+                    if (_disposed || !IsVisible || !IsLoaded)
+                    {
+                        return;
+                    }
                 }
 
                 // ── 恢复 ──
@@ -445,33 +637,129 @@ namespace DeepSeek_v4_for_VisualStudio.View
                 if (w < 1 || h < 1)
                     return (-1, $"<尺寸为 0: {w:F0}x{h:F0}>");
 
-                var rtb = new System.Windows.Media.Imaging.RenderTargetBitmap(
-                    (int)w, (int)h, 96, 96, System.Windows.Media.PixelFormats.Pbgra32);
-                rtb.Render(webView);
+                double scale = Math.Min(
+                    1.0,
+                    RenderedSampleMaxEdge / Math.Max(w, h));
+                int sampleWidth = Math.Max(1, (int)Math.Round(w * scale));
+                int sampleHeight = Math.Max(1, (int)Math.Round(h * scale));
 
-                int stride = rtb.PixelWidth * 4;
-                var pixels = new byte[stride * rtb.PixelHeight];
-                rtb.CopyPixels(pixels, stride, 0);
-
-                // 以左上角像素为背景基准，统计与背景差异明显的像素比例
-                byte bgB = pixels[0], bgG = pixels[1], bgR = pixels[2];
-                long nonBg = 0;
-                long total = (long)rtb.PixelWidth * rtb.PixelHeight;
-
-                for (int i = 0; i < pixels.Length; i += 4)
+                var visual = new System.Windows.Media.DrawingVisual();
+                using (var dc = visual.RenderOpen())
                 {
-                    int diff = Math.Abs(pixels[i] - bgB)
-                             + Math.Abs(pixels[i + 1] - bgG)
-                             + Math.Abs(pixels[i + 2] - bgR);
-                    if (diff > 24) nonBg++;
+                    var brush = new System.Windows.Media.VisualBrush(webView)
+                    {
+                        Stretch = System.Windows.Media.Stretch.Fill,
+                    };
+                    dc.DrawRectangle(
+                        brush,
+                        null,
+                        new Rect(0, 0, sampleWidth, sampleHeight));
                 }
 
-                double pct = total > 0 ? (nonBg * 100.0 / total) : 0;
-                return (pct, $"(非背景 {nonBg}/{total}, bg=#{bgR:X2}{bgG:X2}{bgB:X2})");
+                var rtb = new System.Windows.Media.Imaging.RenderTargetBitmap(
+                    sampleWidth,
+                    sampleHeight,
+                    96,
+                    96,
+                    System.Windows.Media.PixelFormats.Pbgra32);
+                rtb.Render(visual);
+
+                int stride = rtb.PixelWidth * 4;
+                int byteCount = stride * rtb.PixelHeight;
+                byte[] pixels = ArrayPool<byte>.Shared.Rent(byteCount);
+                try
+                {
+                    rtb.CopyPixels(pixels, stride, 0);
+
+                    // 以左上角像素为背景基准，统计与背景差异明显的像素比例
+                    byte bgB = pixels[0], bgG = pixels[1], bgR = pixels[2];
+                    long nonBg = 0;
+                    long total = (long)rtb.PixelWidth * rtb.PixelHeight;
+
+                    for (int i = 0; i < byteCount; i += 4)
+                    {
+                        int diff = Math.Abs(pixels[i] - bgB)
+                                 + Math.Abs(pixels[i + 1] - bgG)
+                                 + Math.Abs(pixels[i + 2] - bgR);
+                        if (diff > 24) nonBg++;
+                    }
+
+                    double pct = total > 0 ? (nonBg * 100.0 / total) : 0;
+                    return (pct, $"(缩略 {rtb.PixelWidth}x{rtb.PixelHeight}, "
+                        + $"非背景 {nonBg}/{total}, bg=#{bgR:X2}{bgG:X2}{bgB:X2})");
+                }
+                finally
+                {
+                    ArrayPool<byte>.Shared.Return(pixels);
+                }
             }
             catch (Exception ex)
             {
                 return (-1, $"<采样失败:{ex.GetType().Name}>");
+            }
+        }
+
+        /// <summary>
+        /// 缩略采样判定为空白时，用一次全尺寸采样复核，避免 VisualBrush
+        /// 在特殊合成环境下无法捕获 WebView2 而导致误重挂。仅疑似故障时调用。
+        /// </summary>
+        private double ConfirmRenderedCoverage(double sampledCoverage)
+        {
+            if (sampledCoverage < 0 || sampledCoverage >= RenderedCoverageThreshold)
+                return sampledCoverage;
+
+            var webView = ChatWebView;
+            if (webView == null)
+                return sampledCoverage;
+
+            try
+            {
+                int width = Math.Max(1, (int)webView.ActualWidth);
+                int height = Math.Max(1, (int)webView.ActualHeight);
+                var rtb = new System.Windows.Media.Imaging.RenderTargetBitmap(
+                    width,
+                    height,
+                    96,
+                    96,
+                    System.Windows.Media.PixelFormats.Pbgra32);
+                rtb.Render(webView);
+
+                int stride = width * 4;
+                int byteCount = stride * height;
+                byte[] pixels = ArrayPool<byte>.Shared.Rent(byteCount);
+                try
+                {
+                    rtb.CopyPixels(pixels, stride, 0);
+                    byte bgB = pixels[0], bgG = pixels[1], bgR = pixels[2];
+                    long nonBg = 0;
+                    long total = (long)width * height;
+                    for (int i = 0; i < byteCount; i += 4)
+                    {
+                        int diff = Math.Abs(pixels[i] - bgB)
+                                 + Math.Abs(pixels[i + 1] - bgG)
+                                 + Math.Abs(pixels[i + 2] - bgR);
+                        if (diff > 24) nonBg++;
+                    }
+
+                    double fullCoverage = total > 0 ? nonBg * 100.0 / total : 0;
+                    if (fullCoverage >= RenderedCoverageThreshold)
+                    {
+                        Logger.Debug($"[WebViewLifecycle] 缩略采样偏低，但全尺寸复核正常 "
+                            + $"(sampled={sampledCoverage:F1}%, full={fullCoverage:F1}%)");
+                        return fullCoverage;
+                    }
+
+                    return sampledCoverage;
+                }
+                finally
+                {
+                    ArrayPool<byte>.Shared.Return(pixels);
+                }
+            }
+            catch (Exception ex)
+            {
+                Logger.Debug($"[WebViewLifecycle] 全尺寸复核失败，保留缩略采样结果: {ex.GetType().Name}");
+                return sampledCoverage;
             }
         }
 
@@ -499,28 +787,24 @@ namespace DeepSeek_v4_for_VisualStudio.View
 
             try
             {
-                // ── 1. 控件自身失效重绘 ──
-                webView.InvalidateVisual();
+                double coverage = ConfirmRenderedCoverage(
+                    await RepaintAndSampleAsync(invalidateLayout: false));
+                if (coverage < 0)
+                    return;
+                if (coverage >= RenderedCoverageThreshold)
+                {
+                    Logger.Debug($"[WebViewLifecycle] 轻量重绘已恢复画面（coverage={coverage:F1}%）");
+                    return;
+                }
 
-                // ── 2. 宿主与控件一并失效，并请求一次布局重算 ──
-                // 宿主 ContentControl 有自己的裁剪区域；只让控件失效时，
-                // 宿主的陈旧内容有时会继续遮挡（与 issue #31 同源的 WPF 合成层 z-order 问题）。
-                ChatWebViewHost.InvalidateVisual();
-                webView.InvalidateMeasure();
-                webView.InvalidateArrange();
-
-                // 把重绘推到下一轮渲染优先级，确保在本次布局完成后真正执行
-                await Dispatcher.InvokeAsync(() => { }, System.Windows.Threading.DispatcherPriority.Render);
-                if (_disposed) return;
-
-                // ── 验证重绘是否真的产出画面 ──
-                // 关键：不假设「重绘必然有效」，而是实测非背景像素占比。
-                // 该失效的特点是 DOM 侧完全正常、状态量全部正常，但控件产出 0 个像素，
-                // 单纯 InvalidateVisual 无法恢复，必须重建合成链路。
-                double coverage = SampleRenderedCoverage();
+                Logger.Debug($"[WebViewLifecycle] 轻量重绘后无画面（coverage={coverage:F1}%），升级宿主布局刷新");
+                coverage = ConfirmRenderedCoverage(
+                    await RepaintAndSampleAsync(invalidateLayout: true));
+                if (coverage < 0)
+                    return;
                 if (coverage >= 0 && coverage < RenderedCoverageThreshold)
                 {
-                    Logger.Warn($"[WebViewLifecycle] 重绘后仍无画面（coverage={coverage:F1}%），"
+                    Logger.Warn($"[WebViewLifecycle] 宿主布局刷新后仍无画面（coverage={coverage:F1}%），"
                         + "重建合成链路以恢复显示");
                     await RecoverCompositionByReattachAsync();
                 }
@@ -529,6 +813,32 @@ namespace DeepSeek_v4_for_VisualStudio.View
             {
                 Logger.Warn($"[WebViewLifecycle] 重绘聊天区域失败: {ex.GetType().Name}: {ex.Message}");
             }
+        }
+
+        private async Task<double> RepaintAndSampleAsync(bool invalidateLayout)
+        {
+            if (_disposed)
+                return -1;
+
+            var webView = ChatWebView;
+            if (webView == null)
+                return -1;
+
+            webView.InvalidateVisual();
+            if (invalidateLayout)
+            {
+                ChatWebViewHost.InvalidateVisual();
+                webView.InvalidateMeasure();
+                webView.InvalidateArrange();
+            }
+
+            await Dispatcher.InvokeAsync(
+                () => { },
+                System.Windows.Threading.DispatcherPriority.Render);
+            if (_disposed)
+                return -1;
+
+            return SampleRenderedCoverage();
         }
 
         /// <summary>
@@ -592,8 +902,19 @@ namespace DeepSeek_v4_for_VisualStudio.View
                 // 摘除期间控件脱离视觉树，库会释放捕获会话；重新挂回时按当前尺寸
                 // 重新创建 D3D 设备与帧池，从而重建整条合成链路。
                 // 这是比重绘更强的手段，用于前两级重绘无效的场景。
-                ChatWebViewHost.Content = null;
-                ChatWebViewHost.Content = webView;
+                //
+                // 这是刻意的短时间往返，不能触发 Unloaded/Loaded 的窗口失效恢复逻辑；
+                // 否则一次轻量合成链修复会被升级成完整的 WebView2 重建。
+                _isIntentionalWebViewReattach = true;
+                try
+                {
+                    ChatWebViewHost.Content = null;
+                    ChatWebViewHost.Content = webView;
+                }
+                finally
+                {
+                    _isIntentionalWebViewReattach = false;
+                }
 
                 // 复位计数：给新链路一个干净的观察窗口
 
@@ -618,7 +939,7 @@ namespace DeepSeek_v4_for_VisualStudio.View
                 await Microsoft.VisualStudio.Shell.ThreadHelper.JoinableTaskFactory.SwitchToMainThreadAsync();
                 if (_disposed) return;
 
-                double after = SampleRenderedCoverage();
+                double after = ConfirmRenderedCoverage(SampleRenderedCoverage());
                 if (after >= 0 && after < RenderedCoverageThreshold)
                 {
                     Logger.Error($"[WebViewLifecycle] 重建合成链路后仍未恢复显示（coverage={after:F1}%），"
@@ -641,33 +962,61 @@ namespace DeepSeek_v4_for_VisualStudio.View
             if (_disposed)
                 return;
 
+            if (_webViewRestoreQueued)
+                return;
+
+            if (_webViewRestoreRunning)
+            {
+                _webViewRestoreRequested = true;
+                return;
+            }
+
             try
             {
+                _webViewRestoreQueued = true;
                 Dispatcher.BeginInvoke(
                     System.Windows.Threading.DispatcherPriority.Background,
-                    new Action(() => { _ = RestoreWebViewAfterReloadAsync(); }));
+                    new Action(RunScheduledWebViewRestore));
             }
             catch (Exception ex)
             {
+                _webViewRestoreQueued = false;
                 Logger.Debug($"[WebViewLifecycle] 排入重载恢复任务失败: {ex.GetType().Name}");
+            }
+        }
+
+        private async void RunScheduledWebViewRestore()
+        {
+            _webViewRestoreQueued = false;
+
+            if (_disposed || _webViewRestoreRunning)
+                return;
+
+            _webViewRestoreRunning = true;
+            try
+            {
+                await RestoreWebViewAfterReloadAsync();
+            }
+            finally
+            {
+                _webViewRestoreRunning = false;
+                if (_webViewRestoreRequested && !_disposed)
+                {
+                    _webViewRestoreRequested = false;
+                    ScheduleWebViewRestoreAfterReload();
+                }
             }
         }
 
         /// <summary>
         /// 控件重新挂载后恢复聊天界面。
         /// <para>
-        /// 主要路径（实测确认）：<c>webview.unloaded</c> 后控件实例的底层浏览器已释放，
-        /// 但引用仍在、属性访问不抛异常，导航则完全无效
-        /// （日志证据：<c>NavigateToString</c> 调用 2.5 秒后 <c>docUrl</c> 仍是 <c>about:blank</c>）。
-        /// 这类实例由 <see cref="TryGetLiveCoreWebView"/> 通过
-        /// <c>_webViewInstanceStale</c> 识别为不可用，于是直接走重建——
-        /// 创建全新控件与 <c>CoreWebView2</c> 环境并全量重绘历史消息。
-        /// </para>
-        /// <para>
-        /// 其余两种情形：
+        /// 恢复按以下顺序判定：
         /// <list type="bullet">
-        /// <item>控件存活且页面内容完好（仅是一次可见性往返）——什么都不做。</item>
-        /// <item>控件存活但页面尚未就绪——重新灌入历史消息（并延迟复查，必要时转重建）。</item>
+        /// <item>控件尚未重新挂载——只记录待渲染状态，不重建。</item>
+        /// <item>控件存活且能执行脚本——复用现有实例，必要时补渲染。</item>
+        /// <item>控件属性不可访问或脚本探测失败——才进入完整重建。</item>
+        /// <item>控件存活但页面尚未就绪——重新灌入历史消息。</item>
         /// </list>
         /// </para>
         /// </summary>
@@ -681,8 +1030,14 @@ namespace DeepSeek_v4_for_VisualStudio.View
                 await Microsoft.VisualStudio.Shell.ThreadHelper.JoinableTaskFactory.SwitchToMainThreadAsync();
                 if (_disposed) return;
 
+                if (ShouldDeferWebViewRender())
+                {
+                    _webViewRenderDirtyWhileDetached = true;
+                    Logger.Debug("[WebViewLifecycle] reload.restore | 控件尚未重新挂载，延迟渲染");
+                    return;
+                }
+
                 // ── 情形 3：控件失效 → 重建（内部会全量重绘历史消息）──
-                // 卸载过的控件实例必然走到这里：属性可访问，但导航无效，重建是唯一出路。
                 if (!TryGetLiveCoreWebView(out var core))
                 {
                     Logger.Info("[WebViewLifecycle] reload.restore | 控件不可用，转入重建路径");
@@ -694,11 +1049,40 @@ namespace DeepSeek_v4_for_VisualStudio.View
                     return;
                 }
 
-                // ── 情形 2：控件存活但页面尚未就绪（内容为空）──
-                // _pageReady 由页面 JS 发出 __pageReady__ 信号置位；控件被卸载后必然为 false，
-                // 说明当前 DOM 是空页面，需要重新灌入历史消息。
-                if (!_pageReady || !_browserInitialized)
+                // ── 先验证浏览器仍能响应 ──
+                // WebView2 的 CoreWebView2 引用可能在控件卸载后残留，但实际浏览器
+                // 已经无法执行脚本。仅凭属性非 null 不能判定实例仍可用。
+                var viewState = await ProbeWebViewStateAsync(core!);
+                if (!viewState.Responsive)
                 {
+                    Logger.Warn("[WebViewLifecycle] reload.restore | 页面状态仍在但浏览器无响应，转入重建");
+                    _webViewInstanceStale = true;
+                    _webViewInitialized = false;
+                    _pageReady = false;
+                    _browserInitialized = false;
+
+                    if (await RebuildWebViewIfNeededAsync() && TryGetLiveCoreWebView(out _))
+                    {
+                        Logger.Info("[WebViewLifecycle] reload.restore | 无响应实例已重建，历史消息已重绘");
+                    }
+                    else
+                    {
+                        Logger.Warn("[WebViewLifecycle] reload.restore | 无响应实例重建未成功");
+                    }
+
+                    return;
+                }
+
+                // ── 情形 2：控件存活但页面尚未就绪（内容为空）──
+                // _pageReady 由页面 JS 发出 __pageReady__ 信号置位。
+                if (!_pageReady || !_browserInitialized || !viewState.PageReady)
+                {
+                    if (_pageReady && !viewState.PageReady)
+                    {
+                        Logger.Warn("[WebViewLifecycle] reload.restore | 浏览器存活但聊天页上下文已丢失，重新导航页面");
+                    }
+
+                    _pageReady = false;
                     _browserInitialized = false;
                     _lastRenderedMessagesLength = 0;
 
@@ -714,7 +1098,15 @@ namespace DeepSeek_v4_for_VisualStudio.View
                     return;
                 }
 
-                // ── 情形 1：页面完好，仅是一次可见性往返 ──
+                // ── 情形 1：页面状态完整，复用现有实例 ──
+                // 暂时脱离宿主期间积累的聊天内容在此补渲染。
+                if (_webViewRenderDirtyWhileDetached)
+                {
+                    Logger.Info("[WebViewLifecycle] reload.restore | 浏览器仍可用，补做延迟渲染");
+                    FlushDeferredWebViewRendering();
+                    return;
+                }
+
                 Logger.Debug("[WebViewLifecycle] reload.restore | 页面内容完好，无需恢复");
             }
             catch (Exception ex)
@@ -901,6 +1293,7 @@ namespace DeepSeek_v4_for_VisualStudio.View
                 // 使下一次真的失效时能再次告警、并重新获得完整的重试预算。
                 _webViewGoneLoggedInstance = null;
                 _rebuildAttemptCount = 0;
+                _webViewRenderDirtyWhileDetached = false;
                 Logger.Info($"[WebViewLifecycle] rebuild.success | newView={ChatWebView?.GetHashCode() ?? 0} | hostContent={(ChatWebViewHost.Content == null ? "null(已摘除)" : "存在")}");
                 return true;
             }
@@ -928,8 +1321,60 @@ namespace DeepSeek_v4_for_VisualStudio.View
             if (_disposed)
                 return;
 
+            if (ShouldDeferWebViewRender())
+            {
+                _webViewRenderDirtyWhileDetached = true;
+                Logger.Debug("[WebViewLifecycle] 控件暂时未挂载或不可见，已延迟本次渲染");
+                return;
+            }
+
+            if (_browserUpdateRunning)
+            {
+                _browserUpdatePending = true;
+                return;
+            }
+
+            _browserUpdateRunning = true;
             try
             {
+                do
+                {
+                    _browserUpdatePending = false;
+                    await UpdateBrowserCoreAsync();
+                }
+                while (_browserUpdatePending && !_disposed && !ShouldDeferWebViewRender());
+
+                if (_browserUpdatePending && ShouldDeferWebViewRender())
+                    _webViewRenderDirtyWhileDetached = true;
+            }
+            finally
+            {
+                _browserUpdateRunning = false;
+                if (_browserUpdatePending && !_disposed && !ShouldDeferWebViewRender())
+                {
+                    _browserUpdatePending = false;
+                    Dispatcher.BeginInvoke(new Action(UpdateBrowser));
+                }
+            }
+        }
+
+        private async Task UpdateBrowserCoreAsync()
+        {
+            try
+            {
+                string allMessages = _messagesHtml.ToString();
+
+                // 没有新增/变化内容时不得进入全量刷新。pageReady 等生命周期事件
+                // 会调用延迟渲染入口；若此处误做 NavigateToString，会再次触发
+                // pageReady，形成“导航→pageReady→导航”的死循环。
+                if (_browserInitialized
+                    && _pendingInitialHtml == null
+                    && allMessages.Length == _lastRenderedMessagesLength)
+                {
+                    Logger.Debug("[Render] 浏览器内容无变化，跳过本次更新");
+                    return;
+                }
+
                 // ── 控件失效（被视觉树卸载）时先重建，再继续本次渲染 ──
                 if (!TryGetLiveCoreWebView(out var core))
                 {
@@ -939,8 +1384,6 @@ namespace DeepSeek_v4_for_VisualStudio.View
                         return;
                     }
                 }
-
-                string allMessages = _messagesHtml.ToString();
 
                 // 初始页面尚未完成分块注入时，不能走增量路径，否则会与暂缓内容重复或竞态。
                 if (_pendingInitialHtml != null)
@@ -1164,11 +1607,6 @@ namespace DeepSeek_v4_for_VisualStudio.View
 
             string windowHtml = BuildMessagesWindowHtml(RenderWindowBatchSize, out int windowStart);
             ApplyMessagesWindow(windowHtml, windowStart);
-
-            // 会话切换 / 新建 / 清空 / 重启恢复都会走到这里：
-            // 先丢弃上一会话残留的待处理追踪，再刷新文件改动列表（通常为空 → 隐藏）。
-            EditorDiffMarkerService.Instance.ClearPendingTracking();
-            RefreshChangeSummary();
         }
 
         /// <summary>
@@ -1211,12 +1649,20 @@ namespace DeepSeek_v4_for_VisualStudio.View
             // 主题切换/全量刷新也可能绕过 RebuildMessagesHtml，导航前统一同步当前流式快照。
             SyncStreamingSnapshotToMessageForRebuild();
 
+            // 页面壳固定，先算一次。后续窗口收缩复用其字节数，避免每轮重新拼接
+            // 数十 KB 的 CSS/JS，再对完整页面做 UTF-8/UTF-16 两次统计。
+            string shellHtml = ChatHtmlService.BuildInitialPageFromMessagesHtml(string.Empty);
+            int shellUtf8Bytes = Encoding.UTF8.GetByteCount(shellHtml);
+            int shellUtf16Bytes = shellHtml.Length * 2;
+
             int windowSize = Math.Min(RenderWindowBatchSize, _messages.Count);
             while (true)
             {
                 string windowHtml = BuildMessagesWindowHtml(windowSize, out int windowStart);
-                string pageHtml = ChatHtmlService.BuildInitialPageFromMessagesHtml(windowHtml);
-                int pageBytes = GetNavigateToStringPayloadBytes(pageHtml);
+                int windowUtf8Bytes = Encoding.UTF8.GetByteCount(windowHtml);
+                int pageBytes = Math.Max(
+                    shellUtf8Bytes + windowUtf8Bytes,
+                    shellUtf16Bytes + windowHtml.Length * 2);
 
                 if (pageBytes <= maxBytes)
                 {
@@ -1227,15 +1673,14 @@ namespace DeepSeek_v4_for_VisualStudio.View
                     }
 
                     ApplyMessagesWindow(windowHtml, windowStart);
-                    return pageHtml;
+                    return ChatHtmlService.BuildInitialPageFromMessagesHtml(windowHtml);
                 }
 
                 // 单条最新消息仍超限时，不能继续缩到空窗口并把历史静默丢掉。
                 // 先导航不含消息的轻量页面，再由 __pageReady__ 分块补发完整窗口。
                 if (windowSize <= 1)
                 {
-                    string shellHtml = ChatHtmlService.BuildInitialPageFromMessagesHtml(string.Empty);
-                    int shellBytes = GetNavigateToStringPayloadBytes(shellHtml);
+                    int shellBytes = Math.Max(shellUtf8Bytes, shellUtf16Bytes);
                     if (shellBytes > maxBytes)
                     {
                         throw new InvalidOperationException(
@@ -1276,9 +1721,11 @@ namespace DeepSeek_v4_for_VisualStudio.View
             if (html == null)
                 throw new ArgumentNullException(nameof(html));
 
+            // UTF-16 的字节数就是 char 数 * 2（代理对同样是两个 char、四个字节），
+            // 无需再跑一次 Encoding.Unicode.GetByteCount 全量扫描。
             return Math.Max(
                 Encoding.UTF8.GetByteCount(html),
-                Encoding.Unicode.GetByteCount(html));
+                html.Length * 2);
         }
 
         /// <summary>
@@ -1290,7 +1737,7 @@ namespace DeepSeek_v4_for_VisualStudio.View
                 throw new ArgumentNullException(nameof(html));
 
             int utf8Bytes = Encoding.UTF8.GetByteCount(html);
-            int utf16Bytes = Encoding.Unicode.GetByteCount(html);
+            int utf16Bytes = html.Length * 2;
             int nullCount = 0;
             int controlCount = 0;
             int unpairedSurrogateCount = 0;
@@ -1364,6 +1811,7 @@ namespace DeepSeek_v4_for_VisualStudio.View
         private void NavigateBrowserToInitialPage(CoreWebView2 core, string? pageHtml = null)
         {
             string html = pageHtml ?? BuildNavigableInitialPageHtml();
+            _pageReady = false;
 
             try
             {
@@ -1538,7 +1986,11 @@ namespace DeepSeek_v4_for_VisualStudio.View
             string? reasoningDelta = null,
             string? contentDelta = null)
         {
-            if (ChatWebView.CoreWebView2 == null || !_pageReady) return;
+            if (!CanPostStreamingUpdateNow())
+            {
+                _webViewRenderDirtyWhileDetached = true;
+                return;
+            }
 
             try
             {
@@ -1789,13 +2241,12 @@ namespace DeepSeek_v4_for_VisualStudio.View
                 Logger.Warn("[WebViewLifecycle] 浏览器进程已退出，排入恢复任务");
 
                 // 作废状态：浏览器进程已随控件释放，必须走重建路径
+                _webViewInstanceStale = true;
                 _webViewInitialized = false;
                 _pageReady = false;
                 _browserInitialized = false;
 
-                Dispatcher.BeginInvoke(
-                    System.Windows.Threading.DispatcherPriority.Background,
-                    new Action(() => { _ = RestoreWebViewAfterReloadAsync(); }));
+                ScheduleWebViewRestoreAfterReload();
             }
             catch (Exception ex)
             {

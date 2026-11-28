@@ -1093,6 +1093,90 @@ public class ChatHtmlServiceTests
         js.Should().Contain("&amp;");
     }
 
+    [Fact]
+    public void BuildInitialPage_TagsThemeStyleForInPlaceUpdate()
+    {
+        string html = ChatHtmlService.BuildInitialPage(new List<ChatMessage>());
+
+        html.Should().Contain("<style id='deepseek-page-style'>");
+        html.Should().Contain("<link id='deepseek-highlight-style'");
+    }
+
+    [Fact]
+    public void BuildApplyThemeInPlaceJs_EncodesCssAndRejectsThemeSensitiveDom()
+    {
+        string js = ChatHtmlService.BuildApplyThemeInPlaceJs(
+            "body{background:#fff}\n.special::after{content:\"</style>\"}",
+            isLight: true);
+
+        js.Should().Contain("deepseek-page-style");
+        js.Should().Contain("data-theme");
+        js.Should().Contain("agent-task-panel");
+        js.Should().Contain("mermaid");
+        js.Should().Contain("deepseek-highlight-style");
+        js.Should().Contain("github.min.css");
+        js.Should().Contain("return false");
+        js.Should().Contain("\\u003C/style\\u003E");
+    }
+
+    [Fact]
+    public void BuildApplyThemeInPlaceJs_DarkTheme_ReinitializesMermaidForFutureDiagrams()
+    {
+        string js = ChatHtmlService.BuildApplyThemeInPlaceJs(
+            "body{background:#1e1e1e}",
+            isLight: false);
+
+        js.Should().Contain("mermaid.initialize");
+        js.Should().Contain("theme:'dark'");
+        js.Should().Contain("data-theme','dark'");
+        js.Should().Contain("github-dark.min.css");
+        js.Should().Contain("suppressErrorRendering:true");
+    }
+
+    [Fact]
+    public void BuildApplyThemeInPlaceJs_LightTheme_UsesLightMermaidTheme()
+    {
+        string js = ChatHtmlService.BuildApplyThemeInPlaceJs(
+            "body{background:#fff}",
+            isLight: true);
+
+        js.Should().Contain("theme:'default'");
+        js.Should().Contain("data-theme','light'");
+        js.Should().Contain("github.min.css");
+    }
+
+    [Fact]
+    public void BuildInitialPage_ShouldExposeThemeForRuntimePanels()
+    {
+        using (UseThemeMode(ThemeMode.Light))
+        {
+            string lightHtml = ChatHtmlService.BuildInitialPage(new List<ChatMessage>());
+            lightHtml.Should().Contain("data-theme='light'");
+            lightHtml.Should().Contain("window.__applyCtxDebugTheme");
+            lightHtml.Should().Contain("#ffffffee");
+            lightHtml.Should().Contain("text:'#333333'");
+        }
+
+        using (UseThemeMode(ThemeMode.Dark))
+        {
+            string darkHtml = ChatHtmlService.BuildInitialPage(new List<ChatMessage>());
+            darkHtml.Should().Contain("data-theme='dark'");
+            darkHtml.Should().Contain("#252526ee");
+            darkHtml.Should().Contain("text:'#d4d4d4'");
+        }
+    }
+
+    [Fact]
+    public void BuildApplyThemeInPlaceJs_ShouldRefreshExistingContextPanel()
+    {
+        string js = ChatHtmlService.BuildApplyThemeInPlaceJs(
+            "body{background:#fff}",
+            isLight: true);
+
+        js.Should().Contain("__applyCtxDebugTheme");
+        js.Should().Contain("data-theme','light'");
+    }
+
     #endregion
 
     private static int CountOccurrences(string haystack, string needle)

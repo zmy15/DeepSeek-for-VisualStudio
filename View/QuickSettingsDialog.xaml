@@ -17,12 +17,14 @@
         <SolidColorBrush x:Key="QuickComboPopup" Color="#2D2D2D"/>
         <SolidColorBrush x:Key="QuickComboSelection" Color="#264F78"/>
         <SolidColorBrush x:Key="QuickComboArrow" Color="#A8A8A8"/>
+        <SolidColorBrush x:Key="QuickComboForeground" Color="#E8E8E8"/>
+        <SolidColorBrush x:Key="QuickTextPrimary" Color="#D4D4D4"/>
         <SolidColorBrush x:Key="QuickSliderTrack" Color="#4A4A4A"/>
         <SolidColorBrush x:Key="QuickSliderFill" Color="#4FC1FF"/>
         <SolidColorBrush x:Key="QuickSliderThumb" Color="#E8E8E8"/>
 
         <Style TargetType="TextBlock">
-            <Setter Property="Foreground" Value="#D4D4D4"/>
+            <Setter Property="Foreground" Value="{DynamicResource QuickTextPrimary}"/>
             <Setter Property="FontSize" Value="12"/>
         </Style>
 
@@ -60,7 +62,7 @@
 
         <Style TargetType="ComboBox">
             <Setter Property="Background" Value="{DynamicResource QuickComboBackground}"/>
-            <Setter Property="Foreground" Value="#E8E8E8"/>
+            <Setter Property="Foreground" Value="{DynamicResource QuickComboForeground}"/>
             <Setter Property="BorderBrush" Value="{DynamicResource QuickComboBorder}"/>
             <Setter Property="BorderThickness" Value="1"/>
             <Setter Property="Padding" Value="7,4"/>
@@ -158,7 +160,7 @@
 
         <Style TargetType="ComboBoxItem">
             <Setter Property="Background" Value="{DynamicResource QuickComboPopup}"/>
-            <Setter Property="Foreground" Value="#E8E8E8"/>
+            <Setter Property="Foreground" Value="{DynamicResource QuickComboForeground}"/>
             <Setter Property="Padding" Value="8,4"/>
             <Setter Property="Template">
                 <Setter.Value>

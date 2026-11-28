@@ -682,6 +682,8 @@ namespace DeepSeek_v4_for_VisualStudio.View
                     ClearEditTransientState();
                 }
 
+                ResetFileChangeTrackingForConversationSwitch();
+
                 // ── 切换会话时重置并恢复累计 Token/费用统计 ──
                 _apiService?.ResetAccumulatedStats();
                 RestoreCacheStatsFromSession();
@@ -1011,6 +1013,7 @@ namespace DeepSeek_v4_for_VisualStudio.View
                     _sessionsContainer = new SessionsContainer { SolutionPath = _solutionPath ?? "(unsaved)" };
                 _sessionsContainer.Sessions.Add(_activeSession);
                 _sessionsContainer.ActiveSessionId = _activeSession.Id;
+                ResetFileChangeTrackingForConversationSwitch();
 
                 // ── 同步当前会话上下文到内置工具服务 ──
                 SyncActiveSessionToBuiltInTools();
@@ -1173,6 +1176,7 @@ namespace DeepSeek_v4_for_VisualStudio.View
                 _sessionsContainer.ActiveSessionId = _activeSession?.Id;
 
                 ResetActiveAgentToAsk();
+                ResetFileChangeTrackingForConversationSwitch();
                 SyncActiveSessionToBuiltInTools();
 
                 lock (_lock)
@@ -1285,6 +1289,7 @@ namespace DeepSeek_v4_for_VisualStudio.View
                 ResetApprovalQueue();
 
                 ResetActiveAgentToAsk();
+                ResetFileChangeTrackingForConversationSwitch();
                 _builtInToolService?.ResetConversationState();
 
                 // ── 重置树 ──

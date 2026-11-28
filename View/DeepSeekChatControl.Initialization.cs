@@ -1078,6 +1078,7 @@ namespace DeepSeek_v4_for_VisualStudio.View
         {
             _solutionPath = newPath;
             _boundSolutionPath = newPath;
+            ResetFileChangeTrackingForConversationSwitch();
 
             // ── 重置浏览器状态，切换解决方案时强制全量刷新 ──
             _browserInitialized = false;

@@ -3,6 +3,7 @@ using DeepSeek_v4_for_VisualStudio.Services;
 using DeepSeek_v4_for_VisualStudio.Utils;
 using Microsoft.VisualStudio.Shell;
 using System;
+using System.Threading.Tasks;
 using System.Windows;
 using System.Windows.Controls;
 using System.Windows.Controls.Primitives;
@@ -23,15 +24,15 @@ namespace DeepSeek_v4_for_VisualStudio.View
         /// <summary>
         /// VS 主题或用户设置变更时触发。
         /// </summary>
-        private void OnThemeChanged(bool isLight)
+        private async void OnThemeChanged(bool isLight)
         {
             if (_isApplyingTheme) return;
             _isApplyingTheme = true;
             try
             {
-                ThreadHelper.ThrowIfNotOnUIThread();
+                await ThreadHelper.JoinableTaskFactory.SwitchToMainThreadAsync();
                 ApplyWpfTheme(isLight);
-                ReloadWebViewForTheme();
+                await ReloadWebViewForThemeAsync();
             }
             catch (Exception ex)
             {
@@ -163,6 +164,7 @@ namespace DeepSeek_v4_for_VisualStudio.View
                     HistoryPopupBorder.BorderBrush = panelBorder;
                 }
                 if (HistoryListBox != null) HistoryListBox.Foreground = textColor;
+                UpdateChromeThemeBrushes(isLight);
                 if (CurrentSessionTitle != null) CurrentSessionTitle.Foreground = textColor;
                 // Update the "审批模式:" label (TextBlock sibling of ApprovalModeComboBox)
                 UpdateApprovalLabel(panelBg, textColor);
@@ -177,7 +179,12 @@ namespace DeepSeek_v4_for_VisualStudio.View
                 if (ThinkingCheckBox != null) ThinkingCheckBox.Foreground = textColor;
 
                 // ── 按钮文字颜色 ──
-                if (ClearButton != null) ClearButton.Foreground = textColor;
+                if (ClearButton != null)
+                {
+                    ClearButton.Foreground = textColor;
+                    ClearButton.BorderBrush = panelBorder;
+                }
+                if (QuickSettingsButton != null) QuickSettingsButton.Foreground = textColor;
                 // 发送/停止按钮使用 AccentButton 样式：白字 + 强调底色，不随主题覆盖前景色
                 if (NewChatButton != null) NewChatButton.Foreground = accentGreen;
                 if (UploadButton != null) UploadButton.Foreground = new SolidColorBrush(Color.FromRgb(0xCE, 0x91, 0x78));
@@ -512,6 +519,37 @@ namespace DeepSeek_v4_for_VisualStudio.View
             }
         }
 
+        /// <summary>更新历史会话浮层、透明按钮和 ToolTip 的主题画刷。</summary>
+        private void UpdateChromeThemeBrushes(bool isLight)
+        {
+            SetResourceBrush("HistoryScrollTrackBrush",
+                isLight ? Color.FromRgb(0xF3, 0xF3, 0xF3) : Color.FromRgb(0x1E, 0x1E, 0x1E));
+            SetResourceBrush("HistoryScrollThumbBrush",
+                isLight ? Color.FromRgb(0xC8, 0xC8, 0xC8) : Color.FromRgb(0x55, 0x55, 0x55));
+            SetResourceBrush("HistoryScrollThumbHoverBrush",
+                isLight ? Color.FromRgb(0xA8, 0xA8, 0xA8) : Color.FromRgb(0x77, 0x77, 0x77));
+            SetResourceBrush("HistoryItemHoverBrush",
+                isLight ? Color.FromRgb(0xE5, 0xF1, 0xFB) : Color.FromRgb(0x3C, 0x3C, 0x3C));
+            SetResourceBrush("HistoryItemSelectedBrush",
+                isLight ? Color.FromRgb(0xCC, 0xE8, 0xFF) : Color.FromRgb(0x26, 0x4F, 0x78));
+            SetResourceBrush("TransparentButtonHoverBrush",
+                isLight ? Color.FromRgb(0xE5, 0xF1, 0xFB) : Color.FromRgb(0x3C, 0x3C, 0x3C));
+            SetResourceBrush("TransparentButtonPressedBrush",
+                isLight ? Color.FromRgb(0xCC, 0xE8, 0xFF) : Color.FromRgb(0x50, 0x50, 0x50));
+            SetResourceBrush("ToolTipBackgroundBrush",
+                isLight ? Color.FromRgb(0xFF, 0xFF, 0xFF) : Color.FromRgb(0x2D, 0x2D, 0x2D));
+            SetResourceBrush("ToolTipForegroundBrush",
+                isLight ? Color.FromRgb(0x33, 0x33, 0x33) : Color.FromRgb(0xF0, 0xF0, 0xF0));
+            SetResourceBrush("ToolTipBorderBrush",
+                isLight ? Color.FromRgb(0xC8, 0xC8, 0xC8) : Color.FromRgb(0x55, 0x55, 0x55));
+        }
+
+        /// <summary>用新画刷替换动态资源，确保已展开的弹出层立即刷新。</summary>
+        private void SetResourceBrush(string key, Color color)
+        {
+            Resources[key] = new SolidColorBrush(color);
+        }
+
         /// <summary>
         /// 启动时初始化应用当前主题（WPF 颜色 + WebView2 重载）。
         /// 在 WebView2 就绪后调用，确保 WebView2 内容使用正确的 CSS。
@@ -544,12 +582,18 @@ namespace DeepSeek_v4_for_VisualStudio.View
         /// 主题变更后重新加载 WebView2 内容。
         /// 如果 WebView 已就绪且有消息，则重新渲染当前窗口中的消息。
         /// </summary>
-        private async void ReloadWebViewForTheme()
+        private async Task ReloadWebViewForThemeAsync()
         {
             try
             {
                 if (ChatWebView?.CoreWebView2 == null) return;
                 if (_messages.Count == 0) return;
+
+                if (await TryApplyWebViewThemeInPlaceAsync())
+                {
+                    Logger.Info("[Theme] WebView2 CSS updated in place");
+                    return;
+                }
 
                 // ── 重置页面就绪标志，等待新页面加载完成后再重建面板 ──
                 _pageReady = false;
@@ -568,6 +612,31 @@ namespace DeepSeek_v4_for_VisualStudio.View
             catch (Exception ex)
             {
                 Logger.Warn($"[Theme] Failed to reload WebView2: {ex.Message}");
+            }
+        }
+
+        /// <summary>
+        /// 普通聊天页原地替换 CSS。动态卡片或 Mermaid 存在时返回 false，
+        /// 由调用方走完整页面重建，避免只换一半主题。
+        /// </summary>
+        private async Task<bool> TryApplyWebViewThemeInPlaceAsync()
+        {
+            try
+            {
+                var core = ChatWebView?.CoreWebView2;
+                if (core == null || !_pageReady)
+                    return false;
+
+                string script = ChatHtmlService.BuildApplyThemeInPlaceJs(
+                    ThemeService.Instance.PageCss,
+                    ThemeService.Instance.IsLight);
+                string result = await core.ExecuteScriptAsync(script);
+                return string.Equals(result, "true", StringComparison.OrdinalIgnoreCase);
+            }
+            catch (Exception ex)
+            {
+                Logger.Debug($"[Theme] 原地更新 WebView CSS 失败: {ex.GetType().Name}: {ex.Message}");
+                return false;
             }
         }
 
