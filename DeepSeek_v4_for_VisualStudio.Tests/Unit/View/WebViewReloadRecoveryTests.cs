@@ -126,9 +126,9 @@ public class WebViewReloadRecoveryTests
     }
 
     // ── 失效实例识别（本次修复的核心）────────────────────────────────
-    // 实测教训：控件卸载后 CoreWebView2 引用仍在、属性访问不抛异常，
-    // 但 NavigateToString 完全无效（2.5 秒后 docUrl 仍为 about:blank）。
-    // 因此必须以「实例是否经历过卸载」作为实质判据，而非属性可访问性。
+    // 一次 Unloaded 不能直接判定实例永久失效：VS 停靠 / 自动隐藏会短暂
+    // 移出并重新挂载同一 WebView2。恢复时必须先尝试现有实例，只有探测失败
+    // 或 CoreWebView2 访问异常时才设置 stale 并进入完整重建。
 
     /// <summary>调用 TryGetLiveCoreWebView 并返回其结果。</summary>
     private static bool InvokeTryGetLiveCoreWebView(DeepSeekChatControl control)
@@ -142,7 +142,7 @@ public class WebViewReloadRecoveryTests
     }
 
     [Fact]
-    public void Unloaded_ShouldMarkInstanceStale()
+    public void Unloaded_ShouldNotImmediatelyMarkInstanceStale()
     {
         RunOnStaThread(control =>
         {
@@ -151,10 +151,10 @@ public class WebViewReloadRecoveryTests
 
             InvokeHandler(control, "ChatWebView_Unloaded");
 
-            // 这是关键状态：卸载后实例的底层浏览器已释放，
-            // 必须持续标记为失效（直到创建新控件），否则恢复路径会做无效的导航尝试。
-            GetField<bool>(control, "_webViewInstanceStale").Should().BeTrue(
-                "卸载后的控件实例必须被标记为失效");
+            GetField<bool>(control, "_webViewInstanceStale").Should().BeFalse(
+                "短暂停靠或布局切换触发的 Unloaded 不能直接判死");
+            GetField<bool>(control, "_webViewReloadNeedsRestore").Should().BeTrue(
+                "仍应标记为待恢复，等到 Loaded 后探测现有实例");
         });
     }
 
@@ -317,7 +317,7 @@ public class WebViewReloadRecoveryTests
     // ── 卸载/重载路径的渲染状态复位契约 ──────────────────────────────
 
     [Fact]
-    public void Unloaded_ShouldInvalidateRenderingStateAndArmRestore()
+    public void Unloaded_ShouldPreserveRenderingStateAndArmRestore()
     {
         RunOnStaThread(control =>
         {
@@ -329,14 +329,56 @@ public class WebViewReloadRecoveryTests
 
             InvokeHandler(control, "ChatWebView_Unloaded");
 
-            // 控件脱离视觉树后 CoreWebView2 与页面 DOM 均已消失，
-            // 这些标志若不复位，恢复路径会误判「页面仍然完好」而跳过重绘 → 空白窗口
-            GetField<bool>(control, "_webViewInitialized").Should().BeFalse();
-            GetField<bool>(control, "_pageReady").Should().BeFalse();
-            GetField<bool>(control, "_browserInitialized").Should().BeFalse();
+            // 暂时卸载不代表 DOM 已消失。保留状态，Loaded 后先探测现有实例；
+            // 只有探测失败才由恢复路径复位这些标志并重建。
+            GetField<bool>(control, "_webViewInitialized").Should().BeTrue();
+            GetField<bool>(control, "_pageReady").Should().BeTrue();
+            GetField<bool>(control, "_browserInitialized").Should().BeTrue();
 
             // 置位恢复标记，供 Loaded 判断这是一次真实的重载往返
             GetField<bool>(control, "_webViewReloadNeedsRestore").Should().BeTrue();
+        });
+    }
+
+    [Fact]
+    public void IntentionalReattach_ShouldNotArmRestoreOrInvalidateState()
+    {
+        RunOnStaThread(control =>
+        {
+            SetField(control, "_webViewInitialized", true);
+            SetField(control, "_pageReady", true);
+            SetField(control, "_browserInitialized", true);
+            SetField(control, "_isIntentionalWebViewReattach", true);
+
+            InvokeHandler(control, "ChatWebView_Unloaded");
+
+            GetField<bool>(control, "_webViewReloadNeedsRestore").Should().BeFalse(
+                "代码主动重挂只用于修复 D3D 合成链，不应升级为窗口恢复");
+            GetField<bool>(control, "_webViewInstanceStale").Should().BeFalse();
+            GetField<bool>(control, "_webViewInitialized").Should().BeTrue();
+            GetField<bool>(control, "_pageReady").Should().BeTrue();
+            GetField<bool>(control, "_browserInitialized").Should().BeTrue();
+        });
+    }
+
+    [Fact]
+    public void UpdateBrowser_WhenDetachedAfterInitialization_ShouldDeferWithoutRebuild()
+    {
+        RunOnStaThread(control =>
+        {
+            SetField(control, "_webViewInitialized", true);
+            SetField(control, "_webViewRenderDirtyWhileDetached", false);
+
+            var method = typeof(DeepSeekChatControl).GetMethod(
+                "UpdateBrowser", BindingFlags.Instance | BindingFlags.NonPublic);
+            method.Should().NotBeNull("UpdateBrowser 应存在");
+
+            method!.Invoke(control, null);
+
+            GetField<bool>(control, "_webViewRenderDirtyWhileDetached").Should().BeTrue(
+                "暂时脱离视觉树期间应只记录待渲染状态");
+            GetField<Task<bool>?>(control, "_webViewRebuildTask").Should().BeNull(
+                "未挂载不能仅因 Parent/IsLoaded 为空就启动完整重建");
         });
     }
 
