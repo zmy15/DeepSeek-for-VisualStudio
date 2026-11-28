@@ -1,4 +1,4 @@
-<#
+﻿<#
 .SYNOPSIS
     校验 WebView 前端资源（Resources\Chat 下的 JS / CSS）的编码与语法。
 

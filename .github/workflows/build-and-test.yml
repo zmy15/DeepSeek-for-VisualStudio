@@ -26,7 +26,7 @@ jobs:
         node-version: '20'
 
     - name: Web Asset Guard (node --check / BOM / placeholder pairing)
-      run: powershell -NoProfile -File tools\check-web-assets.ps1
+      run: pwsh -NoProfile -File tools\check-web-assets.ps1
 
     - name: Setup MSBuild
       uses: microsoft/setup-msbuild@v2
