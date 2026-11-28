@@ -73,8 +73,7 @@ jobs:
           @{ Path = 'README.md'; Pattern = '(badge/VSIX-)[0-9.]+(-success)'; Replacement = '${1}' + $version + '${2}' },
           @{ Path = 'README.zh-CN.md'; Pattern = '(badge/VSIX-)[0-9.]+(-success)'; Replacement = '${1}' + $version + '${2}' },
           @{ Path = 'README.md'; Pattern = '(\|\s*\*\*Version\*\*\s*\|\s*)[0-9][0-9.]*(\s*\|)'; Replacement = '${1}' + $version + '${2}' },
-          @{ Path = 'README.zh-CN.md'; Pattern = '(\|\s*\*\*版本\*\*\s*\|\s*)[0-9][0-9.]*(\s*\|)'; Replacement = '${1}' + $version + '${2}' },
-          @{ Path = 'benchmark/tasks.sample.json'; Pattern = '("extension_version"\s*:\s*")[^"]*(")'; Replacement = '${1}' + $version + '${2}' }
+          @{ Path = 'README.zh-CN.md'; Pattern = '(\|\s*\*\*版本\*\*\s*\|\s*)[0-9][0-9.]*(\s*\|)'; Replacement = '${1}' + $version + '${2}' }
         )
 
         foreach ($update in $updates) {
@@ -110,7 +109,7 @@ jobs:
         if ($LASTEXITCODE -eq 0) {
           Write-Host "版本号已经是 $version，无需提交"
         } else {
-          git add -- source.extension.vsixmanifest DeepSeek_v4_for_VisualStudioPackage.cs README.md README.zh-CN.md benchmark/tasks.sample.json
+          git add -- source.extension.vsixmanifest DeepSeek_v4_for_VisualStudioPackage.cs README.md README.zh-CN.md
           git commit -m "chore(release): bump version to $version"
           git push origin "HEAD:master"
           Write-Host "版本号提交已推送到 master"
