@@ -1829,7 +1829,7 @@ namespace DeepSeek_v4_for_VisualStudio.Services
                 _ => "en"
             };
 
-return "<!DOCTYPE html><html lang='" + htmlLang + "'><head><meta charset='UTF-8'>" +
+return "<!DOCTYPE html><html lang='" + htmlLang + "' data-theme='" + (isLight ? "light" : "dark") + "'><head><meta charset='UTF-8'>" +
        "<meta name='viewport' content='width=device-width,initial-scale=1'>" +
        "<style id='deepseek-page-style'>" + PageCss + "</style>" +
        // ── KaTeX / Highlight.js CSS 均为非阻塞加载（media='none' + onload 翻转）──
@@ -1840,7 +1840,7 @@ return "<!DOCTYPE html><html lang='" + htmlLang + "'><head><meta charset='UTF-8'
        // 既不阻塞渲染也不阻塞脚本执行，加载完成后翻转为 'all' 生效。
        "<link rel='stylesheet' href='" + KaTeXCdnCss +
        "' media='none' onload=\"if(this.media!=='all')this.media='all'\" />" +
-       "<link rel='stylesheet' href='" + HighlightJsCdnStyle +
+       "<link id='deepseek-highlight-style' rel='stylesheet' href='" + HighlightJsCdnStyle +
        "' media='none' onload=\"if(this.media!=='all')this.media='all'\" />" +
        "</head><body>" +
        "<div id='chat-container'>" + messagesHtml + "</div>" +
@@ -1901,6 +1901,8 @@ return "<!DOCTYPE html><html lang='" + htmlLang + "'><head><meta charset='UTF-8'
             string cssJson = JsonSerializer.Serialize(pageCss);
             string theme = isLight ? "light" : "dark";
             string mermaidTheme = isLight ? "default" : "dark";
+            string highlightCssJson = JsonSerializer.Serialize(
+                ThemeService.GetHighlightJsCdnStyle(isLight));
             return "(function(){"
                 + "var s=document.getElementById('deepseek-page-style');"
                 + "if(!s||window.__pageReady!==true)return false;"
@@ -1910,7 +1912,10 @@ return "<!DOCTYPE html><html lang='" + htmlLang + "'><head><meta charset='UTF-8'
                 + "#agent-questions,.handoff-btn,.mermaid');"
                 + "if(sensitive)return false;"
                 + "s.textContent=" + cssJson + ";"
+                + "var hl=document.getElementById('deepseek-highlight-style');"
+                + "if(hl)hl.href=" + highlightCssJson + ";"
                 + "document.documentElement.setAttribute('data-theme','" + theme + "');"
+                + "if(window.__applyCtxDebugTheme)window.__applyCtxDebugTheme();"
                 + "try{if(window.mermaid&&mermaid.initialize){"
                 + "mermaid.initialize({startOnLoad:false,theme:'" + mermaidTheme + "',"
                 + "securityLevel:'loose',suppressErrorRendering:true});"

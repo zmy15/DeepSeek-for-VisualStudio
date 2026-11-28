@@ -9,6 +9,17 @@
     <UserControl.Resources>
         <!-- Win10 不含 Segoe Fluent Icons：回退到系统自带的 Segoe MDL2 Assets，避免图标显示为方框 -->
         <FontFamily x:Key="IconFontFamily">Segoe Fluent Icons, Segoe MDL2 Assets</FontFamily>
+        <!-- 历史会话浮层滚动条：跟随 WPF 主题动态更新 -->
+        <SolidColorBrush x:Key="HistoryScrollTrackBrush" Color="#2D2D2D" />
+        <SolidColorBrush x:Key="HistoryScrollThumbBrush" Color="#555555" />
+        <SolidColorBrush x:Key="HistoryScrollThumbHoverBrush" Color="#777777" />
+        <SolidColorBrush x:Key="HistoryItemHoverBrush" Color="#3C3C3C" />
+        <SolidColorBrush x:Key="HistoryItemSelectedBrush" Color="#264F78" />
+        <SolidColorBrush x:Key="TransparentButtonHoverBrush" Color="#3C3C3C" />
+        <SolidColorBrush x:Key="TransparentButtonPressedBrush" Color="#505050" />
+        <SolidColorBrush x:Key="ToolTipBackgroundBrush" Color="#2D2D2D" />
+        <SolidColorBrush x:Key="ToolTipForegroundBrush" Color="#F0F0F0" />
+        <SolidColorBrush x:Key="ToolTipBorderBrush" Color="#555555" />
         <!-- ═══ 深色主题样式 ═══ -->
         <!-- ComboBox 深色样式（VS 2022 风格） -->
         <Style TargetType="ComboBox">
@@ -199,15 +210,142 @@
                         </Border>
                         <ControlTemplate.Triggers>
                             <Trigger Property="IsMouseOver" Value="True">
-                                <Setter Property="Background" Value="#3C3C3C"/>
+                                <Setter Property="Background"
+                                        Value="{DynamicResource TransparentButtonHoverBrush}"/>
                             </Trigger>
                             <Trigger Property="IsPressed" Value="True">
-                                <Setter Property="Background" Value="#505050"/>
+                                <Setter Property="Background"
+                                        Value="{DynamicResource TransparentButtonPressedBrush}"/>
                             </Trigger>
                             <Trigger Property="IsEnabled" Value="False">
                                 <Setter Property="Foreground" Value="#666666"/>
                             </Trigger>
                         </ControlTemplate.Triggers>
+                    </ControlTemplate>
+                </Setter.Value>
+            </Setter>
+        </Style>
+
+        <!-- ToolTip 跟随当前 WPF 主题，避免浅色界面弹出深色工具提示 -->
+        <Style TargetType="ToolTip">
+            <Setter Property="Background" Value="{DynamicResource ToolTipBackgroundBrush}" />
+            <Setter Property="Foreground" Value="{DynamicResource ToolTipForegroundBrush}" />
+            <Setter Property="BorderBrush" Value="{DynamicResource ToolTipBorderBrush}" />
+            <Setter Property="BorderThickness" Value="1" />
+            <Setter Property="Padding" Value="8,5" />
+            <Setter Property="HasDropShadow" Value="True" />
+            <Setter Property="Template">
+                <Setter.Value>
+                    <ControlTemplate TargetType="ToolTip">
+                        <Border Background="{TemplateBinding Background}"
+                                BorderBrush="{TemplateBinding BorderBrush}"
+                                BorderThickness="{TemplateBinding BorderThickness}"
+                                CornerRadius="4"
+                                Padding="{TemplateBinding Padding}"
+                                SnapsToDevicePixels="True">
+                            <ContentPresenter />
+                        </Border>
+                    </ControlTemplate>
+                </Setter.Value>
+            </Setter>
+        </Style>
+
+        <!-- 历史会话列表专用滚动条与模板：不依赖 ListBox 内部默认的 VS 深色 ScrollBar -->
+        <Style x:Key="HistoryScrollBarStyle" TargetType="ScrollBar">
+            <Setter Property="Width" Value="10" />
+            <Setter Property="Background" Value="{DynamicResource HistoryScrollTrackBrush}" />
+            <Setter Property="Template">
+                <Setter.Value>
+                    <ControlTemplate TargetType="ScrollBar">
+                        <Grid Background="{TemplateBinding Background}">
+                            <Track x:Name="PART_Track"
+                                   Minimum="{TemplateBinding Minimum}"
+                                   Maximum="{TemplateBinding Maximum}"
+                                   Value="{TemplateBinding Value}"
+                                   ViewportSize="{TemplateBinding ViewportSize}"
+                                   Orientation="{TemplateBinding Orientation}"
+                                   IsDirectionReversed="True">
+                                <Track.DecreaseRepeatButton>
+                                    <RepeatButton Command="{x:Static ScrollBar.PageUpCommand}"
+                                                  Opacity="0"
+                                                  Focusable="False" />
+                                </Track.DecreaseRepeatButton>
+                                <Track.Thumb>
+                                    <Thumb>
+                                        <Thumb.Template>
+                                            <ControlTemplate TargetType="Thumb">
+                                                <Border x:Name="ThumbBorder"
+                                                        Margin="2"
+                                                        CornerRadius="4"
+                                                        Background="{DynamicResource HistoryScrollThumbBrush}" />
+                                                <ControlTemplate.Triggers>
+                                                    <Trigger Property="IsMouseOver" Value="True">
+                                                        <Setter TargetName="ThumbBorder"
+                                                                Property="Background"
+                                                                Value="{DynamicResource HistoryScrollThumbHoverBrush}" />
+                                                    </Trigger>
+                                                </ControlTemplate.Triggers>
+                                            </ControlTemplate>
+                                        </Thumb.Template>
+                                    </Thumb>
+                                </Track.Thumb>
+                                <Track.IncreaseRepeatButton>
+                                    <RepeatButton Command="{x:Static ScrollBar.PageDownCommand}"
+                                                  Opacity="0"
+                                                  Focusable="False" />
+                                </Track.IncreaseRepeatButton>
+                            </Track>
+                        </Grid>
+                    </ControlTemplate>
+                </Setter.Value>
+            </Setter>
+        </Style>
+
+        <Style x:Key="HistoryScrollViewerStyle" TargetType="ScrollViewer">
+            <Setter Property="Template">
+                <Setter.Value>
+                    <ControlTemplate TargetType="ScrollViewer">
+                        <Grid>
+                            <Grid.ColumnDefinitions>
+                                <ColumnDefinition Width="*" />
+                                <ColumnDefinition Width="Auto" />
+                            </Grid.ColumnDefinitions>
+                            <ScrollContentPresenter Grid.Column="0"
+                                                    CanContentScroll="{TemplateBinding CanContentScroll}"
+                                                    Content="{TemplateBinding Content}"
+                                                    ContentTemplate="{TemplateBinding ContentTemplate}" />
+                            <ScrollBar x:Name="PART_VerticalScrollBar"
+                                       Grid.Column="1"
+                                       Style="{StaticResource HistoryScrollBarStyle}"
+                                       Orientation="Vertical"
+                                       Minimum="0"
+                                       Maximum="{TemplateBinding ScrollableHeight}"
+                                       ViewportSize="{TemplateBinding ViewportHeight}"
+                                       Value="{Binding VerticalOffset, RelativeSource={RelativeSource TemplatedParent}, Mode=OneWay}"
+                                       Visibility="{TemplateBinding ComputedVerticalScrollBarVisibility}" />
+                        </Grid>
+                    </ControlTemplate>
+                </Setter.Value>
+            </Setter>
+        </Style>
+
+        <Style x:Key="HistoryListBoxStyle" TargetType="ListBox">
+            <Setter Property="Background" Value="Transparent" />
+            <Setter Property="BorderThickness" Value="0" />
+            <Setter Property="Template">
+                <Setter.Value>
+                    <ControlTemplate TargetType="ListBox">
+                        <Border Background="{TemplateBinding Background}"
+                                BorderBrush="{TemplateBinding BorderBrush}"
+                                BorderThickness="{TemplateBinding BorderThickness}">
+                            <ScrollViewer Focusable="False"
+                                          CanContentScroll="True"
+                                          VerticalScrollBarVisibility="Auto"
+                                          HorizontalScrollBarVisibility="Disabled"
+                                          Style="{StaticResource HistoryScrollViewerStyle}">
+                                <ItemsPresenter />
+                            </ScrollViewer>
+                        </Border>
                     </ControlTemplate>
                 </Setter.Value>
             </Setter>
@@ -321,6 +459,7 @@
                 <ListBox x:Name="HistoryListBox"
                          Background="Transparent"
                          BorderThickness="0"
+                         Style="{StaticResource HistoryListBoxStyle}"
                          SelectionChanged="HistoryListBox_SelectionChanged"
                          VirtualizingPanel.ScrollUnit="Pixel">
                     <ListBox.ItemTemplate>
@@ -332,7 +471,6 @@
                                 </Grid.ColumnDefinitions>
                                 <StackPanel Grid.Column="0">
                                     <TextBlock Text="{Binding Title}"
-                                               Foreground="#D4D4D4"
                                                FontSize="12"
                                                TextTrimming="CharacterEllipsis" />
                                     <TextBlock Text="{Binding LastActiveText}"
@@ -387,10 +525,14 @@
                                         </Border>
                                         <ControlTemplate.Triggers>
                                             <Trigger Property="IsMouseOver" Value="True">
-                                                <Setter TargetName="HB" Property="Background" Value="#3C3C3C" />
+                                                <Setter TargetName="HB"
+                                                        Property="Background"
+                                                        Value="{DynamicResource HistoryItemHoverBrush}" />
                                             </Trigger>
                                             <Trigger Property="IsSelected" Value="True">
-                                                <Setter TargetName="HB" Property="Background" Value="#264F78" />
+                                                <Setter TargetName="HB"
+                                                        Property="Background"
+                                                        Value="{DynamicResource HistoryItemSelectedBrush}" />
                                             </Trigger>
                                         </ControlTemplate.Triggers>
                                     </ControlTemplate>

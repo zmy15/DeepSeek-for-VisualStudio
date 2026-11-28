@@ -164,6 +164,7 @@ namespace DeepSeek_v4_for_VisualStudio.View
                     HistoryPopupBorder.BorderBrush = panelBorder;
                 }
                 if (HistoryListBox != null) HistoryListBox.Foreground = textColor;
+                UpdateChromeThemeBrushes(isLight);
                 if (CurrentSessionTitle != null) CurrentSessionTitle.Foreground = textColor;
                 // Update the "审批模式:" label (TextBlock sibling of ApprovalModeComboBox)
                 UpdateApprovalLabel(panelBg, textColor);
@@ -178,7 +179,12 @@ namespace DeepSeek_v4_for_VisualStudio.View
                 if (ThinkingCheckBox != null) ThinkingCheckBox.Foreground = textColor;
 
                 // ── 按钮文字颜色 ──
-                if (ClearButton != null) ClearButton.Foreground = textColor;
+                if (ClearButton != null)
+                {
+                    ClearButton.Foreground = textColor;
+                    ClearButton.BorderBrush = panelBorder;
+                }
+                if (QuickSettingsButton != null) QuickSettingsButton.Foreground = textColor;
                 // 发送/停止按钮使用 AccentButton 样式：白字 + 强调底色，不随主题覆盖前景色
                 if (NewChatButton != null) NewChatButton.Foreground = accentGreen;
                 if (UploadButton != null) UploadButton.Foreground = new SolidColorBrush(Color.FromRgb(0xCE, 0x91, 0x78));
@@ -511,6 +517,37 @@ namespace DeepSeek_v4_for_VisualStudio.View
                 popupBorder.Background = bg;
                 popupBorder.BorderBrush = border;
             }
+        }
+
+        /// <summary>更新历史会话浮层、透明按钮和 ToolTip 的主题画刷。</summary>
+        private void UpdateChromeThemeBrushes(bool isLight)
+        {
+            SetResourceBrush("HistoryScrollTrackBrush",
+                isLight ? Color.FromRgb(0xF3, 0xF3, 0xF3) : Color.FromRgb(0x1E, 0x1E, 0x1E));
+            SetResourceBrush("HistoryScrollThumbBrush",
+                isLight ? Color.FromRgb(0xC8, 0xC8, 0xC8) : Color.FromRgb(0x55, 0x55, 0x55));
+            SetResourceBrush("HistoryScrollThumbHoverBrush",
+                isLight ? Color.FromRgb(0xA8, 0xA8, 0xA8) : Color.FromRgb(0x77, 0x77, 0x77));
+            SetResourceBrush("HistoryItemHoverBrush",
+                isLight ? Color.FromRgb(0xE5, 0xF1, 0xFB) : Color.FromRgb(0x3C, 0x3C, 0x3C));
+            SetResourceBrush("HistoryItemSelectedBrush",
+                isLight ? Color.FromRgb(0xCC, 0xE8, 0xFF) : Color.FromRgb(0x26, 0x4F, 0x78));
+            SetResourceBrush("TransparentButtonHoverBrush",
+                isLight ? Color.FromRgb(0xE5, 0xF1, 0xFB) : Color.FromRgb(0x3C, 0x3C, 0x3C));
+            SetResourceBrush("TransparentButtonPressedBrush",
+                isLight ? Color.FromRgb(0xCC, 0xE8, 0xFF) : Color.FromRgb(0x50, 0x50, 0x50));
+            SetResourceBrush("ToolTipBackgroundBrush",
+                isLight ? Color.FromRgb(0xFF, 0xFF, 0xFF) : Color.FromRgb(0x2D, 0x2D, 0x2D));
+            SetResourceBrush("ToolTipForegroundBrush",
+                isLight ? Color.FromRgb(0x33, 0x33, 0x33) : Color.FromRgb(0xF0, 0xF0, 0xF0));
+            SetResourceBrush("ToolTipBorderBrush",
+                isLight ? Color.FromRgb(0xC8, 0xC8, 0xC8) : Color.FromRgb(0x55, 0x55, 0x55));
+        }
+
+        /// <summary>用新画刷替换动态资源，确保已展开的弹出层立即刷新。</summary>
+        private void SetResourceBrush(string key, Color color)
+        {
+            Resources[key] = new SolidColorBrush(color);
         }
 
         /// <summary>

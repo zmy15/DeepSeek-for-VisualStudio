@@ -111,6 +111,24 @@ public class WebViewReloadRecoveryTests
         method!.Invoke(control, new object?[] { control, new System.Windows.RoutedEventArgs() });
     }
 
+    private static T? FindVisualChild<T>(System.Windows.DependencyObject parent)
+        where T : System.Windows.DependencyObject
+    {
+        int count = System.Windows.Media.VisualTreeHelper.GetChildrenCount(parent);
+        for (int i = 0; i < count; i++)
+        {
+            var child = System.Windows.Media.VisualTreeHelper.GetChild(parent, i);
+            if (child is T match)
+                return match;
+
+            var nested = FindVisualChild<T>(child);
+            if (nested != null)
+                return nested;
+        }
+
+        return null;
+    }
+
     /// <summary>调用控件的私有可见性处理器（DependencyPropertyChangedEventArgs 版本）。</summary>
     private static void InvokeVisibilityHandler(
         DeepSeekChatControl control, string methodName, bool newValue)
@@ -624,6 +642,137 @@ public class WebViewReloadRecoveryTests
 
             GetField<object?>(control, "_flushIdleTimer").Should().BeNull();
             GetField<bool>(control, "_flushIdleTimerCreated").Should().BeFalse();
+        });
+    }
+
+    [Fact]
+    public void HistoryTheme_WhenLight_ShouldUseDarkTextAndLightScrollBars()
+    {
+        RunOnStaThread(control =>
+        {
+            var applyLight = typeof(DeepSeekChatControl).GetMethod(
+                "ApplyWpfLightTheme",
+                BindingFlags.Instance | BindingFlags.NonPublic);
+            applyLight.Should().NotBeNull();
+
+            applyLight!.Invoke(control, null);
+
+            var historyList = GetField<System.Windows.Controls.ListBox>(
+                control, "HistoryListBox");
+            historyList.Style.Should().BeSameAs(
+                control.Resources["HistoryListBoxStyle"],
+                "历史列表必须显式使用专用模板，不能回退到 VS 深色 ScrollBar");
+            control.Resources["HistoryScrollViewerStyle"]
+                .Should().BeOfType<System.Windows.Style>();
+            control.Resources["HistoryScrollBarStyle"]
+                .Should().BeOfType<System.Windows.Style>();
+            var textBrush = (System.Windows.Media.SolidColorBrush)historyList.Foreground;
+            textBrush.Color.R.Should().BeLessThan(0x80,
+                "浅色历史浮层必须使用深色标题，不能继承深色主题的浅灰文字");
+
+            var track = (System.Windows.Media.SolidColorBrush)
+                control.Resources["HistoryScrollTrackBrush"];
+            var thumb = (System.Windows.Media.SolidColorBrush)
+                control.Resources["HistoryScrollThumbBrush"];
+            var hover = (System.Windows.Media.SolidColorBrush)
+                control.Resources["TransparentButtonHoverBrush"];
+            var tooltipBackground = (System.Windows.Media.SolidColorBrush)
+                control.Resources["ToolTipBackgroundBrush"];
+            var tooltipForeground = (System.Windows.Media.SolidColorBrush)
+                control.Resources["ToolTipForegroundBrush"];
+            var quickSettings = GetField<System.Windows.Controls.Button>(
+                control, "QuickSettingsButton");
+            track.Color.R.Should().BeGreaterThan(0xD0,
+                "浅色主题滚动条轨道应为浅色");
+            thumb.Color.R.Should().BeGreaterThan(0xA0,
+                "浅色主题滚动条滑块应为中浅灰");
+            hover.Color.R.Should().BeGreaterThan(0xD0,
+                "浅色主题按钮悬停遮罩不能继续使用深色");
+            tooltipBackground.Color.R.Should().BeGreaterThan(0xE0,
+                "浅色主题 ToolTip 背景应为浅色");
+            tooltipForeground.Color.R.Should().BeLessThan(0x80,
+                "浅色主题 ToolTip 文字应为深色");
+            ((System.Windows.Media.SolidColorBrush)quickSettings.Foreground)
+                .Color.R.Should().BeLessThan(0x80,
+                    "浅色主题快速设置图标必须使用高对比的前景色");
+        });
+    }
+
+    [Fact]
+    public void HistoryTheme_WhenDark_ShouldRestoreDarkScrollBarsAndHoverState()
+    {
+        RunOnStaThread(control =>
+        {
+            var applyDark = typeof(DeepSeekChatControl).GetMethod(
+                "ApplyWpfDarkTheme",
+                BindingFlags.Instance | BindingFlags.NonPublic);
+            applyDark.Should().NotBeNull();
+
+            applyDark!.Invoke(control, null);
+
+            var track = (System.Windows.Media.SolidColorBrush)
+                control.Resources["HistoryScrollTrackBrush"];
+            var hover = (System.Windows.Media.SolidColorBrush)
+                control.Resources["HistoryItemHoverBrush"];
+            var tooltipBackground = (System.Windows.Media.SolidColorBrush)
+                control.Resources["ToolTipBackgroundBrush"];
+            var tooltipForeground = (System.Windows.Media.SolidColorBrush)
+                control.Resources["ToolTipForegroundBrush"];
+            track.Color.R.Should().BeLessThan(0x40,
+                "深色主题滚动条轨道应保持深色");
+            hover.Color.R.Should().BeLessThan(0x60,
+                "深色主题条目悬停底色应保持深色");
+            tooltipBackground.Color.R.Should().BeLessThan(0x60,
+                "深色主题 ToolTip 背景应保持深色");
+            tooltipForeground.Color.R.Should().BeGreaterThan(0xD0,
+                "深色主题 ToolTip 文字应为浅色");
+        });
+    }
+
+    [Fact]
+    public void HistoryListBoxTemplate_ShouldUseThemedScrollViewerAndScrollBar()
+    {
+        RunOnStaThread(control =>
+        {
+            var historyList = GetField<System.Windows.Controls.ListBox>(
+                control, "HistoryListBox");
+            historyList.ApplyTemplate();
+            historyList.Measure(new System.Windows.Size(320, 400));
+            historyList.Arrange(new System.Windows.Rect(0, 0, 320, 400));
+            historyList.UpdateLayout();
+
+            var scrollViewer = FindVisualChild<System.Windows.Controls.ScrollViewer>(historyList);
+            scrollViewer.Should().NotBeNull("HistoryListBox 模板必须包含显式 ScrollViewer");
+            scrollViewer!.Style.Should().BeSameAs(control.Resources["HistoryScrollViewerStyle"]);
+
+            var scrollBar = FindVisualChild<System.Windows.Controls.Primitives.ScrollBar>(
+                scrollViewer);
+            scrollBar.Should().NotBeNull("滚动区域必须使用主题化 ScrollBar");
+            scrollBar!.Style.Should().BeSameAs(control.Resources["HistoryScrollBarStyle"]);
+        });
+    }
+
+    [Fact]
+    public void QuickSettingsLightPalette_ShouldUseDarkComboTextOnLightPopup()
+    {
+        RunOnStaThread(_ =>
+        {
+            var resources = new System.Windows.ResourceDictionary();
+            QuickSettingsDialog.ApplyLightPaletteResources(resources);
+
+            var foreground = (System.Windows.Media.SolidColorBrush)
+                resources["QuickComboForeground"];
+            var popup = (System.Windows.Media.SolidColorBrush)
+                resources["QuickComboPopup"];
+            var selection = (System.Windows.Media.SolidColorBrush)
+                resources["QuickComboSelection"];
+
+            foreground.Color.R.Should().BeLessThan(0x80,
+                "浅色下拉项必须使用深色文字，包括稍后生成的 Popup 内容");
+            popup.Color.R.Should().BeGreaterThan(0xE0,
+                "浅色下拉菜单背景必须为浅色");
+            selection.Color.R.Should().BeGreaterThan(0xB0,
+                "选中项背景必须是浅蓝，不能继续使用深色主题色");
         });
     }
 

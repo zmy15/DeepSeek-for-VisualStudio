@@ -300,13 +300,13 @@ namespace DeepSeek_v4_for_VisualStudio.Services
         /// </summary>
         public string HighlightJsCdnStyle
         {
-            get
-            {
-                return IsLight
-                    ? "https://cdnjs.cloudflare.com/ajax/libs/highlight.js/11.9.0/styles/github.min.css"
-                    : "https://cdnjs.cloudflare.com/ajax/libs/highlight.js/11.9.0/styles/github-dark.min.css";
-            }
+            get => GetHighlightJsCdnStyle(IsLight);
         }
+
+        /// <summary>按目标主题返回 Highlight.js 样式地址。</summary>
+        public static string GetHighlightJsCdnStyle(bool isLight) => isLight
+            ? "https://cdnjs.cloudflare.com/ajax/libs/highlight.js/11.9.0/styles/github.min.css"
+            : "https://cdnjs.cloudflare.com/ajax/libs/highlight.js/11.9.0/styles/github-dark.min.css";
 
         /// <summary>
         /// 获取当前主题对应的页面 CSS（用于 WebView2）。
