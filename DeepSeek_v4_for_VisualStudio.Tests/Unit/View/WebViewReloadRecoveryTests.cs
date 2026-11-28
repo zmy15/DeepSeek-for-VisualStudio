@@ -434,6 +434,200 @@ public class WebViewReloadRecoveryTests
     }
 
     [Fact]
+    public void ScheduleCompositionHealthCheck_ShouldCollapseDuplicateQueuedRequests()
+    {
+        RunOnStaThread(control =>
+        {
+            SetField(control, "_compositionHealthCheckQueued", false);
+            SetField(control, "_compositionHealthCheckRunning", false);
+            SetField(control, "_compositionHealthCheckRequested", false);
+
+            var method = typeof(DeepSeekChatControl).GetMethod(
+                "ScheduleCompositionHealthCheck",
+                BindingFlags.Instance | BindingFlags.NonPublic);
+            method.Should().NotBeNull();
+
+            method!.Invoke(control, null);
+            method.Invoke(control, null);
+
+            GetField<bool>(control, "_compositionHealthCheckQueued").Should().BeTrue();
+            GetField<bool>(control, "_compositionHealthCheckRequested").Should().BeFalse(
+                "尚在队列中的重复请求不需要再安排第二轮");
+        });
+    }
+
+    [Fact]
+    public void ScheduleCompositionHealthCheck_WhenRunning_ShouldRequestOneRerun()
+    {
+        RunOnStaThread(control =>
+        {
+            SetField(control, "_compositionHealthCheckQueued", false);
+            SetField(control, "_compositionHealthCheckRunning", true);
+            SetField(control, "_compositionHealthCheckRequested", false);
+
+            var method = typeof(DeepSeekChatControl).GetMethod(
+                "ScheduleCompositionHealthCheck",
+                BindingFlags.Instance | BindingFlags.NonPublic);
+            method.Should().NotBeNull();
+
+            method!.Invoke(control, null);
+
+            GetField<bool>(control, "_compositionHealthCheckRequested").Should().BeTrue(
+                "执行期间的新可见性变化只应合并成一次重跑");
+        });
+    }
+
+    [Fact]
+    public void ScheduleWebViewRestore_ShouldCollapseQueuedAndRunningRequests()
+    {
+        RunOnStaThread(control =>
+        {
+            var method = typeof(DeepSeekChatControl).GetMethod(
+                "ScheduleWebViewRestoreAfterReload",
+                BindingFlags.Instance | BindingFlags.NonPublic);
+            method.Should().NotBeNull();
+
+            SetField(control, "_webViewRestoreQueued", false);
+            SetField(control, "_webViewRestoreRunning", false);
+            SetField(control, "_webViewRestoreRequested", false);
+            method!.Invoke(control, null);
+            method.Invoke(control, null);
+            GetField<bool>(control, "_webViewRestoreQueued").Should().BeTrue();
+            GetField<bool>(control, "_webViewRestoreRequested").Should().BeFalse();
+
+            SetField(control, "_webViewRestoreQueued", false);
+            SetField(control, "_webViewRestoreRunning", true);
+            method.Invoke(control, null);
+            method.Invoke(control, null);
+            GetField<bool>(control, "_webViewRestoreRequested").Should().BeTrue(
+                "恢复执行期间的重复 Loaded/可见性事件只保留一次后续恢复");
+        });
+    }
+
+    [Fact]
+    public void BatchStreamingUpdate_WhenPageNotReady_ShouldPreservePendingDeltas()
+    {
+        RunOnStaThread(control =>
+        {
+            SetField(control, "_pageReady", false);
+            SetField(control, "_webViewInitialized", true);
+            SetField(control, "_webViewRenderDirtyWhileDetached", false);
+
+            var method = typeof(DeepSeekChatControl).GetMethod(
+                "BatchStreamingUpdate",
+                BindingFlags.Instance | BindingFlags.NonPublic);
+            method.Should().NotBeNull();
+
+            method!.Invoke(control, new object?[]
+            {
+                0,
+                null,
+                null,
+                false,
+                "reasoning-delta",
+                "content-delta",
+            });
+
+            var states = (System.Collections.IDictionary)GetField<object>(
+                control, "_streamBatchStates");
+            states.Count.Should().Be(1, "不可推送时不能丢弃流式批处理状态");
+            GetField<bool>(control, "_webViewRenderDirtyWhileDetached").Should().BeTrue();
+        });
+    }
+
+    [Fact]
+    public void FlushDeferredWebViewRendering_WhenStillHidden_ShouldKeepDirtyState()
+    {
+        RunOnStaThread(control =>
+        {
+            SetField(control, "_pageReady", false);
+            SetField(control, "_webViewInitialized", true);
+            SetField(control, "_webViewRenderDirtyWhileDetached", true);
+
+            var method = typeof(DeepSeekChatControl).GetMethod(
+                "FlushDeferredWebViewRendering",
+                BindingFlags.Instance | BindingFlags.NonPublic);
+            method.Should().NotBeNull();
+
+            method!.Invoke(control, null);
+
+            GetField<bool>(control, "_webViewRenderDirtyWhileDetached").Should().BeTrue(
+                "页面仍不可见/未就绪时不能提前清除待渲染状态");
+        });
+    }
+
+    [Fact]
+    public void FlushDeferredWebViewRendering_WhenNothingIsDirty_ShouldNotScheduleBrowserUpdate()
+    {
+        RunOnStaThread(control =>
+        {
+            SetField(control, "_pageReady", true);
+            SetField(control, "_webViewInitialized", true);
+            SetField(control, "_webViewRenderDirtyWhileDetached", false);
+            SetField(control, "_browserUpdateRunning", true);
+            SetField(control, "_browserUpdatePending", false);
+
+            var method = typeof(DeepSeekChatControl).GetMethod(
+                "FlushDeferredWebViewRendering",
+                BindingFlags.Instance | BindingFlags.NonPublic);
+            method.Should().NotBeNull();
+
+            method!.Invoke(control, null);
+
+            GetField<bool>(control, "_browserUpdatePending").Should().BeFalse(
+                "没有待渲染内容时不得启动新的浏览器更新");
+        });
+    }
+
+    [Fact]
+    public void UpdateBrowser_WhenContentUnchanged_ShouldSkipBeforeWebViewRecovery()
+    {
+        RunOnStaThread(control =>
+        {
+            var html = GetField<System.Text.StringBuilder>(control, "_messagesHtml");
+            html.Clear();
+            html.Append("<div>already-rendered</div>");
+
+            SetField(control, "_browserInitialized", true);
+            SetField(control, "_pendingInitialHtml", null);
+            SetField(control, "_lastRenderedMessagesLength", html.Length);
+            SetField(control, "_browserUpdateRunning", false);
+            SetField(control, "_browserUpdatePending", false);
+            SetField(control, "_rebuildAttemptCount", 0);
+
+            var method = typeof(DeepSeekChatControl).GetMethod(
+                "UpdateBrowser", BindingFlags.Instance | BindingFlags.NonPublic);
+            method.Should().NotBeNull();
+
+            method!.Invoke(control, null);
+
+            GetField<int>(control, "_rebuildAttemptCount").Should().Be(0,
+                "内容未变化时不得探测/重建 WebView 或再次全量导航");
+            GetField<bool>(control, "_browserUpdatePending").Should().BeFalse();
+        });
+    }
+
+    [Fact]
+    public void Dispose_ShouldStopAndReleaseFlushIdleTimer()
+    {
+        RunOnStaThread(control =>
+        {
+            var ensure = typeof(DeepSeekChatControl).GetMethod(
+                "EnsureFlushIdleTimer",
+                BindingFlags.Instance | BindingFlags.NonPublic);
+            ensure.Should().NotBeNull();
+
+            ensure!.Invoke(control, null);
+            GetField<object>(control, "_flushIdleTimer").Should().NotBeNull();
+
+            control.Dispose();
+
+            GetField<object?>(control, "_flushIdleTimer").Should().BeNull();
+            GetField<bool>(control, "_flushIdleTimerCreated").Should().BeFalse();
+        });
+    }
+
+    [Fact]
     public void Loaded_WhenNeverUnloaded_ShouldNotArmRestore()
     {
         RunOnStaThread(control =>

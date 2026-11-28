@@ -498,6 +498,9 @@ namespace DeepSeek_v4_for_VisualStudio.View
         /// </summary>
         private void FlushDeferredWebViewRendering()
         {
+            if (!_webViewRenderDirtyWhileDetached)
+                return;
+
             if (!CanPostStreamingUpdateNow())
                 return;
 
@@ -1359,6 +1362,19 @@ namespace DeepSeek_v4_for_VisualStudio.View
         {
             try
             {
+                string allMessages = _messagesHtml.ToString();
+
+                // 没有新增/变化内容时不得进入全量刷新。pageReady 等生命周期事件
+                // 会调用延迟渲染入口；若此处误做 NavigateToString，会再次触发
+                // pageReady，形成“导航→pageReady→导航”的死循环。
+                if (_browserInitialized
+                    && _pendingInitialHtml == null
+                    && allMessages.Length == _lastRenderedMessagesLength)
+                {
+                    Logger.Debug("[Render] 浏览器内容无变化，跳过本次更新");
+                    return;
+                }
+
                 // ── 控件失效（被视觉树卸载）时先重建，再继续本次渲染 ──
                 if (!TryGetLiveCoreWebView(out var core))
                 {
@@ -1368,8 +1384,6 @@ namespace DeepSeek_v4_for_VisualStudio.View
                         return;
                     }
                 }
-
-                string allMessages = _messagesHtml.ToString();
 
                 // 初始页面尚未完成分块注入时，不能走增量路径，否则会与暂缓内容重复或竞态。
                 if (_pendingInitialHtml != null)
@@ -1797,6 +1811,7 @@ namespace DeepSeek_v4_for_VisualStudio.View
         private void NavigateBrowserToInitialPage(CoreWebView2 core, string? pageHtml = null)
         {
             string html = pageHtml ?? BuildNavigableInitialPageHtml();
+            _pageReady = false;
 
             try
             {

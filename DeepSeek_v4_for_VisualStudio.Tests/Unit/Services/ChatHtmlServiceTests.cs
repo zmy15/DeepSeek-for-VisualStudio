@@ -1116,6 +1116,30 @@ public class ChatHtmlServiceTests
         js.Should().Contain("\\u003C/style\\u003E");
     }
 
+    [Fact]
+    public void BuildApplyThemeInPlaceJs_DarkTheme_ReinitializesMermaidForFutureDiagrams()
+    {
+        string js = ChatHtmlService.BuildApplyThemeInPlaceJs(
+            "body{background:#1e1e1e}",
+            isLight: false);
+
+        js.Should().Contain("mermaid.initialize");
+        js.Should().Contain("theme:'dark'");
+        js.Should().Contain("data-theme','dark'");
+        js.Should().Contain("suppressErrorRendering:true");
+    }
+
+    [Fact]
+    public void BuildApplyThemeInPlaceJs_LightTheme_UsesLightMermaidTheme()
+    {
+        string js = ChatHtmlService.BuildApplyThemeInPlaceJs(
+            "body{background:#fff}",
+            isLight: true);
+
+        js.Should().Contain("theme:'default'");
+        js.Should().Contain("data-theme','light'");
+    }
+
     #endregion
 
     private static int CountOccurrences(string haystack, string needle)
