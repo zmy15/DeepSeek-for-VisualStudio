@@ -2,7 +2,6 @@ using System;
 using System.IO;
 using System.Text.Json;
 using DeepSeek_v4_for_VisualStudio.Services;
-using DeepSeek_v4_for_VisualStudio.View;
 
 namespace DeepSeek_v4_for_VisualStudio.Services.Agents
 {
@@ -270,6 +269,6 @@ namespace DeepSeek_v4_for_VisualStudio.Services.Agents
         internal static bool ShouldBlockOcrToolExecution(
             string toolName, bool isVisionModel, string? userMessage)
             => ShouldSuppressOcrTools(isVisionModel, userMessage)
-               && DeepSeekChatControl.IsOcrToolName(toolName);
+               && OcrToolSupport.IsOcrToolName(toolName);
     }
 }

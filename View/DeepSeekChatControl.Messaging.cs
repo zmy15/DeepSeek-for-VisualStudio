@@ -556,11 +556,14 @@ namespace DeepSeek_v4_for_VisualStudio.View
             return string.Equals(Path.GetExtension(filePath), ".pdf", StringComparison.OrdinalIgnoreCase);
         }
 
+        /// <summary>
+        /// 判断指定工具名是否属于 OCR 类工具。
+        /// 实际判定逻辑已下沉至 <see cref="OcrToolSupport"/>，此处保留转发以兼容 View 层既有调用点。
+        /// </summary>
+        /// <param name="toolName">工具名称。</param>
+        /// <returns>属于 OCR 类工具时返回 true。</returns>
         internal static bool IsOcrToolName(string toolName)
-        {
-            var ocrKeywords = new[] { "ocr", "recognize_text", "paddle_ocr", "ocr_image", "image_to_text", "read_text" };
-            return ocrKeywords.Any(k => toolName.IndexOf(k, StringComparison.OrdinalIgnoreCase) >= 0);
-        }
+            => OcrToolSupport.IsOcrToolName(toolName);
 
         private static List<ChatContentPart>? BuildVisionContent(List<string> imagePaths)
         {
@@ -1145,119 +1148,7 @@ namespace DeepSeek_v4_for_VisualStudio.View
         /// 静态方法，可由 BaseAgent 在执行工具前调用。
         /// </summary>
         internal static string SanitizeOcrToolArguments(string toolName, string argumentsJson)
-        {
-            if (!IsOcrToolName(toolName))
-                return argumentsJson;
-
-            // ── OCR 参数格式提醒 ──
-            Logger.Info($"[OCR]  调用 OCR 工具 `{toolName}`，期望参数格式:\n" +
-                "  • input_data (必需): 文件路径、URL 或 Base64 字符串\n" +
-                "  • output_mode (可选, 默认 \"simple\"): \"simple\" | \"detailed\"\n" +
-                "  • file_type (可选): \"image\" | \"pdf\" | null（input_data 为 URL 时必需）");
-
-            try
-            {
-                var args = JsonSerializer.Deserialize<Dictionary<string, JsonElement>>(argumentsJson);
-                if (args == null || args.Count == 0)
-                {
-                    Logger.Warn($"[OCR]  OCR 工具 `{toolName}` 未收到任何参数！请确保传入 input_data。");
-                    return argumentsJson;
-                }
-
-                var imageParamNames = new[] { "input_data", "input", "data", "image", "image_base64", "base64", "image_data", "image_path", "file_path", "path", "file_url", "url", "image_url" };
-                string? imageKey = null;
-                string? imageValue = null;
-
-                foreach (var kvp in args)
-                {
-                    if (imageParamNames.Any(n => string.Equals(kvp.Key, n, StringComparison.OrdinalIgnoreCase)))
-                    {
-                        imageKey = kvp.Key;
-                        imageValue = kvp.Value.GetString();
-                        break;
-                    }
-                }
-
-                if (imageKey == null || string.IsNullOrWhiteSpace(imageValue))
-                    return argumentsJson;
-
-                bool isProbablyBase64 = imageValue.Length > 200
-                    && !imageValue.Contains(' ')
-                    && !imageValue.Contains('\n')
-                    && imageValue.All(c => char.IsLetterOrDigit(c) || c == '+' || c == '/' || c == '=');
-
-                if (isProbablyBase64)
-                    return argumentsJson;
-
-                // ── URL 检测：如果是 URL 且未提供 file_type，发出提醒 ──
-                bool isUrl = imageValue.StartsWith("http://", StringComparison.OrdinalIgnoreCase)
-                          || imageValue.StartsWith("https://", StringComparison.OrdinalIgnoreCase);
-                if (isUrl)
-                {
-                    bool hasFileType = args.ContainsKey("file_type") || args.ContainsKey("type");
-                    if (!hasFileType)
-                    {
-                        Logger.Warn($"[OCR]  input_data 为 URL 但未提供 file_type 参数！\n" +
-                            "  • 请补充 \"file_type\": \"image\" 或 \"file_type\": \"pdf\"\n" +
-                            $"  • 当前 URL: {imageValue.Substring(0, Math.Min(80, imageValue.Length))}...");
-                    }
-                }
-
-                if (File.Exists(imageValue))
-                {
-                    try
-                    {
-                        byte[] fileBytes = File.ReadAllBytes(imageValue);
-                        string base64 = Convert.ToBase64String(fileBytes);
-                        args[imageKey] = JsonSerializer.Deserialize<JsonElement>(JsonSerializer.Serialize(base64));
-                        return JsonSerializer.Serialize(args);
-                    }
-                    catch (Exception ex)
-                    {
-                        Logger.Warn($"[OCR-Sanitize] 读取本地文件失败: {ex.Message}");
-                        return argumentsJson;
-                    }
-                }
-
-                string fileName = Path.GetFileName(imageValue);
-                var searchDirs = new List<string>();
-
-                string clipboardDir = Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.LocalApplicationData), "DeepSeekVS", "temp", "clipboard");
-                if (Directory.Exists(clipboardDir)) searchDirs.Add(clipboardDir);
-
-                string contextDir = Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.LocalApplicationData), "DeepSeekVS", "temp", "context");
-                if (Directory.Exists(contextDir)) searchDirs.Add(contextDir);
-
-                string? resolvedPath = null;
-                foreach (var dir in searchDirs.Distinct())
-                {
-                    string candidate = Path.Combine(dir, fileName);
-                    if (File.Exists(candidate)) { resolvedPath = candidate; break; }
-                    try
-                    {
-                        var matches = Directory.GetFiles(dir, fileName, SearchOption.TopDirectoryOnly);
-                        if (matches.Length > 0) { resolvedPath = matches[0]; break; }
-                    }
-                    catch { }
-                }
-
-                if (resolvedPath != null)
-                {
-                    byte[] fileBytes = File.ReadAllBytes(resolvedPath);
-                    string base64 = Convert.ToBase64String(fileBytes);
-                    args[imageKey] = JsonSerializer.Deserialize<JsonElement>(JsonSerializer.Serialize(base64));
-                    return JsonSerializer.Serialize(args);
-                }
-
-                Logger.Warn($"[OCR-Sanitize] 无法解析文件 '{imageValue}'");
-                return argumentsJson;
-            }
-            catch (Exception ex)
-            {
-                Logger.Warn($"[OCR-Sanitize] 参数预处理异常: {ex.Message}");
-                return argumentsJson;
-            }
-        }
+            => OcrToolSupport.SanitizeOcrToolArguments(toolName, argumentsJson);
 
         /// <summary>
         /// 确保 ApiService 可用：仅在未初始化时创建，避免重置累计 Token 计数器。

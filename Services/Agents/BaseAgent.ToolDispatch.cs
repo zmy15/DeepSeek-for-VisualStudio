@@ -2,7 +2,6 @@ using DeepSeek_v4_for_VisualStudio.Models;
 using DeepSeek_v4_for_VisualStudio.Services;
 using DeepSeek_v4_for_VisualStudio.Services.BuiltInTools;
 using DeepSeek_v4_for_VisualStudio.Utils;
-using DeepSeek_v4_for_VisualStudio.View;
 using System;
 using System.Collections.Concurrent;
 using System.Collections.Generic;
@@ -35,7 +34,7 @@ namespace DeepSeek_v4_for_VisualStudio.Services.Agents
                 BuiltInTools.CurrentSolutionPath = Context?.SolutionPath;
 
             // ── OCR 参数预处理：将文件路径自动转为 base64 ──
-            argumentsJson = DeepSeekChatControl.SanitizeOcrToolArguments(toolName, argumentsJson);
+            argumentsJson = OcrToolSupport.SanitizeOcrToolArguments(toolName, argumentsJson);
 
             // ── 注入 ExploreHandler 到 BuiltInToolService（桥接 Agent.ExploreAgent）──
             //  修复：确保即使 BaseAgent.ExploreAgent 为 null 也能找到 ExploreAgent。
