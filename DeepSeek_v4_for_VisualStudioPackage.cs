@@ -460,6 +460,11 @@ namespace DeepSeek_v4_for_VisualStudio
                 throw;
             }
 
+            // ── 为 Services 层注入 View 层的编辑器 Diff 宿主工厂 ──
+            // EditorDiffMarkerService 是静态单例，无法走构造函数注入；这里显式装配一次，
+            // 使服务只依赖 IEditorDiffHost 抽象，Services 目录因此无需 using View 命名空间。
+            Services.EditorDiffMarkerService.HostFactory = new View.Hosts.EditorDiffHostFactory();
+
             // ═══ Toast 通知点击 → 激活 VS 窗口并打开工具窗口 ═══
             ToastNotificationService.ToastActivated += () =>
             {
