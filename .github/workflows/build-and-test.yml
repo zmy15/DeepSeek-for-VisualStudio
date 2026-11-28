@@ -16,6 +16,18 @@ jobs:
     - name: Checkout
       uses: actions/checkout@v4
 
+    # 前端资源校验：必须先在 Build 之前完成，否则 LangVersion 14 在 dotnet 8 SDK 下
+    # 构建失败时，后续步骤会被整体跳过，node 校验就永远跑不到。
+    # check-web-assets.ps1 在检测不到 node 时会降级为警告并 exit 0，
+    # 因此这里必须显式安装 Node，校验才会真正生效。
+    - name: Setup Node
+      uses: actions/setup-node@v4
+      with:
+        node-version: '20'
+
+    - name: Web Asset Guard (node --check / BOM / placeholder pairing)
+      run: powershell -NoProfile -File tools\check-web-assets.ps1
+
     - name: Setup MSBuild
       uses: microsoft/setup-msbuild@v2
 
