@@ -20,7 +20,7 @@ namespace DeepSeek_v4_for_VisualStudio.View.Hosts
     ///
     /// Adorner 与被装饰元素（编辑器）天然同位置同尺寸，避免手动计算 viewport 坐标导致的错位。
     /// </summary>
-    public sealed class EditorDiffHost : IDiffHost
+    public sealed class EditorDiffHost : IDiffHost, IEditorDiffHost
     {
         /// <summary>
         /// 兜底 adornment 层名（仅当 AdornerLayer 不可用时使用），

@@ -2,7 +2,6 @@ using DeepSeek_v4_for_VisualStudio.Models;
 using DeepSeek_v4_for_VisualStudio.Services;
 using DeepSeek_v4_for_VisualStudio.Services.BuiltInTools;
 using DeepSeek_v4_for_VisualStudio.Utils;
-using DeepSeek_v4_for_VisualStudio.View;
 using System;
 using System.Collections.Concurrent;
 using System.Collections.Generic;

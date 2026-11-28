@@ -31,6 +31,12 @@
   <ItemGroup>
     <EmbeddedResource Update="VSPackage.zh-Hans.resx" />
   </ItemGroup>
+  <!-- WebView 前端资源：JS/CSS 以嵌入资源随程序集分发，由 Services\WebAssets\WebAssetLoader 读取。
+       通配写法保证新增资源文件无需再改本工程文件；脚本据此可脱离 C# 字符串独立维护并接受 Node 语法校验 -->
+  <ItemGroup>
+    <EmbeddedResource Include="Resources\Chat\Js\*.js" />
+    <EmbeddedResource Include="Resources\Chat\Css\*.css" />
+  </ItemGroup>
   <ItemGroup>
     <Reference Include="System.Design" />
     <Reference Include="System.Windows.Forms" />

@@ -4,6 +4,13 @@ on:
   push:
     branches: [ master ]
 
+# master 连续推送时并行 run 会让 --force-with-lease 的 lease 基准过期而被拒
+# （stale info），因此串行化并取消过时的运行：force push 幂等，取消安全，
+# 且只需保留最后一次 master 状态对应的同步结果。
+concurrency:
+  group: sync-no-paddleocr
+  cancel-in-progress: true
+
 jobs:
   sync:
     runs-on: ubuntu-latest

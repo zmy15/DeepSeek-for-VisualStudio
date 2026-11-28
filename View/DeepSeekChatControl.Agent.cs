@@ -71,6 +71,15 @@ namespace DeepSeek_v4_for_VisualStudio.View
                 _agentStreamingTurnId = message.TurnId;
         }
 
+        /// <summary>过程折叠块渲染回执的最长等待时长。与原 20 次 × 50ms 的轮询上限保持一致。</summary>
+        private static readonly TimeSpan TurnProcessReceiptTimeout = TimeSpan.FromMilliseconds(1000);
+
+        /// <summary>
+        /// 过程折叠块渲染回执等待器：以 DOM 回执替代往返探测，
+        /// 命中即刻折叠，未命中才走超时兜底，避免每轮固定占用近 1 秒。
+        /// </summary>
+        private readonly Services.WebAssets.TurnProcessReceiptWaiter _turnProcessWaiter = new();
+
         /// <summary>
         /// 一轮 Agent 任务结束后，通知前端收起该轮的过程折叠块，仅保留最终总结。
         /// 必须晚于 streamEnd 的 innerHTML 渲染下发，否则折叠目标节点尚不存在。
@@ -89,30 +98,31 @@ namespace DeepSeek_v4_for_VisualStudio.View
             // 非 Agent 轮次（Ask 纯问答）没有轮次标识，无需折叠
             if (string.IsNullOrEmpty(turnId)) return;
 
-            string probeJs = ChatHtmlService.BuildTurnProcessProbeJs(turnId);
-            string collapseJs = ChatHtmlService.BuildCollapseTurnProcessJs(turnId);
+            // 提升为非空局部变量：后续 lambda 闭包与回执等待都需要非空标识。
+            string targetTurnId = turnId;
+            string receiptJs = ChatHtmlService.BuildTurnProcessReceiptJs(targetTurnId);
+            string collapseJs = ChatHtmlService.BuildCollapseTurnProcessJs(targetTurnId);
 
             _ = Dispatcher.InvokeAsync(async () =>
             {
                 try
                 {
-                    // ── 兜底收起 ──
-                    // streamEnd 已按「默认收起」渲染，正常情况下这里无需再做任何事；
-                    // 保留该兜底是为了覆盖页面被全量重绘、或历史节点未按收起态渲染的情形。
-                    bool ready = false;
-                    for (int attempt = 0; attempt < 20 && !ready; attempt++)
-                    {
-                        await Task.Delay(50);
-                        if (ChatWebView?.CoreWebView2 == null) return;
-                        string probe = await ChatWebView.CoreWebView2.ExecuteScriptAsync(probeJs);
-                        ready = probe?.Trim().Equals("true", StringComparison.OrdinalIgnoreCase) == true;
-                    }
+                    if (ChatWebView?.CoreWebView2 == null) return;
+
+                    // ── 先登记再下发握手脚本 ──
+                    // 回执可能在脚本执行后极短时间内到达，登记晚于下发会永久错过该轮回执，
+                    // 使随后的等待只能走满超时。
+                    _turnProcessWaiter.Register(targetTurnId);
+                    await ChatWebView.CoreWebView2.ExecuteScriptAsync(receiptJs);
+
+                    bool ready = await _turnProcessWaiter.WaitAsync(
+                        targetTurnId, TurnProcessReceiptTimeout, CancellationToken.None);
 
                     if (!ready)
                     {
                         // 节点未出现属正常：默认收起渲染下命中即跳过，页面已导航/切走时更是如此。
                         // 此处不改模型，留待下次全量重绘按已持久化的折叠态还原。
-                        Logger.Info($"[Render] 过程折叠块未出现在当前页面，无需兜底收起 ({turnId})");
+                        Logger.Info($"[Render] 过程折叠块未就绪，跳过兜底收起 ({targetTurnId})");
                         return;
                     }
 
@@ -123,13 +133,13 @@ namespace DeepSeek_v4_for_VisualStudio.View
                     // 返回 false 表示用户已手动展开（受 data-user-toggled 保护），
                     // 此时必须尊重其意图，不得覆盖为已折叠。
                     if (collapsed)
-                        MarkTurnProcessCollapsed(turnId, collapsed: true);
+                        MarkTurnProcessCollapsed(targetTurnId, collapsed: true);
                     else
-                        Logger.Info($"[Render] 过程折叠块保持展开（用户已手动展开）: turn={turnId}");
+                        Logger.Info($"[Render] 过程折叠块保持展开（用户已手动展开）: turn={targetTurnId}");
                 }
                 catch (Exception ex)
                 {
-                    Logger.Warn($"[Render] 收起过程折叠块失败 ({turnId}): {ex.Message}");
+                    Logger.Warn($"[Render] 收起过程折叠块失败 ({targetTurnId}): {ex.Message}");
                 }
             }, System.Windows.Threading.DispatcherPriority.Background);
         }

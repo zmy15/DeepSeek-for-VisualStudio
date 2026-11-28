@@ -1,7 +1,6 @@
 using DeepSeek_v4_for_VisualStudio.Models;
 using DeepSeek_v4_for_VisualStudio.Services.Editing;
 using DeepSeek_v4_for_VisualStudio.Utils;
-using DeepSeek_v4_for_VisualStudio.View.Hosts;
 using Microsoft.VisualStudio.Shell;
 using Microsoft.VisualStudio.Text;
 using Microsoft.VisualStudio.Text.Editor;
@@ -16,7 +15,7 @@ namespace DeepSeek_v4_for_VisualStudio.Services
     /// <summary>
     /// 编辑器内嵌 Diff 预览管理服务（preview-then-commit）。
     ///
-    /// 单文件、单会话：预览阶段不修改 sourceBuffer，用户在 <see cref="View.Hosts.EditorDiffHost"/>
+    /// 单文件、单会话：预览阶段不修改 sourceBuffer，用户在 <see cref="IEditorDiffHost"/>
     /// 上逐块「保留 / 撤销」，或整体接受/撤销；写穿模式下通过
     /// <see cref="Editing.StagedEditWorkspace"/> 恢复/确认磁盘 Baseline。
     /// </summary>
@@ -46,8 +45,15 @@ namespace DeepSeek_v4_for_VisualStudio.Services
 
         #region Fields
 
+        /// <summary>
+        /// 编辑器 Diff 宿主工厂 — 由 View 层在扩展初始化时注入。
+        /// 服务只依赖 <see cref="IEditorDiffHost"/> 抽象，因此不必引用 View 命名空间；
+        /// 未注入时内联预览不可用（<see cref="CreateInlineDiffPreview"/> 返回 null 并记日志）。
+        /// </summary>
+        public static IEditorDiffHostFactory? HostFactory { get; set; }
+
         private readonly InlineDiffSessionManager _sessionManager = new();
-        private readonly Dictionary<ITextBuffer, EditorDiffHost> _editorHosts = new();
+        private readonly Dictionary<ITextBuffer, IEditorDiffHost> _editorHosts = new();
         private readonly object _editorHostsLock = new();
 
         // ── 预览刷新防抖 ──
@@ -105,6 +111,15 @@ namespace DeepSeek_v4_for_VisualStudio.Services
             if (string.IsNullOrEmpty(proposedContent) || originalContent == proposedContent)
                 return null;
 
+            // 宿主工厂由 View 层在扩展初始化时注入；未注入说明 UI 尚未就绪，
+            // 此处直接跳过预览而不是抛异常，避免非 UI 宿主（测试/headless）调用时报错。
+            var hostFactory = HostFactory;
+            if (hostFactory == null)
+            {
+                Logger.Warn("[EditorDiff] 宿主工厂未注入，跳过内联 Diff 预览");
+                return null;
+            }
+
             // 获取文件路径
             string filePath = GetFilePathFromBuffer(textView.TextBuffer)
                 ?? textView.TextBuffer.GetHashCode().ToString();
@@ -141,7 +156,7 @@ namespace DeepSeek_v4_for_VisualStudio.Services
             }
 
             // 显示：先登记宿主，待编辑器首帧渲染后再挂载覆盖层，避免阻塞视图创建
-            var editorHost = new EditorDiffHost(textView);
+            var editorHost = hostFactory.Create(textView);
             editorHost.Closed += (_, __) =>
             {
                 lock (_editorHostsLock)
@@ -201,7 +216,7 @@ namespace DeepSeek_v4_for_VisualStudio.Services
 
         /// <summary>
         /// 原地刷新已有写穿会话：把撤销追踪移交新 Workspace、替换变更内容，
-        /// 并通过 EditorDiffHost 重建只读视图与 hunk 按钮。
+        /// 并通过宿主重建只读视图与 hunk 按钮。
         ///
         /// 本方法被 FileTracked / 步骤收尾 / 防抖刷新等多条路径调用，必须满足：
         /// 1. 幂等 —— 内容与 Workspace 均未变化时不再重建 Diff 视图；
@@ -574,7 +589,7 @@ namespace DeepSeek_v4_for_VisualStudio.Services
 
             if (!ThreadHelper.CheckAccess())
             {
-                // EditorDiffHost.Close 有 UI 线程亲和性，必须切回 UI 线程。
+                // 宿主 Close 有 UI 线程亲和性，必须切回 UI 线程。
                 // 这里用 RunAsync 而不是 Run：调用方可能正持有其它锁（例如会话切换路径），
                 // 同步等待 UI 线程会与文档加载 / 编辑器写入互相阻塞，表现为「正在加载文档…」卡死。
                 _ = ThreadHelper.JoinableTaskFactory.RunAsync(async () =>
@@ -663,10 +678,10 @@ namespace DeepSeek_v4_for_VisualStudio.Services
 
         private void DisposeCore()
         {
-            List<EditorDiffHost> hosts;
+            List<IEditorDiffHost> hosts;
             lock (_editorHostsLock)
             {
-                hosts = new List<EditorDiffHost>(_editorHosts.Values);
+                hosts = new List<IEditorDiffHost>(_editorHosts.Values);
                 _editorHosts.Clear();
             }
 
